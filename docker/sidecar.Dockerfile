@@ -1,5 +1,4 @@
-FROM python:3.12.8
-RUN pip install torch torchvision torchaudio
+FROM pytorch/pytorch:2.6.0-cuda12.4-cudnn9-runtime
 
 ADD . /workspace/cornserve
 

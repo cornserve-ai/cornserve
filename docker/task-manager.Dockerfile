@@ -1,4 +1,4 @@
-FROM python:3.12.8
+FROM python:3.11.11
 
 ADD . /workspace/cornserve
 
