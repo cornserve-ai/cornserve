@@ -16,6 +16,8 @@ spec:
       labels:
         app: sidecar
     spec:
+      hostPID: true
+      hostIPC: true
       topologySpreadConstraints:
         - maxSkew: 1
           topologyKey: "kubernetes.io/hostname"
@@ -23,13 +25,15 @@ spec:
           labelSelector:
             matchLabels:
               app: sidecar
+      runtimeClassName: nvidia
+      serviceAccountName: sidecar
       containers:
       - name: sidecar
         image: cornserve/sidecar:latest
         imagePullPolicy: Always
         ports:
           - containerPort: 29500
-            name: torch
+            name: torch-dist
         env:
           - name: MASTER_ADDR
             value: "sidecar-0.torch-headless.cornserve.svc.cluster.local"
@@ -41,3 +45,11 @@ spec:
             valueFrom:
               fieldRef:
                 fieldPath: metadata.name
+        volumeMounts:
+          - name: shm-volume
+            mountPath: /dev/shm
+      volumes:
+      - name: shm-volume
+        hostPath:
+          path: /dev/shm
+          type: Directory

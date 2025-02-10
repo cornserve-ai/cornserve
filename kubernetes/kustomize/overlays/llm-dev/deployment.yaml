@@ -1,0 +1,40 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: llm-server
+  namespace: cornserve
+  labels:
+    app: llm-server
+spec:
+  selector:
+    matchLabels:
+      app: llm-server
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        app: llm-server
+    spec:
+      affinity:
+        podAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchLabels:
+                  app: sidecar
+              topologyKey: "kubernetes.io/hostname"
+      runtimeClassName: nvidia
+      containers:
+      - name: llm-server
+        image: cornserve/llm-server:latest
+        imagePullPolicy: Always
+        env:
+          - name: RANK
+            value: "3"
+        volumeMounts:
+          - name: shm-volume
+            mountPath: /dev/shm
+      volumes:
+      - name: shm-volume
+        hostPath:
+          path: /dev/shm
+          type: Directory

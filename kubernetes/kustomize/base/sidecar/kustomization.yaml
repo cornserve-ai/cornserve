@@ -3,3 +3,6 @@ kind: Kustomization
 resources:
 - statefulset.yaml
 - service.yaml
+- role-binding.yaml
+- role.yaml
+- service-account.yaml

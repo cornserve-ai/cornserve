@@ -1,0 +1,46 @@
+syntax = "proto3";
+
+package cornserve.comm_sidecar;
+
+enum Mode {
+  SEND = 0;
+  RECV = 1;
+}
+
+import "common.proto";
+
+service CommSidecar {
+  rpc Send(SendRequest) returns (SendResponse);
+  rpc Receive(ReceiveRequest) returns (ReceiveResponse);
+  rpc Register(RegisterRequest) returns (RegisterResponse);
+  // TODO: add unregister
+}
+
+message SendRequest {
+  repeated int32 request_ids = 1;
+  repeated int32 dest_ranks = 3;
+  bytes ipc_handle = 4;
+  repeated int32 chunk_ids = 5;
+}
+
+message SendResponse {
+  common.Status status = 1;
+}
+
+message ReceiveRequest {
+  repeated int32 request_ids = 1;
+}
+
+message ReceiveResponse {
+  common.Status status = 1;
+}
+
+message RegisterRequest {
+  Mode mode = 1;
+  repeated int32 shape = 2;
+  string dtype = 3;
+}
+
+message RegisterResponse {
+  common.Status status = 1;
+}

@@ -1,0 +1,40 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: eric1
+  namespace: cornserve
+  labels:
+    app: eric1
+spec:
+  selector:
+    matchLabels:
+      app: eric1
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        app: eric1
+    spec:
+      affinity:
+        podAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchLabels:
+                  app: sidecar
+              topologyKey: "kubernetes.io/hostname"
+      runtimeClassName: nvidia
+      containers:
+      - name: eric1
+        image: cornserve/encoder-server:latest
+        imagePullPolicy: Always
+        env:
+          - name: RANK
+            value: "1"
+        volumeMounts:
+          - name: shm-volume
+            mountPath: /dev/shm
+      volumes:
+      - name: shm-volume
+        hostPath:
+          path: /dev/shm
+          type: Directory
