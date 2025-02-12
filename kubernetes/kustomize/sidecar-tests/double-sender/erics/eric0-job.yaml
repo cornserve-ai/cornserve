@@ -1,19 +1,16 @@
-apiVersion: apps/v1
-kind: Deployment
+apiVersion: batch/v1
+kind: Job
 metadata:
-  name: llm-server
+  name: eric0
   namespace: cornserve
   labels:
-    app: llm-server
+    app: eric0
 spec:
-  selector:
-    matchLabels:
-      app: llm-server
-  replicas: 1
+  backoffLimit: 0
   template:
     metadata:
       labels:
-        app: llm-server
+        app: eric0
     spec:
       affinity:
         podAffinity:
@@ -23,13 +20,18 @@ spec:
                   app: sidecar
               topologyKey: "kubernetes.io/hostname"
       runtimeClassName: nvidia
+      restartPolicy: Never
       containers:
-      - name: llm-server
-        image: cornserve/llm-server:latest
+      - name: eric0
+        image: cornserve/encoder-server:latest
         imagePullPolicy: Always
         env:
           - name: RANK
-            value: "3"
+            value: "0"
+          - name: SHARD_RANK
+            value: "0"
+          - name: NUM_SHARDS
+            value: "2"
         volumeMounts:
           - name: shm-volume
             mountPath: /dev/shm

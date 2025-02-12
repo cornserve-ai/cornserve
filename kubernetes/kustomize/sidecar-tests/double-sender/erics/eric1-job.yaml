@@ -1,15 +1,12 @@
-apiVersion: apps/v1
-kind: Deployment
+apiVersion: batch/v1
+kind: Job
 metadata:
   name: eric1
   namespace: cornserve
   labels:
     app: eric1
 spec:
-  selector:
-    matchLabels:
-      app: eric1
-  replicas: 1
+  backoffLimit: 0
   template:
     metadata:
       labels:
@@ -23,6 +20,7 @@ spec:
                   app: sidecar
               topologyKey: "kubernetes.io/hostname"
       runtimeClassName: nvidia
+      restartPolicy: Never
       containers:
       - name: eric1
         image: cornserve/encoder-server:latest
@@ -30,6 +28,10 @@ spec:
         env:
           - name: RANK
             value: "1"
+          - name: SHARD_RANK
+            value: "1"
+          - name: NUM_SHARDS
+            value: "2"
         volumeMounts:
           - name: shm-volume
             mountPath: /dev/shm
