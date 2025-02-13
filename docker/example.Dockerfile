@@ -8,4 +8,4 @@ RUN pip install -e .
 # default value
 ENV NAME="async_receiver"
 
-CMD sh -c "python -m cornserve.services.examples.${NAME}"
+CMD sh -c "python /workspace/cornserve/examples/${NAME}.py"
