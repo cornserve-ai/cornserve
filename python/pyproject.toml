@@ -20,7 +20,8 @@ dependencies = [
 dynamic = ["version"]
 
 [project.optional-dependencies]
-dev = ["grpcio-tools", "black", "pyright", "ruff"]
+sidecar = ["torch"]
+dev = ["grpcio-tools", "black", "pyright", "ruff", "cornserve[sidecar]"]
 
 [tool.setuptools.dynamic]
 version = { attr = "cornserve.__version__" }

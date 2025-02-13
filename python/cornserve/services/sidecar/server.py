@@ -313,11 +313,14 @@ class CommSidercarSender(Sidecar):
             or request.dst_sidecar_rank < 0
             or request.dst_sidecar_rank == self.sidecar_rank
         ):
+            # XXX: gRPC error propagation should be done with `context.abort`.
             logger.error("Invalid send request")
             return comm_sidecar_pb2.SendResponse(status=common_pb2.Status.STATUS_ERROR)
 
         # inform destination sidecar
         dst_channel = grpc_channel_from_rank(request.dst_sidecar_rank)
+        # XXX: Creating a channel is an expensive overation in gRPC. Should be lazily
+        #      created and reused. Stubs are cheaper to create, but still can be reused.
         async with grpc.aio.insecure_channel(dst_channel) as channel:
             stub = comm_sidecar_pb2_grpc.CommSidecarStub(channel)
             prepare_receive_request = comm_sidecar_pb2.PrepareReceiveRequest(
@@ -341,6 +344,10 @@ class CommSidercarSender(Sidecar):
         cuda_event = torch.cuda.Event.from_ipc_handle(self.device, ipc_handle)
 
         # TODO: does this need to be wrapped in another thread?
+        # XXX: `synchronize` is likely to block the whole server. Should be
+        #      wrapped in a task that polls `query`. Or something like:
+        #      while not cuda_event.query():
+        #          await asyncio.sleep(0.0)  # Allows other futures to make process.
         cuda_event.synchronize()
 
         # here is it making extra copy?

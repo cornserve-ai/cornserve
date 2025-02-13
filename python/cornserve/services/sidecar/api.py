@@ -1,7 +1,5 @@
-from abc import ABC, abstractmethod
 from enum import Enum
 import pickle
-from typing import Tuple
 from typing import cast
 from functools import reduce
 from operator import mul
@@ -49,27 +47,11 @@ class TensorLayout(Enum):
     FULL = 0
 
 
-class TensorSidercar(ABC):
-    def __init__(
-        self,
-        sidecar_rank: int,
-        dtype: torch.dtype,
-    ):
+class TensorSidercar:
+    def __init__(self, sidecar_rank: int, dtype: torch.dtype) -> None:
         self.sidecar_rank = sidecar_rank
         self.dtype = dtype
         self.channel = grpc_channel_from_rank(self.sidecar_rank)
-
-    @abstractmethod
-    def _post_init(self) -> None:
-        # this should init the ring buffer with the locks
-        pass
-
-    @abstractmethod
-    def _register(self) -> None:
-        # calls sidecar server's grpc, and get a device rank back
-        # self.shm_fn = shm_fn_from_rank(self.rank) # using local rank
-        # then init self.device and self.stream
-        pass
 
     def unregister(self):
         channel = grpc.insecure_channel(self.channel)
@@ -83,12 +65,7 @@ class TensorSidercar(ABC):
 
 
 class TensorSidecarReceiver(TensorSidercar):
-    def __init__(
-        self,
-        sidecar_rank: int,
-        shape: Tuple[int, ...],
-        dtype: torch.dtype,
-    ):
+    def __init__(self, sidecar_rank: int, shape: tuple[int, ...], dtype: torch.dtype) -> None:
         super().__init__(sidecar_rank, dtype)
         self.tensor_shape = shape
 
@@ -114,11 +91,7 @@ class TensorSidecarReceiver(TensorSidercar):
         self.device = device_from_rank(self.gpu_rank)
         self.shared_tensor = init_shmem(self.shm_fn, SHM_SIZE, self.dtype)
 
-    async def async_recv(
-        self,
-        req_id: int,
-    ) -> torch.Tensor:
-
+    async def async_recv(self, req_id: int) -> torch.Tensor:
         async with grpc.aio.insecure_channel(self.channel) as channel:
             stub = comm_sidecar_pb2_grpc.CommSidecarStub(channel)
             request = comm_sidecar_pb2.ReceiveRequest(
@@ -152,10 +125,7 @@ class TensorSidecarReceiver(TensorSidercar):
                 * self.tensor_size
             ].view(self.tensor_shape)
 
-    async def async_mark_done(
-        self,
-        req_id: int,
-    ) -> None:
+    async def async_mark_done(self, req_id: int) -> None:
         async with grpc.aio.insecure_channel(self.channel) as channel:
             stub = comm_sidecar_pb2_grpc.CommSidecarStub(channel)
             request = comm_sidecar_pb2.MarkDoneRequest(
@@ -167,10 +137,7 @@ class TensorSidecarReceiver(TensorSidercar):
             else:
                 logger.error(f"Failed to mark request {req_id} done")
 
-    def mark_done(
-        self,
-        req_id: int,
-    ) -> None:
+    def mark_done(self, req_id: int) -> None:
         with grpc.insecure_channel(self.channel) as channel:
             stub = comm_sidecar_pb2_grpc.CommSidecarStub(channel)
             request = comm_sidecar_pb2.MarkDoneRequest(
@@ -187,12 +154,12 @@ class TensorSidecarSender(TensorSidercar):
     def __init__(
         self,
         sidecar_rank: int,
-        chunk_shape: Tuple[int, ...],
+        chunk_shape: tuple[int, ...],
         dtype: torch.dtype,
         shard_rank: int = 0,
         num_shards: int = 1,
         layout: TensorLayout = TensorLayout.FULL,
-    ):
+    ) -> None:
         super().__init__(sidecar_rank, dtype)
         logger.info("instantiating sidecar sender")
         assert shard_rank < num_shards, "Invalid shard rank"
