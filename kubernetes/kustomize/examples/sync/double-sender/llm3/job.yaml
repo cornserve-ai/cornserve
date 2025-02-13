@@ -1,16 +1,16 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: eric0
+  name: sync-double-llm3
   namespace: cornserve
   labels:
-    app: eric0
+    app: sync-double-llm3
 spec:
   backoffLimit: 0
   template:
     metadata:
       labels:
-        app: eric0
+        app: sync-double-llm3
     spec:
       affinity:
         podAffinity:
@@ -22,12 +22,16 @@ spec:
       runtimeClassName: nvidia
       restartPolicy: Never
       containers:
-      - name: eric0
-        image: cornserve/encoder-server:latest
+      - name: sync-double-llm3
+        image: cornserve/example:latest
         imagePullPolicy: Always
         env:
           - name: RANK
-            value: "0"
+            value: "3"
+          - name: NUM_SHARDS
+            value: "2"
+          - name: NAME
+            value: "receiver"
         volumeMounts:
           - name: shm-volume
             mountPath: /dev/shm

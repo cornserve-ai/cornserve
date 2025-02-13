@@ -1,16 +1,16 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: llm3
+  name: sync-single-eric0
   namespace: cornserve
   labels:
-    app: llm3
+    app: sync-single-eric0
 spec:
   backoffLimit: 0
   template:
     metadata:
       labels:
-        app: llm3
+        app: sync-single-eric0
     spec:
       affinity:
         podAffinity:
@@ -22,14 +22,14 @@ spec:
       runtimeClassName: nvidia
       restartPolicy: Never
       containers:
-      - name: llm3
-        image: cornserve/llm-server:latest
+      - name: sync-single-eric0
+        image: cornserve/example:latest
         imagePullPolicy: Always
         env:
           - name: RANK
-            value: "3"
-          - name: NUM_SHARDS
-            value: "2"
+            value: "0"
+          - name: NAME
+            value: "sender"
         volumeMounts:
           - name: shm-volume
             mountPath: /dev/shm

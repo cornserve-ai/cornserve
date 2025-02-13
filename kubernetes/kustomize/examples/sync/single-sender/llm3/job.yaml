@@ -1,0 +1,40 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: sync-single-llm3
+  namespace: cornserve
+  labels:
+    app: sync-single-llm3
+spec:
+  backoffLimit: 0
+  template:
+    metadata:
+      labels:
+        app: sync-single-llm3
+    spec:
+      affinity:
+        podAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchLabels:
+                  app: sidecar
+              topologyKey: "kubernetes.io/hostname"
+      runtimeClassName: nvidia
+      restartPolicy: Never
+      containers:
+      - name: sync-single-llm3
+        image: cornserve/example:latest
+        imagePullPolicy: Always
+        env:
+          - name: RANK
+            value: "3"
+          - name: NAME
+            value: "receiver"
+        volumeMounts:
+          - name: shm-volume
+            mountPath: /dev/shm
+      volumes:
+      - name: shm-volume
+        hostPath:
+          path: /dev/shm
+          type: Directory

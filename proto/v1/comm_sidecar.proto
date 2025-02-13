@@ -15,6 +15,7 @@ service CommSidecar {
   rpc MarkDone(MarkDoneRequest) returns (MarkDoneResponse);
   rpc RegisterSender(RegisterSenderRequest) returns (RegisterResponse);
   rpc RegisterReceiver(RegisterReceiverRequest) returns (RegisterResponse);
+  rpc Unregister(UnregisterRequest) returns (UnregisterResponse);
 
   rpc PrepareReceive(PrepareReceiveRequest) returns (PrepareReceiveResponse);
   // TODO: add unregister
@@ -69,6 +70,13 @@ message RegisterReceiverRequest {
 message RegisterResponse {
   // returns -1 on err
   int32 gpu_rank = 1;
+}
+
+message UnregisterRequest {
+}
+
+message UnregisterResponse {
+  common.Status status = 1;
 }
 
 message PrepareReceiveRequest {

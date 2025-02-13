@@ -1,16 +1,16 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: llm3
+  name: async-single-llm3
   namespace: cornserve
   labels:
-    app: llm3
+    app: async-single-llm3
 spec:
   backoffLimit: 0
   template:
     metadata:
       labels:
-        app: llm3
+        app: async-single-llm3
     spec:
       affinity:
         podAffinity:
@@ -22,12 +22,14 @@ spec:
       runtimeClassName: nvidia
       restartPolicy: Never
       containers:
-      - name: llm3
-        image: cornserve/llm-server:latest
+      - name: async-single-llm3
+        image: cornserve/example:latest
         imagePullPolicy: Always
         env:
           - name: RANK
             value: "3"
+          - name: NAME
+            value: "async_receiver"
         volumeMounts:
           - name: shm-volume
             mountPath: /dev/shm

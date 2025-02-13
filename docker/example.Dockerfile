@@ -5,4 +5,7 @@ ADD . /workspace/cornserve
 WORKDIR /workspace/cornserve/python
 RUN pip install -e .
 
-ENTRYPOINT ["python", "-m", "cornserve.services.llm_server.server"]
+# default value
+ENV NAME="async_receiver"
+
+CMD sh -c "python -m cornserve.services.examples.${NAME}"

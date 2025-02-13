@@ -1,0 +1,44 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: sync-double-eric1
+  namespace: cornserve
+  labels:
+    app: sync-double-eric1
+spec:
+  backoffLimit: 0
+  template:
+    metadata:
+      labels:
+        app: sync-double-eric1
+    spec:
+      affinity:
+        podAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchLabels:
+                  app: sidecar
+              topologyKey: "kubernetes.io/hostname"
+      runtimeClassName: nvidia
+      restartPolicy: Never
+      containers:
+      - name: sync-double-eric1
+        image: cornserve/example:latest
+        imagePullPolicy: Always
+        env:
+          - name: RANK
+            value: "1"
+          - name: SHARD_RANK
+            value: "1"
+          - name: NUM_SHARDS
+            value: "2"
+          - name: NAME
+            value: "sender"
+        volumeMounts:
+          - name: shm-volume
+            mountPath: /dev/shm
+      volumes:
+      - name: shm-volume
+        hostPath:
+          path: /dev/shm
+          type: Directory

@@ -27,7 +27,7 @@ async def main() -> None:
     lock = asyncio.Lock()
 
     async def recv_and_process_req(id: int) -> None:
-        received_tensor = await sidecar.recv(id)
+        received_tensor = await sidecar.async_recv(id)
         async with lock:
             tensor.copy_(received_tensor)
             if NUM_SHARDS == 1:
@@ -41,11 +41,11 @@ async def main() -> None:
                     logger.info(
                         f"Received shard {i} in req {id} with hash {tensor_hash(shard)} of shape {shard.shape} with sum {shard.sum()}"
                     )
-        await sidecar.mark_done(id)
+        await sidecar.async_mark_done(id)
         # process the tensor
 
     id = 0
-    while True:
+    for _ in range(5):
         all_tasks = []
         logger.info(f"start to receive 3 requests starting from {id}")
         for _ in range(3):
@@ -54,6 +54,7 @@ async def main() -> None:
         logger.info(f"waiting for 3 requests starting from {id}")
         await asyncio.gather(*all_tasks)
         await asyncio.sleep(10)
+    sidecar.unregister()
 
 
 if __name__ == "__main__":

@@ -179,3 +179,7 @@ cython_debug/
 *pb2.py
 *pb2.pyi
 *pb2_grpc.py
+
+# Workspace
+old
+tmp

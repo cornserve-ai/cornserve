@@ -483,6 +483,16 @@ class CommSidecarServicer(comm_sidecar_pb2_grpc.CommSidecarServicer):
 
         return await self.sidecar.mark_done(request, context)
 
+    async def Unregister(
+        self,
+        request: comm_sidecar_pb2.UnregisterRequest,
+        context: grpc.aio.ServicerContext,
+    ) -> comm_sidecar_pb2.UnregisterResponse:
+        del self.sidecar
+        self.sidecar = None
+        logger.info("Unregistered sidecar")
+        return comm_sidecar_pb2.UnregisterResponse(status=common_pb2.Status.STATUS_OK)
+
 
 NAMESPACE = "cornserve"
 
