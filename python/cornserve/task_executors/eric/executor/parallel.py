@@ -1,0 +1,144 @@
+import atexit
+
+import torch
+
+from cornserve.logging import get_logger
+
+logger = get_logger(__name__)
+
+
+class DeviceGroup:
+    """A group of devices bound by a common process group.
+
+    `torch.distributed` should be initialized before creating a device group.
+    """
+
+    def __init__(self, ranks: list[int], name: str) -> None:
+        """Initialize the device group.
+
+        Args:
+            ranks: List of ranks in the group.
+            name: Name of the group.
+        """
+        self.name = name
+        self.ranks = ranks
+        self.world_size = len(ranks)
+
+        if self.world_size == 1:
+            self.process_group = None
+            self.rank = 0
+            return
+
+        if not torch.distributed.is_initialized():
+            raise RuntimeError(
+                f"Distributed process group is not initialized. Cannot create device group {name}."
+            )
+
+        self.process_group = torch.distributed.new_group(ranks=ranks)
+        self.rank = torch.distributed.get_rank(self.process_group)
+
+        logger.info(
+            f"Device group {name} initialized with ranks {ranks} and world size {self.world_size}."
+        )
+
+        # Ensure the group is destroyed on exit
+        atexit.register(self.shutdown)
+
+    def shutdown(self) -> None:
+        """Shutdown the device group."""
+        if self.process_group is not None:
+            torch.distributed.destroy_process_group(self.process_group)
+            logger.info(f"Device group {self.name} destroyed.")
+
+    def all_gather(self, input_: torch.Tensor, dim: int = -1) -> torch.Tensor:
+        """Perform AllGather on the tensor across the device group.
+
+        Args:
+            input_: Tensor to AllGather.
+            dim: Dimension to gather along.
+
+        Returns:
+            Gathered tensor.
+        """
+        world_size = self.world_size
+        if world_size == 1:
+            return input_
+        
+        assert -input_.dim() <= dim < input_.dim(), (
+            f"Invalid dim ({dim}) for input tensor with shape {input_.size()}")
+
+        if dim < 0:
+            # Convert negative dim to positive.
+            dim += input_.dim()
+        input_size = input_.size()
+        # NOTE: we have to use concat-style all-gather here,
+        # stack-style all-gather has compatibility issues with
+        # torch.compile . see https://github.com/pytorch/pytorch/issues/138795
+        output_size = (input_size[0] * world_size, ) + input_size[1:]
+        # Allocate output tensor.
+        output_tensor = torch.empty(output_size, dtype=input_.dtype, device=input_.device)
+        # All-gather.
+        torch.distributed.all_gather_into_tensor(output_tensor, input_, group=self.process_group)
+        # Reshape
+        output_tensor = output_tensor.reshape((world_size, ) + input_size)
+        output_tensor = output_tensor.movedim(0, dim)
+        output_tensor = output_tensor.reshape(
+            input_size[:dim] + (world_size * input_size[dim], ) + input_size[dim + 1:],
+        )
+        return output_tensor
+
+
+DIST_INITIALIZED = False
+TP_GROUP: DeviceGroup | None = None
+
+
+def get_tensor_parallel_group() -> DeviceGroup:
+    """Get the global tensor parallel group."""
+    global TP_GROUP
+    if TP_GROUP is None:
+        raise RuntimeError("Tensor parallel group is not initialized.")
+    return TP_GROUP
+
+
+def init_distributed(
+    world_size: int,
+    rank: int,
+    backend: str = "nccl",
+    init_method: str = "tcp://127.0.0.1:29500",
+) -> None:
+    """Initialize the distributed process group."""
+    if torch.distributed.is_initialized():
+        logger.warning(
+            "Distributed process group is already initialized. Skipping initialization."
+        )
+        return
+
+    torch.distributed.init_process_group(
+        backend=backend,
+        init_method=init_method,
+        world_size=world_size,
+        rank=rank,
+    )
+    logger.info(
+        f"Distributed process group initialized with world size {world_size} and rank {rank}."
+    )
+    atexit.register(destroy_distributed)
+
+    # Initialize global tensor parallel group
+    global TP_GROUP
+    TP_GROUP = DeviceGroup(
+        ranks=list(range(world_size)),
+        name="tensor_parallel_group",
+    )
+
+
+def destroy_distributed() -> None:
+    """Destroy the distributed process group."""
+    if not torch.distributed.is_initialized():
+        logger.warning(
+            "Distributed process group is not initialized. Skipping destruction."
+        )
+        return
+
+    torch.distributed.destroy_process_group()
+    logger.info("Distributed process group destroyed.")

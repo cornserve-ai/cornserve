@@ -1,5 +1,6 @@
 import asyncio
 import multiprocessing as mp
+from asyncio.futures import Future
 
 import zmq
 import zmq.asyncio
@@ -14,9 +15,9 @@ from cornserve.task_executors.eric.engine.core import run_engine
 from cornserve.task_executors.eric.models import (
     EngineRequest, EngineResponse, Modality, EmbeddingStatus
 )
+from cornserve.logging import get_logger
 
-_encoder = msgspec.msgpack.Encoder()
-_decoder = msgspec.msgpack.Decoder(type=EngineResponse)
+logger = get_logger(__name__)
 
 class EngineClient:
     def __init__(self, config: EricConfig):
@@ -27,11 +28,15 @@ class EngineClient:
         3. Starts the engine process.
         """
         self.model_id = config.model_id
+
         self.ctx = zmq.asyncio.Context(io_threads=2)
         self.push_sock = make_zmq_socket(self.ctx, "tcp://127.0.0.1:5555", zmq.PUSH)
         self.pull_sock = make_zmq_socket(self.ctx, "tcp://127.0.0.1:5556", zmq.PULL)
         self.responses = {}
+
         self.loop = asyncio.get_event_loop()
+
+        self.encoder = msgspec.msgpack.Encoder()
 
         asyncio.create_task(self._response_listener())
 
@@ -56,21 +61,28 @@ class EngineClient:
         # Closes all sockets and terminates the context
         self.ctx.destroy()
 
-    async def _response_listener(self):
+    async def _response_listener(self) -> None:
+        decoder = msgspec.msgpack.Decoder(type=EngineResponse)
         while True:
-            msg_bytes = await self.loop.run_in_executor(None, self.pull_sock.recv)
-            resp = _decoder.decode(msg_bytes)
+            message = await self.pull_sock.recv()
+            resp = decoder.decode(message)
             req_id = resp.request_id
-            if req_id in self.responses:
+            try:
                 fut = self.responses.pop(req_id)
                 fut.set_result(resp)
+            except KeyError:
+                logger.warning("Response listener received a response for an unknown request ID: %s", req_id)
+                pass
 
     async def embed(self, request_id: str, processed: list[BatchFeature]) -> EngineResponse:
-        fut = self.loop.create_future()
+        """Send the embedding request to the engine and wait for the response."""
+        # This future will be resolved by the response listener task
+        # when the engine process sends a response back
+        fut: Future[EngineResponse] = self.loop.create_future()
         self.responses[request_id] = fut
 
         # Build and send the request
-        # TODO: BatchFeature to request
+        # TODO: BatchFeature to request. First, try actually running it through the HF model.
         arr = tensors.numpy()
         shape = tuple(arr.shape)
         dtype_str = str(arr.dtype)
@@ -81,8 +93,7 @@ class EngineClient:
             dtype=dtype_str,
             processed_tensors=raw_data
         )
-        msg_bytes = _encoder.encode(req)
-        await self.loop.run_in_executor(None, self.push_sock.send, msg_bytes)
+        msg_bytes = self.encoder.encode(req)
+        await self.push_sock.send(msg_bytes)
 
-        # Wait for the engine's response
         return await fut

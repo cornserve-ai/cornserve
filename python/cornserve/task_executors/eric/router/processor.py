@@ -9,7 +9,7 @@ from concurrent.futures import ThreadPoolExecutor
 from PIL import Image
 from transformers import AutoImageProcessor, BaseImageProcessor, BatchFeature
 
-from cornserve.task_executors.eric.models import Modality
+from cornserve.task_executors.eric.schema import Modality
 from cornserve.logging import get_logger
 
 logger = get_logger(__name__)
@@ -31,6 +31,9 @@ class Processor:
         self.loop = asyncio.get_event_loop()
         self.pool = ThreadPoolExecutor(max_workers=num_workers)
 
+    def shutdown(self) -> None:
+        """Shutdown the processor and the thread pool."""
+        self.pool.shutdown(wait=True, cancel_futures=True)
 
     async def process(self, urls: list[str]) -> list[BatchFeature]:
         """Performs modality processing on input data in a thread pool."""

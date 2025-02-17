@@ -1,0 +1,180 @@
+import contextlib
+import os
+import json
+import fnmatch
+import hashlib
+from typing import Literal, Type
+import filelock
+import tempfile
+
+import torch
+import torch.nn as nn
+import transformers
+import safetensors
+import huggingface_hub.errors
+from huggingface_hub import HfApi, hf_hub_download, snapshot_download
+from transformers import AutoConfig, PretrainedConfig
+
+from cornserve.logging import get_logger
+
+logger = get_logger(__name__)
+
+# Maps a model's HF repo name to its class in `eric.models`.
+MODEL_REGISTRY: dict[str, Type[nn.Module]] = {}
+
+
+def load_model(
+    model_name_or_path: str,
+    weight_prefix: str = "",
+    weight_format: Literal["safetensors"] = "safetensors",
+    cache_dir: str | None = None,
+    revision: str | None = None,
+) -> nn.Module:
+    """Load a model from Hugging Face Hub.
+
+    1. Instantiate the model.
+    2. Download the model weights from Hugging Face Hub.
+    3. Load the downloaded model weights into the model.
+
+    Args:
+        model_name_or_path: The model name or path.
+        weight_prefix: The prefix of the model weights to collect.
+        weight_format: The format of the model weights. Currently only "safetensors" is supported.
+        cache_dir: The cache directory to store the model weights. If None, will use HF defaults.
+        revision: The revision of the model.
+
+    Returns:
+        A PyTorch nn.Module instance.
+    """
+    if weight_format not in ["safetensors"]:
+        raise ValueError("Only 'safetensors' format is supported.")
+    
+    # Fetch the model class from the registry
+    try:
+        model_class = MODEL_REGISTRY[model_name_or_path]
+    except KeyError:
+        logger.exception(
+            "Model %s not found in the registry. Available model names are: %s",
+            model_name_or_path,
+            MODEL_REGISTRY.keys(),
+        )
+        raise
+
+    # Fetch the model config from HF
+    hf_config:transformers.PretrainedConfig = transformers.AutoConfig.from_pretrained(
+        model_name_or_path,
+        cache_dir=cache_dir,
+        revision=revision,
+    )
+    torch_dtype = hf_config.torch_dtype
+    assert isinstance(torch_dtype, torch.dtype), f"torch_dtype is not a torch.dtype: {torch_dtype}"
+
+    # Instantiate the model
+
+    weight_dict = get_safetensors_weight_dict(
+        model_name_or_path,
+        weight_prefix=weight_prefix,
+        cache_dir=cache_dir,
+        revision=revision,
+    )
+    
+
+    return model
+
+
+@contextlib.contextmanager
+def set_default_torch_dtype(dtype: torch.dtype):
+    """Context manager to set the default torch dtype."""
+    original_dtype = torch.get_default_dtype()
+    torch.set_default_dtype(dtype)
+    try:
+        yield
+    finally:
+        torch.set_default_dtype(original_dtype)
+
+
+def get_safetensors_weight_dict(
+    model_name_or_path: str,
+    weight_prefix: str = "",
+    cache_dir: str | None = None,
+    revision: str | None = None,
+) -> dict[str, torch.Tensor]:
+    """Download safetensors model weights from HF Hub and build weight dict.
+
+    If possible, only download weights whose name starts with the prefix.
+    The weight prefix will be stripped from the weight names in the dict.
+
+    Args:
+        model_name_or_path: The model name or path.
+        weight_prefix: If possible, only download weights whose name starts with this.
+        cache_dir: The cache directory to store the model weights. If None, will use HF defaults.
+        revision: The revision of the model.
+
+    Returns:
+        A dictionary mapping weight names to tensors.
+    """
+    # Select the first pattern with matching files on the hub
+    file_list = HfApi().list_repo_files(model_name_or_path, revision=revision)
+    weight_files = fnmatch.filter(file_list, "*.safetensors")
+    if not weight_files:
+        raise FileNotFoundError("No .safetensors files found in the model repo.")
+
+    # Use file lock to prevent multiple processes from
+    # downloading the same model weights at the same time.
+    with get_lock(model_name_or_path, cache_dir):
+        # Try to filter the list of safetensors files using the index and prefix.
+        # Note that not all repositories have an index file.
+        try:
+            index_file_path = hf_hub_download(
+                model_name_or_path,
+                filename=transformers.utils.SAFE_WEIGHTS_INDEX_NAME,
+                cache_dir=cache_dir,
+                revision=revision,
+            )
+            # Maps weight names to the safetensors file they are stored in
+            weight_map = json.load(open(index_file_path))["weight_map"]
+            weight_files = []
+            for weight_name, weight_file in weight_map.items():
+                # Only keep weights that start with the prefix
+                if weight_name.startswith(weight_prefix):
+                    weight_files.append(weight_file)
+                    break
+            logger.info(
+                "Safetensors file to download (filtered by index): %s",
+                weight_files,
+            )
+        except huggingface_hub.errors.EntryNotFoundError:
+            logger.info(
+                "No safetensors index file found. Downloading all .safetensors files: %s",
+                weight_files,
+            )
+
+        # Download the safetensors files
+        hf_dir = snapshot_download(
+            model_name_or_path,
+            allow_patterns=weight_files,
+            cache_dir=cache_dir,
+            revision=revision,
+        )
+
+    # Build weight dict
+    weight_dict = {}
+    prefix_strip_len = len(weight_prefix)
+    for weight_file in weight_files:
+        with safetensors.safe_open(f"{hf_dir}/{weight_file}", framework="pt") as f:
+            for name in f.keys():
+                if name.startswith(weight_prefix):
+                    weight_dict[name[prefix_strip_len:]] = f.get_tensor(name)
+    return weight_dict
+
+
+def get_lock(model_name_or_path: str, cache_dir: str | None = None):
+    lock_dir = cache_dir or tempfile.gettempdir()
+    os.makedirs(os.path.dirname(lock_dir), exist_ok=True)
+    model_name = model_name_or_path.replace("/", "-")
+    hash_name = hashlib.sha256(model_name.encode()).hexdigest()
+    # add hash to avoid conflict with old users' lock files
+    lock_file_name = hash_name + model_name + ".lock"
+    # mode 0o666 is required for the filelock to be shared across users
+    lock = filelock.FileLock(os.path.join(lock_dir, lock_file_name), mode=0o666)
+    return lock

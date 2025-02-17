@@ -1,7 +1,7 @@
 import torch
 from transformers import AutoModel, AutoConfig
 
-from cornserve.task_executors.eric.models import Modality
+from cornserve.task_executors.eric.schema import Modality
 
 
 class Worker:
@@ -17,12 +17,14 @@ class Worker:
         """Initialize the worker.
 
         1. Initialize distributed process group
+        2. Load the model
         """
         self.device = torch.device("cuda:0")
         config = AutoConfig.from_pretrained(model_id)
         self.model = AutoModel.from_pretrained(model_id, config=config).to(self.device)
         self.model.eval()
 
+    @torch.inference_mode()
     def execute_model(self, items):
         # "tensors" is a Python list or nested list from JSON, so convert to torch.Tensor
         # each item: { "request_id", "modality", "tensors": nested list }

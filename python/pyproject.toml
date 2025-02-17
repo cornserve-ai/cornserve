@@ -21,7 +21,7 @@ dynamic = ["version"]
 
 [project.optional-dependencies]
 sidecar = ["torch"]
-eric = ["fastapi", "uvicorn[standard]", "pyzmq", "msgspec", "torch", "transformers", "pillow"]
+eric = ["fastapi", "uvicorn[standard]", "pyzmq", "msgspec", "torch>=2.5.0", "transformers", "huggingface_hub", "pillow", "einops", "flash-attn"]
 dev = ["grpcio-tools", "black", "pyright", "ruff", "cornserve[sidecar,eric]"]
 
 [tool.setuptools.dynamic]
