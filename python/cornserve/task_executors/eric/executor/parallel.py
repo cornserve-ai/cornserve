@@ -41,9 +41,6 @@ class DeviceGroup:
             f"Device group {name} initialized with ranks {ranks} and world size {self.world_size}."
         )
 
-        # Ensure the group is destroyed on exit
-        atexit.register(self.shutdown)
-
     def shutdown(self) -> None:
         """Shutdown the device group."""
         if self.process_group is not None:
@@ -88,7 +85,6 @@ class DeviceGroup:
         return output_tensor
 
 
-DIST_INITIALIZED = False
 TP_GROUP: DeviceGroup | None = None
 
 
@@ -140,5 +136,6 @@ def destroy_distributed() -> None:
         )
         return
 
+    get_tensor_parallel_group().shutdown()
     torch.distributed.destroy_process_group()
-    logger.info("Distributed process group destroyed.")
+    logger.info("Uninitialized distributed process groups.")
