@@ -1,11 +1,12 @@
-import contextlib
 import os
 import json
 import fnmatch
 import hashlib
-from typing import Literal, Type
 import filelock
 import tempfile
+import importlib
+import contextlib
+from typing import Literal, Type
 
 import torch
 import torch.nn as nn
@@ -16,11 +17,14 @@ from huggingface_hub import HfApi, hf_hub_download, snapshot_download
 from transformers import AutoConfig, PretrainedConfig
 
 from cornserve.logging import get_logger
+from cornserve.task_executors.eric.distributed import parallel
 
 logger = get_logger(__name__)
 
-# Maps a model's HF repo name to its class in `eric.models`.
-MODEL_REGISTRY: dict[str, Type[nn.Module]] = {}
+# Maps a model's type to its encoder class name in `models`.
+MODEL_REGISTRY: dict[str, str] = {
+    "qwen2_vl": "Qwen2VisionTransformer",
+}
 
 
 def load_model(
@@ -49,27 +53,58 @@ def load_model(
     if weight_format not in ["safetensors"]:
         raise ValueError("Only 'safetensors' format is supported.")
     
-    # Fetch the model class from the registry
-    try:
-        model_class = MODEL_REGISTRY[model_name_or_path]
-    except KeyError:
-        logger.exception(
-            "Model %s not found in the registry. Available model names are: %s",
-            model_name_or_path,
-            MODEL_REGISTRY.keys(),
-        )
-        raise
-
     # Fetch the model config from HF
-    hf_config:transformers.PretrainedConfig = transformers.AutoConfig.from_pretrained(
+    hf_config: PretrainedConfig = AutoConfig.from_pretrained(
         model_name_or_path,
         cache_dir=cache_dir,
         revision=revision,
     )
-    torch_dtype = hf_config.torch_dtype
-    assert isinstance(torch_dtype, torch.dtype), f"torch_dtype is not a torch.dtype: {torch_dtype}"
+
+    # Fetch the model class name from the registry
+    try:
+        model_class_name = MODEL_REGISTRY[hf_config.model_type]
+    except KeyError:
+        logger.exception(
+            "Model %s not found in the registry. Available model names are: %s",
+            model_name_or_path,
+            [f"{module}.{model}" for module, model in MODEL_REGISTRY.items()],
+        )
+        raise
+
+    # Import the model class
+    try:
+        model_class: Type[nn.Module] = getattr(
+            importlib.import_module(f"cornserve.task_executors.eric.models.{hf_config.model_type}"),
+            model_class_name,
+        )
+    except ImportError as e:
+        logger.exception(
+            "Failed to import model %s from `models`. MODEL_REGISTRY: %s",
+            model_name_or_path,
+            [f"{module}.{model}" for module, model in MODEL_REGISTRY.items()],
+        )
+        raise RuntimeError(
+            f"Failed to import model {model_class_name} from `models`."
+        ) from e
+    except AttributeError as e:
+        logger.exception(
+            "Model %s not found in the `%s`. MODEL_REGISTRY:",
+            model_name_or_path,
+            f"models.{hf_config.model_type}",
+            [f"{module}.{model}" for module, model in MODEL_REGISTRY.items()],
+        )
+        raise RuntimeError(
+            f"Model {model_class_name} not found in the module."
+        ) from e
+
 
     # Instantiate the model
+    torch_dtype = hf_config.torch_dtype
+    assert isinstance(torch_dtype, torch.dtype), f"torch_dtype is not a torch.dtype: {torch_dtype}"
+    torch_device = torch.device("cuda", parallel.get_tensor_parallel_group().rank)
+    with set_default_torch_dtype(torch_dtype):
+        with torch_device:
+            model = model_class(hf_config)
 
     weight_dict = get_safetensors_weight_dict(
         model_name_or_path,
@@ -77,7 +112,18 @@ def load_model(
         cache_dir=cache_dir,
         revision=revision,
     )
-    
+
+    incompatible = model.load_state_dict(weight_dict)
+    if incompatible.missing_keys:
+        logger.warning(
+            "Some weights are missing in the model: %s",
+            incompatible.missing_keys,
+        )
+    if incompatible.unexpected_keys:
+        logger.warning(
+            "Some weights are unexpected in the model: %s",
+            incompatible.unexpected_keys,
+        )
 
     return model
 

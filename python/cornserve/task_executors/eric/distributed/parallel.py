@@ -84,12 +84,35 @@ class DeviceGroup:
         )
         return output_tensor
 
+    def all_reduce(self, input_: torch.Tensor) -> torch.Tensor:
+        """Perform AllReduce on the tensor across the device group.
+        
+        AllReduce is performed in-place, so the input tensor is modified.
+
+        Args:
+            input_: Tensor to AllReduce.
+
+        Returns:
+            Reduced tensor.
+        """
+        world_size = self.world_size
+        if world_size == 1:
+            return input_
+
+        # In-place AllReduce.
+        torch.distributed.all_reduce(input_, group=self.process_group)
+        return input_
+
 
 TP_GROUP: DeviceGroup | None = None
 
 
 def get_tensor_parallel_group() -> DeviceGroup:
-    """Get the global tensor parallel group."""
+    """Get the global tensor parallel group.
+
+    This is expected to work even when we're not doing distributed inference.
+    Collective calls will be no-ops, world size will be 1, and rank will be 0.
+    """
     global TP_GROUP
     if TP_GROUP is None:
         raise RuntimeError("Tensor parallel group is not initialized.")
@@ -109,18 +132,21 @@ def init_distributed(
         )
         return
 
-    torch.distributed.init_process_group(
-        backend=backend,
-        init_method=init_method,
-        world_size=world_size,
-        rank=rank,
-    )
-    logger.info(
-        f"Distributed process group initialized with world size {world_size} and rank {rank}."
-    )
-    atexit.register(destroy_distributed)
+    # Only initialize if world size is greater than 1
+    if world_size > 1:
+        torch.distributed.init_process_group(
+            backend=backend,
+            init_method=init_method,
+            world_size=world_size,
+            rank=rank,
+        )
+        logger.info(
+            f"Distributed process group initialized with world size {world_size} and rank {rank}."
+        )
+        atexit.register(destroy_distributed)
 
-    # Initialize global tensor parallel group
+    # Initialize global tensor parallel group.
+    # If world size is 1, it will not create a new group.
     global TP_GROUP
     TP_GROUP = DeviceGroup(
         ranks=list(range(world_size)),

@@ -7,7 +7,7 @@ import torch.nn.functional as F
 from einops import rearrange, repeat
 from transformers.models.qwen2_vl.configuration_qwen2_vl import Qwen2VLConfig
 
-from cornserve.task_executors.eric.executor import parallel
+from cornserve.task_executors.eric.distributed import parallel, utils as dist_utils
 from cornserve.task_executors.eric.models.layers.activations import QuickGELU
 from cornserve.task_executors.eric.models.layers.linear import ColumnParallelLinear, RowParallelLinear
 
@@ -59,13 +59,11 @@ class Qwen2VisionPatchMerger(nn.Module):
         self.mlp = nn.ModuleList([
             ColumnParallelLinear(self.hidden_size,
                                  self.hidden_size,
-                                 bias=True,
-                                 prefix=f"{prefix}.mlp.0"),
+                                 bias=True),
             nn.GELU(),
             RowParallelLinear(self.hidden_size,
                               d_model,
-                              bias=True,
-                              prefix=f"{prefix}.mlp.2"),
+                              bias=True),
         ])
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -120,12 +118,10 @@ class Qwen2VisionMLP(nn.Module):
     ):
         super().__init__()
         self.fc1 = ColumnParallelLinear(in_features,
-                                        hidden_features,
-                                        prefix=f"{prefix}.fc1")
+                                        hidden_features)
         self.act = act_layer()
         self.fc2 = RowParallelLinear(hidden_features,
-                                     in_features,
-                                     prefix=f"{prefix}.fc2")
+                                     in_features)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x_parallel, _ = self.fc1(x)
@@ -199,11 +195,9 @@ class Qwen2VisionAttention(nn.Module):
             num_heads, self.tp_size)
 
         self.qkv = ColumnParallelLinear(input_size=embed_dim,
-                                        output_size=3 * projection_size,
-                                        prefix=f"{prefix}.qkv")
+                                        output_size=3 * projection_size)
         self.proj = RowParallelLinear(input_size=projection_size,
-                                      output_size=embed_dim,
-                                      prefix=f"{prefix}.proj")
+                                      output_size=embed_dim)
 
     def split_qkv(self, qkv: torch.Tensor) -> tuple[torch.Tensor, ...]:
         # [s, b, 3 * head * head_dim]
