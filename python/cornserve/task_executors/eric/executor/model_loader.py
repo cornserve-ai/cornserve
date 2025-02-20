@@ -33,6 +33,7 @@ def load_model(
     weight_format: Literal["safetensors"] = "safetensors",
     cache_dir: str | None = None,
     revision: str | None = None,
+    torch_dtype: torch.dtype | None = None,
 ) -> nn.Module:
     """Load a model from Hugging Face Hub.
 
@@ -46,6 +47,7 @@ def load_model(
         weight_format: The format of the model weights. Currently only "safetensors" is supported.
         cache_dir: The cache directory to store the model weights. If None, will use HF defaults.
         revision: The revision of the model.
+        torch_dtype: The torch dtype to use. If None, will use the dtype from the model config.
 
     Returns:
         A PyTorch nn.Module instance.
@@ -99,7 +101,7 @@ def load_model(
 
 
     # Instantiate the model
-    torch_dtype = hf_config.torch_dtype
+    torch_dtype = torch_dtype or hf_config.torch_dtype
     assert isinstance(torch_dtype, torch.dtype), f"torch_dtype is not a torch.dtype: {torch_dtype}"
     torch_device = torch.device("cuda", parallel.get_tensor_parallel_group().rank)
     with set_default_torch_dtype(torch_dtype):

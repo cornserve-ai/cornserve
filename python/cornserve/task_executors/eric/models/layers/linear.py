@@ -130,9 +130,8 @@ class ColumnParallelLinear(nn.Module):
 
         self.register_load_state_dict_pre_hook(self.__class__._load_hook)
 
-    def _load_hook(self: nn.Module, state_dict: dict[str, Any], prefix: str, *args) -> None:
+    def _load_hook(self, state_dict: dict[str, Any], prefix: str, *args) -> None:
         """State dict hook to narrow the weight tensor to the sharded size."""
-        tp_rank = self.tp_rank
         for name, param in self.named_parameters(recurse=False):
             # Original weight in state dict
             weight_key = prefix + name
@@ -144,11 +143,11 @@ class ColumnParallelLinear(nn.Module):
                 continue
 
             # Shard the weight based on TP rank
-            shard_size = weight.shape[output_dim]
-            start_idx = tp_rank * shard_size
+            shard_size = divide(weight.shape[output_dim], self.tp_size)
+            start_idx = self.tp_rank * shard_size
             sharded_weight = weight.narrow(output_dim, start_idx, shard_size)
 
-            logger.info(
+            logger.debug(
                 "%s: Loading weight %s. Original shape %s narrowed to %s by slicing %d:%d along dim=%d",
                 self.__class__.__name__,
                 weight_key,
@@ -249,7 +248,6 @@ class RowParallelLinear(nn.Module):
 
     def _load_hook(self, state_dict: dict[str, Any], prefix: str, *args) -> None:
         """State dict hook to narrow the weight tensor to the sharded size."""
-        tp_rank = self.tp_rank
         for name, param in self.named_parameters(recurse=False):
             # Original weight in state dict
             weight_key = prefix + name
@@ -260,11 +258,11 @@ class RowParallelLinear(nn.Module):
                 continue
 
             # Shard the weight based on TP rank
-            shard_size = weight.shape[input_dim]
-            start_idx = tp_rank * shard_size
+            shard_size = divide(weight.shape[input_dim], self.tp_size)
+            start_idx = self.tp_rank * shard_size
             sharded_weight = weight.narrow(input_dim, start_idx, shard_size)
 
-            logger.info(
+            logger.debug(
                 "%s: Loading weight %s. Original shape %s narrowed to %s by slicing %d:%d along dim=%d",
                 self.__class__.__name__,
                 weight_key,
