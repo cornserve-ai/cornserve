@@ -34,6 +34,7 @@ def load_model(
     cache_dir: str | None = None,
     revision: str | None = None,
     torch_dtype: torch.dtype | None = None,
+    torch_device: torch.device | None = None,
 ) -> nn.Module:
     """Load a model from Hugging Face Hub.
 
@@ -48,6 +49,7 @@ def load_model(
         cache_dir: The cache directory to store the model weights. If None, will use HF defaults.
         revision: The revision of the model.
         torch_dtype: The torch dtype to use. If None, will use the dtype from the model config.
+        torch_device: The torch device to use. If None, will use CUDA and current TP rank.
 
     Returns:
         A PyTorch nn.Module instance.
@@ -103,7 +105,7 @@ def load_model(
     # Instantiate the model
     torch_dtype = torch_dtype or hf_config.torch_dtype
     assert isinstance(torch_dtype, torch.dtype), f"torch_dtype is not a torch.dtype: {torch_dtype}"
-    torch_device = torch.device("cuda", parallel.get_tensor_parallel_group().rank)
+    torch_device = torch_device or torch.device("cuda", parallel.get_tensor_parallel_group().rank)
     with set_default_torch_dtype(torch_dtype):
         with torch_device:
             model = model_class(hf_config)

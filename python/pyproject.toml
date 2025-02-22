@@ -26,6 +26,7 @@ eric = [
   "uvicorn[standard]",
   "pyzmq",
   "msgspec",
+  "psutil",
   "torch>=2.5.0",
   "transformers",
   "huggingface_hub",
@@ -33,7 +34,7 @@ eric = [
   "einops",
   "flash-attn",
 ]
-dev = ["grpcio-tools", "black", "pyright", "ruff", "pytest", "cornserve[sidecar,eric]"]
+dev = ["grpcio-tools", "black", "pyright", "ruff", "pytest", "expecttest", "cornserve[sidecar,eric]"]
 
 [tool.setuptools.dynamic]
 version = { attr = "cornserve.__version__" }

@@ -1,15 +1,17 @@
 import queue
 import threading
+from multiprocessing.connection import Connection
 
 import zmq
 import msgspec.msgpack as msp
 import numpy as np
 import torch
 
-from cornserve.task_executors.eric.zmq_utils import make_zmq_socket
-from cornserve.task_executors.eric.engine.worker import Worker
+from cornserve.task_executors.eric.config import EricConfig
+from cornserve.task_executors.eric.utils import make_zmq_socket
+from cornserve.task_executors.eric.executor.executor import ModelExecutor
 from cornserve.task_executors.eric.engine.scheduler import Scheduler
-from cornserve.task_executors.eric.models import (
+from cornserve.task_executors.eric.schema import (
     EngineRequest, EngineResponse, EmbeddingStatus, Modality
 )
 
@@ -18,7 +20,13 @@ _decoder = msp.Decoder()
 
 
 class Engine:
-    """Core engine that embeds modality data and sends it to the tensor sidecar."""
+    """Eric core engine.
+
+    The engine receives modality embedding requests from the router and
+    invokes the model executor to launch embedding computation. When tenosrs
+    are sent to the sidecar, the engine sends a message to the router to
+    signal completion.
+    """
 
     def __init__(self, model_id: str, modality: Modality) -> None:
         """Initialize the engine."""
@@ -29,17 +37,17 @@ class Engine:
         self.pull_sock = make_zmq_socket(
             ctx=self.ctx,
             path="tcp://127.0.0.1:5555",
-            type=zmq.PULL,
+            sock_type=zmq.PULL,
         )
         # Push socket for sending responses back to the router
         self.push_sock = make_zmq_socket(
             ctx=self.ctx,
             path="tcp://127.0.0.1:5556",
-            type=zmq.PUSH,
+            sock_type=zmq.PUSH,
         )
 
         self.input_queue = queue.Queue()
-        self.worker = Worker(model_id, modality)
+        self.executor = ModelExecutor(model_id, modality)
         self.scheduler = Scheduler()
 
         # Background thread for receiving requests
@@ -47,6 +55,19 @@ class Engine:
             target=self._receive_loop,
             daemon=True
         )
+
+    @staticmethod
+    def run_engine(
+        config: EricConfig,
+        model_id: str,
+        modality: Modality,
+        request_sock_path: str,
+        response_sock_path: str,
+        ready_pipe: Connection,
+        ready_message: bytes,
+    ) -> None:
+        """Start the engine process."""
+
 
     def _receive_loop(self):
         """Continuously receive requests from the pull socket and enqueue them."""

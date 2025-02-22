@@ -1,5 +1,8 @@
+import os
+import signal
 import asyncio
 import multiprocessing as mp
+from contextlib import suppress
 from asyncio.futures import Future
 
 import zmq
@@ -10,14 +13,15 @@ import numpy as np
 from transformers import BatchFeature
 
 from cornserve.task_executors.eric.config import EricConfig
-from cornserve.task_executors.eric.zmq_utils import make_zmq_socket
-from cornserve.task_executors.eric.engine.core import run_engine
-from cornserve.task_executors.eric.models import (
+from cornserve.task_executors.eric.utils import get_open_zmq_ipc_path, make_zmq_socket, kill_process_tree
+from cornserve.task_executors.eric.engine.core import Engine
+from cornserve.task_executors.eric.schema import (
     EngineRequest, EngineResponse, Modality, EmbeddingStatus
 )
 from cornserve.logging import get_logger
 
 logger = get_logger(__name__)
+
 
 class EngineClient:
     def __init__(self, config: EricConfig):
@@ -27,24 +31,42 @@ class EngineClient:
         2. Sets up a response listener async task to handle incoming messages.
         3. Starts the engine process.
         """
-        self.model_id = config.model_id
-
+        # Create ZMQ sockets for communication with the engine
         self.ctx = zmq.asyncio.Context(io_threads=2)
-        self.push_sock = make_zmq_socket(self.ctx, "tcp://127.0.0.1:5555", zmq.PUSH)
-        self.pull_sock = make_zmq_socket(self.ctx, "tcp://127.0.0.1:5556", zmq.PULL)
-        self.responses = {}
+        self.request_sock_path = get_open_zmq_ipc_path("engine-request")
+        self.request_sock = make_zmq_socket(self.ctx, self.request_sock_path, zmq.PUSH)
+        self.response_sock_path = get_open_zmq_ipc_path("engine-response")
+        self.response_sock = make_zmq_socket(self.ctx, self.response_sock_path, zmq.PULL)
 
-        self.loop = asyncio.get_event_loop()
-
-        self.encoder = msgspec.msgpack.Encoder()
-
+        # Start an async task that listens for responses from the engine and
+        # sets the result of the future corresponding to the request
+        self.responses: dict[str, Future[EngineResponse]] = {}
         asyncio.create_task(self._response_listener())
 
-        self.engine_proc = mp.get_context("spawn").Process(
-            target=run_engine,
-            args=(self.model_id,)
+        # Cached variables
+        self.config = config
+        self.loop = asyncio.get_event_loop()
+        self.encoder = msgspec.msgpack.Encoder()
+
+        # Spawn the engine process and wait for it to be ready
+        context = mp.get_context("spawn")
+        reader, writer = context.Pipe(duplex=False)
+        ready_message = b"ready"
+        self.engine_proc = context.Process(
+            target=Engine.run_engine,
+            kwargs=dict(
+                config=config,
+                model_id=self.config.model.id,
+                modality=config.modality.ty,
+                request_sock_path=self.request_sock_path,
+                response_sock_path=self.response_sock_path,
+                ready_pipe=writer,
+                ready_message=ready_message,
+            )
         )
         self.engine_proc.start()
+        if reader.recv() != ready_message:
+            raise RuntimeError("Engine process failed to start")
 
     def health_check(self) -> bool:
         """Check if the engine process is alive."""
@@ -52,19 +74,25 @@ class EngineClient:
 
     def shutdown(self) -> None:
         """Shutdown the engine process and close sockets."""
+        # Terminate the engine process
         self.engine_proc.terminate()
         self.engine_proc.join(timeout=3)
-        if self.engine_proc.exitcode is None:
-            self.engine_proc.kill()
-            self.engine_proc.join()
+        if self.engine_proc.is_alive():
+            kill_process_tree(self.engine_proc.pid)
 
         # Closes all sockets and terminates the context
         self.ctx.destroy()
 
+        # Delete socket files
+        with suppress(FileNotFoundError):
+            os.remove(self.request_sock_path.replace("ipc://", ""))
+        with suppress(FileNotFoundError):
+            os.remove(self.response_sock_path.replace("ipc://", ""))
+
     async def _response_listener(self) -> None:
         decoder = msgspec.msgpack.Decoder(type=EngineResponse)
         while True:
-            message = await self.pull_sock.recv()
+            message = await self.response_sock.recv()
             resp = decoder.decode(message)
             req_id = resp.request_id
             try:
@@ -94,6 +122,6 @@ class EngineClient:
             processed_tensors=raw_data
         )
         msg_bytes = self.encoder.encode(req)
-        await self.push_sock.send(msg_bytes)
+        await self.request_sock.send(msg_bytes)
 
         return await fut

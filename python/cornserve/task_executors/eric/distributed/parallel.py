@@ -133,10 +133,12 @@ def init_distributed(
         )
         return
 
-    if not torch.cuda.is_available():
-        raise RuntimeError("CUDA is not available.")
-
-    torch.cuda.set_device(rank)
+    if torch.cuda.is_available():
+        torch.cuda.set_device(rank)
+    else:
+        logger.warning(
+            "CUDA is not available. Continuing to initialize distributed environment without CUDA."
+        )
 
     # Only initialize if world size is greater than 1
     if world_size > 1:

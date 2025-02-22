@@ -36,6 +36,9 @@ class EngineRequest(msgspec.Struct, array_like=True, omit_defaults=True):
     request_id: str
     shape: tuple[int, ...]
     dtype: str
+    # TODO: Pickling (pickle.dumps with pickle.HIGHEST_PROTOCOL) the numpy array
+    # and loading with pickle.loads is the fastest.
+    # https://gist.github.com/tlrmchlsmth/8067f1b24a82b6e2f90450e7764fa103
     processed_tensors: bytes
 
 

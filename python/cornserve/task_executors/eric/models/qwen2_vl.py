@@ -171,7 +171,10 @@ def apply_rotary_pos_emb_vision(t: torch.Tensor,
     t_ = t.float()
     cos = freqs.cos()
     sin = freqs.sin()
-    output = apply_rotary_emb_torch(t_, cos, sin).type_as(t)
+
+    from flash_attn.layers.rotary import apply_rotary_emb
+    output = apply_rotary_emb(t_, cos, sin).type_as(t)
+
     return output
 
 

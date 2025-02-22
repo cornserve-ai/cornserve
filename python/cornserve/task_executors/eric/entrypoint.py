@@ -1,6 +1,7 @@
 import signal
 import asyncio
 
+from cornserve.task_executors.eric.engine.client import EngineClient
 import tyro
 import uvicorn
 
@@ -37,8 +38,13 @@ async def serve(eric_config: EricConfig) -> None:
     loop = asyncio.get_running_loop()
     server_task = loop.create_task(server.serve())
 
-    loop.add_signal_handler(signal.SIGINT, server_task.cancel)
-    loop.add_signal_handler(signal.SIGTERM, server_task.cancel)
+    def shutdown() -> None:
+        engine_client: EngineClient = app.state.engine_client
+        engine_client.shutdown()
+        server_task.cancel()
+
+    loop.add_signal_handler(signal.SIGINT, shutdown)
+    loop.add_signal_handler(signal.SIGTERM, shutdown)
 
     try:
         await server_task
