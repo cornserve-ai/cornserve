@@ -1,12 +1,12 @@
 import signal
 import asyncio
 
-from cornserve.task_executors.eric.engine.client import EngineClient
 import tyro
 import uvicorn
 
 from cornserve.task_executors.eric.config import EricConfig
 from cornserve.task_executors.eric.router.app import create_app
+from cornserve.task_executors.eric.engine.client import EngineClient
 from cornserve.logging import get_logger
 
 logger = get_logger("cornserve.task_executors.eric.entrypoint")

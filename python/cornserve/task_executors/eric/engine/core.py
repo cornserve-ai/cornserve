@@ -1,22 +1,27 @@
 import queue
+import signal
 import threading
+import multiprocessing as mp
+from typing import Any
+from multiprocessing.process import BaseProcess
 from multiprocessing.connection import Connection
 
+import psutil
 import zmq
-import msgspec.msgpack as msp
 import numpy as np
 import torch
 
 from cornserve.task_executors.eric.config import EricConfig
-from cornserve.task_executors.eric.utils import make_zmq_socket
+from cornserve.task_executors.eric.utils.zmq import zmq_sync_socket
+from cornserve.task_executors.eric.utils.serde import MsgpackEncoder, MsgpackDecoder
 from cornserve.task_executors.eric.executor.executor import ModelExecutor
 from cornserve.task_executors.eric.engine.scheduler import Scheduler
 from cornserve.task_executors.eric.schema import (
-    EngineRequest, EngineResponse, EmbeddingStatus, Modality
+    EmbeddingResponse, EngineOpcode, EngineRequest, EngineResponse, EmbeddingStatus
 )
+from cornserve.logging import get_logger
 
-_encoder = msp.Encoder()
-_decoder = msp.Decoder()
+logger = get_logger(__name__)
 
 
 class Engine:
@@ -28,92 +33,217 @@ class Engine:
     signal completion.
     """
 
-    def __init__(self, model_id: str, modality: Modality) -> None:
+    def __init__(
+        self,
+        config: EricConfig,
+        request_sock_path: str,
+        response_sock_path: str,
+    ) -> None:
         """Initialize the engine."""
-        self.model_id = model_id
-        self.ctx = zmq.Context(io_threads=2)
+        self.config = config
 
-        # Pull socket for receiving requests from the router
-        self.pull_sock = make_zmq_socket(
-            ctx=self.ctx,
-            path="tcp://127.0.0.1:5555",
-            sock_type=zmq.PULL,
-        )
-        # Push socket for sending responses back to the router
-        self.push_sock = make_zmq_socket(
-            ctx=self.ctx,
-            path="tcp://127.0.0.1:5556",
-            sock_type=zmq.PUSH,
+        self.executor = ModelExecutor(
+            model_id=config.model.id,
+            modality=config.modality.ty,
+            tp_size=config.model.tp_size,
         )
 
-        self.input_queue = queue.Queue()
-        self.executor = ModelExecutor(model_id, modality)
         self.scheduler = Scheduler()
 
-        # Background thread for receiving requests
-        self._receive_thread = threading.Thread(
-            target=self._receive_loop,
-            daemon=True
-        )
+        # Background thread that continuously receives from the request
+        # ZMQ socket and pushes it into the request queue
+        self.request_queue: queue.Queue[tuple[EngineOpcode, Any]] = queue.Queue()
+        threading.Thread(
+            target=self._request_receive_loop,
+            kwargs=dict(sock_path=request_sock_path),
+            daemon=True,
+        ).start()
+
+        # Background thread that continuously pulls from the response
+        # queue and sends it to the router via the response ZMQ socket
+        self.response_queue: queue.Queue[EngineResponse] = queue.Queue()
+        threading.Thread(
+            target=self._response_send_loop,
+            kwargs=dict(sock_path=response_sock_path),
+            daemon=True,
+        ).start()
 
     @staticmethod
-    def run_engine(
+    def spawn_engine(
         config: EricConfig,
-        model_id: str,
-        modality: Modality,
+        request_sock_path: str,
+        response_sock_path: str,
+    ) -> BaseProcess:
+        """Spawn the engine process.
+
+        Called by the engine client. We're not inside the engine process yet!
+
+        This function spawns the engine in a separate process and
+        waits for it to be ready by blocking on a pipe.
+        """
+        context = mp.get_context("spawn")
+        reader, writer = context.Pipe(duplex=False)
+        ready_message = b"ready"
+        engine_proc = context.Process(
+            target=Engine.main,
+            kwargs=dict(
+                config=config,
+                request_sock_path=request_sock_path,
+                response_sock_path=response_sock_path,
+                ready_pipe=writer,
+                ready_message=ready_message,
+            )
+        )
+        engine_proc.start()
+        if reader.recv() != ready_message:
+            raise RuntimeError("Engine process failed to start")
+
+        return engine_proc
+
+    @staticmethod
+    def main(
+        config: EricConfig,
         request_sock_path: str,
         response_sock_path: str,
         ready_pipe: Connection,
         ready_message: bytes,
     ) -> None:
-        """Start the engine process."""
+        """Entrypoint for the engine process when it's spawned.
 
+        This function registers signal handlers and performs exception handling
+        around the engine's main loop.
+        """
+        # Install signal handlers for graceful shutdown.
+        # Users send SIGINT, the engine client sends SIGTERM.
+        shutdown_requested = False
+        def shutdown(*_) -> None:
+            """Idempotently shutdown the engine process."""
+            nonlocal shutdown_requested
+            if not shutdown_requested:
+                shutdown_requested = True
+                raise SystemExit()
+        signal.signal(signal.SIGINT, shutdown)
+        signal.signal(signal.SIGTERM, shutdown)
 
-    def _receive_loop(self):
-        """Continuously receive requests from the pull socket and enqueue them."""
-        while True:
-            msg_bytes = self.pull_sock.recv()
-            req = _decoder.decode(msg_bytes, type=EngineRequest)
-            self.input_queue.put(req)
+        # Start the engine process.
+        engine: Engine | None = None
+        parent_process = psutil.Process().parent()
+        try:
+            engine = Engine(
+                config=config,
+                request_sock_path=request_sock_path,
+                response_sock_path=response_sock_path,
+            )
+            # Send the ready message back to the engine client.
+            ready_pipe.send(ready_message)
+            engine.run()
+        except SystemExit:
+            logger.debug("Engine interrupted by signal.")
+        except Exception:
+            logger.exception("Engine hit an exception.")
+            if parent_process:
+                parent_process.send_signal(signal.SIGUSR1)
+        finally:
+            if engine:
+                engine.shutdown()
+
+    def shutdown(self) -> None:
+        """Shutdown the engine process."""
+        logger.info("Shutting down engine.")
+        self.executor.shutdown()
 
     def run(self):
-        """Main engine loop: schedule batches, run the model, send results."""
-        self._receive_thread.start()
+        """Main engine loop."""
+        # Loop until process is sent a SIGINT or SIGTERM
         while True:
-            items = self.scheduler.batch(self.input_queue)
-            if not items:
-                continue
-            try:
-                # Convert each EngineRequest's raw data to a torch Tensor on GPU
-                batched_tensors = []
-                for req in items:
-                    arr = np.frombuffer(req.data, dtype=req.dtype).reshape(req.shape)
-                    t = torch.from_numpy(arr).to(self.worker.device)
-                    batched_tensors.append((req, t))
+            # Poll the input queue until there is work to do.
+            if not self.scheduler.has_waiting_requests():
+                while True:
+                    try:
+                        req = self.request_queue.get(timeout=3.0)
+                        self._handle_client_request(*req)
+                        break
+                    except queue.Empty:
+                        logger.debug("EngineCore busy loop waiting.")
+                    except BaseException:
+                        raise
 
-                # Execute the model
-                results = self.worker.execute_model(batched_tensors)
+            # Handle any new client requests that arrived during the wait.
+            while not self.request_queue.empty():
+                req = self.request_queue.get_nowait()
+                self._handle_client_request(*req)
 
-                # Send out responses
-                for (req, _), emb in zip(batched_tensors, results):
-                    emb_cpu = emb.cpu().contiguous()
-                    out_arr = emb_cpu.numpy()
-                    out_shape = list(out_arr.shape)
-                    out_dtype = str(out_arr.dtype)
-                    out_data = out_arr.tobytes()
+            # Step the engine core.
+            responses = self.step()
 
-                    resp = EngineResponse(
-                        request_id=req.request_id,
-                        status=EmbeddingStatus.SUCCESS,
-                    )
-                    self.push_sock.send(_encoder.encode(resp))
+            # Put EngineCoreOutputs in the response queue.
+            self.response_queue.put_nowait(responses)
 
-            except Exception as e:
-                # On error, return an error response for each item
-                for req in items:
-                    err_resp = EngineResponse(
-                        request_id=req.request_id,
-                        status=EmbeddingStatus.ERROR,
-                        error_message=str(e),
-                    )
-                    self.push_sock.send(_encoder.encode(err_resp))
+    def step(self) -> EngineResponse:
+        """Step the engine core.
+
+        This function is called in a loop to process requests and send
+        responses. It handles scheduling, executing, and processing results.
+        """
+        batch = self.scheduler.schedule()
+        batch_result = self.executor.execute_model(batch)
+
+        return EngineResponse(
+            request_ids=batch.request_ids,
+            status=batch_result.status,
+            error_message=batch_result.error_message,
+        )
+
+    def _handle_client_request(self, opcode: EngineOpcode, request: Any) -> None:
+        """Dispatch request from client."""
+
+        match opcode:
+            case EngineOpcode.ENQUEUE:
+                self.scheduler.enqueue(request)
+            case default:
+                raise NotImplementedError(f"Opcode {opcode} not implemented.")
+
+    @staticmethod
+    def _convert_msgspec_args(method, args):
+        """If a provided arg type doesn't match corresponding target method
+         arg type, try converting to msgspec object."""
+        if not args:
+            return args
+        arg_types = signature(method).parameters.values()
+        assert len(args) <= len(arg_types)
+        return tuple(
+            msgspec.convert(v, type=p.annotation) if isclass(p.annotation)
+            and issubclass(p.annotation, msgspec.Struct)
+            and not isinstance(v, p.annotation) else v
+            for v, p in zip(args, arg_types))
+
+    def _request_receive_loop(self, sock_path: str) -> None:
+        """Continuously receive requests from a ZMQ socket and enqueue them."""
+        new_request_decoder = MsgpackDecoder(ty=EngineRequest)
+        generic_decoder = MsgpackDecoder()
+
+        with zmq_sync_socket(sock_path, zmq.PULL) as sock:
+            while True:
+                opcode_frame, inst_frame = sock.recv_multipart(copy=False)
+                opcode = EngineOpcode(bytes(opcode_frame.buffer))
+
+                match opcode:
+                    case EngineOpcode.ENQUEUE:
+                        req = new_request_decoder.decode(inst_frame.buffer)
+                        self.request_queue.put(req)
+                        logger.info("Adding request: %s", req.request_id)
+                    case EngineOpcode.PROFILE:
+                        req = generic_decoder.decode(inst_frame.buffer)
+                        self.should_profile = True
+                        logger.info("Received profile instruction: %s", req)
+
+    def _response_send_loop(self, sock_path: str) -> None:
+        """Continuously dequeue responses and send them to the router."""
+        encoder = MsgpackEncoder()
+        buffer = bytearray()  # Reuse buffer
+
+        with zmq_sync_socket(sock_path, zmq.PUSH) as sock:
+            while True:
+                resp = self.response_queue.get()
+                encoder.encode_into(resp, buffer)
+                sock.send(buffer, copy=False)

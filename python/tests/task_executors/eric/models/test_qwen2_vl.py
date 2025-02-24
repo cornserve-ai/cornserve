@@ -4,7 +4,7 @@ import torch
 from transformers.models.qwen2_vl.modeling_qwen2_vl import Qwen2VLForConditionalGeneration
 
 from cornserve.task_executors.eric.distributed.parallel import destroy_distributed, init_distributed
-from cornserve.task_executors.eric.executor.model_loader import load_model
+from cornserve.task_executors.eric.executor.loader import load_model
 from cornserve.task_executors.eric.schema import Modality
 from cornserve.task_executors.eric.router.processor import Processor
 from cornserve.task_executors.eric.models.qwen2_vl import Qwen2VisionTransformer
@@ -34,7 +34,7 @@ def test_weight_loading():
     # hf_output = hf_model(pixel_values, grid_thw=image_grid_thw)
 
     # Load our model
-    our_model = load_model(model_id, weight_prefix="visual.", torch_device=torch.device("cpu"))
+    our_model = load_model(model_id, modality=Modality.IMAGE, weight_prefix="visual.", torch_device=torch.device("cpu"))
     # assert isinstance(our_model, Qwen2VisionTransformer)
 
     # Check if parameters are the same

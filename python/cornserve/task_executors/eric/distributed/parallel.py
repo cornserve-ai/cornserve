@@ -1,5 +1,3 @@
-import atexit
-
 import torch
 
 from cornserve.logging import get_logger
@@ -124,7 +122,6 @@ def init_distributed(
     rank: int,
     backend: str = "nccl",
     init_method: str = "tcp://127.0.0.1:29500",
-    register_atexit_hook: bool = True,
 ) -> None:
     """Initialize the distributed process group."""
     if torch.distributed.is_initialized():
@@ -151,11 +148,6 @@ def init_distributed(
         logger.info(
             f"Distributed process group initialized with world size {world_size} and rank {rank}."
         )
-
-        if register_atexit_hook:
-            # This is skipped in distributed inference test cases, as this is
-            # called by the tearDown method of the test case.
-            atexit.register(destroy_distributed)
 
     # Initialize global tensor parallel group.
     # If world size is 1, it will not create a new group.

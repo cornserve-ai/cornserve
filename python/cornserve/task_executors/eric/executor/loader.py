@@ -17,19 +17,16 @@ from huggingface_hub import HfApi, hf_hub_download, snapshot_download
 from transformers import AutoConfig, PretrainedConfig
 
 from cornserve.logging import get_logger
+from cornserve.task_executors.eric.schema import Modality
 from cornserve.task_executors.eric.distributed import parallel
+from cornserve.task_executors.eric.models import MODEL_REGISTRY
 
 logger = get_logger(__name__)
-
-# Maps a model's type to its encoder class name in `models`.
-MODEL_REGISTRY: dict[str, str] = {
-    "qwen2_vl": "Qwen2VisionTransformer",
-}
 
 
 def load_model(
     model_name_or_path: str,
-    weight_prefix: str = "",
+    modality: Modality,
     weight_format: Literal["safetensors"] = "safetensors",
     cache_dir: str | None = None,
     revision: str | None = None,
@@ -44,7 +41,7 @@ def load_model(
 
     Args:
         model_name_or_path: The model name or path.
-        weight_prefix: The prefix of the model weights to collect.
+        modality: The modality encoder to use from the model.
         weight_format: The format of the model weights. Currently only "safetensors" is supported.
         cache_dir: The cache directory to store the model weights. If None, will use HF defaults.
         revision: The revision of the model.
@@ -66,41 +63,46 @@ def load_model(
 
     # Fetch the model class name from the registry
     try:
-        model_class_name = MODEL_REGISTRY[hf_config.model_type]
+        registry_entry = MODEL_REGISTRY[hf_config.model_type]
     except KeyError:
         logger.exception(
-            "Model %s not found in the registry. Available model names are: %s",
+            "Model type %s not found in the registry. Available model types are: %s",
             model_name_or_path,
-            [f"{module}.{model}" for module, model in MODEL_REGISTRY.items()],
+            MODEL_REGISTRY.keys(),
+        )
+        raise
+    try:
+        model_class_name = registry_entry.model[modality].class_name
+    except KeyError:
+        logger.exception(
+            "Modality %s not supported by %s. Available modalities in the registry are: %s",
+            modality,
+            model_name_or_path,
+            registry_entry.model.keys(),
         )
         raise
 
     # Import the model class
     try:
         model_class: Type[nn.Module] = getattr(
-            importlib.import_module(f"cornserve.task_executors.eric.models.{hf_config.model_type}"),
+            importlib.import_module(f"cornserve.task_executors.eric.models.{registry_entry.module}"),
             model_class_name,
         )
-    except ImportError as e:
+    except ImportError:
         logger.exception(
-            "Failed to import model %s from `models`. MODEL_REGISTRY: %s",
-            model_name_or_path,
-            [f"{module}.{model}" for module, model in MODEL_REGISTRY.items()],
+            "Failed to import `%s` from `models`. Registry entry: %s",
+            registry_entry.module,
+            registry_entry,
         )
-        raise RuntimeError(
-            f"Failed to import model {model_class_name} from `models`."
-        ) from e
-    except AttributeError as e:
+        raise
+    except AttributeError:
         logger.exception(
-            "Model %s not found in the `%s`. MODEL_REGISTRY:",
-            model_name_or_path,
-            f"models.{hf_config.model_type}",
-            [f"{module}.{model}" for module, model in MODEL_REGISTRY.items()],
+            "Model class %s not found in the `%s`. Registry entry:",
+            model_class_name,
+            f"models.{registry_entry.module}",
+            registry_entry,
         )
-        raise RuntimeError(
-            f"Model {model_class_name} not found in the module."
-        ) from e
-
+        raise
 
     # Instantiate the model
     torch_dtype = torch_dtype or hf_config.torch_dtype
@@ -112,7 +114,7 @@ def load_model(
 
     weight_dict = get_safetensors_weight_dict(
         model_name_or_path,
-        weight_prefix=weight_prefix,
+        weight_prefix=registry_entry.model[modality].weight_prefix,
         cache_dir=cache_dir,
         revision=revision,
     )
@@ -218,7 +220,8 @@ def get_safetensors_weight_dict(
     return weight_dict
 
 
-def get_lock(model_name_or_path: str, cache_dir: str | None = None):
+def get_lock(model_name_or_path: str, cache_dir: str | None = None) -> filelock.BaseFileLock:
+    """Get a file lock for the model directory."""
     lock_dir = cache_dir or tempfile.gettempdir()
     os.makedirs(os.path.dirname(lock_dir), exist_ok=True)
     model_name = model_name_or_path.replace("/", "-")

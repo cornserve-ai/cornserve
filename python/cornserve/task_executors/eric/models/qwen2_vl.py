@@ -391,8 +391,8 @@ class Qwen2VisionTransformer(nn.Module):
 
     def forward(
         self,
-        x: torch.Tensor,
-        grid_thw: torch.Tensor,
+        x: torch.Tensor,  # [total sequence length (flat concat), 6 * patch_size (14) * patch_size (14)]
+        grid_thw: torch.Tensor,  # [batch_size, 3]
     ) -> torch.Tensor:
         # patchify
         x = x.to(device=self.device, dtype=self.dtype)

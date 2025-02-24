@@ -1,13 +1,10 @@
-import os
-import signal
 import contextlib
 import tempfile
 from uuid import uuid4
-from typing import overload
+from typing import overload, Iterator
 
 import zmq
 import zmq.asyncio
-import psutil
 
 from cornserve.logging import get_logger
 
@@ -64,29 +61,13 @@ def get_open_zmq_ipc_path(description: str | None = None) -> str:
     return f"ipc://{TMP_DIR}/{filename}"
 
 
-def kill_process_tree(pid: int | None) -> None:
-    """Kill all descendant processes of the given pid by sending SIGKILL.
+@contextlib.contextmanager
+def zmq_sync_socket(path: str, sock_type: int) -> Iterator[zmq.Socket]:
+    """Context manager that creates and cleans up a ZMQ socket."""
 
-    Args:
-        pid: Process ID of the parent process.
-    """
-    # None might be passed in if mp.Process hasn't been spawned yet
-    if pid is None:
-        return
-
+    ctx = zmq.Context(io_threads=2)
     try:
-        parent = psutil.Process(pid)
-    except psutil.NoSuchProcess:
-        return
+        yield make_zmq_socket(ctx, path, sock_type)
 
-    # Get all children recursively
-    children = parent.children(recursive=True)
-
-    # Send SIGKILL to all children first
-    for child in children:
-        with contextlib.suppress(ProcessLookupError):
-            os.kill(child.pid, signal.SIGKILL)
-
-    # Finally kill the parent
-    with contextlib.suppress(ProcessLookupError):
-        os.kill(pid, signal.SIGKILL)
+    finally:
+        ctx.destroy(linger=0)

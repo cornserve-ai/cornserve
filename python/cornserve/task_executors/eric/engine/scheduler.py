@@ -1,21 +1,25 @@
-import time
-import queue
+from collections import deque
+
+from cornserve.task_executors.eric.schema import EngineRequest
+from cornserve.logging import get_logger
+
+logger = get_logger(__name__)
+
 
 class Scheduler:
-    def __init__(self, max_batch_size=4, max_wait=0.01):
-        self.max_batch_size = max_batch_size
-        self.max_wait = max_wait
+    """Scheduler for batching embedding requests."""
 
-    def batch(self, q: queue.Queue):
-        if q.empty():
-            time.sleep(0.0005)
-            return []
+    def __init__(self) -> None:
+        """Initialize the scheduler."""
+        self.waiting_queue: deque[EngineRequest] = deque()
 
-        items = [q.get()]
-        start = time.time()
-        while len(items) < self.max_batch_size:
-            if not q.empty():
-                items.append(q.get())
-            if time.time() - start >= self.max_wait:
-                break
-        return items
+    def enqueue(self, request: EngineRequest) -> None:
+        """Add a request to the waiting queue."""
+        self.waiting_queue.append(request)
+
+    def has_waiting_requests(self) -> bool:
+        """Check if there are any unfinished requests."""
+        return bool(self.waiting_queue)
+
+    def schedule(self) -> Batch:
+        """Schedule requests to run in the next batch."""
