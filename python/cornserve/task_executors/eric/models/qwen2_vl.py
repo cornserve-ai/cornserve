@@ -391,12 +391,20 @@ class Qwen2VisionTransformer(nn.Module):
 
     def forward(
         self,
-        x: torch.Tensor,  # [total sequence length (flat concat), 6 * patch_size (14) * patch_size (14)]
-        grid_thw: torch.Tensor,  # [batch_size, 3]
-    ) -> torch.Tensor:
+        batch: dict[str, list[torch.Tensor]],
+    ) -> list[torch.Tensor]:
+        """Forward pass of the model.
+
+        `batch` is expected to have the following keys:
+        - `pixel_values`: The pixel values of the images. Each [seq_len, 6 * patch_size (14) * patch_size (14)].
+        - `image_grid_thw`: The grid size of the images. Each [1, 3].
+        """
+        # Batch
+        pixel_values = torch.cat(batch["pixel_values"], dim=0).to(device=self.device, dtype=self.dtype)
+        grid_thw = torch.cat(batch["image_grid_thw"], dim=0).to(device=self.device)
+
         # patchify
-        x = x.to(device=self.device, dtype=self.dtype)
-        x = self.patch_embed(x)
+        x = self.patch_embed(pixel_values)
 
         # compute position embedding
         rotary_pos_emb = self.rot_pos_emb(grid_thw)
@@ -415,4 +423,8 @@ class Qwen2VisionTransformer(nn.Module):
         # adapter
         x = self.merger(x)
 
-        return x
+        # Unbatch
+        seqlens = (grid_thw[:, 1] * grid_thw[:, 2]).squeeze(0) // (self.spatial_merge_size**2)
+        result = x.squeeze(0).split(seqlens.tolist(), dim=0)
+
+        return result
