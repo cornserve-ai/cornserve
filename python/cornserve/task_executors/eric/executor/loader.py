@@ -220,7 +220,7 @@ def get_safetensors_weight_dict(
     prefix_strip_len = len(weight_prefix)
     for weight_file in weight_files:
         with safetensors.safe_open(f"{hf_dir}/{weight_file}", framework="pt") as f:
-            for name in f:
+            for name in f.keys():
                 if name.startswith(weight_prefix):
                     weight_dict[name[prefix_strip_len:]] = f.get_tensor(name)
     return weight_dict
