@@ -36,14 +36,17 @@ class DeviceGroup:
         self.rank = torch.distributed.get_rank(self.process_group)
 
         logger.info(
-            f"Device group {name} initialized with ranks {ranks} and world size {self.world_size}."
+            "Device group %s initialized with ranks %s and world size %d.",
+            name,
+            ranks,
+            self.world_size,
         )
 
     def shutdown(self) -> None:
         """Shutdown the device group."""
         if self.process_group is not None:
             torch.distributed.destroy_process_group(self.process_group)
-            logger.info(f"Device group {self.name} destroyed.")
+            logger.info("Device group %s destroyed.", self.name)
 
     def all_gather(self, input_: torch.Tensor, dim: int = -1) -> torch.Tensor:
         """Perform AllGather on the tensor across the device group.
@@ -116,7 +119,6 @@ def get_tensor_parallel_group() -> DeviceGroup:
     This is expected to work even when we're not doing distributed inference.
     Collective calls will be no-ops, world size will be 1, and rank will be 0.
     """
-    global TP_GROUP
     if TP_GROUP is None:
         raise RuntimeError("Tensor parallel group is not initialized.")
     return TP_GROUP
@@ -151,7 +153,9 @@ def init_distributed(
             rank=rank,
         )
         logger.info(
-            f"Distributed process group initialized with world size {world_size} and rank {rank}."
+            "Distributed process group initialized with world size %d and rank %d.",
+            world_size,
+            rank,
         )
 
     # Initialize global tensor parallel group.

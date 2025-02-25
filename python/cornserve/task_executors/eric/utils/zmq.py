@@ -34,6 +34,13 @@ def make_zmq_socket(
     path: str,
     sock_type: int,
 ) -> zmq.Socket | zmq.asyncio.Socket:
+    """Create a ZMQ socket.
+
+    Args:
+        ctx: The ZMQ context. Can be either a sync or async context.
+        path: Socket path prefixed with protocol.
+        sock_type: Socket type, like `zmq.PULL` or `zmq.PUSH`.
+    """
     s = ctx.socket(sock_type)
 
     buf_size = int(0.5 * 1024**3)  # 500 MiB
@@ -65,7 +72,6 @@ def get_open_zmq_ipc_path(description: str | None = None) -> str:
 @contextlib.contextmanager
 def zmq_sync_socket(path: str, sock_type: int) -> Iterator[zmq.Socket]:
     """Context manager that creates and cleans up a ZMQ socket."""
-
     ctx = zmq.Context(io_threads=2)
     try:
         yield make_zmq_socket(ctx, path, sock_type)

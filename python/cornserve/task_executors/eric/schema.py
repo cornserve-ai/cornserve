@@ -3,6 +3,7 @@ from dataclasses import dataclass
 
 import torch
 import msgspec
+import numpy as np
 from pydantic import BaseModel
 
 
@@ -44,9 +45,7 @@ class EngineRequest(msgspec.Struct, array_like=True, omit_defaults=True):
     """Request sent from the router to the engine."""
 
     request_id: str
-    shape: tuple[int, ...]
-    dtype: str
-    processed_tensors: bytes
+    data: list[dict[str, np.ndarray]]
 
 
 class EngineResponse(msgspec.Struct, array_like=True, omit_defaults=True):

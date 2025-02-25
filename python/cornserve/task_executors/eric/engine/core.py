@@ -1,3 +1,5 @@
+"""Eric engine core."""
+
 import queue
 import signal
 import threading
@@ -8,8 +10,6 @@ from multiprocessing.connection import Connection
 
 import psutil
 import zmq
-import numpy as np
-import torch
 
 from cornserve.task_executors.eric.config import EricConfig
 from cornserve.task_executors.eric.utils.zmq import zmq_sync_socket
@@ -17,11 +17,9 @@ from cornserve.task_executors.eric.utils.serde import MsgpackEncoder, MsgpackDec
 from cornserve.task_executors.eric.executor.executor import ModelExecutor
 from cornserve.task_executors.eric.engine.scheduler import Scheduler
 from cornserve.task_executors.eric.schema import (
-    EmbeddingResponse,
     EngineOpcode,
     EngineRequest,
     EngineResponse,
-    Status,
 )
 from cornserve.logging import get_logger
 
@@ -198,38 +196,20 @@ class Engine:
         batch_result = self.executor.execute_model(batch)
 
         return EngineResponse(
-            request_ids=batch.request_ids,
+            request_ids=batch_result.request_ids,
             status=batch_result.status,
             error_message=batch_result.error_message,
         )
 
     def _handle_client_request(self, opcode: EngineOpcode, request: Any) -> None:
         """Dispatch request from client."""
-
         match opcode:
             case EngineOpcode.ENQUEUE:
+                logger.info("Adding request: %s", request.request_id)
                 self.scheduler.enqueue(request)
-            case default:
+            case EngineOpcode.PROFILE:
+                self.should_profile = True
                 raise NotImplementedError(f"Opcode {opcode} not implemented.")
-
-    @staticmethod
-    def _convert_msgspec_args(method, args):
-        """If a provided arg type doesn't match corresponding target method
-        arg type, try converting to msgspec object."""
-        if not args:
-            return args
-        arg_types = signature(method).parameters.values()
-        assert len(args) <= len(arg_types)
-        return tuple(
-            (
-                msgspec.convert(v, type=p.annotation)
-                if isclass(p.annotation)
-                and issubclass(p.annotation, msgspec.Struct)
-                and not isinstance(v, p.annotation)
-                else v
-            )
-            for v, p in zip(args, arg_types)
-        )
 
     def _request_receive_loop(self, sock_path: str) -> None:
         """Continuously receive requests from a ZMQ socket and enqueue them."""
@@ -241,15 +221,12 @@ class Engine:
                 opcode_frame, inst_frame = sock.recv_multipart(copy=False)
                 opcode = EngineOpcode(bytes(opcode_frame.buffer))
 
-                match opcode:
-                    case EngineOpcode.ENQUEUE:
-                        req = new_request_decoder.decode(inst_frame.buffer)
-                        self.request_queue.put(req)
-                        logger.info("Adding request: %s", req.request_id)
-                    case EngineOpcode.PROFILE:
-                        req = generic_decoder.decode(inst_frame.buffer)
-                        self.should_profile = True
-                        logger.info("Received profile instruction: %s", req)
+                if opcode == EngineOpcode.ENQUEUE:
+                    request = new_request_decoder.decode(inst_frame.buffer)
+                else:
+                    request = generic_decoder.decode(inst_frame.buffer)
+
+                self.request_queue.put((opcode, request))
 
     def _response_send_loop(self, sock_path: str) -> None:
         """Continuously dequeue responses and send them to the router."""

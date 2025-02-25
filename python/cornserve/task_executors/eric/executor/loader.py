@@ -99,7 +99,7 @@ def load_model(
         raise
     except AttributeError:
         logger.exception(
-            "Model class %s not found in the `%s`. Registry entry:",
+            "Model class %s not found in the `%s`. Registry entry: %s",
             model_class_name,
             f"models.{registry_entry.module}",
             registry_entry,
@@ -114,9 +114,8 @@ def load_model(
     torch_device = torch_device or torch.device(
         "cuda", parallel.get_tensor_parallel_group().rank
     )
-    with set_default_torch_dtype(torch_dtype):
-        with torch_device:
-            model = model_class(hf_config)
+    with set_default_torch_dtype(torch_dtype), torch_device:
+        model = model_class(hf_config)
 
     weight_dict = get_safetensors_weight_dict(
         model_name_or_path,
@@ -190,7 +189,8 @@ def get_safetensors_weight_dict(
                 revision=revision,
             )
             # Maps weight names to the safetensors file they are stored in
-            weight_map = json.load(open(index_file_path))["weight_map"]
+            with open(index_file_path) as f:
+                weight_map = json.load(f)["weight_map"]
             weight_files = []
             for weight_name, weight_file in weight_map.items():
                 # Only keep weights that start with the prefix
@@ -220,7 +220,7 @@ def get_safetensors_weight_dict(
     prefix_strip_len = len(weight_prefix)
     for weight_file in weight_files:
         with safetensors.safe_open(f"{hf_dir}/{weight_file}", framework="pt") as f:
-            for name in f.keys():
+            for name in f:
                 if name.startswith(weight_prefix):
                     weight_dict[name[prefix_strip_len:]] = f.get_tensor(name)
     return weight_dict

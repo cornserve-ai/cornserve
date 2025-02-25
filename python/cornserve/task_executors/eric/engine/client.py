@@ -1,13 +1,10 @@
 import os
 import asyncio
-import multiprocessing as mp
 from contextlib import suppress
 from asyncio.futures import Future
 
 import zmq
 import zmq.asyncio
-import torch
-import numpy as np
 from transformers import BatchFeature
 
 from cornserve.task_executors.eric.config import EricConfig
@@ -20,11 +17,9 @@ from cornserve.task_executors.eric.utils.process import kill_process_tree
 from cornserve.task_executors.eric.engine.core import Engine
 from cornserve.task_executors.eric.schema import (
     EmbeddingResponse,
+    EngineOpcode,
     EngineRequest,
     EngineResponse,
-    EngineOpcode,
-    Modality,
-    Status,
 )
 from cornserve.logging import get_logger
 
@@ -32,6 +27,8 @@ logger = get_logger(__name__)
 
 
 class EngineClient:
+    """Client that communicates with the engine process."""
+
     def __init__(self, config: EricConfig):
         """Initialize the engine client.
 
@@ -119,18 +116,14 @@ class EngineClient:
         self.responses[request_id] = fut
 
         # Build and send the request
-        # TODO: BatchFeature to request. First, try actually running it through the HF model.
-        arr = tensors.numpy()
-        shape = tuple(arr.shape)
-        dtype_str = str(arr.dtype)
-        raw_data = arr.tobytes()
         req = EngineRequest(
             request_id=request_id,
-            shape=shape,
-            dtype=dtype_str,
-            processed_tensors=raw_data,
+            data=[d.data for d in processed],
         )
         msg_bytes = self.encoder.encode(req)
-        await self.request_sock.send(msg_bytes)
+        await self.request_sock.send_multipart(
+            (EngineOpcode.ENQUEUE.value, msg_bytes),
+            copy=False,
+        )
 
         return await fut

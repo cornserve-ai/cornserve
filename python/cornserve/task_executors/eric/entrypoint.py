@@ -28,7 +28,7 @@ async def serve(eric_config: EricConfig) -> None:
 
         logger.info(
             "%s %s",
-            methods[0] if len(methods) == 1 else "{" + ",".join(methods) + "}",
+            list(methods)[0] if len(methods) == 1 else "{" + ",".join(methods) + "}",
             path,
         )
 

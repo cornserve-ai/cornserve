@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "cornserve"
-description = "Easy, fast, and scalable agentic AI"
+description = "Easy, fast, and scalable multimodal agentic AI"
 readme = "README.md"
 license = { file = "LICENSE" }
 classifiers = [
@@ -41,6 +41,8 @@ version = { attr = "cornserve.__version__" }
 
 [tool.ruff]
 line-length = 120
+
+[tool.ruff.lint]
 pydocstyle.convention = "google"
 select = [
   "E",   # pycodestyle error
@@ -52,6 +54,19 @@ select = [
   "G",   # flake8-logging-format (complains about logging)
   "SIM", # flake8-simplify (suggests code simplifications)
 ]
+exclude = [
+  "cornserve/task_executors/eric/models/*.py"
+]
+ignore = [
+  "PLW0603",  # Global statement
+  "PLR2004",  # Magic value
+  "PLR0913",  # Too many arguments
+  "PLR0402",  # `import torch.nn as nn` is fine
+]
+
+[tool.ruff.lint.per-file-ignores]
+"**/__init__.py" = ["F401", "F403"]
+"cornserve/services/**/server.py" = ["N802"]
 
 [tool.pyright]
 exclude = [

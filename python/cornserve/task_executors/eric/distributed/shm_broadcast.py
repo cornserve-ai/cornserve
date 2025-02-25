@@ -307,8 +307,10 @@ class MessageQueue:
         return self
 
     def wait_until_ready(self):
-        """This is a collective operation. All processes (including the
-        readers and the writer) should call this function.
+        """Wait until all readers are connected to the writer.
+
+        This is a collective operation. All processes (including the readers
+        and the writer) should call this function.
         """
         if self._is_writer:
             # wait for all readers to connect

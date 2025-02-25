@@ -3,7 +3,6 @@ import time
 import signal
 from typing import Any
 import psutil
-import multiprocessing as mp
 from contextlib import suppress
 
 from cornserve.task_executors.eric.distributed.shm_broadcast import MessageQueue

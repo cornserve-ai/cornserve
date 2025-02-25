@@ -1,3 +1,5 @@
+"""Defines the Processor class for handling modality preprocessing."""
+
 import time
 import asyncio
 import base64
@@ -74,7 +76,7 @@ class ImageLoader:
                 url, headers={"User-Agent": "Mozilla/5.0"}, timeout=5
             ) as r:
                 r.raise_for_status()
-                image = self.load_bytes(r.content)
+                image = self._load_bytes(r.content)
             logger.info(
                 "Took %.3f seconds to load image from web URL",
                 time.monotonic() - start_time,
@@ -88,7 +90,7 @@ class ImageLoader:
                 raise ValueError(
                     f"Only base64 data URLs are supported; got '{data_type}'."
                 )
-            image = self.load_base64(data)
+            image = self._load_base64(data)
             logger.info(
                 "Took %.3f seconds to load image from data URL",
                 time.monotonic() - start_time,
@@ -96,7 +98,7 @@ class ImageLoader:
             return image
 
         elif url_spec.scheme == "file":
-            image = self.load_file(url_spec.path)
+            image = self._load_file(url_spec.path)
             logger.info(
                 "Took %.3f seconds to load image from file URL",
                 time.monotonic() - start_time,
@@ -106,11 +108,11 @@ class ImageLoader:
         else:
             raise ValueError("The URL must be either a HTTP, data or file URL.")
 
-    def load_bytes(self, data: bytes) -> Image.Image:
+    def _load_bytes(self, data: bytes) -> Image.Image:
         return Image.open(BytesIO(data)).convert("RGB")
 
-    def load_base64(self, data: str) -> Image.Image:
-        return self.load_bytes(base64.b64decode(data))
+    def _load_base64(self, data: str) -> Image.Image:
+        return self._load_bytes(base64.b64decode(data))
 
-    def load_file(self, filepath: str) -> Image.Image:
+    def _load_file(self, filepath: str) -> Image.Image:
         return Image.open(filepath).convert("RGB")

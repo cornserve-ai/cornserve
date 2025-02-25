@@ -7,14 +7,13 @@ from multiprocessing.process import BaseProcess
 import zmq
 import torch
 import psutil
-from transformers import AutoModel, AutoConfig
 
 from cornserve.task_executors.eric.distributed.shm_broadcast import (
     MessageQueueHandle,
     MessageQueue,
 )
 from cornserve.task_executors.eric.executor.loader import load_model
-from cornserve.task_executors.eric.schema import Batch, Modality, Status
+from cornserve.task_executors.eric.schema import Batch, Modality
 from cornserve.task_executors.eric.utils.zmq import (
     get_open_zmq_ipc_path,
     zmq_sync_socket,

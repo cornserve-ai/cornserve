@@ -65,7 +65,9 @@ class TensorSidercar:
 
 
 class TensorSidecarReceiver(TensorSidercar):
-    def __init__(self, sidecar_rank: int, shape: tuple[int, ...], dtype: torch.dtype) -> None:
+    def __init__(
+        self, sidecar_rank: int, shape: tuple[int, ...], dtype: torch.dtype
+    ) -> None:
         super().__init__(sidecar_rank, dtype)
         self.tensor_shape = shape
 
