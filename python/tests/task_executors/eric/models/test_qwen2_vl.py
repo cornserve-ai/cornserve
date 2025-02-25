@@ -32,7 +32,11 @@ def test_weight_loading() -> None:
     assert_same_weights(hf_model, our_model)
 
 
-@pytest.mark.parametrize("tp_size", list(filter(lambda x: x <= NUM_GPUS, [1, 2, 4, 8])))
+@pytest.mark.parametrize(
+    "tp_size",
+    list(filter(lambda x: x <= NUM_GPUS, [1, 2, 4, 8])),
+    ids=lambda x: f"TP={x}",
+)
 def test_inference(test_images: list[ModalityData], tp_size: int) -> None:
     """Test if inference works correctly."""
     model_id = "Qwen/Qwen2-VL-7B-Instruct"

@@ -47,13 +47,18 @@ async def embeddings(request: EmbeddingRequest, raw_request: Request) -> Respons
         case Status.SUCCESS:
             return Response(status_code=status.HTTP_200_OK)
         case Status.ERROR:
-            return Response(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, content=response.error_message)
+            return Response(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                content=response.error_message,
+            )
 
 
 def init_app_state(app: FastAPI, config: EricConfig) -> None:
     """Initialize the app state with the configuration and engine client."""
     app.state.config = config
-    app.state.processor = Processor(config.model.id, config.modality.ty, config.modality.num_workers)
+    app.state.processor = Processor(
+        config.model.id, config.modality.ty, config.modality.num_workers
+    )
     app.state.engine_client = EngineClient(config)
 
 

@@ -12,11 +12,19 @@ from transformers import BatchFeature
 
 from cornserve.task_executors.eric.config import EricConfig
 from cornserve.task_executors.eric.utils.serde import MsgpackDecoder, MsgpackEncoder
-from cornserve.task_executors.eric.utils.zmq import get_open_zmq_ipc_path, make_zmq_socket
+from cornserve.task_executors.eric.utils.zmq import (
+    get_open_zmq_ipc_path,
+    make_zmq_socket,
+)
 from cornserve.task_executors.eric.utils.process import kill_process_tree
 from cornserve.task_executors.eric.engine.core import Engine
 from cornserve.task_executors.eric.schema import (
-    EmbeddingResponse, EngineRequest, EngineResponse, EngineOpcode, Modality, Status
+    EmbeddingResponse,
+    EngineRequest,
+    EngineResponse,
+    EngineOpcode,
+    Modality,
+    Status,
 )
 from cornserve.logging import get_logger
 
@@ -36,7 +44,9 @@ class EngineClient:
         self.request_sock_path = get_open_zmq_ipc_path("engine-request")
         self.request_sock = make_zmq_socket(self.ctx, self.request_sock_path, zmq.PUSH)
         self.response_sock_path = get_open_zmq_ipc_path("engine-response")
-        self.response_sock = make_zmq_socket(self.ctx, self.response_sock_path, zmq.PULL)
+        self.response_sock = make_zmq_socket(
+            self.ctx, self.response_sock_path, zmq.PULL
+        )
 
         # Start an async task that listens for responses from the engine and
         # sets the result of the future corresponding to the request
@@ -99,7 +109,9 @@ class EngineClient:
                         req_id,
                     )
 
-    async def embed(self, request_id: str, processed: list[BatchFeature]) -> EmbeddingResponse:
+    async def embed(
+        self, request_id: str, processed: list[BatchFeature]
+    ) -> EmbeddingResponse:
         """Send the embedding request to the engine and wait for the response."""
         # This future will be resolved by the response listener task
         # when the engine process sends a response back
@@ -116,7 +128,7 @@ class EngineClient:
             request_id=request_id,
             shape=shape,
             dtype=dtype_str,
-            processed_tensors=raw_data
+            processed_tensors=raw_data,
         )
         msg_bytes = self.encoder.encode(req)
         await self.request_sock.send(msg_bytes)

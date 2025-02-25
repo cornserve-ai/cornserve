@@ -20,9 +20,9 @@ logger = get_logger(__name__)
 # We prefer to use os.sched_yield as it results in tighter polling loops,
 # measured to be around 3e-7 seconds. However on earlier versions of Python
 # os.sched_yield() does not release the GIL, so we fall back to time.sleep(0)
-USE_SCHED_YIELD = ((sys.version_info[:3] >= (3, 11, 1))
-                   or (sys.version_info[:2] == (3, 10)
-                       and sys.version_info[2] >= 8))
+USE_SCHED_YIELD = (sys.version_info[:3] >= (3, 11, 1)) or (
+    sys.version_info[:2] == (3, 10) and sys.version_info[2] >= 8
+)
 
 
 def sched_yield():
@@ -48,7 +48,7 @@ class ShmRingBuffer:
         of items that can be stored in the buffer are known in advance.
         In this case, we don't need to synchronize the access to
          the buffer.
-        
+
         Buffer memory layout:
                   data                                 metadata
                     |                                      |
@@ -89,13 +89,14 @@ class ShmRingBuffer:
         created object to other processes by pickling it. The other processes will
         get the name of the shared memory and open it, so that they can access the
         same shared memory buffer.
-        """# noqa
+        """  # noqa
         self.n_reader = n_reader
         self.metadata_size = 1 + n_reader
         self.max_chunk_bytes = max_chunk_bytes
         self.max_chunks = max_chunks
-        self.total_bytes_of_buffer = (self.max_chunk_bytes +
-                                      self.metadata_size) * self.max_chunks
+        self.total_bytes_of_buffer = (
+            self.max_chunk_bytes + self.metadata_size
+        ) * self.max_chunks
         self.data_offset = 0
         self.metadata_offset = self.max_chunk_bytes * self.max_chunks
 
@@ -103,10 +104,12 @@ class ShmRingBuffer:
             # we are creating a buffer
             self.is_creator = True
             self.shared_memory = shared_memory.SharedMemory(
-                create=True, size=self.total_bytes_of_buffer)
+                create=True, size=self.total_bytes_of_buffer
+            )
             # initialize the metadata section to 0
-            with memoryview(self.shared_memory.buf[self.metadata_offset:]
-                            ) as metadata_buffer:
+            with memoryview(
+                self.shared_memory.buf[self.metadata_offset :]
+            ) as metadata_buffer:
                 torch.frombuffer(metadata_buffer, dtype=torch.uint8).fill_(0)
         else:
             # we are opening an existing buffer
@@ -114,12 +117,13 @@ class ShmRingBuffer:
             # fix to https://stackoverflow.com/q/62748654/9191338
             # Python incorrectly tracks shared memory even if it is not
             # created by the process. The following patch is a workaround.
-            with patch("multiprocessing.resource_tracker.register",
-                       lambda *args, **kwargs: None):
+            with patch(
+                "multiprocessing.resource_tracker.register",
+                lambda *args, **kwargs: None,
+            ):
                 try:
                     self.shared_memory = shared_memory.SharedMemory(name=name)
-                    assert (
-                        self.shared_memory.size == self.total_bytes_of_buffer)
+                    assert self.shared_memory.size == self.total_bytes_of_buffer
                 except FileNotFoundError:
                     # we might deserialize the object in a different node
                     # in this case, this object is not used,
@@ -127,8 +131,12 @@ class ShmRingBuffer:
                     pass
 
     def handle(self):
-        return (self.n_reader, self.max_chunk_bytes, self.max_chunks,
-                self.shared_memory.name)
+        return (
+            self.n_reader,
+            self.max_chunk_bytes,
+            self.max_chunks,
+            self.shared_memory.name,
+        )
 
     def __reduce__(self):
         return (
@@ -197,8 +205,7 @@ class MessageQueue:
             # for local readers, we will:
             # 1. create a shared memory ring buffer to communicate small data
             # 2. create a publish-subscribe socket to communicate large data
-            self.buffer = ShmRingBuffer(n_local_reader, max_chunk_bytes,
-                                        max_chunks)
+            self.buffer = ShmRingBuffer(n_local_reader, max_chunk_bytes, max_chunks)
 
             # XPUB is very similar to PUB,
             # except that it can receive subscription messages
@@ -246,8 +253,7 @@ class MessageQueue:
         self.handle = MessageQueueHandle(
             connect_ip=connect_ip,
             local_reader_ranks=local_reader_ranks,
-            buffer_handle=self.buffer.handle()
-            if self.buffer is not None else None,
+            buffer_handle=self.buffer.handle() if self.buffer is not None else None,
             local_subscribe_port=local_subscribe_port,
             remote_subscribe_port=remote_subscribe_port,
         )
@@ -352,15 +358,18 @@ class MessageQueue:
                     sched_yield()
 
                     # if we wait for a long time, log a message
-                    if (time.monotonic() - start_time
-                            > RINGBUFFER_FULL_WARNING_INTERVAL * n_warning):
-                        logger.debug("No available block found in %s second. ",
-                                     RINGBUFFER_FULL_WARNING_INTERVAL)
+                    if (
+                        time.monotonic() - start_time
+                        > RINGBUFFER_FULL_WARNING_INTERVAL * n_warning
+                    ):
+                        logger.debug(
+                            "No available block found in %s second. ",
+                            RINGBUFFER_FULL_WARNING_INTERVAL,
+                        )
                         n_warning += 1
 
                     # if we time out, raise an exception
-                    if (timeout is not None
-                            and time.monotonic() - start_time > timeout):
+                    if timeout is not None and time.monotonic() - start_time > timeout:
                         raise TimeoutError
 
                     continue
@@ -384,8 +393,7 @@ class MessageQueue:
                     metadata_buffer[i] = 0
                 # mark the block as written
                 metadata_buffer[0] = 1
-                self.current_idx = (self.current_idx +
-                                    1) % self.buffer.max_chunks
+                self.current_idx = (self.current_idx + 1) % self.buffer.max_chunks
                 break
 
     @contextmanager
@@ -410,15 +418,18 @@ class MessageQueue:
                     sched_yield()
 
                     # if we wait for a long time, log a message
-                    if (time.monotonic() - start_time
-                            > RINGBUFFER_FULL_WARNING_INTERVAL * n_warning):
-                        logger.debug("No available block found in %s second. ",
-                                     RINGBUFFER_FULL_WARNING_INTERVAL)
+                    if (
+                        time.monotonic() - start_time
+                        > RINGBUFFER_FULL_WARNING_INTERVAL * n_warning
+                    ):
+                        logger.debug(
+                            "No available block found in %s second. ",
+                            RINGBUFFER_FULL_WARNING_INTERVAL,
+                        )
                         n_warning += 1
 
                     # if we time out, raise an exception
-                    if (timeout is not None
-                            and time.monotonic() - start_time > timeout):
+                    if timeout is not None and time.monotonic() - start_time > timeout:
                         raise TimeoutError
 
                     continue
@@ -430,12 +441,11 @@ class MessageQueue:
                 # caller has read from the buffer
                 # set the read flag
                 metadata_buffer[self.local_reader_rank + 1] = 1
-                self.current_idx = (self.current_idx +
-                                    1) % self.buffer.max_chunks
+                self.current_idx = (self.current_idx + 1) % self.buffer.max_chunks
                 break
 
     def enqueue(self, obj, timeout: float | None = None):
-        """ Write to message queue with optional timeout (in seconds) """
+        """Write to message queue with optional timeout (in seconds)"""
         assert self._is_writer, "Only writers can enqueue"
         serialized_obj = pickle.dumps(obj, protocol=pickle.HIGHEST_PROTOCOL)
         if self.n_local_reader > 0:
@@ -446,12 +456,12 @@ class MessageQueue:
             else:
                 with self.acquire_write(timeout) as buf:
                     buf[0] = 0  # not overflow
-                    buf[1:len(serialized_obj) + 1] = serialized_obj
+                    buf[1 : len(serialized_obj) + 1] = serialized_obj
         if self.n_remote_reader > 0:
             self.remote_socket.send(serialized_obj)
 
     def dequeue(self, timeout: float | None = None):
-        """ Read from message queue with optional timeout (in seconds) """
+        """Read from message queue with optional timeout (in seconds)"""
         if self._is_local_reader:
             with self.acquire_read(timeout) as buf:
                 overflow = buf[0] == 1

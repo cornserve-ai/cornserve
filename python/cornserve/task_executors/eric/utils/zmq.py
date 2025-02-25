@@ -12,21 +12,22 @@ logger = get_logger(__name__)
 
 TMP_DIR = tempfile.gettempdir()
 
+
 @overload
 def make_zmq_socket(
     ctx: zmq.asyncio.Context,
     path: str,
     sock_type: int,
-) -> zmq.asyncio.Socket:
-    ...
+) -> zmq.asyncio.Socket: ...
+
 
 @overload
 def make_zmq_socket(
     ctx: zmq.Context,
     path: str,
     sock_type: int,
-) -> zmq.Socket:
-    ...
+) -> zmq.Socket: ...
+
 
 def make_zmq_socket(
     ctx: zmq.Context | zmq.asyncio.Context,

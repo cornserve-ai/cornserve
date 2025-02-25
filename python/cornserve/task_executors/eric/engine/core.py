@@ -17,7 +17,11 @@ from cornserve.task_executors.eric.utils.serde import MsgpackEncoder, MsgpackDec
 from cornserve.task_executors.eric.executor.executor import ModelExecutor
 from cornserve.task_executors.eric.engine.scheduler import Scheduler
 from cornserve.task_executors.eric.schema import (
-    EmbeddingResponse, EngineOpcode, EngineRequest, EngineResponse, Status
+    EmbeddingResponse,
+    EngineOpcode,
+    EngineRequest,
+    EngineResponse,
+    Status,
 )
 from cornserve.logging import get_logger
 
@@ -95,7 +99,7 @@ class Engine:
                 response_sock_path=response_sock_path,
                 ready_pipe=writer,
                 ready_message=ready_message,
-            )
+            ),
         )
         engine_proc.start()
         if reader.recv() != ready_message:
@@ -119,12 +123,14 @@ class Engine:
         # Install signal handlers for graceful shutdown.
         # Users send SIGINT, the engine client sends SIGTERM.
         shutdown_requested = False
+
         def shutdown(*_) -> None:
             """Idempotently shutdown the engine process."""
             nonlocal shutdown_requested
             if not shutdown_requested:
                 shutdown_requested = True
                 raise SystemExit()
+
         signal.signal(signal.SIGINT, shutdown)
         signal.signal(signal.SIGTERM, shutdown)
 
@@ -209,16 +215,21 @@ class Engine:
     @staticmethod
     def _convert_msgspec_args(method, args):
         """If a provided arg type doesn't match corresponding target method
-         arg type, try converting to msgspec object."""
+        arg type, try converting to msgspec object."""
         if not args:
             return args
         arg_types = signature(method).parameters.values()
         assert len(args) <= len(arg_types)
         return tuple(
-            msgspec.convert(v, type=p.annotation) if isclass(p.annotation)
-            and issubclass(p.annotation, msgspec.Struct)
-            and not isinstance(v, p.annotation) else v
-            for v, p in zip(args, arg_types))
+            (
+                msgspec.convert(v, type=p.annotation)
+                if isclass(p.annotation)
+                and issubclass(p.annotation, msgspec.Struct)
+                and not isinstance(v, p.annotation)
+                else v
+            )
+            for v, p in zip(args, arg_types)
+        )
 
     def _request_receive_loop(self, sock_path: str) -> None:
         """Continuously receive requests from a ZMQ socket and enqueue them."""

@@ -17,13 +17,13 @@ def split_tensor_along_last_dim(
 ) -> Sequence[torch.Tensor]:
     """Split a tensor along its last dimension.
 
-       Arguments:
-           tensor: input tensor.
-           num_partitions: number of partitions to split the tensor
-           contiguous_split_chunks: If True, make each chunk contiguous.
+    Arguments:
+        tensor: input tensor.
+        num_partitions: number of partitions to split the tensor
+        contiguous_split_chunks: If True, make each chunk contiguous.
 
-       Returns:
-           A list of Tensors
+    Returns:
+        A list of Tensors
     """
     # Get the size and dimension.
     last_dim = tensor.dim() - 1

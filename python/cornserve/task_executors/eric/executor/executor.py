@@ -49,6 +49,7 @@ class ModelExecutor:
             if (parent := psutil.Process().parent()) and parent.name() == "eric_engine":
                 parent.send_signal(signal.SIGUSR1)
             self.shutdown()
+
         signal.signal(signal.SIGUSR1, shutdown)
 
         # Message queue for communication between executor and workers

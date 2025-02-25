@@ -5,7 +5,10 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from cornserve.logging import get_logger
-from cornserve.task_executors.eric.distributed.utils import divide, split_tensor_along_last_dim
+from cornserve.task_executors.eric.distributed.utils import (
+    divide,
+    split_tensor_along_last_dim,
+)
 from cornserve.task_executors.eric.distributed.parallel import get_tensor_parallel_group
 
 logger = get_logger(__name__)
@@ -61,8 +64,7 @@ class LinearBase(nn.Module):
         self.params_dtype = params_dtype
         self.tp_group = get_tensor_parallel_group()
 
-    def forward(self,
-                x: torch.Tensor) -> tuple[torch.Tensor, nn.Parameter | None]:
+    def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, nn.Parameter | None]:
         raise NotImplementedError
 
 
@@ -100,7 +102,7 @@ class ColumnParallelLinear(nn.Module):
                 the list would be size 3.
         """
         super().__init__()
-    
+
         self.input_size = input_size
         self.output_size = output_size
         self.skip_bias_add = skip_bias_add
@@ -117,13 +119,17 @@ class ColumnParallelLinear(nn.Module):
             output_sizes = [output_size]
 
         self.weight = nn.Parameter(
-            torch.empty(sum(self.output_partition_sizes), self.input_size, dtype=params_dtype),
+            torch.empty(
+                sum(self.output_partition_sizes), self.input_size, dtype=params_dtype
+            ),
             requires_grad=False,
         )
         set_weight_attrs(self.weight, {"input_dim": 1, "output_dim": 0})
 
         if bias:
-            self.bias = nn.Parameter(torch.empty(self.output_size_per_partition, dtype=params_dtype))
+            self.bias = nn.Parameter(
+                torch.empty(self.output_size_per_partition, dtype=params_dtype)
+            )
             set_weight_attrs(self.bias, {"output_dim": 0})
         else:
             self.register_parameter("bias", None)
@@ -158,9 +164,9 @@ class ColumnParallelLinear(nn.Module):
                 output_dim,
             )
 
-            assert param.shape == sharded_weight.shape, (
-                f"Weight shape mismatch: {param.shape=} != {sharded_weight.shape=}"
-            )
+            assert (
+                param.shape == sharded_weight.shape
+            ), f"Weight shape mismatch: {param.shape=} != {sharded_weight.shape=}"
 
             # Set the sharded weight in the state dict
             # When the hook exits, this weight will be loaded into the parameter
@@ -233,7 +239,9 @@ class RowParallelLinear(nn.Module):
         self.input_size_per_partition = divide(input_size, self.tp_size)
 
         self.weight = nn.Parameter(
-            torch.empty(self.output_size, self.input_size_per_partition, dtype=params_dtype),
+            torch.empty(
+                self.output_size, self.input_size_per_partition, dtype=params_dtype
+            ),
             requires_grad=False,
         )
         set_weight_attrs(self.weight, {"input_dim": 1, "output_dim": 0})
@@ -273,9 +281,9 @@ class RowParallelLinear(nn.Module):
                 input_dim,
             )
 
-            assert param.shape == sharded_weight.shape, (
-                f"Weight shape mismatch: {param.shape=} != {sharded_weight.shape=}"
-            )
+            assert (
+                param.shape == sharded_weight.shape
+            ), f"Weight shape mismatch: {param.shape=} != {sharded_weight.shape=}"
 
             # Set the sharded weight in the state dict
             # When the hook exits, this weight will be loaded into the parameter

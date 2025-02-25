@@ -53,7 +53,7 @@ def load_model(
     """
     if weight_format not in ["safetensors"]:
         raise ValueError("Only 'safetensors' format is supported.")
-    
+
     # Fetch the model config from HF
     hf_config: PretrainedConfig = AutoConfig.from_pretrained(
         model_name_or_path,
@@ -85,7 +85,9 @@ def load_model(
     # Import the model class
     try:
         model_class: Type[nn.Module] = getattr(
-            importlib.import_module(f"cornserve.task_executors.eric.models.{registry_entry.module}"),
+            importlib.import_module(
+                f"cornserve.task_executors.eric.models.{registry_entry.module}"
+            ),
             model_class_name,
         )
     except ImportError:
@@ -106,8 +108,12 @@ def load_model(
 
     # Instantiate the model
     torch_dtype = torch_dtype or hf_config.torch_dtype
-    assert isinstance(torch_dtype, torch.dtype), f"torch_dtype is not a torch.dtype: {torch_dtype}"
-    torch_device = torch_device or torch.device("cuda", parallel.get_tensor_parallel_group().rank)
+    assert isinstance(
+        torch_dtype, torch.dtype
+    ), f"torch_dtype is not a torch.dtype: {torch_dtype}"
+    torch_device = torch_device or torch.device(
+        "cuda", parallel.get_tensor_parallel_group().rank
+    )
     with set_default_torch_dtype(torch_dtype):
         with torch_device:
             model = model_class(hf_config)
@@ -220,7 +226,9 @@ def get_safetensors_weight_dict(
     return weight_dict
 
 
-def get_lock(model_name_or_path: str, cache_dir: str | None = None) -> filelock.BaseFileLock:
+def get_lock(
+    model_name_or_path: str, cache_dir: str | None = None
+) -> filelock.BaseFileLock:
     """Get a file lock for the model directory."""
     lock_dir = cache_dir or tempfile.gettempdir()
     os.makedirs(os.path.dirname(lock_dir), exist_ok=True)

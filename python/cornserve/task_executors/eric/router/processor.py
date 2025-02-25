@@ -23,7 +23,9 @@ class Processor:
         self.model_id = model_id
 
         if modality == Modality.IMAGE:
-            self.processor: BaseImageProcessor = AutoImageProcessor.from_pretrained(model_id)
+            self.processor: BaseImageProcessor = AutoImageProcessor.from_pretrained(
+                model_id
+            )
             self.loader = ImageLoader()
         else:
             raise ValueError(f"Unsupported modality: {modality}")
@@ -40,10 +42,12 @@ class Processor:
         # Here, we intentionally do not batch images in the processor because
         # 1. we are running them in parallel anyway, and
         # 2. the HF processor merges together processed tensors into a single tensor.
-        return await asyncio.gather(*(
-            self.loop.run_in_executor(self.pool, self._do_process, item)
-            for item in urls
-        ))
+        return await asyncio.gather(
+            *(
+                self.loop.run_in_executor(self.pool, self._do_process, item)
+                for item in urls
+            )
+        )
 
     def _do_process(self, url: str) -> BatchFeature:
         """Run processing on input data."""
@@ -66,24 +70,37 @@ class ImageLoader:
         if url_spec.scheme.startswith("http"):
             if url_spec.scheme not in ["http", "https"]:
                 raise ValueError(f"Unsupported URL scheme: {url_spec.scheme}")
-            with self.session.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=5) as r:
+            with self.session.get(
+                url, headers={"User-Agent": "Mozilla/5.0"}, timeout=5
+            ) as r:
                 r.raise_for_status()
                 image = self.load_bytes(r.content)
-            logger.info("Took %.3f seconds to load image from web URL", time.monotonic() - start_time)
+            logger.info(
+                "Took %.3f seconds to load image from web URL",
+                time.monotonic() - start_time,
+            )
             return image
 
         elif url_spec.scheme == "data":
             data_spec, data = url_spec.path.split(",", 1)
             _, data_type = data_spec.split(";", 1)
             if data_type != "base64":
-                raise ValueError(f"Only base64 data URLs are supported; got '{data_type}'.")
+                raise ValueError(
+                    f"Only base64 data URLs are supported; got '{data_type}'."
+                )
             image = self.load_base64(data)
-            logger.info("Took %.3f seconds to load image from data URL", time.monotonic() - start_time)
+            logger.info(
+                "Took %.3f seconds to load image from data URL",
+                time.monotonic() - start_time,
+            )
             return image
 
         elif url_spec.scheme == "file":
             image = self.load_file(url_spec.path)
-            logger.info("Took %.3f seconds to load image from file URL", time.monotonic() - start_time)
+            logger.info(
+                "Took %.3f seconds to load image from file URL",
+                time.monotonic() - start_time,
+            )
             return image
 
         else:

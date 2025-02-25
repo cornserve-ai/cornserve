@@ -58,9 +58,10 @@ class DeviceGroup:
         world_size = self.world_size
         if world_size == 1:
             return input_
-        
-        assert -input_.dim() <= dim < input_.dim(), (
-            f"Invalid dim ({dim}) for input tensor with shape {input_.size()}")
+
+        assert (
+            -input_.dim() <= dim < input_.dim()
+        ), f"Invalid dim ({dim}) for input tensor with shape {input_.size()}"
 
         if dim < 0:
             # Convert negative dim to positive.
@@ -69,22 +70,26 @@ class DeviceGroup:
         # NOTE: we have to use concat-style all-gather here,
         # stack-style all-gather has compatibility issues with
         # torch.compile . see https://github.com/pytorch/pytorch/issues/138795
-        output_size = (input_size[0] * world_size, ) + input_size[1:]
+        output_size = (input_size[0] * world_size,) + input_size[1:]
         # Allocate output tensor.
-        output_tensor = torch.empty(output_size, dtype=input_.dtype, device=input_.device)
+        output_tensor = torch.empty(
+            output_size, dtype=input_.dtype, device=input_.device
+        )
         # All-gather.
-        torch.distributed.all_gather_into_tensor(output_tensor, input_, group=self.process_group)
+        torch.distributed.all_gather_into_tensor(
+            output_tensor, input_, group=self.process_group
+        )
         # Reshape
-        output_tensor = output_tensor.reshape((world_size, ) + input_size)
+        output_tensor = output_tensor.reshape((world_size,) + input_size)
         output_tensor = output_tensor.movedim(0, dim)
         output_tensor = output_tensor.reshape(
-            input_size[:dim] + (world_size * input_size[dim], ) + input_size[dim + 1:],
+            input_size[:dim] + (world_size * input_size[dim],) + input_size[dim + 1 :],
         )
         return output_tensor
 
     def all_reduce(self, input_: torch.Tensor) -> torch.Tensor:
         """Perform AllReduce on the tensor across the device group.
-        
+
         AllReduce is performed in-place, so the input tensor is modified.
 
         Args:

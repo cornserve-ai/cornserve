@@ -9,11 +9,20 @@ import torch
 import psutil
 from transformers import AutoModel, AutoConfig
 
-from cornserve.task_executors.eric.distributed.shm_broadcast import MessageQueueHandle, MessageQueue
+from cornserve.task_executors.eric.distributed.shm_broadcast import (
+    MessageQueueHandle,
+    MessageQueue,
+)
 from cornserve.task_executors.eric.executor.loader import load_model
 from cornserve.task_executors.eric.schema import Batch, Modality, Status
-from cornserve.task_executors.eric.utils.zmq import get_open_zmq_ipc_path, zmq_sync_socket
-from cornserve.task_executors.eric.distributed.parallel import init_distributed, destroy_distributed
+from cornserve.task_executors.eric.utils.zmq import (
+    get_open_zmq_ipc_path,
+    zmq_sync_socket,
+)
+from cornserve.task_executors.eric.distributed.parallel import (
+    init_distributed,
+    destroy_distributed,
+)
 from cornserve.logging import get_logger
 
 logger = get_logger(__name__)
@@ -34,7 +43,6 @@ class WorkerHandle:
     rank: int
     ready_zmq_path: str
     response_mq: MessageQueue
-
 
 
 class Worker:
@@ -135,12 +143,14 @@ class Worker:
         # Install signal handlers for graceful termination.
         # Users send SIGNIT, the executor sends SIGTERM.
         shutdown_requested = False
+
         def shutdown(*_) -> None:
             """Idempotently shutdown the worker process."""
             nonlocal shutdown_requested
             if not shutdown_requested:
                 shutdown_requested = True
                 raise SystemExit()
+
         signal.signal(signal.SIGINT, shutdown)
         signal.signal(signal.SIGTERM, shutdown)
 
