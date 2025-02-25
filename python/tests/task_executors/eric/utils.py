@@ -1,5 +1,7 @@
 import sys
+import uuid
 import random
+import subprocess
 from functools import cache
 
 import numpy as np
@@ -10,9 +12,20 @@ from transformers import BatchFeature
 from torch.testing._internal.common_utils import FILE_SCHEMA
 from torch.testing._internal.common_distributed import TEST_SKIPS, MultiProcessTestCase
 
-from cornserve.task_executors.eric.schema import Modality
+from cornserve.task_executors.eric.schema import Batch, Modality
 from cornserve.task_executors.eric.router.processor import ImageLoader, Processor
 from cornserve.task_executors.eric.distributed.parallel import init_distributed, destroy_distributed
+
+
+try:
+    NUM_GPUS = int(
+        subprocess
+        .check_output(["nvidia-smi", "--query-gpu=count", "--format=csv,noheader,nounits", "-i", "0"])
+        .strip()
+        .decode()
+    )
+except subprocess.CalledProcessError:
+    NUM_GPUS = 0
 
 
 class ModalityData:
@@ -38,6 +51,15 @@ def assert_same_weights(hf_model: nn.Module, our_model: nn.Module) -> None:
         our_param = our_params[hf_name]
         assert hf_param.shape == our_param.shape, hf_name
         assert torch.allclose(hf_param, our_param), hf_name
+
+
+def batch_builder(model_id: str, images: list[ModalityData]) -> Batch:
+    """Builds a Batch object to pass to ModelExecutor.execute_model."""
+    data = {
+        key: [torch.from_numpy(image.processed(model_id)[key]) for image in images]
+        for key in images[0].processed(model_id).keys()
+    }
+    return Batch(request_ids=[uuid.uuid4().hex for _ in images], data=data)
 
 
 class InferenceTestCase(MultiProcessTestCase):

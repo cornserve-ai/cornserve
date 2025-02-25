@@ -85,6 +85,8 @@ class Engine:
         reader, writer = context.Pipe(duplex=False)
         ready_message = b"ready"
         engine_proc = context.Process(
+            # The Executor's shutdown handler depends on this name to
+            # identify the engine process and send SIGUSR1 to it.
             name="eric_engine",
             target=Engine.main,
             kwargs=dict(
