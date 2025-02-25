@@ -17,7 +17,7 @@ from cornserve.task_executors.eric.utils.zmq import get_open_zmq_ipc_path, make_
 from cornserve.task_executors.eric.utils.process import kill_process_tree
 from cornserve.task_executors.eric.engine.core import Engine
 from cornserve.task_executors.eric.schema import (
-    EmbeddingResponse, EngineRequest, EngineResponse, EngineOpcode, Modality, EmbeddingStatus
+    EmbeddingResponse, EngineRequest, EngineResponse, EngineOpcode, Modality, Status
 )
 from cornserve.logging import get_logger
 

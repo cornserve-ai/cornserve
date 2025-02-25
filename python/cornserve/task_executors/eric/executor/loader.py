@@ -131,7 +131,7 @@ def load_model(
             incompatible.unexpected_keys,
         )
 
-    return model
+    return model.eval()
 
 
 @contextlib.contextmanager

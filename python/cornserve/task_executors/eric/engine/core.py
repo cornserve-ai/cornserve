@@ -17,7 +17,7 @@ from cornserve.task_executors.eric.utils.serde import MsgpackEncoder, MsgpackDec
 from cornserve.task_executors.eric.executor.executor import ModelExecutor
 from cornserve.task_executors.eric.engine.scheduler import Scheduler
 from cornserve.task_executors.eric.schema import (
-    EmbeddingResponse, EngineOpcode, EngineRequest, EngineResponse, EmbeddingStatus
+    EmbeddingResponse, EngineOpcode, EngineRequest, EngineResponse, Status
 )
 from cornserve.logging import get_logger
 

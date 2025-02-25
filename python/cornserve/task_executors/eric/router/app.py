@@ -1,12 +1,10 @@
-import asyncio
-
 from fastapi import FastAPI, APIRouter, Request, Response, status
 
 from cornserve.logging import get_logger
 from cornserve.task_executors.eric.config import EricConfig
 from cornserve.task_executors.eric.engine.client import EngineClient
 from cornserve.task_executors.eric.router.processor import Processor
-from cornserve.task_executors.eric.schema import EmbeddingRequest, EmbeddingResponse, EmbeddingStatus
+from cornserve.task_executors.eric.schema import EmbeddingRequest, Status
 
 router = APIRouter()
 logger = get_logger(__name__)
@@ -41,10 +39,10 @@ async def embeddings(request: EmbeddingRequest, raw_request: Request) -> Respons
     response = await engine_client.embed(request.request_id, processed)
 
     match response.status:
-        case EmbeddingStatus.SUCCESS:
+        case Status.SUCCESS:
             return Response(status_code=status.HTTP_200_OK)
-        case EmbeddingStatus.ERROR:
-            return Response(status_code=status.HTTP_200_OK, content=response.error_message)
+        case Status.ERROR:
+            return Response(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, content=response.error_message)
 
 
 def init_app_state(app: FastAPI, config: EricConfig) -> None:

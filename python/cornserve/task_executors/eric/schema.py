@@ -19,7 +19,7 @@ class EmbeddingRequest(BaseModel):
     urls: list[str]
 
 
-class EmbeddingStatus(enum.IntEnum):
+class Status(enum.IntEnum):
     """Whether the embedding was successfully computed or not."""
 
     SUCCESS = 0
@@ -29,7 +29,7 @@ class EmbeddingStatus(enum.IntEnum):
 class EmbeddingResponse(BaseModel):
     """Response containing the embedding."""
 
-    status: EmbeddingStatus
+    status: Status
     error_message: str | None = None
 
 
@@ -53,7 +53,7 @@ class EngineResponse(msgspec.Struct, array_like=True, omit_defaults=True):
     """Response sent from the engine to the router."""
 
     request_ids: list[str]
-    status: EmbeddingStatus
+    status: Status
     error_message: str | None = None
 
 
@@ -66,7 +66,7 @@ class Batch:
     """
 
     request_ids: list[str]
-    data: dict[str, torch.Tensor]
+    data: dict[str, list[torch.Tensor]]
 
 
 @dataclass
@@ -74,5 +74,14 @@ class BatchResult:
     """Embedding result for a batch of requests."""
 
     request_ids: list[str]
-    status: EmbeddingStatus
+    status: Status
+    error_message: str | None = None
+
+
+@dataclass
+class WorkerResult:
+    """Result of a worker running a batch of data."""
+
+    request_ids: list[str]
+    status: Status
     error_message: str | None = None

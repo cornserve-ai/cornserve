@@ -9,17 +9,11 @@ from unittest.mock import patch
 
 import zmq
 import torch
-import torch.distributed as dist
-from torch.distributed import ProcessGroup
 
-# import vllm.envs as envs
-# from vllm.distributed.utils import StatelessProcessGroup
-# from vllm.logger import init_logger
-# from vllm.utils import get_ip, get_open_port, is_valid_ipv6_address
 from cornserve.logging import get_logger
 from cornserve.task_executors.eric.utils.network import get_open_port
 
-RINGBUFFER_FULL_WARNING_INTERVAL = 10  #envs.VLLM_RINGBUFFER_WARNING_INTERVAL
+RINGBUFFER_FULL_WARNING_INTERVAL = 10
 
 logger = get_logger(__name__)
 
@@ -258,7 +252,7 @@ class MessageQueue:
             remote_subscribe_port=remote_subscribe_port,
         )
 
-        logger.info("vLLM message queue communication handle: %s", self.handle)
+        logger.info("Message queue created from communication handle: %s", self.handle)
 
     def export_handle(self) -> MessageQueueHandle:
         return self.handle
@@ -482,53 +476,3 @@ class MessageQueue:
             return obj
         else:
             return self.dequeue()
-
-    @staticmethod
-    def create_from_process_group(pg: ProcessGroup,  # | StatelessProcessGroup,
-                                  max_chunk_bytes,
-                                  max_chunks,
-                                  writer_rank=0) -> "MessageQueue":
-        if isinstance(pg, ProcessGroup):
-            group_rank = dist.get_rank(pg)
-            group_world_size = dist.get_world_size(pg)
-            global_ranks = dist.get_process_group_ranks(pg)
-        else:
-            assert False
-            group_rank = pg.rank
-            group_world_size = pg.world_size
-            global_ranks = list(range(pg.world_size))
-
-        from vllm.distributed.parallel_state import in_the_same_node_as
-        status = in_the_same_node_as(pg, source_rank=writer_rank)
-        same_node_ranks = [i for i, s in enumerate(status) if s]
-        n_reader = group_world_size - 1
-        n_local_reader = len(same_node_ranks) - 1
-        local_reader_ranks = [i for i in same_node_ranks if i != writer_rank]
-        buffer_io: MessageQueue
-        if group_rank == writer_rank:
-            buffer_io = MessageQueue(
-                n_reader=n_reader,
-                n_local_reader=n_local_reader,
-                local_reader_ranks=local_reader_ranks,
-                max_chunk_bytes=max_chunk_bytes,
-                max_chunks=max_chunks,
-            )
-            handle = buffer_io.export_handle()
-            if isinstance(pg, ProcessGroup):
-                dist.broadcast_object_list([handle],
-                                           src=global_ranks[writer_rank],
-                                           group=pg)
-            else:
-                pg.broadcast_obj(handle, writer_rank)
-        else:
-            if isinstance(pg, ProcessGroup):
-                recv = [None]
-                dist.broadcast_object_list(recv,
-                                           src=global_ranks[writer_rank],
-                                           group=pg)
-                handle = recv[0]  # type: ignore
-            else:
-                handle = pg.broadcast_obj(None, writer_rank)
-            buffer_io = MessageQueue.create_from_handle(handle, group_rank)
-        buffer_io.wait_until_ready()
-        return buffer_io

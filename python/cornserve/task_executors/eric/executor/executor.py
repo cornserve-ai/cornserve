@@ -1,13 +1,14 @@
 import os
 import time
 import signal
+from typing import Any
 import psutil
 import multiprocessing as mp
 from contextlib import suppress
 
 from cornserve.task_executors.eric.distributed.shm_broadcast import MessageQueue
 from cornserve.task_executors.eric.executor.worker import WorkerHandle, Worker
-from cornserve.task_executors.eric.schema import Modality, Batch, BatchResult
+from cornserve.task_executors.eric.schema import Modality, Batch, BatchResult, Status
 from cornserve.logging import get_logger
 
 logger = get_logger(__name__)
@@ -45,8 +46,8 @@ class ModelExecutor:
         # Install shutdown signal handler
         def shutdown(*_) -> None:
             logger.fatal("Received signal from worker. Shutting down.")
-            if (parent := psutil.Process().parent()):
-                parent.send_signal(signal.SIGUSR1)
+            # if (parent := psutil.Process().parent()):
+            #     parent.send_signal(signal.SIGUSR1)
             self.shutdown()
         signal.signal(signal.SIGUSR1, shutdown)
 
@@ -58,6 +59,7 @@ class ModelExecutor:
         self.workers: list[WorkerHandle] = []
         for tp_rank in range(self.tp_size):
             start_time = time.monotonic()
+            logger.info("Spawning worker %d", tp_rank)
             worker = Worker.spawn_worker(
                 model_id=self.model_id,
                 modality=self.modality,
@@ -116,6 +118,31 @@ class ModelExecutor:
             with suppress(FileNotFoundError):
                 os.remove(worker.ready_zmq_path.replace("ipc://", ""))
 
+    def run_workers(
+        self,
+        method: str,
+        args: tuple | None = None,
+        kwargs: dict | None = None,
+    ) -> Any:
+        """Dispatch a method to all workers and retrieve results."""
+        self.input_mq.enqueue((method, args, kwargs))
+
+        responses = []
+
+        for w in self.workers:
+            result = w.response_mq.dequeue()
+            responses.append(result)
+
+        if any(isinstance(r, Exception) for r in responses):
+            logger.error("One or more workers failed with an exception: %s", responses)
+            raise RuntimeError("One or more workers failed to process the request.")
+
+        return responses
+
     def execute_model(self, batch: Batch) -> BatchResult:
         """Invoke the workers to run inference on the model."""
-        pass
+        results = self.run_workers("execute_model", kwargs={"batch": batch})
+        return BatchResult(
+            request_ids=batch.request_ids,
+            status=Status.SUCCESS,
+        )

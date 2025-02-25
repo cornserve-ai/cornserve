@@ -11,7 +11,7 @@ from transformers import AutoModel, AutoConfig
 
 from cornserve.task_executors.eric.distributed.shm_broadcast import MessageQueueHandle, MessageQueue
 from cornserve.task_executors.eric.executor.loader import load_model
-from cornserve.task_executors.eric.schema import Modality
+from cornserve.task_executors.eric.schema import Batch, Modality, Status
 from cornserve.task_executors.eric.utils.zmq import get_open_zmq_ipc_path, zmq_sync_socket
 from cornserve.task_executors.eric.distributed.parallel import init_distributed, destroy_distributed
 from cornserve.logging import get_logger
@@ -96,6 +96,7 @@ class Worker:
             daemon=True,
         )
         worker_proc.start()
+        logger.info("Worker %d spawned with PID %d", tp_rank, worker_proc.pid)
 
         # Wait for the worker to be ready and return MessageQueueHandle
         with zmq_sync_socket(ready_zmq_path, zmq.PULL) as ready_sock:
@@ -150,6 +151,16 @@ class Worker:
             input_mq = MessageQueue.create_from_handle(input_mq_handle, tp_rank)
             response_mq = MessageQueue(1, 1)
 
+            # Worker is ready, so signal the executor
+            with zmq_sync_socket(ready_zmq_path, zmq.PUSH) as ready_sock:
+                # Send the response message queue handle to the executor
+                # as a signal of readiness
+                handle_frame = pickle.dumps(
+                    response_mq.export_handle(),
+                    protocol=pickle.HIGHEST_PROTOCOL,
+                )
+                ready_sock.send(handle_frame)
+
             # Instantiate the worker, which will initialize tensor parallelism
             # and load the model
             worker = Worker(
@@ -161,22 +172,13 @@ class Worker:
                 response_mq=response_mq,
             )
 
-            # Worker is ready, so signal the executor
-            with zmq_sync_socket(ready_zmq_path, zmq.PUSH) as ready_sock:
-                # Send the response message queue handle to the executor
-                # as a signal of readiness
-                handle_frame = pickle.dumps(
-                    response_mq.export_handle(),
-                    protocol=pickle.HIGHEST_PROTOCOL,
-                )
-                ready_sock.send(handle_frame)
-
             # Wait until the message queues are ready. Order is critical.
             input_mq.wait_until_ready()
             response_mq.wait_until_ready()
 
             # Run the worker loop
             worker.run()
+
         except SystemExit:
             logger.debug("Worker interrupted by signal.")
         except Exception:
@@ -200,37 +202,37 @@ class Worker:
         Wait for batches of data from the executor, run the model, and send
         results back to the executor.
         """
+        while True:
+            # Wait for the executor to invoke the worker
+            method_name, args, kwargs = self.input_mq.dequeue()
+            args = args or []
+            kwargs = kwargs or {}
+
+            # Execute the method
+            try:
+                assert isinstance(method_name, str)
+                method = getattr(self, method_name)
+                output = method(*args, **kwargs)
+            except Exception as e:
+                logger.error(
+                    "Worker %d hit an exception while running %s(args=%s, kwargs=%s): %s",
+                    self.tp_rank,
+                    method_name,
+                    args,
+                    kwargs,
+                    e,
+                )
+                output = e
+
+            self.response_mq.enqueue(output)
 
     @torch.inference_mode()
-    def execute_model(self, items):
-        # "tensors" is a Python list or nested list from JSON, so convert to torch.Tensor
-        # each item: { "request_id", "modality", "tensors": nested list }
-        # We'll accumulate them, shape them, move to GPU, run forward pass
-        # Return one output embedding per item
-
-        # Convert each item’s "tensors" back to a torch.Tensor
-        # They were originally [batch_size, 3, H, W] or similar
-        # Here we do something simple: just cat them
-        batch_list = []
-        batch_sizes = []
-        for it in items:
-            arr = torch.tensor(it["tensors"], dtype=torch.float32)
-            batch_list.append(arr)
-            batch_sizes.append(arr.shape[0])
-
-        batched = torch.cat(batch_list, dim=0).to(self.device)
-        with torch.no_grad():
-            out = self.model(batched)
-            # assume out.last_hidden_state is [total_batch, seq_len, hidden_dim]
-            # do a mean pooling
-            emb = out.last_hidden_state.mean(dim=1)  # [total_batch, hidden_dim]
-
-        results = []
-        idx = 0
-        for size in batch_sizes:
-            # slice out the portion for this request
-            sub_emb = emb[idx: idx + size]
-            idx += size
-            # maybe store final embedding as CPU tensor
-            results.append(sub_emb.cpu())
-        return results
+    def execute_model(self, batch: Batch) -> None:
+        """Run the model on a batch of data."""
+        output = self.model(batch.data)
+        logger.info(
+            "Worker %d processed batch with request IDs %s and returned a tensor of shape %s",
+            self.tp_rank,
+            batch.request_ids,
+            [t.shape for t in output],
+        )
