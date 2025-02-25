@@ -6,13 +6,12 @@ from asyncio.futures import Future
 
 import zmq
 import zmq.asyncio
-import msgspec
 import torch
 import numpy as np
 from transformers import BatchFeature
 
 from cornserve.task_executors.eric.config import EricConfig
-from cornserve.task_executors.eric.utils.serde import MsgpackDecoder
+from cornserve.task_executors.eric.utils.serde import MsgpackDecoder, MsgpackEncoder
 from cornserve.task_executors.eric.utils.zmq import get_open_zmq_ipc_path, make_zmq_socket
 from cornserve.task_executors.eric.utils.process import kill_process_tree
 from cornserve.task_executors.eric.engine.core import Engine
@@ -47,7 +46,7 @@ class EngineClient:
         # Cached variables
         self.config = config
         self.loop = asyncio.get_event_loop()
-        self.encoder = msgspec.msgpack.Encoder()
+        self.encoder = MsgpackEncoder()
 
         # Spawn the engine process and wait for it to be ready
         self.engine_proc = Engine.spawn_engine(

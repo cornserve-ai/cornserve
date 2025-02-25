@@ -1,10 +1,15 @@
+from typing import TYPE_CHECKING
+
 from fastapi import FastAPI, APIRouter, Request, Response, status
 
 from cornserve.logging import get_logger
 from cornserve.task_executors.eric.config import EricConfig
-from cornserve.task_executors.eric.engine.client import EngineClient
-from cornserve.task_executors.eric.router.processor import Processor
 from cornserve.task_executors.eric.schema import EmbeddingRequest, Status
+
+if TYPE_CHECKING:
+    from cornserve.task_executors.eric.engine.client import EngineClient
+    from cornserve.task_executors.eric.router.processor import Processor
+
 
 router = APIRouter()
 logger = get_logger(__name__)
@@ -48,8 +53,8 @@ async def embeddings(request: EmbeddingRequest, raw_request: Request) -> Respons
 def init_app_state(app: FastAPI, config: EricConfig) -> None:
     """Initialize the app state with the configuration and engine client."""
     app.state.config = config
-    app.state.engine_client = EngineClient(config)
     app.state.processor = Processor(config.model.id, config.modality.ty, config.modality.num_workers)
+    app.state.engine_client = EngineClient(config)
 
 
 def create_app(config: EricConfig) -> FastAPI:

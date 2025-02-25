@@ -213,8 +213,9 @@ class Worker:
                 assert isinstance(method_name, str)
                 method = getattr(self, method_name)
                 output = method(*args, **kwargs)
+                self.response_mq.enqueue(output)
             except Exception as e:
-                logger.error(
+                logger.info(
                     "Worker %d hit an exception while running %s(args=%s, kwargs=%s): %s",
                     self.tp_rank,
                     method_name,
@@ -223,8 +224,8 @@ class Worker:
                     e,
                 )
                 output = e
-
-            self.response_mq.enqueue(output)
+                self.response_mq.enqueue(output)
+                raise
 
     @torch.inference_mode()
     def execute_model(self, batch: Batch) -> None:

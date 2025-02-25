@@ -85,6 +85,7 @@ class Engine:
         reader, writer = context.Pipe(duplex=False)
         ready_message = b"ready"
         engine_proc = context.Process(
+            name="eric_engine",
             target=Engine.main,
             kwargs=dict(
                 config=config,
