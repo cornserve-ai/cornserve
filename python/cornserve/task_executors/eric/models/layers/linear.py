@@ -5,7 +5,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from cornserve.logging import get_logger
-from cornserve.task_executors.eric.distributed.utils import (
+from cornserve.task_executors.eric.utils.distributed import (
     divide,
     split_tensor_along_last_dim,
 )

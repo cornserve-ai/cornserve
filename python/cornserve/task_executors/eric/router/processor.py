@@ -8,10 +8,15 @@ from io import BytesIO
 from urllib.parse import urlparse
 from concurrent.futures import ThreadPoolExecutor
 
+import numpy as np
 from PIL import Image
 from transformers import AutoImageProcessor, BaseImageProcessor, BatchFeature
 
-from cornserve.task_executors.eric.schema import Modality
+from cornserve.task_executors.eric.schema import (
+    EmbeddingData,
+    Modality,
+    ProcessedEmbeddingData,
+)
 from cornserve.logging import get_logger
 
 logger = get_logger(__name__)
@@ -39,22 +44,42 @@ class Processor:
         """Shutdown the processor and the thread pool."""
         self.pool.shutdown(wait=True, cancel_futures=True)
 
-    async def process(self, urls: list[str]) -> list[BatchFeature]:
+    async def process(self, data: list[EmbeddingData]) -> list[ProcessedEmbeddingData]:
         """Performs modality processing on input data in a thread pool."""
         # Here, we intentionally do not batch images in the processor because
         # 1. we are running them in parallel anyway, and
         # 2. the HF processor merges together processed tensors into a single tensor.
-        return await asyncio.gather(
+        features = await asyncio.gather(
             *(
-                self.loop.run_in_executor(self.pool, self._do_process, item)
-                for item in urls
+                self.loop.run_in_executor(self.pool, self._do_process, item.url)
+                for item in data
             )
         )
+        processed = [
+            ProcessedEmbeddingData(
+                id=item.id, modality=item.modality, data=feature.data
+            )
+            for item, feature in zip(data, features, strict=True)
+        ]
+        self._check_processed_data(processed)
+        return processed
 
     def _do_process(self, url: str) -> BatchFeature:
         """Run processing on input data."""
         image = self.loader.load_from_url(url)
         return self.processor(image, return_tensors="np")
+
+    def _check_processed_data(self, processed: list[ProcessedEmbeddingData]) -> None:
+        """Check that all processed data is valid."""
+        for item in processed:
+            if not isinstance(item.data, dict):
+                raise ValueError(
+                    f"Processed data should be a dict; got {type(item.data)}."
+                )
+            if not all(isinstance(v, np.ndarray) for v in item.data.values()):
+                raise ValueError(
+                    f"All processed data should be numpy arrays; got {item.data}"
+                )
 
 
 class ImageLoader:

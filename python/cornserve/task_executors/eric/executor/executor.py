@@ -1,3 +1,5 @@
+"""The model executor manages multiple workers that execute inference."""
+
 import os
 import time
 import signal
@@ -52,7 +54,12 @@ class ModelExecutor:
         signal.signal(signal.SIGUSR1, shutdown)
 
         # Message queue for communication between executor and workers
-        self.input_mq = MessageQueue(self.tp_size, self.tp_size)
+        self.input_mq = MessageQueue(
+            self.tp_size,
+            self.tp_size,
+            max_chunk_bytes=1024 * 1024 * 1024,  # 1GB
+            max_chunks=2,
+        )
         input_mq_handle = self.input_mq.export_handle()
 
         # Spawn workers
@@ -144,8 +151,10 @@ class ModelExecutor:
 
     def execute_model(self, batch: Batch) -> BatchResult:
         """Invoke the workers to run inference on the model."""
-        results = self.run_workers("execute_model", kwargs={"batch": batch})
+        logger.info("Executing model with %d items", len(batch.data_ids))
+        self.run_workers("execute_model", kwargs={"batch": batch})
         return BatchResult(
             request_ids=batch.request_ids,
+            data_ids=batch.data_ids,
             status=Status.SUCCESS,
         )

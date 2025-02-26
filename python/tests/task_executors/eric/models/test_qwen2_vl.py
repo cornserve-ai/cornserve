@@ -1,5 +1,4 @@
 import gc
-import uuid
 
 import pytest
 import torch
@@ -7,7 +6,7 @@ from transformers.models.qwen2_vl.modeling_qwen2_vl import Qwen2VLForConditional
 
 from cornserve.task_executors.eric.distributed.parallel import destroy_distributed, init_distributed
 from cornserve.task_executors.eric.executor.loader import load_model
-from cornserve.task_executors.eric.schema import Batch, Modality, Status
+from cornserve.task_executors.eric.schema import Modality, Status
 from cornserve.task_executors.eric.executor.executor import ModelExecutor
 
 from ..utils import ModalityData, assert_same_weights, batch_builder, NUM_GPUS

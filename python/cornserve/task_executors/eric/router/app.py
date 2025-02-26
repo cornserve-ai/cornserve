@@ -1,3 +1,5 @@
+"""Eric FastAPI app definition."""
+
 from fastapi import FastAPI, APIRouter, Request, Response, status
 
 from cornserve.logging import get_logger
@@ -35,10 +37,10 @@ async def embeddings(request: EmbeddingRequest, raw_request: Request) -> Respons
     engine_client: EngineClient = raw_request.app.state.engine_client
 
     # Load data from URLs and apply processing
-    processed = await processor.process(request.urls)
+    processed = await processor.process(request.data)
 
     # Send to engine process (embedding + transmission via Tensor Sidecar)
-    response = await engine_client.embed(request.request_id, processed)
+    response = await engine_client.embed(request.id, processed)
 
     match response.status:
         case Status.SUCCESS:

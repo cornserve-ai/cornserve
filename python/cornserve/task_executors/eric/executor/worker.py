@@ -1,3 +1,5 @@
+"""Worker processes use the GPUs to run tensor parallel inference."""
+
 import signal
 import pickle
 import multiprocessing as mp
@@ -211,6 +213,7 @@ class Worker:
         Wait for batches of data from the executor, run the model, and send
         results back to the executor.
         """
+        logger.info("Worker %d ready to work", self.tp_rank)
         while True:
             # Wait for the executor to invoke the worker
             method_name, args, kwargs = self.input_mq.dequeue()

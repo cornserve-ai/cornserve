@@ -1,3 +1,5 @@
+"""Qwen2-VL Vision Transformer."""
+
 from functools import partial
 from typing import Callable, Type
 
@@ -7,7 +9,8 @@ import torch.nn.functional as F
 from einops import rearrange, repeat
 from transformers.models.qwen2_vl.configuration_qwen2_vl import Qwen2VLConfig
 
-from cornserve.task_executors.eric.distributed import parallel, utils as dist_utils
+from cornserve.task_executors.eric.distributed import parallel
+from cornserve.task_executors.eric.utils import distributed as dist_utils
 from cornserve.task_executors.eric.models.layers.activations import QuickGELU
 from cornserve.task_executors.eric.models.layers.linear import (
     ColumnParallelLinear,
@@ -53,7 +56,6 @@ class Qwen2VisionPatchMerger(nn.Module):
         context_dim: int,
         norm_layer: Callable[[int], nn.Module] | None = None,
         spatial_merge_size: int = 2,
-        prefix: str = "",
     ) -> None:
         super().__init__()
         self.hidden_size = context_dim * (spatial_merge_size**2)
@@ -121,7 +123,6 @@ class Qwen2VisionMLP(nn.Module):
         in_features: int,
         hidden_features: int,
         act_layer: Type[nn.Module] = QuickGELU,
-        prefix: str = "",
     ):
         super().__init__()
         self.fc1 = ColumnParallelLinear(in_features, hidden_features)
@@ -189,7 +190,6 @@ class Qwen2VisionAttention(nn.Module):
         embed_dim: int,
         num_heads: int,
         projection_size: int,
-        prefix: str = "",
     ) -> None:
         super().__init__()
         # Per attention head and per partition values.
@@ -301,11 +301,8 @@ class Qwen2VisionBlock(nn.Module):
             embed_dim=dim,
             num_heads=num_heads,
             projection_size=dim,
-            prefix=f"{prefix}.attn",
         )
-        self.mlp = Qwen2VisionMLP(
-            dim, mlp_hidden_dim, act_layer=act_layer, prefix=f"{prefix}.mlp"
-        )
+        self.mlp = Qwen2VisionMLP(dim, mlp_hidden_dim, act_layer=act_layer)
 
     def forward(
         self, x: torch.Tensor, cu_seqlens: torch.Tensor, rotary_pos_emb: torch.Tensor
@@ -368,7 +365,6 @@ class Qwen2VisionTransformer(nn.Module):
             d_model=hidden_size,
             context_dim=embed_dim,
             norm_layer=norm_layer,
-            prefix=f"{prefix}.merger",
         )
 
     @property

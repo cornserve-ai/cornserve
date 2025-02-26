@@ -1,8 +1,8 @@
+"""The scheduler is responsible for batching embedding requests."""
+
 from collections import deque
 
-import torch
-
-from cornserve.task_executors.eric.schema import Batch, EngineRequest
+from cornserve.task_executors.eric.schema import Batch, EngineEnqueueRequest, Modality
 from cornserve.logging import get_logger
 
 logger = get_logger(__name__)
@@ -11,11 +11,12 @@ logger = get_logger(__name__)
 class Scheduler:
     """Scheduler for batching embedding requests."""
 
-    def __init__(self) -> None:
+    def __init__(self, modality: Modality) -> None:
         """Initialize the scheduler."""
-        self.waiting_queue: deque[EngineRequest] = deque()
+        self.modality = modality
+        self.waiting_queue: deque[EngineEnqueueRequest] = deque()
 
-    def enqueue(self, request: EngineRequest) -> None:
+    def enqueue(self, request: EngineEnqueueRequest) -> None:
         """Add a request to the waiting queue."""
         self.waiting_queue.append(request)
 
@@ -25,17 +26,10 @@ class Scheduler:
 
     def schedule(self) -> Batch:
         """Schedule requests to run in the next batch."""
-        # This is currently a dumb scheduler that dispatches everything
+        # XXX: This is currently a dumb scheduler that dispatches everything
         # in the queue in a single batch.
-        request_ids = []
-        data = {}
+        batch = Batch(modality=self.modality)
         while self.waiting_queue:
             request = self.waiting_queue.popleft()
-            for item in request.data:
-                request_ids.append(request.request_id)
-                for key, value in item.items():
-                    if key not in data:
-                        data[key] = []
-                    data[key].append(torch.from_numpy(value))
-
-        return Batch(request_ids=request_ids, data=data)
+            batch.add_request(request)
+        return batch

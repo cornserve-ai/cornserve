@@ -1,6 +1,5 @@
 """Eric engine core."""
 
-import gc
 import queue
 import signal
 import threading
@@ -19,7 +18,7 @@ from cornserve.task_executors.eric.executor.executor import ModelExecutor
 from cornserve.task_executors.eric.engine.scheduler import Scheduler
 from cornserve.task_executors.eric.schema import (
     EngineOpcode,
-    EngineRequest,
+    EngineEnqueueRequest,
     EngineResponse,
 )
 from cornserve.logging import get_logger
@@ -51,7 +50,7 @@ class Engine:
             tp_size=config.model.tp_size,
         )
 
-        self.scheduler = Scheduler()
+        self.scheduler = Scheduler(modality=config.modality.ty)
 
         # Background thread that continuously receives from the request
         # ZMQ socket and pushes it into the request queue
@@ -205,6 +204,7 @@ class Engine:
 
         return EngineResponse(
             request_ids=batch_result.request_ids,
+            data_ids=batch_result.data_ids,
             status=batch_result.status,
             error_message=batch_result.error_message,
         )
@@ -221,7 +221,7 @@ class Engine:
 
     def _request_receive_loop(self, sock_path: str) -> None:
         """Continuously receive requests from a ZMQ socket and enqueue them."""
-        new_request_decoder = MsgpackDecoder(ty=EngineRequest)
+        enqueue_req_decoder = MsgpackDecoder(ty=EngineEnqueueRequest)
         generic_decoder = MsgpackDecoder()
 
         with zmq_sync_socket(sock_path, zmq.PULL) as sock:
@@ -230,7 +230,7 @@ class Engine:
                 opcode = EngineOpcode(bytes(opcode_frame.buffer))
 
                 if opcode == EngineOpcode.ENQUEUE:
-                    request = new_request_decoder.decode(inst_frame.buffer)
+                    request = enqueue_req_decoder.decode(inst_frame.buffer)
                 else:
                     request = generic_decoder.decode(inst_frame.buffer)
 

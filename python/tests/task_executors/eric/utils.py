@@ -1,3 +1,5 @@
+"""Testing utilities for Eric."""
+
 import uuid
 import subprocess
 from functools import cache
@@ -7,7 +9,7 @@ import torch.nn as nn
 from transformers import BatchFeature
 
 from cornserve.task_executors.eric.schema import Batch, Modality
-from cornserve.task_executors.eric.router.processor import ImageLoader, Processor
+from cornserve.task_executors.eric.router.processor import Processor
 
 
 try:
@@ -27,10 +29,10 @@ class ModalityData:
     def __init__(self, url: str, modality: Modality) -> None:
         self.url = url
         self.modality = modality
-        self.image = ImageLoader().load_from_url(url)
 
     @cache
     def processed(self, model_id: str) -> BatchFeature:
+        """Process the data for the given model."""
         processor = Processor(model_id, self.modality, 1)
         return processor._do_process(self.url)
 
@@ -52,4 +54,9 @@ def batch_builder(model_id: str, images: list[ModalityData]) -> Batch:
         key: [torch.from_numpy(image.processed(model_id)[key]) for image in images]
         for key in images[0].processed(model_id).keys()
     }
-    return Batch(request_ids=[uuid.uuid4().hex for _ in images], data=data)
+    return Batch(
+        modality=images[0].modality,
+        request_ids=[uuid.uuid4().hex for _ in images],
+        data_ids=[uuid.uuid4().hex for _ in images],
+        data=data,
+    )

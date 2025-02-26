@@ -1,3 +1,5 @@
+"""Instantiating the PyTorch model and loading Hugging Face Hub model weights."""
+
 import os
 import json
 import fnmatch
@@ -164,7 +166,8 @@ def get_safetensors_weight_dict(
     Args:
         model_name_or_path: The model name or path.
         weight_prefix: If possible, only download weights whose name starts with this.
-        cache_dir: The cache directory to store the model weights. If None, will use HF defaults.
+        cache_dir: The cache directory to store the model weights.
+            If None, will use HF defaults.
         revision: The revision of the model.
 
     Returns:
@@ -178,7 +181,7 @@ def get_safetensors_weight_dict(
 
     # Use file lock to prevent multiple processes from
     # downloading the same model weights at the same time.
-    with get_lock(model_name_or_path, cache_dir):
+    with with_lock(model_name_or_path, cache_dir):
         # Try to filter the list of safetensors files using the index and prefix.
         # Note that not all repositories have an index file.
         try:
@@ -220,15 +223,14 @@ def get_safetensors_weight_dict(
     prefix_strip_len = len(weight_prefix)
     for weight_file in weight_files:
         with safetensors.safe_open(f"{hf_dir}/{weight_file}", framework="pt") as f:
-            for name in f.keys():
+            for name in f.keys():  # noqa: SIM118
                 if name.startswith(weight_prefix):
                     weight_dict[name[prefix_strip_len:]] = f.get_tensor(name)
     return weight_dict
 
 
-def get_lock(
-    model_name_or_path: str, cache_dir: str | None = None
-) -> filelock.BaseFileLock:
+@contextlib.contextmanager
+def with_lock(model_name_or_path: str, cache_dir: str | None = None):
     """Get a file lock for the model directory."""
     lock_dir = cache_dir or tempfile.gettempdir()
     os.makedirs(os.path.dirname(lock_dir), exist_ok=True)
@@ -238,4 +240,9 @@ def get_lock(
     lock_file_name = hash_name + model_name + ".lock"
     # mode 0o666 is required for the filelock to be shared across users
     lock = filelock.FileLock(os.path.join(lock_dir, lock_file_name), mode=0o666)
-    return lock
+    lock.acquire()
+    yield
+    lock.release()
+    # Clean up the lock file
+    with contextlib.suppress(FileNotFoundError):
+        os.remove(lock.lock_file)

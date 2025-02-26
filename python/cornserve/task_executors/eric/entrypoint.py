@@ -1,3 +1,5 @@
+"""Spins up Eric."""
+
 import signal
 import asyncio
 

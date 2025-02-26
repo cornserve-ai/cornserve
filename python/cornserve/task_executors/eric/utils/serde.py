@@ -1,3 +1,5 @@
+"""Utilities for serializing and deserializing objects."""
+
 import pickle
 from typing import Any, Type
 
