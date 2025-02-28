@@ -183,8 +183,6 @@ class Engine:
                     except BaseException:
                         raise
 
-            time.sleep(1)
-
             # Handle any new client requests that arrived during the wait.
             while not self.request_queue.empty():
                 req = self.request_queue.get_nowait()
