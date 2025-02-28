@@ -3,13 +3,18 @@
 from functools import partial
 from typing import Callable, Type
 
+from cornserve.task_executors.eric.schema import Modality
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import numpy.typing as npt
 from einops import rearrange, repeat
+from transformers import AutoImageProcessor
 from transformers.models.qwen2_vl.configuration_qwen2_vl import Qwen2VLConfig
 
 from cornserve.task_executors.eric.distributed import parallel
+from cornserve.task_executors.eric.models.base import EricModel
+from cornserve.task_executors.eric.router.processor import BaseModalityProcessor
 from cornserve.task_executors.eric.utils import distributed as dist_utils
 from cornserve.task_executors.eric.models.layers.activations import QuickGELU
 from cornserve.task_executors.eric.models.layers.linear import (
@@ -288,7 +293,6 @@ class Qwen2VisionBlock(nn.Module):
         mlp_ratio: float,
         act_layer: Type[nn.Module] = QuickGELU,
         norm_layer: Callable[[int], nn.Module] | None = None,
-        prefix: str = "",
     ) -> None:
         super().__init__()
         if norm_layer is None:
@@ -314,12 +318,11 @@ class Qwen2VisionBlock(nn.Module):
         return x
 
 
-class Qwen2VisionTransformer(nn.Module):
+class Qwen2VisionTransformer(EricModel):
 
     def __init__(
         self,
         config: Qwen2VLConfig,
-        prefix: str = "",
     ) -> None:
         super().__init__()
         vision_config = config.vision_config
@@ -333,6 +336,7 @@ class Qwen2VisionTransformer(nn.Module):
         num_heads = vision_config.num_heads
         mlp_ratio = vision_config.mlp_ratio
 
+        self.hidden_size = hidden_size
         self.spatial_merge_size = spatial_merge_size
         self.num_heads = num_heads
         self.embed_dim = embed_dim
@@ -356,9 +360,8 @@ class Qwen2VisionTransformer(nn.Module):
                     num_heads=num_heads,
                     mlp_ratio=mlp_ratio,
                     norm_layer=norm_layer,
-                    prefix=f"{prefix}.blocks.{layer_idx}",
                 )
-                for layer_idx in range(depth)
+                for _ in range(depth)
             ]
         )
         self.merger = Qwen2VisionPatchMerger(
@@ -370,6 +373,10 @@ class Qwen2VisionTransformer(nn.Module):
     @property
     def dtype(self) -> torch.dtype:
         return self.patch_embed.proj.weight.dtype
+
+    @property
+    def chunk_shape(self) -> tuple[int, ...]:
+        return (1, self.hidden_size)
 
     @property
     def device(self) -> torch.device:
@@ -409,19 +416,37 @@ class Qwen2VisionTransformer(nn.Module):
 
     def forward(
         self,
+        modality: Modality,
         batch: dict[str, list[torch.Tensor]],
     ) -> list[torch.Tensor]:
         """Forward pass of the model.
 
-        `batch` is expected to have the following keys:
+        For images, `batch` is expected to have the following keys:
         - `pixel_values`: The pixel values of the images. Each [seq_len, 6 * patch_size (14) * patch_size (14)].
         - `image_grid_thw`: The grid size of the images. Each [1, 3].
+
+        For videos, `batch` is expected to have the following keys:
+        - `pixel_values_videos`: The pixel values of the videos. Each [seq_len, 6 * patch_size (14) * patch_size (14)].
+        - `video_grid_thw`: The grid size of the videos. Each [1, 3].
         """
         # Batch
-        pixel_values = torch.cat(batch["pixel_values"], dim=0).to(
-            device=self.device, dtype=self.dtype
-        )
-        grid_thw = torch.cat(batch["image_grid_thw"], dim=0).to(device=self.device)
+        match modality:
+            case Modality.IMAGE:
+                pixel_values = torch.cat(batch["pixel_values"], dim=0).to(
+                    device=self.device, dtype=self.dtype
+                )
+                grid_thw = torch.cat(batch["image_grid_thw"], dim=0).to(
+                    device=self.device
+                )
+            case Modality.VIDEO:
+                pixel_values = torch.cat(batch["pixel_values_videos"], dim=0).to(
+                    device=self.device, dtype=self.dtype
+                )
+                grid_thw = torch.cat(batch["video_grid_thw"], dim=0).to(
+                    device=self.device
+                )
+            case _:
+                raise ValueError(f"Unsupported modality: {modality}.")
 
         # patchify
         x = self.patch_embed(pixel_values)
@@ -444,9 +469,38 @@ class Qwen2VisionTransformer(nn.Module):
         x = self.merger(x)
 
         # Unbatch
-        seqlens = (grid_thw[:, 1] * grid_thw[:, 2]).squeeze(0) // (
+        seqlens = (grid_thw[:, 0] * grid_thw[:, 1] * grid_thw[:, 2]).squeeze(0) // (
             self.spatial_merge_size**2
         )
         result = x.squeeze(0).split(seqlens.tolist(), dim=0)
 
         return result
+
+
+class ModalityProcessor(BaseModalityProcessor):
+    """Qwen2-VL modality processor."""
+
+    def __init__(self, model_id: str) -> None:
+        """Initialize the processor."""
+        super().__init__(model_id=model_id)
+        self.hf_processor = AutoImageProcessor.from_pretrained(model_id)
+
+    def get_image_processor(self) -> Callable | None:
+        """Return the image processor."""
+
+        def processor(image: npt.NDArray) -> dict[str, npt.NDArray]:
+            """Invoke the HF processor and convert to dict."""
+            return self.hf_processor(images=[image], return_tensors="np").data
+
+        return processor
+
+    def get_video_processor(self) -> Callable | None:
+        """Return the video processor."""
+
+        def processor(video: npt.NDArray) -> dict[str, npt.NDArray]:
+            """Invoke the HF processor and convert to dict."""
+            return self.hf_processor(
+                images=None, videos=[video], return_tensors="np"
+            ).data
+
+        return processor

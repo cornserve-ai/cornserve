@@ -31,6 +31,7 @@ eric = [
   "transformers",
   "huggingface_hub",
   "pillow",
+  "decord",
   "einops",
   "flash-attn",
 ]

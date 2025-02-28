@@ -3,11 +3,10 @@
 Config values will be supplied by the Task Manager when Eric is launched.
 """
 
-from __future__ import annotations
+from transformers import AutoConfig, PretrainedConfig
+from typing_extensions import Self
 
-from pydantic import BaseModel, NonNegativeInt, PositiveInt, model_validator
-
-from cornserve.task_executors.eric.schema import Modality
+from pydantic import BaseModel, ConfigDict, NonNegativeInt, PositiveInt, model_validator
 
 
 class ModelConfig(BaseModel):
@@ -18,6 +17,23 @@ class ModelConfig(BaseModel):
 
     # Tensor parallel degree
     tp_size: PositiveInt = 1
+
+    # HF config
+    # This will be replaced with the real HF config of the model ID
+    hf_config: PretrainedConfig = PretrainedConfig()
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    @model_validator(mode="after")
+    def validator(self) -> Self:
+        """Validate the config for correctness."""
+        # Load the HF config
+        try:
+            self.hf_config = AutoConfig.from_pretrained(self.id)
+        except Exception as e:
+            raise ValueError(f"Failed to load HF config for model {self.id}") from e
+
+        return self
 
 
 class ServerConfig(BaseModel):
@@ -30,14 +46,36 @@ class ServerConfig(BaseModel):
     port: PositiveInt = 8000
 
 
+class ImageDataConfig(BaseModel):
+    """Configuration related to downloading and processing image data."""
+
+
+class VideoDataConfig(BaseModel):
+    """Configuration related to downloading and processing video data."""
+
+    # Number of frames to sample from the video
+    max_num_frames: PositiveInt = 32
+
+
 class ModalityConfig(BaseModel):
     """Modality processing config."""
 
-    # Modality to process
-    ty: Modality = Modality.IMAGE
-
     # Number of modality processing workers to spawn
     num_workers: PositiveInt = 12
+
+    # Image-specific processor config
+    image_config: ImageDataConfig = ImageDataConfig()
+
+    # Video-specific processor config
+    video_config: VideoDataConfig = VideoDataConfig()
+
+    @model_validator(mode="after")
+    def validator(self) -> Self:
+        """Validate the config for correctness."""
+        if self.image_config is None and self.video_config is None:
+            raise ValueError("At least one modality processor config must be set.")
+
+        return self
 
 
 class SidecarConfig(BaseModel):
@@ -56,7 +94,7 @@ class EricConfig(BaseModel):
     sidecar: SidecarConfig
 
     @model_validator(mode="after")
-    def audit(self) -> EricConfig:
+    def validator(self) -> Self:
         """Audit the config for correctness."""
         if self.model.tp_size != len(self.sidecar.ranks):
             raise ValueError(

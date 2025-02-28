@@ -4,41 +4,117 @@ import time
 import asyncio
 import base64
 import requests
+import importlib
+import threading
 from io import BytesIO
+from typing import Callable
+from abc import ABC, abstractmethod
 from urllib.parse import urlparse
 from concurrent.futures import ThreadPoolExecutor
 
+import decord
 import numpy as np
+import numpy.typing as npt
 from PIL import Image
-from transformers import AutoImageProcessor, BaseImageProcessor, BatchFeature
+from transformers import AutoConfig
 
+from cornserve.task_executors.eric.config import (
+    ModalityConfig,
+)
 from cornserve.task_executors.eric.schema import (
     EmbeddingData,
     Modality,
     ProcessedEmbeddingData,
 )
+from cornserve.task_executors.eric.models.registry import MODEL_REGISTRY
 from cornserve.logging import get_logger
 
 logger = get_logger(__name__)
+thread_local = threading.local()
+
+
+class BaseModalityProcessor:
+    """Base class for modality processors.
+
+    Each model definition module contains a `ModalityProcessor` class that
+    inherits from this class. It should override `get_image_processor`,
+    `get_video_processor`, etc. to return the appropriate processor for the
+    given modality. The processor should be a callable that takes the input
+    modality data as a Numpy array and returns the processed data as
+    """
+
+    def __init__(self, model_id: str) -> None:
+        """Initialize the processor."""
+        self.model_id = model_id
+
+    def get_image_processor(self) -> Callable | None:
+        """Get the image processor for this modality."""
+        return None
+
+    def get_video_processor(self) -> Callable | None:
+        """Get the video processor for this modality."""
+        return None
+
+    def process(self, modality: Modality, data: npt.NDArray) -> dict[str, npt.NDArray]:
+        """Process the input data for the given modality."""
+        match modality:
+            case Modality.IMAGE:
+                image_processor = self.get_image_processor()
+                if image_processor is None:
+                    raise ValueError("Image processor not available.")
+                return image_processor(data)
+            case Modality.VIDEO:
+                video_processor = self.get_video_processor()
+                if video_processor is None:
+                    raise ValueError("Video processor not available.")
+                return video_processor(data)
+            case _:
+                raise ValueError(f"Unsupported modality: {modality}")
 
 
 class Processor:
-    """Runs modality processing on input data asynchronously in a thread pool."""
+    """Runs modality processing on input data asynchronously in a thread pool.
 
-    def __init__(self, model_id: str, modality: Modality, num_workers: int) -> None:
+    Holds an instance of BaseModalityProcessor for the given model_id and modality,
+    which invokes the appropriate processor for the given modality.
+    """
+
+    def __init__(self, model_id: str, modality_config: ModalityConfig) -> None:
         """Initialize the Processor."""
+        # Saved variables
         self.model_id = model_id
 
-        if modality == Modality.IMAGE:
-            self.processor: BaseImageProcessor = AutoImageProcessor.from_pretrained(
-                model_id
-            )
-            self.loader = ImageLoader()
-        else:
-            raise ValueError(f"Unsupported modality: {modality}")
+        # Load the model config from HF and Eric model class
+        hf_config = AutoConfig.from_pretrained(model_id)
+        try:
+            registry_entry = MODEL_REGISTRY[hf_config.model_type]
+        except KeyError as e:
+            raise ValueError(
+                f"Model {model_id} (model_type={hf_config.model_type}) not found in model registry."
+            ) from e
+        model_module = importlib.import_module(
+            f"cornserve.task_executors.eric.models.{registry_entry.module}"
+        )
+
+        # Instantiate the thread pool
+        def init_thread() -> None:
+            """Initialize the thread-local processor and loader."""
+            thread_local.loader = ModalityDataLoader(modality_config)
+            thread_local.processor = model_module.ModalityProcessor(model_id)
+
+        # Initialize for the main thread as well, which is useful for testing
+        init_thread()
 
         self.loop = asyncio.get_event_loop()
-        self.pool = ThreadPoolExecutor(max_workers=num_workers)
+        self.pool = ThreadPoolExecutor(
+            max_workers=modality_config.num_workers,
+            initializer=init_thread,
+        )
+
+        # Run dummy tasks to force-initialize the thread-local variables
+        list(
+            self.pool.map(lambda _: time.sleep(0.1), range(modality_config.num_workers))
+        )
 
     def shutdown(self) -> None:
         """Shutdown the processor and the thread pool."""
@@ -51,23 +127,25 @@ class Processor:
         # 2. the HF processor merges together processed tensors into a single tensor.
         features = await asyncio.gather(
             *(
-                self.loop.run_in_executor(self.pool, self._do_process, item.url)
+                self.loop.run_in_executor(
+                    self.pool, self._do_process, item.modality, item.url
+                )
                 for item in data
             )
         )
         processed = [
-            ProcessedEmbeddingData(
-                id=item.id, modality=item.modality, data=feature.data
-            )
+            ProcessedEmbeddingData(id=item.id, modality=item.modality, data=feature)
             for item, feature in zip(data, features, strict=True)
         ]
         self._check_processed_data(processed)
         return processed
 
-    def _do_process(self, url: str) -> BatchFeature:
+    def _do_process(self, modality: Modality, url: str) -> dict[str, npt.NDArray]:
         """Run processing on input data."""
-        image = self.loader.load_from_url(url)
-        return self.processor(image, return_tensors="np")
+        loader: ModalityDataLoader = thread_local.loader
+        processor: BaseModalityProcessor = thread_local.processor
+        data = loader.load_from_url(modality, url)
+        return processor.process(modality, data)
 
     def _check_processed_data(self, processed: list[ProcessedEmbeddingData]) -> None:
         """Check that all processed data is valid."""
@@ -82,15 +160,117 @@ class Processor:
                 )
 
 
-class ImageLoader:
-    """Handles loading images from various sources, including URLs and base64 data."""
+class BaseLoader(ABC):
+    """Base class for downloading data from various sources."""
 
-    def __init__(self) -> None:
+    @abstractmethod
+    def load_bytes(self, data: bytes) -> npt.NDArray:
+        """Load data from bytes."""
+
+    @abstractmethod
+    def load_base64(self, media_type: str, data: str) -> npt.NDArray:
+        """Load data from base64 string."""
+
+    @abstractmethod
+    def load_file(self, filepath: str) -> npt.NDArray:
+        """Load data from file path."""
+
+
+class ImageLoader(BaseLoader):
+    """Handles loading images from various sources."""
+
+    def __init__(self, config: ModalityConfig) -> None:
         """Initialize the loader."""
+        if config.image_config is None:
+            raise ValueError("Image config must be set.")
+
+        self.config = config
+
+    def load_bytes(self, data: bytes) -> npt.NDArray:
+        """Load image data from bytes."""
+        return np.asarray(Image.open(BytesIO(data)).convert("RGB"))
+
+    def load_base64(self, media_type: str, data: str) -> npt.NDArray:
+        """Load image data from base64 string."""
+        return self.load_bytes(base64.b64decode(data))
+
+    def load_file(self, filepath: str) -> npt.NDArray:
+        """Load image data from file path."""
+        return np.asarray(Image.open(filepath).convert("RGB"))
+
+
+class VideoLoader(BaseLoader):
+    """Handles loading videos from various sources."""
+
+    def __init__(self, config: ModalityConfig) -> None:
+        """Initialize the loader."""
+        if config.video_config is None:
+            raise ValueError("Video config must be set.")
+
+        self.config = config
+        self.max_num_frames = config.video_config.max_num_frames
+
+        self.image_loader = ImageLoader(config)
+
+    def load_bytes(self, data: bytes) -> npt.NDArray:
+        """Load video data from bytes."""
+        vr = decord.VideoReader(BytesIO(data), num_threads=1)
+        num_frames = len(vr)
+
+        if num_frames > self.max_num_frames:
+            frame_indices = np.linspace(
+                0, num_frames - 1, self.max_num_frames, dtype=int
+            )
+        else:
+            frame_indices = np.arange(num_frames)
+
+        return vr.get_batch(frame_indices).asnumpy()
+
+    def load_base64(self, media_type: str, data: str) -> npt.NDArray:
+        """Load video data from base64 string."""
+        # Video as a sequence of JPEG frames
+        if media_type.lower() == "video/jpeg":
+            return np.stack(
+                [
+                    self.image_loader.load_base64("image/jpeg", frame)
+                    for frame in data.split(",")
+                ]
+            )
+
+        return self.load_bytes(base64.b64decode(data))
+
+    def load_file(self, filepath: str) -> npt.NDArray:
+        """Load video data from file path."""
+        with open(filepath, "rb") as f:
+            data = f.read()
+
+        return self.load_bytes(data)
+
+
+class ModalityDataLoader:
+    """Handles loading data for different modalities.
+
+    This class is responsible for loading data from URLs using the appropriate
+    modality loader.
+    """
+
+    def __init__(self, config: ModalityConfig) -> None:
+        """Initialize the data loader."""
         self.session = requests.Session()
 
-    def load_from_url(self, url: str) -> Image.Image:
+        self.image_loader = ImageLoader(config)
+        self.video_loader = VideoLoader(config)
+
+    def load_from_url(self, modality: Modality, url: str) -> npt.NDArray:
         """Load an image from a web, data, or file URL."""
+        match modality:
+            case Modality.IMAGE:
+                loader = self.image_loader
+            case Modality.VIDEO:
+                loader = self.video_loader
+            case _:
+                raise ValueError(f"Unsupported modality: {modality}")
+
         start_time = time.monotonic()
 
         url_spec = urlparse(url)
@@ -101,43 +281,37 @@ class ImageLoader:
                 url, headers={"User-Agent": "Mozilla/5.0"}, timeout=5
             ) as r:
                 r.raise_for_status()
-                image = self._load_bytes(r.content)
+                data = loader.load_bytes(r.content)
             logger.info(
-                "Took %.3f seconds to load image from web URL",
+                "Took %.3f seconds to load %s from web URL",
                 time.monotonic() - start_time,
+                modality.value,
             )
-            return image
+            return data
 
         elif url_spec.scheme == "data":
             data_spec, data = url_spec.path.split(",", 1)
-            _, data_type = data_spec.split(";", 1)
+            media_type, data_type = data_spec.split(";", 1)
             if data_type != "base64":
                 raise ValueError(
                     f"Only base64 data URLs are supported; got '{data_type}'."
                 )
-            image = self._load_base64(data)
+            data = loader.load_base64(media_type, data)
             logger.info(
-                "Took %.3f seconds to load image from data URL",
+                "Took %.3f seconds to load %s from data URL",
                 time.monotonic() - start_time,
+                modality.value,
             )
-            return image
+            return data
 
         elif url_spec.scheme == "file":
-            image = self._load_file(url_spec.path)
+            data = loader.load_file(url_spec.path)
             logger.info(
-                "Took %.3f seconds to load image from file URL",
+                "Took %.3f seconds to load %s from file URL",
                 time.monotonic() - start_time,
+                modality.value,
             )
-            return image
+            return data
 
         else:
             raise ValueError("The URL must be either a HTTP, data or file URL.")
-
-    def _load_bytes(self, data: bytes) -> Image.Image:
-        return Image.open(BytesIO(data)).convert("RGB")
-
-    def _load_base64(self, data: str) -> Image.Image:
-        return self._load_bytes(base64.b64decode(data))
-
-    def _load_file(self, filepath: str) -> Image.Image:
-        return Image.open(filepath).convert("RGB")

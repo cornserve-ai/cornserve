@@ -11,7 +11,6 @@ import contextlib
 from typing import Literal, Type
 
 import torch
-import torch.nn as nn
 import transformers
 import safetensors
 import huggingface_hub.errors
@@ -19,22 +18,21 @@ from huggingface_hub import HfApi, hf_hub_download, snapshot_download
 from transformers import AutoConfig, PretrainedConfig
 
 from cornserve.logging import get_logger
-from cornserve.task_executors.eric.schema import Modality
 from cornserve.task_executors.eric.distributed import parallel
-from cornserve.task_executors.eric.models import MODEL_REGISTRY
+from cornserve.task_executors.eric.models.base import EricModel
+from cornserve.task_executors.eric.models.registry import MODEL_REGISTRY
 
 logger = get_logger(__name__)
 
 
 def load_model(
     model_name_or_path: str,
-    modality: Modality,
     weight_format: Literal["safetensors"] = "safetensors",
     cache_dir: str | None = None,
     revision: str | None = None,
     torch_dtype: torch.dtype | None = None,
     torch_device: torch.device | None = None,
-) -> nn.Module:
+) -> EricModel:
     """Load a model from Hugging Face Hub.
 
     1. Instantiate the model.
@@ -43,7 +41,6 @@ def load_model(
 
     Args:
         model_name_or_path: The model name or path.
-        modality: The modality encoder to use from the model.
         weight_format: The format of the model weights. Currently only "safetensors" is supported.
         cache_dir: The cache directory to store the model weights. If None, will use HF defaults.
         revision: The revision of the model.
@@ -73,24 +70,14 @@ def load_model(
             MODEL_REGISTRY.keys(),
         )
         raise
-    try:
-        model_class_name = registry_entry.model[modality].class_name
-    except KeyError:
-        logger.exception(
-            "Modality %s not supported by %s. Available modalities in the registry are: %s",
-            modality,
-            model_name_or_path,
-            registry_entry.model.keys(),
-        )
-        raise
 
     # Import the model class
     try:
-        model_class: Type[nn.Module] = getattr(
+        model_class: Type[EricModel] = getattr(
             importlib.import_module(
                 f"cornserve.task_executors.eric.models.{registry_entry.module}"
             ),
-            model_class_name,
+            registry_entry.class_name,
         )
     except ImportError:
         logger.exception(
@@ -101,12 +88,18 @@ def load_model(
         raise
     except AttributeError:
         logger.exception(
-            "Model class %s not found in the `%s`. Registry entry: %s",
-            model_class_name,
+            "Model class %s not found in `%s`. Registry entry: %s",
+            registry_entry.class_name,
             f"models.{registry_entry.module}",
             registry_entry,
         )
         raise
+
+    # Ensure that the model class is an EricModel
+    assert issubclass(model_class, EricModel), (
+        f"Model class {model_class} is not a subclass of EricModel. "
+        f"Registry entry: {registry_entry}"
+    )
 
     # Instantiate the model
     torch_dtype = torch_dtype or hf_config.torch_dtype
@@ -121,7 +114,7 @@ def load_model(
 
     weight_dict = get_safetensors_weight_dict(
         model_name_or_path,
-        weight_prefix=registry_entry.model[modality].weight_prefix,
+        weight_prefix=registry_entry.weight.prefix,
         cache_dir=cache_dir,
         revision=revision,
     )

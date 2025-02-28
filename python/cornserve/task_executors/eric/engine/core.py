@@ -4,6 +4,7 @@ import queue
 import signal
 import threading
 import multiprocessing as mp
+import time
 from typing import Any
 from multiprocessing.process import BaseProcess
 from multiprocessing.connection import Connection
@@ -46,11 +47,11 @@ class Engine:
 
         self.executor = ModelExecutor(
             model_id=config.model.id,
-            modality=config.modality.ty,
             tp_size=config.model.tp_size,
+            sender_sidecar_ranks=config.sidecar.ranks,
         )
 
-        self.scheduler = Scheduler(modality=config.modality.ty)
+        self.scheduler = Scheduler()
 
         # Background thread that continuously receives from the request
         # ZMQ socket and pushes it into the request queue
@@ -182,6 +183,8 @@ class Engine:
                     except BaseException:
                         raise
 
+            time.sleep(1)
+
             # Handle any new client requests that arrived during the wait.
             while not self.request_queue.empty():
                 req = self.request_queue.get_nowait()
@@ -191,6 +194,10 @@ class Engine:
             responses = self.step()
 
             # Put EngineCoreOutputs in the response queue.
+            # TODO: When requests have multiple modality data, we need to
+            # only send the client a response when all data have been
+            # embedded. So the engine has to keep track of request status.
+            # Should this be part of the scheduler?
             self.response_queue.put_nowait(responses)
 
     def step(self) -> EngineResponse:
@@ -201,10 +208,10 @@ class Engine:
         """
         batch = self.scheduler.schedule()
         batch_result = self.executor.execute_model(batch)
+        done_request_ids = self.scheduler.process_batch_result(batch_result)
 
         return EngineResponse(
-            request_ids=batch_result.request_ids,
-            data_ids=batch_result.data_ids,
+            request_ids=done_request_ids,
             status=batch_result.status,
             error_message=batch_result.error_message,
         )

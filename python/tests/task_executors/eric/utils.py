@@ -6,8 +6,9 @@ from functools import cache
 
 import torch
 import torch.nn as nn
-from transformers import BatchFeature
+import numpy.typing as npt
 
+from cornserve.task_executors.eric.config import ImageDataConfig, ModalityConfig, VideoDataConfig
 from cornserve.task_executors.eric.schema import Batch, Modality
 from cornserve.task_executors.eric.router.processor import Processor
 
@@ -29,12 +30,17 @@ class ModalityData:
     def __init__(self, url: str, modality: Modality) -> None:
         self.url = url
         self.modality = modality
+        self.modality_config = ModalityConfig(
+            num_workers=1,
+            image_config=ImageDataConfig(),
+            video_config=VideoDataConfig(max_num_frames=32),
+        )
 
     @cache
-    def processed(self, model_id: str) -> BatchFeature:
+    def processed(self, model_id: str) -> dict[str, npt.NDArray]:
         """Process the data for the given model."""
-        processor = Processor(model_id, self.modality, 1)
-        return processor._do_process(self.url)
+        processor = Processor(model_id, self.modality_config)
+        return processor._do_process(self.modality, self.url)
 
 
 def assert_same_weights(hf_model: nn.Module, our_model: nn.Module) -> None:

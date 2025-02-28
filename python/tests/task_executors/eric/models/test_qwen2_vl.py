@@ -6,7 +6,7 @@ from transformers.models.qwen2_vl.modeling_qwen2_vl import Qwen2VLForConditional
 
 from cornserve.task_executors.eric.distributed.parallel import destroy_distributed, init_distributed
 from cornserve.task_executors.eric.executor.loader import load_model
-from cornserve.task_executors.eric.schema import Modality, Status
+from cornserve.task_executors.eric.schema import Status
 from cornserve.task_executors.eric.executor.executor import ModelExecutor
 
 from ..utils import ModalityData, assert_same_weights, batch_builder, NUM_GPUS
@@ -24,7 +24,7 @@ def test_weight_loading() -> None:
 
     # Load our model
     init_distributed(world_size=1, rank=0)
-    our_model = load_model(model_id, modality=Modality.IMAGE, torch_device=torch.device("cpu"))
+    our_model = load_model(model_id, torch_device=torch.device("cpu"))
     destroy_distributed()
 
     # Check if parameters are the same
@@ -40,7 +40,11 @@ def test_inference(test_images: list[ModalityData], tp_size: int) -> None:
     """Test if inference works correctly."""
     model_id = "Qwen/Qwen2-VL-7B-Instruct"
 
-    executor = ModelExecutor(model_id=model_id, modality=Modality.IMAGE, tp_size=tp_size)
+    executor = ModelExecutor(
+        model_id=model_id,
+        tp_size=tp_size,
+        sender_sidecar_ranks=list(range(tp_size)),
+    )
 
     result = executor.execute_model(batch=batch_builder(model_id, test_images))
 

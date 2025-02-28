@@ -88,13 +88,13 @@ class EngineEnqueueRequest(msgspec.Struct, array_like=True, omit_defaults=True):
 
     request_id: str
     data: list[ProcessedEmbeddingData]
+    receiver_sidecar_ranks: list[int] | None = None
 
 
 class EngineResponse(msgspec.Struct, array_like=True, omit_defaults=True):
     """Response sent from the engine to the router."""
 
     request_ids: list[ID]
-    data_ids: list[ID]
     status: Status
     error_message: str | None = None
 
@@ -103,30 +103,55 @@ class EngineResponse(msgspec.Struct, array_like=True, omit_defaults=True):
 class Batch:
     """Embedding requests to run together in a single forward pass.
 
+    Currently, different modalities are not batched together because
+    some models require different processing for different modalities.
+
     Attributes:
         modality: Modality of the data to be embedded.
-        request_ids: List of unique request IDs in the batch. If there
-            are multiple modality data in the batch, this will be
-            shorter than `data_ids`.
+        request_ids: List of request IDs in the batch. If there are multiple
+            modality data in a single request, the request ID is repeated
+            for each data ID.
         data_ids: List of unique data IDs in the batch. This is a
             concatenation of all data IDs in the batch.
+        receiver_ranks: Sidecar ranks that will receive the embeddings.
         data: Dictionary of data to be embedded. The keys are the
             tensor names as returned by the HF processor and the corresponding
             encoder model should be expecting these names.
     """
 
-    # TODO: Can different modalities be batched together?
     modality: Modality
     request_ids: list[ID] = field(default_factory=list)
     data_ids: list[ID] = field(default_factory=list)
+    chunk_ids: list[int] = field(default_factory=list)
+    num_chunks: list[int] = field(default_factory=list)
+    receiver_ranks: list[list[int] | None] = field(default_factory=list)
     data: dict[str, list[torch.Tensor]] = field(default_factory=dict)
 
-    def add_request(self, request: EngineEnqueueRequest) -> None:
+    def __len__(self) -> int:
+        """Return batch size."""
+        return len(self.data_ids)
+
+    def add_data(
+        self,
+        request_id: ID,
+        data: list[ProcessedEmbeddingData],
+        chunk_ids: list[int],
+        num_chunks: list[int],
+        receiver_ranks: list[int] | None = None,
+    ) -> None:
         """Add a request to the batch."""
-        self.request_ids.append(request.request_id)
         # Add all modality data inside a request to the batch.
-        for item in request.data:
+        for item, chunk_id, num_chunk in zip(data, chunk_ids, num_chunks, strict=True):
+            if self.modality != item.modality:
+                raise ValueError(
+                    f"Cannot batch different modalities together: "
+                    f"{self.modality} != {item.modality} (Data ID: {item.id})"
+                )
+            self.request_ids.append(request_id)
             self.data_ids.append(item.id)
+            self.chunk_ids.append(chunk_id)
+            self.num_chunks.append(num_chunk)
+            self.receiver_ranks.append(receiver_ranks)
             for key, value in item.data.items():
                 if key not in self.data:
                     self.data[key] = []
@@ -146,6 +171,9 @@ class BatchResult:
 
     request_ids: list[ID]
     data_ids: list[ID]
+    chunk_ids: list[int]
+    num_chunks: list[int]
+    receiver_ranks: list[list[int] | None]
     status: Status
     error_message: str | None = None
 
