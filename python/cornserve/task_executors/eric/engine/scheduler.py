@@ -5,7 +5,6 @@ from typing import Generator
 
 from cornserve.task_executors.eric.schema import (
     ID,
-    BatchResult,
     Modality,
     Batch,
     EngineEnqueueRequest,
@@ -82,11 +81,14 @@ class RequestQueue:
         return next(iter(self.request_id_to_request.values()))
 
     def peek_data(self) -> ProcessedEmbeddingData:
-        """Peak the first data of the head of the queue."""
+        """Peak the first waiting data of the head of the queue."""
         assert self.request_id_to_request, "Queue is empty"
-        request = next(iter(self.request_id_to_request.values()))
+        request = self.peek_request()
         assert request.data, "Request has no data"
-        return request.data[0]
+        for data in request.data:
+            if not self.is_done(request.request_id, data.id):
+                return data
+        raise ValueError("No waiting data in a waiting request")
 
     def iter_waiting(
         self,
@@ -100,13 +102,13 @@ class RequestQueue:
         count = 0
         for request in self.request_id_to_request.values():
             for data in request.data:
-                # Modality change, stop!
-                if data.modality != modality:
-                    return
-
                 # We're only interested in data that is not done yet.
                 if self.is_done(request.request_id, data.id):
                     continue
+
+                # Modality change, stop!
+                if data.modality != modality:
+                    return
 
                 yield request, data
 
@@ -151,10 +153,12 @@ class Scheduler:
         assert batch.request_ids, "Batch should not be empty"
         return batch
 
-    def process_batch_result(self, batch_result: BatchResult) -> list[ID]:
+    def process_batch_result(
+        self, request_ids: list[ID], data_ids: list[ID]
+    ) -> list[ID]:
         """Process the result of a completed batch.
 
         Returns:
             A list of request IDs that are done (i.e., all data is done).
         """
-        return self.queue.mark_done(batch_result.request_ids, batch_result.data_ids)
+        return self.queue.mark_done(request_ids, data_ids)

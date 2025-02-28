@@ -96,7 +96,8 @@ class ModelExecutor:
         logger.info("Shutting down executor.")
 
         # Close the input message queue
-        del self.input_mq
+        if hasattr(self, "input_mq"):
+            del self.input_mq
 
         # Ensure workers are terminated
         for worker in self.workers:

@@ -208,7 +208,10 @@ class Engine:
         """
         batch = self.scheduler.schedule()
         batch_result = self.executor.execute_model(batch)
-        done_request_ids = self.scheduler.process_batch_result(batch_result)
+        done_request_ids = self.scheduler.process_batch_result(
+            batch_result.request_ids,
+            batch_result.data_ids,
+        )
 
         return EngineResponse(
             request_ids=done_request_ids,

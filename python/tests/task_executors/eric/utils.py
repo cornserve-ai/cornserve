@@ -64,5 +64,8 @@ def batch_builder(model_id: str, images: list[ModalityData]) -> Batch:
         modality=images[0].modality,
         request_ids=[uuid.uuid4().hex for _ in images],
         data_ids=[uuid.uuid4().hex for _ in images],
+        chunk_ids=[0 for _ in images],
+        num_chunks=[1 for _ in images],
+        receiver_ranks=[None for _ in images],
         data=data,
     )
