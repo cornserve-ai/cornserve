@@ -1,60 +1,49 @@
-import torch
-from cornserve.services.sidecar.api import TensorSidecarReceiver
-from cornserve.logging import get_logger
-from cornserve.services.utils import tensor_hash
+""" An example receiver that instatiates a TensorSidecarAsyncReceiver. """
+import asyncio
+import hashlib
 import os
-import time
+import random
+
+from cornserve.logging import get_logger
+from cornserve.services.sidecar.api import TensorSidecarAsyncReceiver
+from cornserve.services.utils import tensor_hash
+import torch
 
 logger = get_logger(__name__)
+torch.manual_seed(0)
+random.seed(0)
 
+def fake_uuid(i: int) -> str:
+    """Generate a fake UUID for testing purposes."""
+    return str(i) * 32 + hashlib.sha256(f'{i}'.encode('utf-8')).hexdigest()[:32]
 
-def main() -> None:
+async def main() -> None:
     RANK = int(os.environ.get("RANK", 3))
-    NUM_SHARDS = int(os.environ.get("NUM_SHARDS", 1))
+    CHUNKING = bool(os.environ.get("CHUNKING", False))
+    n = int(os.environ.get("N", 1))
+
+    if CHUNKING:
+        slot_shape = (-1, 576, 4096,)
+    else:
+        slot_shape = (-1, 1176,)
     dtype = torch.bfloat16
-    shape = (4, 1601, 4096)
 
-    sidecar = TensorSidecarReceiver(
+    sidecar_receiver = TensorSidecarAsyncReceiver(
         sidecar_rank=RANK,
-        shape=shape,
+        gpu_rank=RANK,
+        shape=slot_shape,
         dtype=dtype,
-    )
+        )
     device = torch.device(f"cuda:{RANK}")
-    logger.info(f"Starting encoder server using device {device} on rank {RANK}")
+    logger.info("Starting encoder server using device %s on rank %d", device, RANK)
 
-    tensor = torch.rand(shape, device=device, dtype=dtype)
+    for i in range(n):
+        id = fake_uuid(i)
+        data = await sidecar_receiver.recv(id)
+        logger.info(f"Received request %s with hash %s of shape %s", id, tensor_hash(data), data.shape)
 
-    def recv_and_process_req(id: int) -> None:
-        received_tensor = sidecar.recv(id)
-
-        tensor.copy_(received_tensor)
-        if NUM_SHARDS == 1:
-            logger.info(
-                f"Received tensor with req id {id} with hash {tensor_hash(received_tensor)} of shape {received_tensor.shape}"
-            )
-        else:
-            shards = torch.chunk(received_tensor, NUM_SHARDS, dim=0)
-            for i, shard in enumerate(shards):
-                # this is to check the hash of each shard
-                logger.info(
-                    f"Received shard {i} in req {id} with hash {tensor_hash(shard)} of shape {shard.shape} with sum {shard.sum()}"
-                )
-
-        sidecar.mark_done(id)
-
-        # process the tensor
-
-    id = 0
-    for _ in range(5):
-        logger.info(f"start to receive 3 requests starting from {id}")
-        for _ in range(3):
-            recv_and_process_req(id)
-            id += 1
-        logger.info(f"waiting for 3 requests starting from {id}")
-        time.sleep(10)
-
-    sidecar.unregister()
+    await sidecar_receiver.shutdown()
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())
