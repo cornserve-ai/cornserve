@@ -20,7 +20,8 @@ dependencies = [
 dynamic = ["version"]
 
 [project.optional-dependencies]
-dev = ["grpcio-tools", "black", "pyright", "ruff"]
+sidecar = ["torch"]
+dev = ["grpcio-tools", "pyright", "ruff", "pytest-asyncio", "cornserve[sidecar]"]
 
 [tool.setuptools.dynamic]
 version = { attr = "cornserve.__version__" }
@@ -44,3 +45,7 @@ exclude = [
     "**/*_pb2.py",
     "**/*_pb2_grpc.py",
 ]
+
+[tool.pytest.ini_options]
+asyncio_mode = "strict"
+asyncio_default_fixture_loop_scope = "function"
