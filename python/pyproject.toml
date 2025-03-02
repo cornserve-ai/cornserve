@@ -34,7 +34,7 @@ eric = [
   "einops",
   "flash-attn",
 ]
-dev = ["grpcio-tools", "black", "pyright", "ruff", "pytest", "expecttest", "cornserve[sidecar,eric]"]
+dev = ["grpcio-tools", "black", "pyright", "ruff", "pytest", "pytest-asyncio", "expecttest", "cornserve[sidecar,eric]"]
 
 [tool.setuptools.dynamic]
 version = { attr = "cornserve.__version__" }
