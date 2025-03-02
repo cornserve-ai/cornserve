@@ -56,4 +56,9 @@ kubectl apply -k kustomize/base
 kubectl apply -k kustomize/overlays/dev
 ```
 
+## Install NVIDIA device plugin 
+After installing the Nvidia container toolkit, install the NVIDIA device plugin
+so that containers can request GPUs as resources. More in the officail [doc](https://github.com/NVIDIA/k8s-device-plugin/blob/main/README.md)
+`kubectl create -f https://raw.githubusercontent.com/NVIDIA/k8s-device-plugin/v0.17.0/deployments/static/nvidia-device-plugin.yml`
+
 TODO: The number of workers depends on the number of GPUs on the node. Later, this can be configured more flexibly with Kustomize (i.e., override the default number of replicas for the `base` environment `Deployment` object with a patch in the `internal` environment).
