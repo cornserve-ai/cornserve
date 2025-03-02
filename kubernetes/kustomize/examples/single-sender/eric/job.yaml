@@ -1,16 +1,16 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: sync-single-eric0
+  name: single-eric
   namespace: cornserve
   labels:
-    app: sync-single-eric0
+    app: single-eric
 spec:
   backoffLimit: 0
   template:
     metadata:
       labels:
-        app: sync-single-eric0
+        app: single-eric
     spec:
       affinity:
         podAffinity:
@@ -22,14 +22,21 @@ spec:
       runtimeClassName: nvidia
       restartPolicy: Never
       containers:
-      - name: sync-single-eric0
+      - name: single-eric
         image: cornserve/example:latest
         imagePullPolicy: Always
+        resources:
+          limits:
+            nvidia.com/gpu: 1
         env:
           - name: RANK
             value: "0"
           - name: NAME
             value: "sender"
+          - name: N
+            value: "10"
+          - name: NVIDIA_VISIBLE_DEVICES
+            value: "0"
         volumeMounts:
           - name: shm-volume
             mountPath: /dev/shm

@@ -1,16 +1,16 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: sync-double-eric0
+  name: double-erics
   namespace: cornserve
   labels:
-    app: sync-double-eric0
+    app: double-erics
 spec:
   backoffLimit: 0
   template:
     metadata:
       labels:
-        app: sync-double-eric0
+        app: double-erics
     spec:
       affinity:
         podAffinity:
@@ -22,18 +22,21 @@ spec:
       runtimeClassName: nvidia
       restartPolicy: Never
       containers:
-      - name: sync-double-eric0
+      - name: double-erics
         image: cornserve/example:latest
         imagePullPolicy: Always
+        resources:
+          limits:
+            nvidia.com/gpu: 2
         env:
-          - name: RANK
-            value: "0"
-          - name: SHARD_RANK
-            value: "0"
-          - name: NUM_SHARDS
-            value: "2"
           - name: NAME
             value: "sender"
+          - name: TP_SIZE
+            value: "2"
+          - name: N
+            value: "10"
+          - name: NVIDIA_VISIBLE_DEVICES
+            value: "0,1"
         volumeMounts:
           - name: shm-volume
             mountPath: /dev/shm
