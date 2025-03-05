@@ -4,7 +4,6 @@ import queue
 import signal
 import threading
 import multiprocessing as mp
-import time
 from typing import Any
 from multiprocessing.process import BaseProcess
 from multiprocessing.connection import Connection

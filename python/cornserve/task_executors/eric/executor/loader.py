@@ -103,9 +103,7 @@ def load_model(
 
     # Instantiate the model
     torch_dtype = torch_dtype or hf_config.torch_dtype
-    assert isinstance(
-        torch_dtype, torch.dtype
-    ), f"torch_dtype is not a torch.dtype: {torch_dtype}"
+    assert isinstance(torch_dtype, torch.dtype), str(type(torch_dtype))
     torch_device = torch_device or torch.device(
         "cuda", parallel.get_tensor_parallel_group().rank
     )
@@ -114,7 +112,8 @@ def load_model(
 
     weight_dict = get_safetensors_weight_dict(
         model_name_or_path,
-        weight_prefix=registry_entry.weight.prefix,
+        weight_prefixes=registry_entry.weight.prefixes,
+        strip_prefixes=registry_entry.weight.strip_prefixes,
         cache_dir=cache_dir,
         revision=revision,
     )
@@ -147,7 +146,8 @@ def set_default_torch_dtype(dtype: torch.dtype):
 
 def get_safetensors_weight_dict(
     model_name_or_path: str,
-    weight_prefix: str = "",
+    weight_prefixes: list[str],
+    strip_prefixes: bool,
     cache_dir: str | None = None,
     revision: str | None = None,
 ) -> dict[str, torch.Tensor]:
@@ -158,7 +158,11 @@ def get_safetensors_weight_dict(
 
     Args:
         model_name_or_path: The model name or path.
-        weight_prefix: If possible, only download weights whose name starts with this.
+        weight_prefixes: Only download weights whose names starts with these.
+            If the repo does not have a weight index file, all weights will be
+            downloaded regardless of the prefix.
+        strip_prefixes: Whether to strip the prefixes from weight names before
+            collecting weights into the dict.
         cache_dir: The cache directory to store the model weights.
             If None, will use HF defaults.
         revision: The revision of the model.
@@ -190,7 +194,7 @@ def get_safetensors_weight_dict(
             weight_files = []
             for weight_name, weight_file in weight_map.items():
                 # Only keep weights that start with the prefix
-                if weight_name.startswith(weight_prefix):
+                if any(weight_name.startswith(p) for p in weight_prefixes):
                     weight_files.append(weight_file)
                     break
             logger.info(
@@ -213,12 +217,16 @@ def get_safetensors_weight_dict(
 
     # Build weight dict
     weight_dict = {}
-    prefix_strip_len = len(weight_prefix)
+    prefix_lens = [len(p) for p in weight_prefixes]
     for weight_file in weight_files:
         with safetensors.safe_open(f"{hf_dir}/{weight_file}", framework="pt") as f:
             for name in f.keys():  # noqa: SIM118
-                if name.startswith(weight_prefix):
-                    weight_dict[name[prefix_strip_len:]] = f.get_tensor(name)
+                for weight_prefix, strip_len in zip(weight_prefixes, prefix_lens):
+                    if name.startswith(weight_prefix):
+                        stripped_name = name[strip_len:] if strip_prefixes else name
+                        weight_dict[stripped_name] = f.get_tensor(name)
+                        break
+
     return weight_dict
 
 

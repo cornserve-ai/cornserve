@@ -1,22 +1,7 @@
-"""All model-specific definitions.
-
-All models are expected to be in the `models` subdirectory of this module,
-and have an entry in `MODEL_REGISTRY`.
-
-Each model class must have the following @property definitions
-- `chunk_shape` (tuple[int, ...]): Shape of the tensor chunks to be sent to the sidecar
-- `dtype` (torch.dtype): Data type of embeddings
-
-Each model module must define the following classes
-- `ModalityProcessor`: Inherited from `BaseModalityProcessor`, this class defines
-    how to instantiate and run processors for each supported modality by overriding
-    `get_image_processor`, `get_video_processor`, etc. The default implementation
-    of these methods returns `None`, which is taken to mean that the modality is not
-    supported by the model.
-"""
+"""The registry holds model-specific information."""
 
 import enum
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 from cornserve.task_executors.eric.schema import Modality
 
@@ -25,14 +10,18 @@ from cornserve.task_executors.eric.schema import Modality
 class WeightInfo:
     """Model info for a modality."""
 
-    # Prefix of the model weights to collect
-    prefix: str
+    # List of model weight name prefixes to load.
+    prefixes: list[str]
+
+    # Whether or not to strip the prefixes from weight names before
+    # calling `load_state_dict`.
+    strip_prefixes: bool = True
 
     # Rules to replace weight name prefixes. For instance,
     # ("multi_modal.", "vision_tower.multi_modal.") will
     # find all weight names that start with "multi_modal.", strip
     # that prefix, and prepend with "vision_tower.multi_modal.".
-    prefix_rename_rules: list[tuple[str, str]] = field(default_factory=list)
+    # prefix_rename_rules: list[tuple[str, str]] = field(default_factory=list)
 
 
 class ViTResolutionType(enum.Enum):
@@ -83,7 +72,8 @@ MODEL_REGISTRY: dict[str, RegistryEntry] = {
         class_name="Qwen2VisionTransformer",
         vit_resolution_type=ViTResolutionType.DYNAMIC,
         weight=WeightInfo(
-            prefix="visual.",
+            prefixes=["visual."],
+            strip_prefixes=True,
         ),
         modality={
             Modality.IMAGE: ModalityEntry(),
@@ -95,13 +85,8 @@ MODEL_REGISTRY: dict[str, RegistryEntry] = {
         class_name="LlavaOneVisionTransformer",
         vit_resolution_type=ViTResolutionType.FIXED,
         weight=WeightInfo(
-            prefix="vision_tower.",
-            prefix_rename_rules=[
-                (
-                    "multi_modal_projector.",
-                    "vision_tower.multi_modal_projector.",
-                ),
-            ],
+            prefixes=["vision_tower.", "multi_modal_projector.", "image_newline."],
+            strip_prefixes=False,
         ),
         modality={
             Modality.IMAGE: ModalityEntry(),

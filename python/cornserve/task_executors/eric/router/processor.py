@@ -7,7 +7,6 @@ import requests
 import importlib
 import threading
 from io import BytesIO
-from typing import Callable
 from abc import ABC, abstractmethod
 from urllib.parse import urlparse
 from concurrent.futures import ThreadPoolExecutor
@@ -27,49 +26,11 @@ from cornserve.task_executors.eric.schema import (
     ProcessedEmbeddingData,
 )
 from cornserve.task_executors.eric.models.registry import MODEL_REGISTRY
+from cornserve.task_executors.eric.models.base import BaseModalityProcessor
 from cornserve.logging import get_logger
 
 logger = get_logger(__name__)
 thread_local = threading.local()
-
-
-class BaseModalityProcessor:
-    """Base class for modality processors.
-
-    Each model definition module contains a `ModalityProcessor` class that
-    inherits from this class. It should override `get_image_processor`,
-    `get_video_processor`, etc. to return the appropriate processor for the
-    given modality. The processor should be a callable that takes the input
-    modality data as a Numpy array and returns the processed data as
-    """
-
-    def __init__(self, model_id: str) -> None:
-        """Initialize the processor."""
-        self.model_id = model_id
-
-    def get_image_processor(self) -> Callable | None:
-        """Get the image processor for this modality."""
-        return None
-
-    def get_video_processor(self) -> Callable | None:
-        """Get the video processor for this modality."""
-        return None
-
-    def process(self, modality: Modality, data: npt.NDArray) -> dict[str, npt.NDArray]:
-        """Process the input data for the given modality."""
-        match modality:
-            case Modality.IMAGE:
-                image_processor = self.get_image_processor()
-                if image_processor is None:
-                    raise ValueError("Image processor not available.")
-                return image_processor(data)
-            case Modality.VIDEO:
-                video_processor = self.get_video_processor()
-                if video_processor is None:
-                    raise ValueError("Video processor not available.")
-                return video_processor(data)
-            case _:
-                raise ValueError(f"Unsupported modality: {modality}")
 
 
 class Processor:
@@ -109,11 +70,6 @@ class Processor:
         self.pool = ThreadPoolExecutor(
             max_workers=modality_config.num_workers,
             initializer=init_thread,
-        )
-
-        # Run dummy tasks to force-initialize the thread-local variables
-        list(
-            self.pool.map(lambda _: time.sleep(0.1), range(modality_config.num_workers))
         )
 
     def shutdown(self) -> None:

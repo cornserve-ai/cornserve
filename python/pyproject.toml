@@ -34,6 +34,7 @@ eric = [
   "decord",
   "einops",
   "flash-attn",
+  "xformers",
 ]
 dev = ["grpcio-tools", "black", "pyright", "ruff", "pytest", "expecttest", "cornserve[sidecar,eric]"]
 

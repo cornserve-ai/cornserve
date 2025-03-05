@@ -11,16 +11,15 @@ import numpy.typing as npt
 from einops import rearrange, repeat
 from transformers import AutoImageProcessor
 from transformers.models.qwen2_vl.configuration_qwen2_vl import Qwen2VLConfig
+from flash_attn import flash_attn_varlen_func
+from flash_attn.layers.rotary import apply_rotary_emb
 
+from .base import EricModel
+from .layers.activations import QuickGELU
+from .layers.linear import ColumnParallelLinear, RowParallelLinear
 from cornserve.task_executors.eric.distributed import parallel
-from cornserve.task_executors.eric.models.base import EricModel
 from cornserve.task_executors.eric.router.processor import BaseModalityProcessor
 from cornserve.task_executors.eric.utils import distributed as dist_utils
-from cornserve.task_executors.eric.models.layers.activations import QuickGELU
-from cornserve.task_executors.eric.models.layers.linear import (
-    ColumnParallelLinear,
-    RowParallelLinear,
-)
 
 
 class Qwen2VisionPatchEmbed(nn.Module):
@@ -181,8 +180,6 @@ def apply_rotary_pos_emb_vision(t: torch.Tensor, freqs: torch.Tensor) -> torch.T
     cos = freqs.cos()
     sin = freqs.sin()
 
-    from flash_attn.layers.rotary import apply_rotary_emb
-
     output = apply_rotary_emb(t_, cos, sin).type_as(t)
 
     return output
@@ -259,8 +256,6 @@ class Qwen2VisionAttention(nn.Module):
         if rotary_pos_emb is not None:
             q = apply_rotary_pos_emb_vision(q, rotary_pos_emb)
             k = apply_rotary_pos_emb_vision(k, rotary_pos_emb)
-
-        from flash_attn import flash_attn_varlen_func
 
         q, k, v = (rearrange(x, "b s ... -> (b s) ...") for x in [q, k, v])
 
@@ -375,12 +370,12 @@ class Qwen2VisionTransformer(EricModel):
         return self.patch_embed.proj.weight.dtype
 
     @property
-    def chunk_shape(self) -> tuple[int, ...]:
-        return (1, self.hidden_size)
-
-    @property
     def device(self) -> torch.device:
         return self.patch_embed.proj.weight.device
+
+    @property
+    def chunk_shape(self) -> tuple[int, ...]:
+        return (1, self.hidden_size)
 
     def rot_pos_emb(self, grid_thw: torch.Tensor) -> torch.Tensor:
         pos_ids = []
