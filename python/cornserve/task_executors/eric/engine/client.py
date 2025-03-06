@@ -43,9 +43,7 @@ class EngineClient:
         self.request_sock_path = get_open_zmq_ipc_path("engine-request")
         self.request_sock = make_zmq_socket(self.ctx, self.request_sock_path, zmq.PUSH)
         self.response_sock_path = get_open_zmq_ipc_path("engine-response")
-        self.response_sock = make_zmq_socket(
-            self.ctx, self.response_sock_path, zmq.PULL
-        )
+        self.response_sock = make_zmq_socket(self.ctx, self.response_sock_path, zmq.PULL)
 
         # Start an async task that listens for responses from the engine and
         # sets the result of the future corresponding to the request

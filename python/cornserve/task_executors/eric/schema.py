@@ -160,8 +160,7 @@ class Batch:
         # Sanity check
         for key in self.data:
             assert len(self.data[key]) == len(self.data_ids), (
-                f"Data length mismatch for key {key}: "
-                f"{len(self.data[key])} != {len(self.data_ids)}"
+                f"Data length mismatch for key {key}: {len(self.data[key])} != {len(self.data_ids)}"
             )
 
 

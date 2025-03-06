@@ -24,6 +24,4 @@ def get_act_fn(name: str) -> nn.Module:
         case "silu":
             return nn.SiLU()
         case _:
-            raise NotImplementedError(
-                f"Activation function {name!r} is not implemented."
-            )
+            raise NotImplementedError(f"Activation function {name!r} is not implemented.")

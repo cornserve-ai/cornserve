@@ -74,9 +74,7 @@ def load_model(
     # Import the model class
     try:
         model_class: Type[EricModel] = getattr(
-            importlib.import_module(
-                f"cornserve.task_executors.eric.models.{registry_entry.module}"
-            ),
+            importlib.import_module(f"cornserve.task_executors.eric.models.{registry_entry.module}"),
             registry_entry.class_name,
         )
     except ImportError:
@@ -97,38 +95,35 @@ def load_model(
 
     # Ensure that the model class is an EricModel
     assert issubclass(model_class, EricModel), (
-        f"Model class {model_class} is not a subclass of EricModel. "
-        f"Registry entry: {registry_entry}"
+        f"Model class {model_class} is not a subclass of EricModel. Registry entry: {registry_entry}"
     )
 
     # Instantiate the model
     torch_dtype = torch_dtype or hf_config.torch_dtype
     assert isinstance(torch_dtype, torch.dtype), str(type(torch_dtype))
-    torch_device = torch_device or torch.device(
-        "cuda", parallel.get_tensor_parallel_group().rank
-    )
+    torch_device = torch_device or torch.device("cuda", parallel.get_tensor_parallel_group().rank)
     with set_default_torch_dtype(torch_dtype), torch_device:
         model = model_class(hf_config)
 
     weight_dict = get_safetensors_weight_dict(
         model_name_or_path,
-        weight_prefixes=registry_entry.weight.prefixes,
+        weight_prefixes=registry_entry.weight.required_prefixes,
         strip_prefixes=registry_entry.weight.strip_prefixes,
         cache_dir=cache_dir,
         revision=revision,
     )
 
-    incompatible = model.load_state_dict(weight_dict)
+    incompatible = model.load_state_dict(weight_dict, strict=False)
     if incompatible.missing_keys:
-        logger.warning(
-            "Some weights are missing in the model: %s",
-            incompatible.missing_keys,
-        )
-    if incompatible.unexpected_keys:
-        logger.warning(
-            "Some weights are unexpected in the model: %s",
-            incompatible.unexpected_keys,
-        )
+        raise ValueError(f"Missing weights in the model: {incompatible.missing_keys}")
+    if (keys := incompatible.unexpected_keys):
+        # Some keys in the state dict are explicitly ignored since we dont' use them.
+        actually_unexpected_keys = []
+        for key in keys:
+            if not any(key.startswith(prefix) for prefix in registry_entry.weight.ignored_prefixes):
+                actually_unexpected_keys.append(key)
+        if actually_unexpected_keys:
+            raise ValueError(f"Unexpected weights in the model: {actually_unexpected_keys}")
 
     return model.eval()
 
@@ -221,7 +216,7 @@ def get_safetensors_weight_dict(
     for weight_file in weight_files:
         with safetensors.safe_open(f"{hf_dir}/{weight_file}", framework="pt") as f:
             for name in f.keys():  # noqa: SIM118
-                for weight_prefix, strip_len in zip(weight_prefixes, prefix_lens):
+                for weight_prefix, strip_len in zip(weight_prefixes, prefix_lens, strict=True):
                     if name.startswith(weight_prefix):
                         stripped_name = name[strip_len:] if strip_prefixes else name
                         weight_dict[stripped_name] = f.get_tensor(name)

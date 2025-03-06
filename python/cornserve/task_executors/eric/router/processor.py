@@ -53,9 +53,7 @@ class Processor:
             raise ValueError(
                 f"Model {model_id} (model_type={hf_config.model_type}) not found in model registry."
             ) from e
-        model_module = importlib.import_module(
-            f"cornserve.task_executors.eric.models.{registry_entry.module}"
-        )
+        model_module = importlib.import_module(f"cornserve.task_executors.eric.models.{registry_entry.module}")
 
         # Instantiate the thread pool
         def init_thread() -> None:
@@ -82,12 +80,7 @@ class Processor:
         # 1. we are running them in parallel anyway, and
         # 2. the HF processor merges together processed tensors into a single tensor.
         features = await asyncio.gather(
-            *(
-                self.loop.run_in_executor(
-                    self.pool, self._do_process, item.modality, item.url
-                )
-                for item in data
-            )
+            *(self.loop.run_in_executor(self.pool, self._do_process, item.modality, item.url) for item in data)
         )
         processed = [
             ProcessedEmbeddingData(id=item.id, modality=item.modality, data=feature)
@@ -107,13 +100,9 @@ class Processor:
         """Check that all processed data is valid."""
         for item in processed:
             if not isinstance(item.data, dict):
-                raise ValueError(
-                    f"Processed data should be a dict; got {type(item.data)}."
-                )
+                raise ValueError(f"Processed data should be a dict; got {type(item.data)}.")
             if not all(isinstance(v, np.ndarray) for v in item.data.values()):
-                raise ValueError(
-                    f"All processed data should be numpy arrays; got {item.data}"
-                )
+                raise ValueError(f"All processed data should be numpy arrays; got {item.data}")
 
 
 class BaseLoader(ABC):
@@ -174,9 +163,7 @@ class VideoLoader(BaseLoader):
         num_frames = len(vr)
 
         if num_frames > self.max_num_frames:
-            frame_indices = np.linspace(
-                0, num_frames - 1, self.max_num_frames, dtype=int
-            )
+            frame_indices = np.linspace(0, num_frames - 1, self.max_num_frames, dtype=int)
         else:
             frame_indices = np.arange(num_frames)
 
@@ -186,12 +173,7 @@ class VideoLoader(BaseLoader):
         """Load video data from base64 string."""
         # Video as a sequence of JPEG frames
         if media_type.lower() == "video/jpeg":
-            return np.stack(
-                [
-                    self.image_loader.load_base64("image/jpeg", frame)
-                    for frame in data.split(",")
-                ]
-            )
+            return np.stack([self.image_loader.load_base64("image/jpeg", frame) for frame in data.split(",")])
 
         return self.load_bytes(base64.b64decode(data))
 
@@ -233,9 +215,7 @@ class ModalityDataLoader:
         if url_spec.scheme.startswith("http"):
             if url_spec.scheme not in ["http", "https"]:
                 raise ValueError(f"Unsupported URL scheme: {url_spec.scheme}")
-            with self.session.get(
-                url, headers={"User-Agent": "Mozilla/5.0"}, timeout=5
-            ) as r:
+            with self.session.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=5) as r:
                 r.raise_for_status()
                 data = loader.load_bytes(r.content)
             logger.info(
@@ -249,9 +229,7 @@ class ModalityDataLoader:
             data_spec, data = url_spec.path.split(",", 1)
             media_type, data_type = data_spec.split(";", 1)
             if data_type != "base64":
-                raise ValueError(
-                    f"Only base64 data URLs are supported; got '{data_type}'."
-                )
+                raise ValueError(f"Only base64 data URLs are supported; got '{data_type}'.")
             data = loader.load_base64(media_type, data)
             logger.info(
                 "Took %.3f seconds to load %s from data URL",

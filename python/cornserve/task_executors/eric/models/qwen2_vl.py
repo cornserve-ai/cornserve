@@ -23,7 +23,6 @@ from cornserve.task_executors.eric.utils import distributed as dist_utils
 
 
 class Qwen2VisionPatchEmbed(nn.Module):
-
     def __init__(
         self,
         patch_size: int = 14,
@@ -53,7 +52,6 @@ class Qwen2VisionPatchEmbed(nn.Module):
 
 
 class Qwen2VisionPatchMerger(nn.Module):
-
     def __init__(
         self,
         d_model: int,
@@ -86,7 +84,6 @@ class Qwen2VisionPatchMerger(nn.Module):
 
 
 class Qwen2VisionRotaryEmbedding(nn.Module):
-
     def __init__(self, dim: int, theta: float = 10000.0) -> None:
         super().__init__()
         self.dim = dim
@@ -101,17 +98,9 @@ class Qwen2VisionRotaryEmbedding(nn.Module):
             seqlen *= 2
             self._seq_len_cached = seqlen
             self.inv_freq = 1.0 / (
-                self.theta
-                ** (
-                    torch.arange(
-                        0, self.dim, 2, dtype=torch.float, device=self.inv_freq.device
-                    )
-                    / self.dim
-                )
+                self.theta ** (torch.arange(0, self.dim, 2, dtype=torch.float, device=self.inv_freq.device) / self.dim)
             )
-            seq = torch.arange(
-                seqlen, device=self.inv_freq.device, dtype=self.inv_freq.dtype
-            )
+            seq = torch.arange(seqlen, device=self.inv_freq.device, dtype=self.inv_freq.dtype)
             freqs = torch.outer(seq, self.inv_freq)
             self._freqs_cached = freqs
 
@@ -121,7 +110,6 @@ class Qwen2VisionRotaryEmbedding(nn.Module):
 
 
 class Qwen2VisionMLP(nn.Module):
-
     def __init__(
         self,
         in_features: int,
@@ -146,9 +134,7 @@ def rotate_half(x: torch.Tensor, interleaved: bool = False) -> torch.Tensor:
         return torch.cat((-x2, x1), dim=-1)
     else:
         x1, x2 = x[..., ::2], x[..., 1::2]
-        return rearrange(
-            torch.stack((-x2, x1), dim=-1), "... d two -> ... (d two)", two=2
-        )
+        return rearrange(torch.stack((-x2, x1), dim=-1), "... d two -> ... (d two)", two=2)
 
 
 def apply_rotary_emb_torch(
@@ -160,12 +146,8 @@ def apply_rotary_emb_torch(
     """
     ro_dim = cos.shape[-1] * 2
     assert ro_dim <= x.shape[-1]
-    cos = repeat(
-        cos, "... d -> ... 1 (2 d)" if not interleaved else "... d -> ... 1 (d 2)"
-    )
-    sin = repeat(
-        sin, "... d -> ... 1 (2 d)" if not interleaved else "... d -> ... 1 (d 2)"
-    )
+    cos = repeat(cos, "... d -> ... 1 (2 d)" if not interleaved else "... d -> ... 1 (d 2)")
+    sin = repeat(sin, "... d -> ... 1 (2 d)" if not interleaved else "... d -> ... 1 (d 2)")
     return torch.cat(
         [
             x[..., :ro_dim] * cos + rotate_half(x[..., :ro_dim], interleaved) * sin,
@@ -186,7 +168,6 @@ def apply_rotary_pos_emb_vision(t: torch.Tensor, freqs: torch.Tensor) -> torch.T
 
 
 class Qwen2VisionAttention(nn.Module):
-
     def __init__(
         self,
         embed_dim: int,
@@ -198,16 +179,10 @@ class Qwen2VisionAttention(nn.Module):
         self.tp_group = parallel.get_tensor_parallel_group()
         self.tp_size = self.tp_group.world_size
         self.tp_rank = self.tp_group.rank
-        self.hidden_size_per_attention_head = dist_utils.divide(
-            projection_size, num_heads
-        )
-        self.num_attention_heads_per_partition = dist_utils.divide(
-            num_heads, self.tp_size
-        )
+        self.hidden_size_per_attention_head = dist_utils.divide(projection_size, num_heads)
+        self.num_attention_heads_per_partition = dist_utils.divide(num_heads, self.tp_size)
 
-        self.qkv = ColumnParallelLinear(
-            input_size=embed_dim, output_size=3 * projection_size
-        )
+        self.qkv = ColumnParallelLinear(input_size=embed_dim, output_size=3 * projection_size)
         self.proj = RowParallelLinear(input_size=projection_size, output_size=embed_dim)
 
     def split_qkv(self, qkv: torch.Tensor) -> tuple[torch.Tensor, ...]:
@@ -221,9 +196,7 @@ class Qwen2VisionAttention(nn.Module):
 
         # 3 * [s, b, head * head_dim]
         if self.tp_size > 1:
-            splitter = partial(
-                dist_utils.split_tensor_along_last_dim, num_partitions=self.tp_size
-            )
+            splitter = partial(dist_utils.split_tensor_along_last_dim, num_partitions=self.tp_size)
             q = splitter(q)[self.tp_rank]
             k = splitter(k)[self.tp_rank]
             v = splitter(v)[self.tp_rank]
@@ -244,7 +217,6 @@ class Qwen2VisionAttention(nn.Module):
         cu_seqlens: torch.Tensor,
         rotary_pos_emb: torch.Tensor,
     ) -> torch.Tensor:
-
         # [s, b, c] --> [s, b, 3 * head * head_dim]
         x, _ = self.qkv(x)
 
@@ -280,7 +252,6 @@ class Qwen2VisionAttention(nn.Module):
 
 
 class Qwen2VisionBlock(nn.Module):
-
     def __init__(
         self,
         dim: int,
@@ -303,18 +274,13 @@ class Qwen2VisionBlock(nn.Module):
         )
         self.mlp = Qwen2VisionMLP(dim, mlp_hidden_dim, act_layer=act_layer)
 
-    def forward(
-        self, x: torch.Tensor, cu_seqlens: torch.Tensor, rotary_pos_emb: torch.Tensor
-    ) -> torch.Tensor:
-        x = x + self.attn(
-            self.norm1(x), cu_seqlens=cu_seqlens, rotary_pos_emb=rotary_pos_emb
-        )
+    def forward(self, x: torch.Tensor, cu_seqlens: torch.Tensor, rotary_pos_emb: torch.Tensor) -> torch.Tensor:
+        x = x + self.attn(self.norm1(x), cu_seqlens=cu_seqlens, rotary_pos_emb=rotary_pos_emb)
         x = x + self.mlp(self.norm2(x))
         return x
 
 
 class Qwen2VisionTransformer(EricModel):
-
     def __init__(
         self,
         config: Qwen2VLConfig,
@@ -427,19 +393,11 @@ class Qwen2VisionTransformer(EricModel):
         # Batch
         match modality:
             case Modality.IMAGE:
-                pixel_values = torch.cat(batch["pixel_values"], dim=0).to(
-                    device=self.device, dtype=self.dtype
-                )
-                grid_thw = torch.cat(batch["image_grid_thw"], dim=0).to(
-                    device=self.device
-                )
+                pixel_values = torch.cat(batch["pixel_values"], dim=0).to(device=self.device, dtype=self.dtype)
+                grid_thw = torch.cat(batch["image_grid_thw"], dim=0).to(device=self.device)
             case Modality.VIDEO:
-                pixel_values = torch.cat(batch["pixel_values_videos"], dim=0).to(
-                    device=self.device, dtype=self.dtype
-                )
-                grid_thw = torch.cat(batch["video_grid_thw"], dim=0).to(
-                    device=self.device
-                )
+                pixel_values = torch.cat(batch["pixel_values_videos"], dim=0).to(device=self.device, dtype=self.dtype)
+                grid_thw = torch.cat(batch["video_grid_thw"], dim=0).to(device=self.device)
             case _:
                 raise ValueError(f"Unsupported modality: {modality}.")
 
@@ -450,9 +408,9 @@ class Qwen2VisionTransformer(EricModel):
         rotary_pos_emb = self.rot_pos_emb(grid_thw)
 
         # compute cu_seqlens
-        cu_seqlens = torch.repeat_interleave(
-            grid_thw[:, 1] * grid_thw[:, 2], grid_thw[:, 0]
-        ).cumsum(dim=0, dtype=torch.int32)
+        cu_seqlens = torch.repeat_interleave(grid_thw[:, 1] * grid_thw[:, 2], grid_thw[:, 0]).cumsum(
+            dim=0, dtype=torch.int32
+        )
         cu_seqlens = F.pad(cu_seqlens, (1, 0), "constant", 0)
 
         # transformers
@@ -464,9 +422,7 @@ class Qwen2VisionTransformer(EricModel):
         x = self.merger(x)
 
         # Unbatch
-        seqlens = (grid_thw[:, 0] * grid_thw[:, 1] * grid_thw[:, 2]).squeeze(0) // (
-            self.spatial_merge_size**2
-        )
+        seqlens = (grid_thw[:, 0] * grid_thw[:, 1] * grid_thw[:, 2]).squeeze(0) // (self.spatial_merge_size**2)
         result = x.squeeze(0).split(seqlens.tolist(), dim=0)
 
         return result
@@ -494,8 +450,6 @@ class ModalityProcessor(BaseModalityProcessor):
 
         def processor(video: npt.NDArray) -> dict[str, npt.NDArray]:
             """Invoke the HF processor and convert to dict."""
-            return self.hf_processor(
-                images=None, videos=[video], return_tensors="np"
-            ).data
+            return self.hf_processor(images=None, videos=[video], return_tensors="np").data
 
         return processor

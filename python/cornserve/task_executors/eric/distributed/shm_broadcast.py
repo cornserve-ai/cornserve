@@ -24,9 +24,7 @@ logger = get_logger(__name__)
 # We prefer to use os.sched_yield as it results in tighter polling loops,
 # measured to be around 3e-7 seconds. However on earlier versions of Python
 # os.sched_yield() does not release the GIL, so we fall back to time.sleep(0)
-USE_SCHED_YIELD = (sys.version_info[:3] >= (3, 11, 1)) or (
-    sys.version_info[:2] == (3, 10) and sys.version_info[2] >= 8
-)
+USE_SCHED_YIELD = (sys.version_info[:3] >= (3, 11, 1)) or (sys.version_info[:2] == (3, 10) and sys.version_info[2] >= 8)
 
 
 def sched_yield():
@@ -107,22 +105,16 @@ class ShmRingBuffer:
         self.metadata_size = 1 + n_reader
         self.max_chunk_bytes = max_chunk_bytes
         self.max_chunks = max_chunks
-        self.total_bytes_of_buffer = (
-            self.max_chunk_bytes + self.metadata_size
-        ) * self.max_chunks
+        self.total_bytes_of_buffer = (self.max_chunk_bytes + self.metadata_size) * self.max_chunks
         self.data_offset = 0
         self.metadata_offset = self.max_chunk_bytes * self.max_chunks
 
         if name is None:
             # we are creating a buffer
             self.is_creator = True
-            self.shared_memory = shared_memory.SharedMemory(
-                create=True, size=self.total_bytes_of_buffer
-            )
+            self.shared_memory = shared_memory.SharedMemory(create=True, size=self.total_bytes_of_buffer)
             # initialize the metadata section to 0
-            with memoryview(
-                self.shared_memory.buf[self.metadata_offset :]
-            ) as metadata_buffer:
+            with memoryview(self.shared_memory.buf[self.metadata_offset :]) as metadata_buffer:
                 torch.frombuffer(metadata_buffer, dtype=torch.uint8).fill_(0)
         else:
             # we are opening an existing buffer
@@ -331,10 +323,7 @@ class MessageQueue:
                     sched_yield()
 
                     # if we wait for a long time, log a message
-                    if (
-                        time.monotonic() - start_time
-                        > RINGBUFFER_FULL_WARNING_INTERVAL * n_warning
-                    ):
+                    if time.monotonic() - start_time > RINGBUFFER_FULL_WARNING_INTERVAL * n_warning:
                         logger.debug(
                             "No available block found in %s second. ",
                             RINGBUFFER_FULL_WARNING_INTERVAL,
@@ -392,10 +381,7 @@ class MessageQueue:
                     sched_yield()
 
                     # if we wait for a long time, log a message
-                    if (
-                        time.monotonic() - start_time
-                        > RINGBUFFER_FULL_WARNING_INTERVAL * n_warning
-                    ):
+                    if time.monotonic() - start_time > RINGBUFFER_FULL_WARNING_INTERVAL * n_warning:
                         logger.debug(
                             "No available block found in %s second. ",
                             RINGBUFFER_FULL_WARNING_INTERVAL,

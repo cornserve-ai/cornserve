@@ -1,7 +1,7 @@
 """The registry holds model-specific information."""
 
 import enum
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from cornserve.task_executors.eric.schema import Modality
 
@@ -11,7 +11,14 @@ class WeightInfo:
     """Model info for a modality."""
 
     # List of model weight name prefixes to load.
-    prefixes: list[str]
+    # Keys that start with any of these prefixes are downloaded, and they
+    # will be included in the state dict loaded into the model.
+    required_prefixes: list[str]
+
+    # List of model weight name prefixes to ignore from the state dict.
+    # Generally, you will add short prefixes to `required_prefixes` and
+    # explicitly ignore specific longer submodules that we do not use.
+    ignored_prefixes: list[str] = field(default_factory=list)
 
     # Whether or not to strip the prefixes from weight names before
     # calling `load_state_dict`.
@@ -72,7 +79,7 @@ MODEL_REGISTRY: dict[str, RegistryEntry] = {
         class_name="Qwen2VisionTransformer",
         vit_resolution_type=ViTResolutionType.DYNAMIC,
         weight=WeightInfo(
-            prefixes=["visual."],
+            required_prefixes=["visual."],
             strip_prefixes=True,
         ),
         modality={
@@ -82,10 +89,11 @@ MODEL_REGISTRY: dict[str, RegistryEntry] = {
     ),
     "llava_onevision": RegistryEntry(
         module="llava_onevision",
-        class_name="LlavaOneVisionTransformer",
+        class_name="LlavaOneVisionEncoder",
         vit_resolution_type=ViTResolutionType.FIXED,
         weight=WeightInfo(
-            prefixes=["vision_tower.", "multi_modal_projector.", "image_newline."],
+            required_prefixes=["vision_tower.", "multi_modal_projector.", "image_newline"],
+            ignored_prefixes=["vision_tower.vision_model.post_layernorm"],
             strip_prefixes=False,
         ),
         modality={

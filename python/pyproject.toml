@@ -36,7 +36,7 @@ eric = [
   "flash-attn",
   "xformers",
 ]
-dev = ["grpcio-tools", "black", "pyright", "ruff", "pytest", "expecttest", "cornserve[sidecar,eric]"]
+dev = ["grpcio-tools", "pyright", "ruff", "pytest", "expecttest", "cornserve[sidecar,eric]"]
 
 [tool.setuptools.dynamic]
 version = { attr = "cornserve.__version__" }

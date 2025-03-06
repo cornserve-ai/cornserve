@@ -14,9 +14,7 @@ class EricModel(nn.Module, ABC):
     """Base class for all models in Eric."""
 
     @abstractmethod
-    def forward(
-        self, modality: Modality, batch: dict[str, list[torch.Tensor]]
-    ) -> list[torch.Tensor]:
+    def forward(self, modality: Modality, batch: dict[str, list[torch.Tensor]]) -> list[torch.Tensor]:
         """Forward pass for the model.
 
         Args:

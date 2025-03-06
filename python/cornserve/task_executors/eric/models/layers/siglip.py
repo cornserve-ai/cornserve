@@ -16,7 +16,6 @@ from cornserve.task_executors.eric.models.layers.linear import (
 
 
 class SiglipVisionEmbeddings(nn.Module):
-
     def __init__(self, config: SiglipVisionConfig) -> None:
         super().__init__()
         self.config = config
@@ -41,9 +40,7 @@ class SiglipVisionEmbeddings(nn.Module):
             persistent=False,
         )
 
-    def interpolate_pos_encoding(
-        self, embeddings: torch.Tensor, height: int, width: int
-    ) -> torch.Tensor:
+    def interpolate_pos_encoding(self, embeddings: torch.Tensor, height: int, width: int) -> torch.Tensor:
         """Interpolate learned position embeddings to support larger image sizes.
 
         This method is an adapted method for SigLIP (due to SigLIP not having
@@ -81,39 +78,26 @@ class SiglipVisionEmbeddings(nn.Module):
             mode="bicubic",
             align_corners=False,
         )
-        if (
-            int(height) != patch_pos_embed.shape[-2]
-            or int(width) != patch_pos_embed.shape[-1]
-        ):
-            raise ValueError(
-                "Width or height does not match with "
-                "the interpolated position embeddings"
-            )
+        if int(height) != patch_pos_embed.shape[-2] or int(width) != patch_pos_embed.shape[-1]:
+            raise ValueError("Width or height does not match with the interpolated position embeddings")
 
         patch_pos_embed = patch_pos_embed.permute(0, 2, 3, 1).view(1, -1, dim)
         return patch_pos_embed
 
-    def forward(
-        self, pixel_values: torch.Tensor, interpolate_pos_encoding: bool = False
-    ) -> torch.Tensor:
+    def forward(self, pixel_values: torch.Tensor, interpolate_pos_encoding: bool = False) -> torch.Tensor:
         _, _, height, width = pixel_values.shape
         target_dtype = self.patch_embedding.weight.dtype
-        patch_embeds = self.patch_embedding(
-            pixel_values.to(dtype=target_dtype)
-        )  # shape = [*, width, grid, grid]
+        patch_embeds = self.patch_embedding(pixel_values.to(dtype=target_dtype))  # shape = [*, width, grid, grid]
         embeddings = patch_embeds.flatten(2).transpose(1, 2)
 
         if interpolate_pos_encoding:
-            embeddings = embeddings + self.interpolate_pos_encoding(
-                embeddings, height, width
-            )
+            embeddings = embeddings + self.interpolate_pos_encoding(embeddings, height, width)
         else:
             embeddings = embeddings + self.position_embedding(self.position_ids)
         return embeddings
 
 
 class SiglipAttention(nn.Module):
-
     def __init__(self, config: SiglipVisionConfig) -> None:
         super().__init__()
 
@@ -161,7 +145,6 @@ class SiglipAttention(nn.Module):
 
 
 class SiglipMLP(nn.Module):
-
     def __init__(self, config: SiglipVisionConfig) -> None:
         super().__init__()
         self.config = config
@@ -177,7 +160,6 @@ class SiglipMLP(nn.Module):
 
 
 class SiglipEncoderLayer(nn.Module):
-
     def __init__(self, config: SiglipVisionConfig) -> None:
         super().__init__()
 
@@ -204,7 +186,6 @@ class SiglipEncoderLayer(nn.Module):
 
 
 class SiglipEncoder(nn.Module):
-
     def __init__(
         self,
         config: SiglipVisionConfig,
@@ -219,9 +200,7 @@ class SiglipEncoder(nn.Module):
         else:
             num_hidden_layers = num_hidden_layers_override
 
-        self.layers = nn.ModuleList(
-            [SiglipEncoderLayer(config) for _ in range(num_hidden_layers)]
-        )
+        self.layers = nn.ModuleList([SiglipEncoderLayer(config) for _ in range(num_hidden_layers)])
 
     def forward(
         self,
@@ -304,11 +283,7 @@ def compute_final_output(
     num_loaded_layers = len(encoder_outputs) - 1
     offset = max_possible_layers - num_loaded_layers
     hs_pool = [
-        (
-            encoder_outputs[layer_idx]
-            if layer_idx >= 0
-            else encoder_outputs[layer_idx + offset]
-        )
+        (encoder_outputs[layer_idx] if layer_idx >= 0 else encoder_outputs[layer_idx + offset])
         for layer_idx in feature_sample_layers
     ]
 
@@ -320,7 +295,6 @@ def compute_final_output(
 
 
 class SiglipVisionTransformer(nn.Module):
-
     def __init__(
         self,
         config: SiglipVisionConfig,
@@ -368,7 +342,6 @@ class SiglipVisionTransformer(nn.Module):
         interpolate_pos_encoding: bool = True,
         feature_sample_layers: list[int] | None = None,
     ) -> torch.Tensor:
-
         hidden_states = self.embeddings(
             pixel_values,
             interpolate_pos_encoding=interpolate_pos_encoding,
@@ -399,7 +372,6 @@ class SiglipVisionTransformer(nn.Module):
 
 
 class SiglipVisionModel(nn.Module):
-
     def __init__(
         self,
         config: SiglipVisionConfig,

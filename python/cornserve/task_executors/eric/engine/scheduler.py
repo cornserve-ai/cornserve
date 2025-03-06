@@ -153,9 +153,7 @@ class Scheduler:
         assert batch.request_ids, "Batch should not be empty"
         return batch
 
-    def process_batch_result(
-        self, request_ids: list[ID], data_ids: list[ID]
-    ) -> list[ID]:
+    def process_batch_result(self, request_ids: list[ID], data_ids: list[ID]) -> list[ID]:
         """Process the result of a completed batch.
 
         Returns:

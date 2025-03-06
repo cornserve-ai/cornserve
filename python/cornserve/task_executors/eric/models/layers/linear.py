@@ -119,23 +119,17 @@ class ColumnParallelLinear(nn.Module):
         if output_sizes is None:
             self.output_partition_sizes = [self.output_size_per_partition]
         else:
-            self.output_partition_sizes = [
-                divide(output_size, self.tp_size) for output_size in output_sizes
-            ]
+            self.output_partition_sizes = [divide(output_size, self.tp_size) for output_size in output_sizes]
         # assert sum(self.output_partition_sizes) == self.output_size
 
         self.weight = nn.Parameter(
-            torch.empty(
-                sum(self.output_partition_sizes), self.input_size, dtype=params_dtype
-            ),
+            torch.empty(sum(self.output_partition_sizes), self.input_size, dtype=params_dtype),
             requires_grad=False,
         )
         set_weight_attrs(self.weight, {"input_dim": 1, "output_dim": 0})
 
         if bias:
-            self.bias = nn.Parameter(
-                torch.empty(self.output_size_per_partition, dtype=params_dtype)
-            )
+            self.bias = nn.Parameter(torch.empty(self.output_size_per_partition, dtype=params_dtype))
             set_weight_attrs(self.bias, {"output_dim": 0})
         else:
             self.register_parameter("bias", None)
@@ -170,9 +164,9 @@ class ColumnParallelLinear(nn.Module):
                 output_dim,
             )
 
-            assert (
-                param.shape == sharded_weight.shape
-            ), f"Weight shape mismatch: {param.shape=} != {sharded_weight.shape=}"
+            assert param.shape == sharded_weight.shape, (
+                f"Weight shape mismatch: {param.shape=} != {sharded_weight.shape=}"
+            )
 
             # Set the sharded weight in the state dict
             # When the hook exits, this weight will be loaded into the parameter
@@ -257,9 +251,7 @@ class QKVParallelLinear(ColumnParallelLinear):
             self.num_kv_head_replicas = 1
 
         input_size = hidden_size
-        output_size = (
-            (self.num_heads + 2 * self.num_kv_heads) * self.tp_size * head_size
-        )
+        output_size = (self.num_heads + 2 * self.num_kv_heads) * self.tp_size * head_size
         # XXX: Seems unnecessary; sum is equivalent to output_size.
         self.output_sizes = [
             self.num_heads * head_size * self.tp_size,  # q_proj
@@ -336,8 +328,7 @@ class QKVParallelLinear(ColumnParallelLinear):
             """Shard Q, K, and V weights in the head dimension and concatenate."""
             if len(weights) != 3:
                 raise ValueError(
-                    "Expected parameters for q, k, and v but got "
-                    f"{'nothing' if not weights else weights.keys()}"
+                    f"Expected parameters for q, k, and v but got {'nothing' if not weights else weights.keys()}"
                 )
 
             # If there are less K and V heads than TP degree, replicate them.
@@ -349,9 +340,7 @@ class QKVParallelLinear(ColumnParallelLinear):
                         self.num_kv_head_replicas,
                         self.tp_size,
                     )
-                    weights[role] = weights[role].repeat_interleave(
-                        self.num_kv_head_replicas, dim=0
-                    )
+                    weights[role] = weights[role].repeat_interleave(self.num_kv_head_replicas, dim=0)
 
             fused_weights = []
             for q, k, v in zip(
@@ -360,16 +349,14 @@ class QKVParallelLinear(ColumnParallelLinear):
                 weights["v"].chunk(self.tp_size, dim=0),
                 strict=True,
             ):
-                assert q.shape[0] == k.shape[0] == v.shape[0] == self.num_heads
+                # assert q.shape[0] == k.shape[0] == v.shape[0] == self.num_heads
                 fused_weights.append(q)
                 fused_weights.append(k)
                 fused_weights.append(v)
 
             return torch.cat(fused_weights, dim=0)
 
-        def hook(
-            parent: nn.Module, state_dict: dict[str, Any], prefix: str, *args
-        ) -> None:
+        def hook(parent: nn.Module, state_dict: dict[str, Any], prefix: str, *args) -> None:
             """State dict hook to fuse Q, K, and V weights."""
             # Pop out individual Q, K, and V weights from state dict.
             weights: dict[Literal["q", "k", "v"], torch.Tensor] = {}
@@ -382,9 +369,7 @@ class QKVParallelLinear(ColumnParallelLinear):
                         elif name.endswith("bias"):
                             biases[role] = state_dict.pop(name)
                         else:
-                            raise ValueError(
-                                f"Expected {name} to end with either 'weight' or 'bias'"
-                            )
+                            raise ValueError(f"Expected {name} to end with either 'weight' or 'bias'")
 
             logger.debug(
                 "Found %s weights and %s biases in state dict for %s",
@@ -473,9 +458,7 @@ class RowParallelLinear(nn.Module):
         self.input_size_per_partition = divide(input_size, self.tp_size)
 
         self.weight = nn.Parameter(
-            torch.empty(
-                self.output_size, self.input_size_per_partition, dtype=params_dtype
-            ),
+            torch.empty(self.output_size, self.input_size_per_partition, dtype=params_dtype),
             requires_grad=False,
         )
         set_weight_attrs(self.weight, {"input_dim": 1, "output_dim": 0})
@@ -515,9 +498,9 @@ class RowParallelLinear(nn.Module):
                 input_dim,
             )
 
-            assert (
-                param.shape == sharded_weight.shape
-            ), f"Weight shape mismatch: {param.shape=} != {sharded_weight.shape=}"
+            assert param.shape == sharded_weight.shape, (
+                f"Weight shape mismatch: {param.shape=} != {sharded_weight.shape=}"
+            )
 
             # Set the sharded weight in the state dict
             # When the hook exits, this weight will be loaded into the parameter

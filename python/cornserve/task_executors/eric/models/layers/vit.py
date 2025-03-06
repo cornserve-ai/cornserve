@@ -19,9 +19,7 @@ def _get_num_hidden_layers(hf_config) -> int:
     # If we have multiple feature layers, initialize up to the deepest one
     elif isinstance(feature_layers, (list, tuple)):
         return max(_get_layer_index(idx, num_hidden_layers) for idx in feature_layers)
-    raise TypeError(
-        f"vision_layer_feature type: {type(feature_layers)}" " is not supported"
-    )
+    raise TypeError(f"vision_layer_feature type: {type(feature_layers)} is not supported")
 
 
 def _get_layer_index(feature_layer_index: int, num_hidden_layers: int) -> int:
