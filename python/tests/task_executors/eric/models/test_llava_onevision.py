@@ -12,7 +12,7 @@ from cornserve.task_executors.eric.schema import Status
 from cornserve.task_executors.eric.executor.executor import ModelExecutor
 from cornserve.task_executors.eric.models.registry import MODEL_REGISTRY
 
-from ..utils import ModalityData, assert_same_weights, batch_builder, NUM_GPUS
+from ..utils import ModalityData, assert_same_weights, batch_builder, NUM_GPUS, DUMP_DIR
 
 model_id = "llava-hf/llava-onevision-qwen2-7b-ov-chat-hf"
 dump_prefix = os.getenv("CORNSERVE_TEST_DUMP_TENSOR_PREFIX", None)
@@ -65,9 +65,7 @@ def test_image_inference(test_images: list[ModalityData], tp_size: int) -> None:
         sender_sidecar_ranks=list(range(tp_size)),
     )
 
-    result = executor.execute_model(
-        batch=batch_builder(model_id, "onevision", test_images),
-    )
+    result = executor.execute_model(batch=batch_builder(model_id, "onevision", test_images))
 
     assert result.status == Status.SUCCESS
 
