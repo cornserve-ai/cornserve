@@ -36,7 +36,7 @@ eric = [
   "flash-attn",
   "xformers",
 ]
-dev = ["grpcio-tools", "pyright", "ruff", "pytest", "expecttest", "cornserve[sidecar,eric]"]
+dev = ["grpcio-tools", "pyright", "ruff", "pytest", "pytest-asyncio", "cornserve[sidecar,eric]"]
 
 [tool.setuptools.dynamic]
 version = { attr = "cornserve.__version__" }
@@ -76,3 +76,7 @@ exclude = [
   "**/*_pb2_grpc.py",
   "cornserve/task_executors/eric/models/*.py",
 ]
+
+[tool.pytest.ini_options]
+asyncio_mode = "strict"
+asyncio_default_fixture_loop_scope = "function"

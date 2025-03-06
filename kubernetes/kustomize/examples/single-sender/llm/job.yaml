@@ -1,16 +1,16 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: sync-double-llm3
+  name: single-llm
   namespace: cornserve
   labels:
-    app: sync-double-llm3
+    app: single-llm
 spec:
   backoffLimit: 0
   template:
     metadata:
       labels:
-        app: sync-double-llm3
+        app: single-llm
     spec:
       affinity:
         podAffinity:
@@ -22,16 +22,21 @@ spec:
       runtimeClassName: nvidia
       restartPolicy: Never
       containers:
-      - name: sync-double-llm3
+      - name: single-llm
         image: cornserve/example:latest
         imagePullPolicy: Always
+        resources:
+          limits:
+            nvidia.com/gpu: 1
         env:
           - name: RANK
             value: "3"
-          - name: NUM_SHARDS
-            value: "2"
           - name: NAME
             value: "receiver"
+          - name: N
+            value: "10"
+          - name: NVIDIA_VISIBLE_DEVICES
+            value: "3"
         volumeMounts:
           - name: shm-volume
             mountPath: /dev/shm

@@ -6,6 +6,6 @@ WORKDIR /workspace/cornserve/python
 RUN pip install -e .
 
 # default value
-ENV NAME="async_receiver"
+ENV NAME="receiver"
 
-CMD sh -c "python /workspace/cornserve/examples/${NAME}.py"
+CMD ["sh", "-c", "python /workspace/cornserve/examples/${NAME}.py"]

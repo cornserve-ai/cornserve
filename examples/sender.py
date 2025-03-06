@@ -1,71 +1,66 @@
-import torch
-from cornserve.services.sidecar.api import TensorSidecarSender
-from cornserve.logging import get_logger
-from cornserve.services.utils import tensor_hash
+""" An example sender that instatiates a TensorSidecarSender. """
 import os
 import random
 import time
+import hashlib
+
+from cornserve.logging import get_logger
+from cornserve.services.sidecar.api import TensorSidecarSender
+from cornserve.services.utils import tensor_hash
+import torch
 
 logger = get_logger(__name__)
+torch.manual_seed(0)
+random.seed(0)
 
+def fake_uuid(i: int) -> str:
+    """Generate a fake UUID for testing purposes."""
+    return str(i) * 32 + hashlib.sha256(f'{i}'.encode('utf-8')).hexdigest()[:32]
 
 def main() -> None:
-    RANK = int(os.environ.get("RANK", 0))
-    SHARD_RANK = int(os.environ.get("SHARD_RANK", 0))
-    NUM_SHARDS = int(os.environ.get("NUM_SHARDS", 1))
+    TP_SIZE = int(os.environ.get("TP_SIZE", 1))
+    NUM_CHUNKS = int(os.environ.get("NUM_CHUNKS", 1))
+    DST_RANK = int(os.environ.get("DST_RANK", 3))
+    n = int(os.environ.get("N", 1))
 
-    DST_RANK = 3
-
+    if NUM_CHUNKS == 1:
+        slot_shape = (1176,)
+        num_tokens_range = (100,5000)
+    else:
+        slot_shape = (4096,)
+        num_tokens_range = (576,576)
     dtype = torch.bfloat16
-    tensor_shape = (4 // NUM_SHARDS, 1601, 4096)
-    num_chunks = 4 // NUM_SHARDS
-    chunk_shape = (1601, 4096)
 
-    sidecar = TensorSidecarSender(
-        sidecar_rank=RANK,
-        chunk_shape=chunk_shape,
-        dtype=dtype,
-        shard_rank=SHARD_RANK,
-        num_shards=NUM_SHARDS,
-    )
-    logger.info(f"Connected to sidecar-{RANK}")
+    sidecar_senders = []
+    devices = []
+    for i in range(TP_SIZE):
+        sidecar_senders.append(TensorSidecarSender(
+            sidecar_rank=i,
+            slot_shape=slot_shape,
+            dtype=dtype,
+            shard_rank=i,
+            num_shards=TP_SIZE,
+        ))
+        devices.append(torch.device(f"cuda:{i}"))
+        logger.info("TP worker %d: Connected to sidecar-%d", i, i)
 
-    device = torch.device(f"cuda:{RANK}")
-    logger.info(f"Starting encoder server using device {device} on sidecar_rank {RANK}")
-
-    id = 0
-    # single tensor
-    for _ in range(15):
-        if NUM_SHARDS == 1:
-            dummy_tensor = torch.rand(tensor_shape, device=device, dtype=dtype)
-        else:
-            num_elements = tensor_shape[0] * tensor_shape[1] * tensor_shape[2]
-            if SHARD_RANK == 0:
-                dummy_tensor = torch.arange(
-                    1, num_elements + 1, device=device, dtype=dtype
-                ).reshape(tensor_shape)
-            else:
-                dummy_tensor = torch.arange(
-                    1 + num_elements, 2 * num_elements + 1, device=device, dtype=dtype
-                ).reshape(tensor_shape)
-
-        logger.info(
-            f"Sending tensor with req id {id} with hash {tensor_hash(dummy_tensor)} of shape {dummy_tensor.shape} with sum {dummy_tensor.sum()}"
-        )
-        for i in range(num_chunks):
-            chunk = dummy_tensor[i]
-            logger.info(f"Sending chunk {i}")
-            sidecar.send(
-                chunk=chunk,
-                req_id=id,
-                chunk_id=i,
-                num_chunks=num_chunks,
-                dst_sidecar_rank=DST_RANK,
-            )
-
-        time.sleep(random.randint(1, 10))
-        id += 1
-    sidecar.unregister()
+    for i in range(n):
+        id = fake_uuid(i)
+        for c in range(NUM_CHUNKS):
+            data_shape = (random.randint(*num_tokens_range),*slot_shape)
+            data = torch.rand(data_shape, dtype=dtype)
+            for j, sidecar_sender in enumerate(sidecar_senders):
+                device = devices[j]
+                data = data.to(device)
+                logger.info("TP worker %d: Sending chunk %d of request %s with hash %s",j, c, id, tensor_hash(data))
+                sidecar_sender.send(
+                    chunk=data,
+                    id=id,
+                    dst_sidecar_ranks=[DST_RANK],
+                    chunk_id=c,
+                    num_chunks=NUM_CHUNKS,
+                )
+    time.sleep(30)
 
 
 if __name__ == "__main__":

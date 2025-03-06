@@ -15,21 +15,21 @@ service CommSidecar {
   rpc MarkDone(MarkDoneRequest) returns (MarkDoneResponse);
   rpc RegisterSender(RegisterSenderRequest) returns (RegisterResponse);
   rpc RegisterReceiver(RegisterReceiverRequest) returns (RegisterResponse);
-  rpc Unregister(UnregisterRequest) returns (UnregisterResponse);
 
   rpc PrepareReceive(PrepareReceiveRequest) returns (PrepareReceiveResponse);
   // TODO: add unregister
 }
 
 message SendRequest {
-  int32 chunk_slot = 1;
-  bytes ipc_handle = 2;
-  int32 request_id = 3;
-  int32 chunk_id = 4;
-  int32 num_chunks = 5;
-  int32 shard_rank = 6;
-  int32 num_shards = 7;
-  int32 dst_sidecar_rank = 8;
+  string id = 1;
+  int32 size = 2;
+  int32 slot = 3;
+  bytes ipc_handle = 4;
+  int32 chunk_id = 5;
+  int32 num_chunks = 6;
+  repeated int32 dst_ranks = 7;
+  int32 chunk_size = 8;
+  int32 shard_offset = 9;
 }
 
 message SendResponse {
@@ -38,16 +38,17 @@ message SendResponse {
 
 message ReceiveRequest {
   // -1 or error
-  int32 request_id = 1;
+  string id = 1;
 }
 
 message ReceiveResponse {
   // -1 or error
-  int32 slot = 1;
+  int32 offset = 1;
+  int32 size = 2;
 }
 
 message MarkDoneRequest {
-  int32 request_id = 1;
+  string id = 1;
 }
 
 message MarkDoneResponse {
@@ -55,7 +56,7 @@ message MarkDoneResponse {
 }
 
 message RegisterSenderRequest {
-  repeated int32 chunk_shape = 1;
+  int32 slot_size = 1;
   string dtype = 2;
   int32 shard_rank = 3;
   int32 num_shards = 4;
@@ -63,31 +64,29 @@ message RegisterSenderRequest {
 }
 
 message RegisterReceiverRequest {
-  repeated int32 shape = 1;
+  int32 slot_size = 1;
   string dtype = 2;
+  int32 layout = 3;
 }
 
 message RegisterResponse {
   // returns -1 on err
-  int32 gpu_rank = 1;
-}
-
-message UnregisterRequest {
-}
-
-message UnregisterResponse {
-  common.Status status = 1;
+  int32 local_rank = 1;
+  int32 shm_size = 2;
 }
 
 message PrepareReceiveRequest {
-  int32 request_id = 1;
-  int32 chunk_id = 2;
-  int32 num_chunks = 3;
-  string dtype = 4;
-  int32 shard_rank = 5;
-  int32 num_shards = 6;
-  int32 src_sidecar_rank = 7;
-  int32 layout = 8;
+  string id = 1;
+  int32 shard_size = 2;
+  string dtype = 3;
+  int32 shard_rank = 4;
+  int32 num_shards = 5;
+  int32 chunk_size = 6;
+  int32 num_chunks = 7;
+  int32 chunk_id = 9;
+  int32 src_rank = 10;
+  int32 shard_offset = 11;
+  int32 layout = 12;
 }
 
 message PrepareReceiveResponse {

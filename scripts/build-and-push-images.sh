@@ -12,10 +12,10 @@ bash scripts/generate_pb.sh
 
 NAMESPACE="cornserve"
 
-# If a service name is provided as the first argument, use it.
+# If service names are provided as arguments, use them.
 # Otherwise, recursively find all Dockerfiles in the "docker" directory.
 if [ "$#" -ge 1 ]; then
-    BUILD_LIST=("$1")
+    BUILD_LIST=("$@")
 else
     echo "Building all services found recursively in the docker directory."
     BUILD_LIST=()
