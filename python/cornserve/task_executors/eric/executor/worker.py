@@ -273,3 +273,10 @@ class Worker:
             #     num_chunks=batch.num_chunks[i],
             #     dst_sidecar_ranks=batch.receiver_ranks[i],
             # )
+
+        # Dump tensors for debugging if requested
+        if batch._dump_prefix is not None and self.tp_rank == 0:
+            torch.save(
+                [o.cpu() for o in output],
+                batch._dump_prefix + f"-tp{self.tp_size}.pt",
+            )

@@ -349,7 +349,7 @@ class QKVParallelLinear(ColumnParallelLinear):
                 weights["v"].chunk(self.tp_size, dim=0),
                 strict=True,
             ):
-                # assert q.shape[0] == k.shape[0] == v.shape[0] == self.num_heads
+                assert q.shape[0] == k.shape[0] == v.shape[0] == self.num_heads * self.head_size
                 fused_weights.append(q)
                 fused_weights.append(k)
                 fused_weights.append(v)

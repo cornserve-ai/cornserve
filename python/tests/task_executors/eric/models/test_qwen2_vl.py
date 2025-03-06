@@ -1,3 +1,5 @@
+"""Tests for the Qwen2-VL model's vision encoder."""
+
 import pytest
 import torch
 from transformers.models.qwen2_vl.modeling_qwen2_vl import Qwen2VLForConditionalGeneration
@@ -39,7 +41,7 @@ def test_image_inference(test_images: list[ModalityData], tp_size: int) -> None:
         sender_sidecar_ranks=list(range(tp_size)),
     )
 
-    result = executor.execute_model(batch=batch_builder(model_id, test_images))
+    result = executor.execute_model(batch=batch_builder(model_id, "qwen2", test_images))
 
     assert result.status == Status.SUCCESS
 
@@ -59,7 +61,7 @@ def test_video_inference(test_videos: list[ModalityData], tp_size: int) -> None:
         sender_sidecar_ranks=list(range(tp_size)),
     )
 
-    result = executor.execute_model(batch=batch_builder(model_id, test_videos[:2]))
+    result = executor.execute_model(batch=batch_builder(model_id, "qwen2", test_videos[:2]))
 
     assert result.status == Status.SUCCESS
 

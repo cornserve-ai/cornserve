@@ -1,4 +1,6 @@
-from functools import partial
+"""Tests for the LLaVA-OneVision model's vision encoder."""
+
+import os
 
 import pytest
 import torch
@@ -13,9 +15,9 @@ from cornserve.task_executors.eric.models.registry import MODEL_REGISTRY
 from ..utils import ModalityData, assert_same_weights, batch_builder, NUM_GPUS
 
 model_id = "llava-hf/llava-onevision-qwen2-7b-ov-chat-hf"
+dump_prefix = os.getenv("CORNSERVE_TEST_DUMP_TENSOR_PREFIX", None)
 
 
-@pytest.mark.filterwarnings("ignore::DeprecationWarning")
 def test_weight_loading() -> None:
     """Check if weights are loaded correctly."""
     # Hugging Face model output
@@ -63,7 +65,9 @@ def test_image_inference(test_images: list[ModalityData], tp_size: int) -> None:
         sender_sidecar_ranks=list(range(tp_size)),
     )
 
-    result = executor.execute_model(batch=batch_builder(model_id, test_images))
+    result = executor.execute_model(
+        batch=batch_builder(model_id, "onevision", test_images),
+    )
 
     assert result.status == Status.SUCCESS
 
@@ -83,8 +87,11 @@ def test_video_inference(test_videos: list[ModalityData], tp_size: int) -> None:
         sender_sidecar_ranks=list(range(tp_size)),
     )
 
-    result = executor.execute_model(batch=batch_builder(model_id, test_videos[:2]))
+    result = executor.execute_model(batch=batch_builder(model_id, "onevision", test_videos[:2]))
 
     assert result.status == Status.SUCCESS
 
     executor.shutdown()
+
+
+pytestmark = pytest.mark.filterwarnings("ignore::DeprecationWarning")

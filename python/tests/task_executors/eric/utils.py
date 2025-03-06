@@ -1,5 +1,6 @@
 """Testing utilities for Eric."""
 
+import os
 import uuid
 import subprocess
 from typing import Callable
@@ -14,6 +15,7 @@ from cornserve.task_executors.eric.config import ImageDataConfig, ModalityConfig
 from cornserve.task_executors.eric.schema import Batch, Modality
 from cornserve.task_executors.eric.router.processor import Processor
 
+DUMP_DIR = os.getenv("CORNSERVE_TEST_DUMP_TENSOR_DIR", None)
 
 try:
     NUM_GPUS = int(
@@ -94,18 +96,26 @@ def assert_same_weights(
         check_param(name, param, hf_params)
 
 
-def batch_builder(model_id: str, images: list[ModalityData]) -> Batch:
+def batch_builder(model_id: str, nickname: str, data: list[ModalityData]) -> Batch:
     """Builds a Batch object to pass to ModelExecutor.execute_model."""
-    data = {
-        key: [torch.from_numpy(image.processed(model_id)[key]) for image in images]
-        for key in images[0].processed(model_id).keys()
+    modality = data[0].modality
+    assert all(item.modality == modality for item in data)
+
+    processed_data = {
+        key: [torch.from_numpy(item.processed(model_id)[key]) for item in data]
+        for key in data[0].processed(model_id).keys()
     }
-    return Batch(
-        modality=images[0].modality,
-        request_ids=[uuid.uuid4().hex for _ in images],
-        data_ids=[uuid.uuid4().hex for _ in images],
-        chunk_ids=[0 for _ in images],
-        num_chunks=[1 for _ in images],
-        receiver_ranks=[None for _ in images],
-        data=data,
+    batch = Batch(
+        modality=data[0].modality,
+        request_ids=[uuid.uuid4().hex for _ in data],
+        data_ids=[uuid.uuid4().hex for _ in data],
+        chunk_ids=[0 for _ in data],
+        num_chunks=[1 for _ in data],
+        receiver_ranks=[None for _ in data],
+        data=processed_data,
     )
+
+    if DUMP_DIR is not None:
+        batch._dump_prefix = f"{DUMP_DIR}/{nickname}-{modality.value}"
+
+    return batch

@@ -117,6 +117,7 @@ class Batch:
         data: Dictionary of data to be embedded. The keys are the
             tensor names as returned by the HF processor and the corresponding
             encoder model should be expecting these names.
+        _dump_prefix: Path to dump the batch data for debugging.
     """
 
     modality: Modality
@@ -126,6 +127,8 @@ class Batch:
     num_chunks: list[int] = field(default_factory=list)
     receiver_ranks: list[list[int] | None] = field(default_factory=list)
     data: dict[str, list[torch.Tensor]] = field(default_factory=dict)
+
+    _dump_prefix: str | None = None
 
     def __len__(self) -> int:
         """Return batch size."""

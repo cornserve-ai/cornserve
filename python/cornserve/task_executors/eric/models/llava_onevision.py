@@ -266,7 +266,7 @@ class LlavaOneVisionEncoder(EricModel):
         - `pixel_values`: The pixel values of the images.
             Each [num_tiles, 3, image_size (384), image_size (384)].
             The number of tiles can be different for each image.
-        - `image_sizes`: The height and width of the images. Each [1, 2].
+        - `image_sizes`: The height and width of the images. Each [2,].
 
         For videos, `batch` is expected to have the following keys:
         - `pixel_values_videos`: The pixel values of the images.
@@ -276,16 +276,11 @@ class LlavaOneVisionEncoder(EricModel):
         # Batch
         match modality:
             case Modality.IMAGE:
-                embeddings = self.get_image_embeddings(batch["pixel_values"], batch["image_sizes"])
+                return self.get_image_embeddings(batch["pixel_values"], batch["image_sizes"])
             case Modality.VIDEO:
-                embeddings = self.get_video_embeddings(batch["pixel_values_videos"])
+                return self.get_video_embeddings(batch["pixel_values_videos"])
             case _:
                 raise ValueError(f"Unsupported modality: {modality}.")
-
-        # Unbatch
-
-        return result
-
 
 class ModalityProcessor(BaseModalityProcessor):
     """Llava OneVision modality processor."""
@@ -304,7 +299,7 @@ class ModalityProcessor(BaseModalityProcessor):
             """Invoke the HF processor and convert to dict."""
             out = self.image_processor.preprocess(images=[image], return_tensors="np")
             # Batch size is going to be 1, so squeeze it out
-            return out.data.squeeze(0)
+            return {k: v.squeeze(0) for k, v in out.data.items()}
 
         return processor
 
@@ -315,6 +310,6 @@ class ModalityProcessor(BaseModalityProcessor):
             """Invoke the HF processor and convert to dict."""
             out = self.video_processor.preprocess(videos=[video], return_tensors="np")
             # Batch size is going to be 1, so squeeze it out
-            return out.data.squeeze(0)
+            return {k: v.squeeze(0) for k, v in out.data.items()}
 
         return processor
