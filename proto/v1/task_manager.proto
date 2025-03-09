@@ -5,12 +5,12 @@ package cornserve.task_manager;
 import "common.proto";
 
 service TaskManager {
-  // Register a new task and profile it
+  // Configure the task manager to handle a task
   rpc RegisterNewTask(RegisterTaskRequest) returns (RegisterTaskResponse);
   
   // Load management
-  rpc ReconcileTargetLoad(ReconcileTargetLoadRequest) returns (ReconcileTargetLoadResponse);
   rpc GetTaskProfile(GetTaskProfileRequest) returns (GetTaskProfileResponse);
+  rpc ReconcileTargetLoad(ReconcileTargetLoadRequest) returns (ReconcileTargetLoadResponse);
   
   // Request routing
   rpc Submit(SubmitRequest) returns (SubmitResponse);

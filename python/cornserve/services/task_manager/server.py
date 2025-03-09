@@ -34,9 +34,7 @@ class TaskManagerServicer(task_manager_pb2_grpc.TaskManagerServicer):
 
         self.id = request.task_manager_id
         self.worker_stubs: dict[str, worker_pb2_grpc.WorkerStub] = {
-            worker_id: worker_pb2_grpc.WorkerStub(
-                grpc.aio.insecure_channel(worker_address)
-            )
+            worker_id: worker_pb2_grpc.WorkerStub(grpc.aio.insecure_channel(worker_address))
             for worker_id, worker_address in request.workers.items()
         }
 
@@ -53,21 +51,15 @@ class TaskManagerServicer(task_manager_pb2_grpc.TaskManagerServicer):
         resp = task_manager_pb2.HealthcheckResponse()
         resp.status = common_pb2.Status.STATUS_OK
         for worker_id, worker_stub in self.worker_stubs.items():
-            worker_resp: worker_pb2.HealthcheckResponse = worker_stub.Healthcheck(
-                worker_pb2.HealthcheckRequest()
-            )
-            worker_status = task_manager_pb2.WorkerStatus(
-                worker_id=worker_id, status=worker_resp.status
-            )
+            worker_resp: worker_pb2.HealthcheckResponse = worker_stub.Healthcheck(worker_pb2.HealthcheckRequest())
+            worker_status = task_manager_pb2.WorkerStatus(worker_id=worker_id, status=worker_resp.status)
             resp.worker_statuses[worker_id] = worker_status
         return resp
 
 
 async def serve(ip: str = "[::]", port: int = 50051) -> None:
     server = grpc.aio.server()
-    task_manager_pb2_grpc.add_TaskManagerServicer_to_server(
-        TaskManagerServicer(), server
-    )
+    task_manager_pb2_grpc.add_TaskManagerServicer_to_server(TaskManagerServicer(), server)
     listen_addr = f"{ip}:{port}"
     server.add_insecure_port(listen_addr)
     logger.info("Starting server on %s", listen_addr)

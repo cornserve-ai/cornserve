@@ -5,44 +5,53 @@ package cornserve.resource_manager;
 import "common.proto";
 
 service ResourceManager {
-  // Spawn a new task manager
-  rpc DeployTaskManager(DeployTaskManagerRequest) returns (DeployTaskManagerResponse);
+  // Ensure a task manager exists with given configuration
+  rpc ReconcileNewApp(ReconcileNewAppRequest) returns (ReconcileNewAppResponse);
 
   // Kill a task manager
-  rpc KillTaskManager(DeployTaskManagerRequest) returns (DeployTaskManagerResponse);
+  rpc ReconcileRemovedApp(ReconcileRemovedAppRequest) returns (ReconcileRemovedAppResponse);
 
   // Health checking
   rpc Healthcheck(HealthcheckRequest) returns (HealthcheckResponse);
 }
 
-// Spawn a new task manager
-message DeployTaskManagerRequest {
-  string task_manager_id = 1;
-  common.TaskType type = 2;
-  map<string, string> config = 3;  // TODO: Add some structure
+message TaskManagerConfig {
+  // Type of task
+  common.TaskType type = 1;
+
+  // JSON-encoded config
+  string config = 2;
 }
 
-message DeployTaskManagerResponse {
+message ReconcileNewAppRequest {
+  // ID of the app that is being registered
+  string app_id = 1;
+
+  // Task manager configs
+  repeated TaskManagerConfig task_manager_configs = 2;
+}
+
+message ReconcileNewAppResponse {
   common.Status status = 1;
 }
 
-// Kill a task manager
-message KillTaskManagerRequest {
-  string task_manager_id = 1;
+message ReconcileRemovedAppRequest {
+  string app_id = 1;
 }
 
-message KillTaskManagerResponse {
+message ReconcileRemovedAppResponse {
   common.Status status = 1;
 }
 
 // Health checking
 message TaskManagerStatus {
-  common.Status status = 1;
+  string task_manager_id = 1;
+  common.Status status = 2;
 }
 
 message HealthcheckRequest {}
 
 message HealthcheckResponse {
   common.Status status = 1;
-  map<string, TaskManagerStatus> task_manager_statuses = 2;
+  repeated TaskManagerStatus task_manager_statuses = 2;
 }

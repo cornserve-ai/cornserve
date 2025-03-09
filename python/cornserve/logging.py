@@ -4,11 +4,11 @@ import os
 import sys
 import logging
 
-from typing import Any, MutableMapping, Optional
+from typing import Any, MutableMapping
 
 
 def get_logger(
-    name: str, adapters: Optional[list[type[logging.LoggerAdapter]]] = None
+    name: str, adapters: list[type[logging.LoggerAdapter]] | None = None
 ) -> logging.Logger | logging.LoggerAdapter:
     """Get a logger with the given name with some formatting configs."""
     # No need to reconfigure the logger if it was already created
@@ -30,7 +30,7 @@ def get_logger(
 class SidcarAdapter(logging.LoggerAdapter):
     """Adapter that prepends 'Sidecar {rank}' to all messages."""
 
-    def __init__(self, logger: logging.Logger):
+    def __init__(self, logger: logging.Logger) -> None:
         """Initialize the adapter with the given logger."""
         super().__init__(logger, {})
         if pod_name := os.environ.get("SIDECAR_POD_NAME"):

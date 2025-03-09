@@ -14,7 +14,7 @@ TEST_IMAGE_URLS = [
 @pytest.fixture(scope="session")
 def test_images() -> list[ModalityData]:
     """Fixture to provide test images."""
-    return [ModalityData(url=url, modality=Modality.IMAGE)for url in TEST_IMAGE_URLS]
+    return [ModalityData(url=url, modality=Modality.IMAGE) for url in TEST_IMAGE_URLS]
 
 
 TEST_VIDEO_URLS = [

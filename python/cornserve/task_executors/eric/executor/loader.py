@@ -116,7 +116,7 @@ def load_model(
     incompatible = model.load_state_dict(weight_dict, strict=False)
     if incompatible.missing_keys:
         raise ValueError(f"Missing weights in the model: {incompatible.missing_keys}")
-    if (keys := incompatible.unexpected_keys):
+    if keys := incompatible.unexpected_keys:
         # Some keys in the state dict are explicitly ignored since we dont' use them.
         actually_unexpected_keys = []
         for key in keys:

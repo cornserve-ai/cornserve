@@ -19,8 +19,7 @@ DUMP_DIR = os.getenv("CORNSERVE_TEST_DUMP_TENSOR_DIR", None)
 
 try:
     NUM_GPUS = int(
-        subprocess
-        .check_output(["nvidia-smi", "--query-gpu=count", "--format=csv,noheader,nounits", "-i", "0"])
+        subprocess.check_output(["nvidia-smi", "--query-gpu=count", "--format=csv,noheader,nounits", "-i", "0"])
         .strip()
         .decode()
     )
@@ -65,6 +64,7 @@ def assert_same_weights(
             called to check weight equivalence. The function should take three args:
             our_name (str), our_param (Tensor), and hf_params (dict[str, Tensor]).
     """
+
     def filter_weight_dict(weight_dict: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
         """Filter the weight dictionary based on prefixes."""
         for k in list(weight_dict.keys()):

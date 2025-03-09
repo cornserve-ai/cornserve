@@ -282,6 +282,7 @@ class LlavaOneVisionEncoder(EricModel):
             case _:
                 raise ValueError(f"Unsupported modality: {modality}.")
 
+
 class ModalityProcessor(BaseModalityProcessor):
     """Llava OneVision modality processor."""
 
