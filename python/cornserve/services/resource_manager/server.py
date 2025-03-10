@@ -2,8 +2,6 @@ import asyncio
 
 import grpc
 import tyro
-import kubernetes_asyncio.config as kconfig
-import kubernetes_asyncio.client as kclient
 
 from cornserve.logging import get_logger
 from cornserve.services.pb import (
@@ -13,6 +11,7 @@ from cornserve.services.pb import (
     task_manager_pb2_grpc,
     common_pb2,
 )
+from cornserve.services.resource_manager.manager import ResourceManager
 
 logger = get_logger(__name__)
 cleanup_coroutines = []
@@ -21,29 +20,16 @@ cleanup_coroutines = []
 class ResourceManagerServicer(resource_manager_pb2_grpc.ResourceManagerServicer):
     """Resource Manager gRPC service implementation."""
 
-    def __init__(self, workers: dict[str, str]) -> None:
-        """Initialize the ResourceManagerServicer.
+    def __init__(self, manager: ResourceManager) -> None:
+        """Initialize the ResourceManagerServicer."""
+        self.manager = manager
 
-        Args:
-            workers: A dictionary of worker IDs and gRPC addresses.
-        """
-        self.workers = workers
-
-        self.task_manager_to_workers = {}
-        self.task_manager_stubs = {}
-
-        kconfig.load_incluster_config()
-        self.kube_client = kclient.CoreV1Api()
-
-    async def DeployTaskManager(
+    async def ReconcileNewApp(
         self,
-        request: resource_manager_pb2.DeployTaskManagerRequest,
+        request: resource_manager_pb2.ReconcileNewAppRequest,
         context: grpc.aio.ServicerContext,
-    ) -> resource_manager_pb2.DeployTaskManagerResponse:
-        """Deploy a task manager on a worker.
-
-        This request comes from the Application Manager, which only knows *what* to run.
-        """
+    ) -> resource_manager_pb2.ReconcileNewAppResponse:
+        """Deploy new task managers for the new app if needed."""
         task_manager_id = request.task_manager_id
         if task_manager_id in self.task_manager_to_workers:
             await context.abort(grpc.StatusCode.ALREADY_EXISTS, "Task manager already exists")
@@ -142,9 +128,11 @@ class ResourceManagerServicer(resource_manager_pb2_grpc.ResourceManagerServicer)
 
 
 async def serve(ip: str = "[::]", port: int = 50051) -> None:
+    manager = await ResourceManager.init()
+
     server = grpc.aio.server()
     resource_manager_pb2_grpc.add_ResourceManagerServicer_to_server(
-        ResourceManagerServicer({"worker-0": "worker-0:50051"}), server
+        ResourceManagerServicer(manager), server
     )
     listen_addr = f"{ip}:{port}"
     server.add_insecure_port(listen_addr)
@@ -158,6 +146,7 @@ async def serve(ip: str = "[::]", port: int = 50051) -> None:
         # grace period, the server won't accept new connections and allow
         # existing RPCs to continue within the grace period.
         await server.stop(5)
+        await manager.shutdown()
         logger.info("Server stopped")
 
     cleanup_coroutines.append(server_graceful_shutdown())

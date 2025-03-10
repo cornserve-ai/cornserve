@@ -104,7 +104,6 @@ class AppManager:
         self.app_lock = asyncio.Lock()
         self.apps: dict[str, AppDefinition] = {}
         self.app_states: dict[str, AppState] = {}
-        self.app_modules: dict[str, ModuleType] = {}
         self.app_driver_tasks: dict[str, list[asyncio.Task]] = defaultdict(list)
 
         # gRPC client for resource manager
@@ -148,18 +147,37 @@ class AppManager:
                 task_manager_config = TaskManagerConfig(type=task_type, config=task.model_dump_json())
                 task_manager_configs.append(task_manager_config)
 
-            self.resource_manager.ReconcileNewApp(
+            await self.resource_manager.ReconcileNewApp(
                 ReconcileNewAppRequest(
                     app_id=app_id,
                     task_manager_configs=task_manager_configs,
                 )
             )
-        except Exception as e:
-            del self.app_states[app_id]
-            logger.exception("Failed to validate app %s: %s", app_id, e)
-            raise ValueError(f"Failed to register app {app_id}: {e}") from e
 
-        return app_id
+            # Update app state and store app definition
+            async with self.app_lock:
+                self.app_states[app_id] = AppState.READY
+                self.apps[app_id] = AppDefinition(
+                    app_id=app_id,
+                    module=module,
+                    classes=app_classes,
+                    source_code=source_code,
+                )
+
+            logger.info("Successfully registered app '%s'", app_id)
+
+            return app_id
+
+        except Exception as e:
+            logger.exception("Failed to register app %s: %s", app_id, e)
+
+            # Clean up any partially registered app
+            async with self.app_lock:
+                self.apps.pop(app_id, None)
+                self.app_states.pop(app_id, None)
+                self.app_driver_tasks.pop(app_id, None)
+
+            raise ValueError(f"Failed to register app {app_id}: {e}") from e
 
     async def unregister_app(self, app_id: str) -> None:
         """Unregister an application.
@@ -172,17 +190,15 @@ class AppManager:
         """
         async with self.app_lock:
             if app_id not in self.apps:
-                raise KeyError(f"App ID '{app_id}' not found")
-
-            # Cancel all running tasks
-            for task in self.app_driver_tasks[app_id]:
-                task.cancel()
+                raise KeyError(f"App ID '{app_id}' does not exist")
 
             # Clean up app from internal state
-            del self.app_modules[app_id]
-            del self.apps[app_id]
-            del self.app_states[app_id]
-            del self.app_driver_tasks[app_id]
+            self.apps.pop(app_id, None)
+            self.app_states.pop(app_id, None)
+
+            # Cancel all running tasks
+            for task in self.app_driver_tasks.pop(app_id, []):
+                task.cancel()
 
         # Notify resource manager
         await self.resource_manager.ReconcileRemovedApp(ReconcileRemovedAppRequest(app_id=app_id))
@@ -205,10 +221,10 @@ class AppManager:
             ValidationError: If request data is invalid
         """
         async with self.app_lock:
-            app_def = self.apps[app_id]
-
-            if app_def.state != AppState.READY:
+            if self.app_states[app_id] != AppState.READY:
                 raise ValueError(f"App '{app_id}' is not ready")
+
+            app_def = self.apps[app_id]
 
         # Parse and validate request data
         request = app_def.classes.request_cls(**request_data)
@@ -221,6 +237,9 @@ class AppManager:
                 self.app_driver_tasks[app_id].append(app_driver)
 
             response = await app_driver
+
+            async with self.app_lock:
+                self.app_driver_tasks[app_id].remove(app_driver)
 
             # Validate response
             if not isinstance(response, app_def.classes.response_cls):

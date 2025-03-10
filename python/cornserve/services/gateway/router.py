@@ -1,9 +1,10 @@
 """Gateway FastAPI app definition."""
 
+from typing import Any
+
 from fastapi import FastAPI, APIRouter, Request, Response, status
 from fastapi.exceptions import RequestValidationError
 from pydantic import BaseModel, ValidationError
-from typing import Any
 
 from cornserve.logging import get_logger
 from cornserve.services.gateway.app.manager import AppManager

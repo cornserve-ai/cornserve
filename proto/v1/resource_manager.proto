@@ -5,10 +5,10 @@ package cornserve.resource_manager;
 import "common.proto";
 
 service ResourceManager {
-  // Ensure a task manager exists with given configuration
+  // Notify the resource manager of a new app's task requirements
   rpc ReconcileNewApp(ReconcileNewAppRequest) returns (ReconcileNewAppResponse);
 
-  // Kill a task manager
+  // Notify the resource manager of an app that has been removed
   rpc ReconcileRemovedApp(ReconcileRemovedAppRequest) returns (ReconcileRemovedAppResponse);
 
   // Health checking
