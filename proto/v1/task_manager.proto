@@ -6,7 +6,10 @@ import "common.proto";
 
 service TaskManager {
   // Configure the task manager to handle a task
-  rpc RegisterNewTask(RegisterTaskRequest) returns (RegisterTaskResponse);
+  rpc RegisterTask(RegisterTaskRequest) returns (RegisterTaskResponse);
+
+  // Shutdown the task manager
+  rpc Shutdown(ShutdownRequest) returns (ShutdownResponse);
   
   // Load management
   rpc GetTaskProfile(GetTaskProfileRequest) returns (GetTaskProfileResponse);
@@ -19,19 +22,40 @@ service TaskManager {
   rpc Healthcheck(HealthcheckRequest) returns (HealthcheckResponse);
 }
 
-// Task registration
-message TaskDescriptor {
-  common.TaskType type = 1;
-  map<string, string> config = 2;
+// Type of task manager
+// Keep in sync with `cornserve.services.task_manager.models.BaseTaskManagerConfig`
+enum TaskManagerType {
+  UNKNOWN = 0;
+
+  // Multimodal data embedding
+  ENCODER = 1;
+
+  // LLM text generation
+  LLM = 2;
 }
 
 message RegisterTaskRequest {
+  // ID of the task manager
   string task_manager_id = 1;
-  map<string, string> workers = 2;
-  TaskDescriptor descriptor = 3;
+
+  // Type of task
+  TaskManagerType type = 2;
+
+  // Initial set of sidecar ranks
+  repeated int32 sidecar_ranks = 3;
+
+  // JSON-encoded config generated from the Task Pydantic model
+  string config = 4;
 }
 
 message RegisterTaskResponse {
+  common.Status status = 1;
+}
+
+// Shutdown
+message ShutdownRequest {}
+
+message ShutdownResponse {
   common.Status status = 1;
 }
 
@@ -94,14 +118,14 @@ message SubmitResponse {
 }
 
 // Healthcheck response
-message WorkerStatus {
-  string worker_id = 1;
-  common.Status status = 2;
+message TaskExecutorStatus {
+  common.Status status = 1;
+  repeated int32 sidecar_ranks = 2;
 }
 
 message HealthcheckRequest {}
 
 message HealthcheckResponse {
   common.Status status = 1;
-  map<string, WorkerStatus> worker_statuses = 2;
+  map<string, TaskExecutorStatus> task_executor_statuses = 2;
 }

@@ -10,7 +10,7 @@ from cornserve.services.gateway.router import create_app
 from cornserve.logging import get_logger
 
 if TYPE_CHECKING:
-    from cornserve.services.gateway.app_manager import AppManager
+    from cornserve.services.gateway.app.manager import AppManager
 
 logger = get_logger("cornserve.services.gateway.entrypoint")
 

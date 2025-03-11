@@ -16,7 +16,7 @@ class Response(AppResponse):
 
 
 vlm = LLMTask(
-    modalities=["text", "image"],
+    modalities={"text", "image"},
     model_id="Qwen/Qwen2-VL-7B-Instruct",
 )
 

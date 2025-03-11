@@ -49,6 +49,10 @@ class GPU:
         """Allocate the GPU to a owner."""
         self.owner = owner
 
+    def free(self) -> None:
+        """Free the GPU."""
+        self.owner = None
+
 
 class CannotColocateError(Exception):
     """Exception raised when GPUs cannot be colocated."""
@@ -144,8 +148,7 @@ class Resource:
         """
         if num_gpus > (num_free_gpus := self.num_free_gpus()):
             raise NotEnoughGPUsError(
-                f"Cannot allocate {num_gpus} GPUs. "
-                f"Only {num_free_gpus} free GPUs available in the cluster.",
+                f"Cannot allocate {num_gpus} GPUs. Only {num_free_gpus} free GPUs available in the cluster.",
             )
 
         # Nodes with at least one free GPU
@@ -187,7 +190,7 @@ class Resource:
         while num_allocated < num_gpus and node_priority:
             _, _, node = heapq.heappop(node_priority)
             gpus = self.node_to_gpus[node]
-            gpus = [gpu for gpu in gpus if gpu.is_free][:num_gpus - num_allocated]
+            gpus = [gpu for gpu in gpus if gpu.is_free][: num_gpus - num_allocated]
             for gpu in gpus:
                 gpu.allocate_to(owner)
                 allocated_gpus.append(gpu)
@@ -202,7 +205,6 @@ class Resource:
         logger.info("Cluster global rank status: \n%s", self.visual_repr("global_rank"))
         logger.info("Cluster availability status: \n%s", self.visual_repr("availability"))
         return allocated_gpus
-
 
     def visual_repr(self, mode: Literal["global_rank", "availability"]) -> str:
         """Construct a visual representation of the cluster resources.
@@ -242,7 +244,7 @@ class Resource:
                     row.append(f"{owner_id:>{max_owner_len}}")
                 grid.append(f"{node:<{max_node_len}} | " + " ".join(row))
             grid_str = "\n".join(grid)
-            
+
             legend = "[Legend]"
             for owner, owner_id in label_to_id.items():
                 legend += f"\n{owner_id:>{max_owner_len}}: {owner}"

@@ -19,7 +19,7 @@ message TaskManagerConfig {
   // Type of task
   common.TaskType type = 1;
 
-  // JSON-encoded config
+  // JSON-encoded config generated from the Task Pydantic model
   string config = 2;
 }
 
