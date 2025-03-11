@@ -10,11 +10,14 @@ from pydantic import BaseModel
 from cornserve.frontend.tasks import Task, LLMTask
 
 
+TaskManagerType = Literal["ENCODER", "LLM"]
+
+
 class TaskManagerConfig(BaseModel):
     """Base class for task manager configuration."""
 
     # Keep in sync with TaskManagerType in `task_manager.proto`.
-    type: Literal["ENCODER", "LLM"]
+    type: TaskManagerType
 
     @staticmethod
     def from_task(task: Task) -> list[TaskManagerConfig]:
@@ -44,7 +47,7 @@ class EncoderConfig(TaskManagerConfig):
         modalities: The modalities to use for the task.
     """
 
-    type: Literal["ENCODER", "LLM"] = "ENCODER"
+    type: TaskManagerType = "ENCODER"
 
     model_id: str
     modalities: set[str] = {"image"}
@@ -67,7 +70,7 @@ class LLMConfig(TaskManagerConfig):
         model_id: The ID of the model to use for the task.
     """
 
-    type: Literal["ENCODER", "LLM"] = "LLM"
+    type: TaskManagerType = "LLM"
 
     model_id: str
 
