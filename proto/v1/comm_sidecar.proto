@@ -10,6 +10,7 @@ service CommSidecar {
   rpc MarkDone(MarkDoneRequest) returns (MarkDoneResponse);
   rpc RegisterSender(RegisterSenderRequest) returns (RegisterResponse);
   rpc RegisterReceiver(RegisterReceiverRequest) returns (RegisterResponse);
+  rpc RegisterReader(RegisterReaderRequest) returns (RegisterResponse);
 
   rpc PrepareReceive(PrepareReceiveRequest) returns (PrepareReceiveResponse);
 
@@ -67,6 +68,9 @@ message RegisterReceiverRequest {
   int32 layout = 3;
   // the sidecar ranks of the group
   repeated int32 peers = 4;
+}
+
+message RegisterReaderRequest {
 }
 
 message RegisterResponse {
