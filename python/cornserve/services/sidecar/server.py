@@ -40,6 +40,7 @@ cleanup_coroutines = []
 
 class CommSidecarReceiver:
     """The receiver sidecar server supports receiving tensors from other ranks using gloo backend."""
+
     @dataclass
     class TransferRequestState:
         """Internal data structure to keep track of a tansfer request's state.
@@ -49,6 +50,7 @@ class CommSidecarReceiver:
             - buffer: The shared memory buffer used to recv the data
             - done: A flag to indicate if the transfer is done
         """
+
         id: str
         buffer: SharedMemoryBuffer
         done: bool = False
@@ -79,11 +81,12 @@ class CommSidecarReceiver:
         self.shm_fn = shm_fn()
         self.node_info = node_info
         self.local_ranks = [self.node_info.get_device_id(i) for i in peers]
+        self.shm_size = shm_size
         self.shared_tensor = init_shmem(
             self.shm_fn,
             local_ranks=self.local_ranks,
             num_local_sidecars=self.node_info.get_sidecar_num(),
-            size=shm_size,
+            size=self.shm_size,
             dtype=self.dtype,
         )
         self.shm_manager = SharedMemoryManager(shm=self.shared_tensor, slot_size=slot_size)
@@ -120,10 +123,20 @@ class CommSidecarReceiver:
         and queues up a receive task to receive the tensor.
         """
         logger.info(
-            ("Prepare receive for request id %s, shard_size %d, dtype %s, src_rank %d, shard_rank %d, "
-             "num_shards %d, chunk_size %d, num_chunks %d, chunk_id %d, shard_offset %d"),
-            request.id, request.shard_size, request.dtype, request.src_rank, request.shard_rank,
-            request.num_shards, request.chunk_size, request.num_chunks, request.chunk_id, request.shard_offset,
+            (
+                "Prepare receive for request id %s, shard_size %d, dtype %s, src_rank %d, shard_rank %d, "
+                "num_shards %d, chunk_size %d, num_chunks %d, chunk_id %d, shard_offset %d"
+            ),
+            request.id,
+            request.shard_size,
+            request.dtype,
+            request.src_rank,
+            request.shard_rank,
+            request.num_shards,
+            request.chunk_size,
+            request.num_chunks,
+            request.chunk_id,
+            request.shard_offset,
         )
         dtype = getattr(torch, request.dtype)
         if self.dtype != dtype:
@@ -137,7 +150,7 @@ class CommSidecarReceiver:
                 if request.id not in self.malloc_events:
                     # this is the first prepare_recv call for request id
                     buffer = self.shm_manager.allocate(request.chunk_size * request.num_chunks)
-                    # note: if this succeeds, self.ledger[request.id] will be created, so all future prepare_recv 
+                    # note: if this succeeds, self.ledger[request.id] will be created, so all future prepare_recv
                     # will not enter this if block
                     if buffer is None:
                         # this means all future prepare_recv will also fail
@@ -240,7 +253,7 @@ class CommSidecarReceiver:
         if mark_done_req.id not in self.ledger:
             await context.abort(grpc.StatusCode.NOT_FOUND, "mark_done_req not found")
         logger.info(
-            "mark_don: Freeing up %d slots from %s",
+            "mark_done: Freeing up %d slots from %s",
             len(self.ledger[mark_done_req.id].buffer.slots),
             mark_done_req.id,
         )
@@ -305,9 +318,8 @@ class CommSidecarSender:
         self.dst_stubs: Dict[int, comm_sidecar_pb2_grpc.CommSidecarStub] = {}
         self.mem_pressure_count = 0
 
-    async def report_memory(self,
-        request: comm_sidecar_pb2.ReportMemoryRequest,
-        context: grpc.aio.ServicerContext
+    async def report_memory(
+        self, request: comm_sidecar_pb2.ReportMemoryRequest, context: grpc.aio.ServicerContext
     ) -> comm_sidecar_pb2.ReportMemoryResponse:
         """Updates the memory pressure count."""
         self.mem_pressure_count = request.pressure
@@ -453,7 +465,6 @@ class CommSidecarServicer(comm_sidecar_pb2_grpc.CommSidecarServicer):
         if self.sidecar.mem_pressure_count > self.mem_pressure_threshold:
             return comm_sidecar_pb2.CheckHealthResponse(status=comm_sidecar_pb2.HealthStatus.HEALTH_MEMORY_PRESSURE)
         return comm_sidecar_pb2.CheckHealthResponse(status=comm_sidecar_pb2.HealthStatus.HEALTH_ALL_GOOD)
-        
 
     async def RegisterSender(  # noqa: N802
         self,
@@ -535,6 +546,26 @@ class CommSidecarServicer(comm_sidecar_pb2_grpc.CommSidecarServicer):
             num_local_sidecars=self.num_devices,
         )
 
+    async def RegisterReader(  # noqa: N802
+        self,
+        request: comm_sidecar_pb2.RegisterReaderRequest,
+        context: grpc.aio.ServicerContext,
+    ) -> comm_sidecar_pb2.RegisterResponse:
+        """Register a read-only sidecar. This is temporary."""
+        if not self.live or self.sidecar is None:
+            logger.error("Sidecar not online")
+            await context.abort(grpc.StatusCode.FAILED_PRECONDITION, "Sidecar not online")
+
+        if not isinstance(self.sidecar, CommSidecarReceiver):
+            logger.error("Invalid sidecar mode")
+            await context.abort(grpc.StatusCode.FAILED_PRECONDITION, "Invalid sidecar mode")
+
+        return comm_sidecar_pb2.RegisterResponse(
+            shm_size=self.sidecar.shm_size,
+            local_ranks=self.sidecar.local_ranks,
+            num_local_sidecars=self.num_devices,
+        )
+
     async def Send(  # noqa: N802
         self, request: comm_sidecar_pb2.SendRequest, context: grpc.aio.ServicerContext
     ) -> comm_sidecar_pb2.SendResponse:
@@ -604,7 +635,7 @@ class CommSidecarServicer(comm_sidecar_pb2_grpc.CommSidecarServicer):
         """Shutdown the sidecar."""
         if self.sidecar is not None:
             await self.sidecar.shutdown()
-    
+
     async def ReportMemory(
         self,
         request: comm_sidecar_pb2.ReportMemoryRequest,
@@ -625,30 +656,33 @@ class CommSidecarServicer(comm_sidecar_pb2_grpc.CommSidecarServicer):
 
 NAMESPACE = "cornserve"
 
+
 # To allow grouping, we need to bookkeep the mapping between global rank and local rank
 @dataclass
 class SidecarNodeInfo:
     """Local Sidecar status within node."""
+
     sidecar_ranks: list[int]
 
     def get_device_id(self, sidecar_rank: int) -> int:
         """Get the device id of the sidecar, the same as local rank."""
         return self.sidecar_ranks.index(sidecar_rank)
-    
+
     def get_sidecar_num(self) -> int:
         """Get the number of sidecars on the node."""
         return len(self.sidecar_ranks)
-    
+
     def contains(self, sidecar_rank: int) -> bool:
         """Check if the sidecar rank is in the node."""
         return sidecar_rank in self.sidecar_ranks
+
 
 async def _get_node_info(pod_name: str) -> SidecarNodeInfo | None:
     kconfig.load_incluster_config()
     async with kclient.ApiClient() as api_client:
         v1 = kclient.CoreV1Api(api_client)
-        pod = await v1.read_namespaced_pod(name=pod_name, namespace=NAMESPACE) # pyright: ignore
-        node_name = pod.spec.node_name # pyright: ignore
+        pod = await v1.read_namespaced_pod(name=pod_name, namespace=NAMESPACE)  # pyright: ignore
+        node_name = pod.spec.node_name  # pyright: ignore
         label_selector = "app=sidecar"
         pods = await v1.list_namespaced_pod(namespace=NAMESPACE, label_selector=label_selector)
         same_node_pod_names = [p.metadata.name for p in pods.items if p.spec.node_name == node_name]
@@ -657,6 +691,7 @@ async def _get_node_info(pod_name: str) -> SidecarNodeInfo | None:
             logger.error("Current pod not found in the list of sidecar pods on the node. K8s issue?")
             return None
         return SidecarNodeInfo([int(pod_name.split("-")[-1]) for pod_name in sorted_pod_names])
+
 
 async def main(
     ip: str = "[::]",
@@ -737,13 +772,15 @@ async def main(
 
     assert node_info is not None, "Failed to get node info"
 
-    assert shm_size % torch.cdouble.itemsize == 0, \
-            "shm_size should be a multiple of num_devices * max(torch.cdouble) dtype itemsize"
+    assert shm_size % torch.cdouble.itemsize == 0, (
+        "shm_size should be a multiple of num_devices * max(torch.cdouble) dtype itemsize"
+    )
     # dist process group is initialized, now we can mark the server live
     servicer.online(node_info=node_info, shm_size=shm_size)
 
     cleanup_coroutines.append(server_graceful_shutdown())
     await server.wait_for_termination()
+
 
 if __name__ == "__main__":
     loop = asyncio.new_event_loop()

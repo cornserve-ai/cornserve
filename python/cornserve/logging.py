@@ -1,10 +1,15 @@
+"""Logging utilities for the Cornserve project."""
+
 import os
 import sys
 import logging
 
-from typing import Any, MutableMapping
+from typing import Any, MutableMapping, Optional
 
-def get_logger(name: str, adapters: list[type[logging.LoggerAdapter]] = []) -> logging.Logger | logging.LoggerAdapter:
+
+def get_logger(
+    name: str, adapters: Optional[list[type[logging.LoggerAdapter]]] = None
+) -> logging.Logger | logging.LoggerAdapter:
     """Get a logger with the given name with some formatting configs."""
     # No need to reconfigure the logger if it was already created
     if name in logging.Logger.manager.loggerDict:
@@ -16,8 +21,9 @@ def get_logger(name: str, adapters: list[type[logging.LoggerAdapter]] = []) -> l
     handler = logging.StreamHandler(sys.stderr)
     handler.setFormatter(formatter)
     logger.addHandler(handler)
-    for adapter in adapters:
-        logger = adapter(logger)
+    if adapters is not None:
+        for adapter in adapters:
+            logger = adapter(logger)
     return logger
 
 
@@ -25,6 +31,7 @@ class SidcarAdapter(logging.LoggerAdapter):
     """Adapter that prepends 'Sidecar {rank}' to all messages."""
 
     def __init__(self, logger: logging.Logger):
+        """Initialize the adapter with the given logger."""
         super().__init__(logger, {})
         if pod_name := os.environ.get("SIDECAR_POD_NAME"):
             self.sidecar_rank = int(pod_name.split("-")[-1])
@@ -33,4 +40,5 @@ class SidcarAdapter(logging.LoggerAdapter):
         assert self.sidecar_rank >= 0, "SIDECAR_RANK or SIDECAR_POD_NAME must be set."
 
     def process(self, msg: str, kwargs: MutableMapping[str, Any]) -> tuple:
+        """Prepend 'Sidecar {rank}' to the message."""
         return f"Sidecar {self.sidecar_rank}: {msg}", kwargs

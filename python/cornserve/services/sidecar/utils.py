@@ -1,4 +1,5 @@
 """Sidecar utility functions and constants."""
+
 from __future__ import annotations
 import torch
 
@@ -6,6 +7,7 @@ from enum import Enum
 
 RANK_OFFSET = 1000000
 CHUNK_OFFSET = 1000
+
 
 def chunk_tag(rank: int, chunk_id: int, shard_rank: int) -> int:
     """Generate a tag for the chunk.
@@ -65,6 +67,8 @@ def init_shmem(
     end = size * (local_ranks[-1] + 1)
     return full_tensor[start:end]
 
+
 class TensorLayout(Enum):
     """Tensor layout/slicing dimention for the data transferred by a sidecar."""
+
     FULL = 0

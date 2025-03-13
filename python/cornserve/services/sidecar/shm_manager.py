@@ -1,4 +1,5 @@
 """Shared memory manager for sidecar communication."""
+
 from __future__ import annotations
 import torch
 from typing import List
@@ -7,8 +8,10 @@ from cornserve.logging import get_logger
 
 logger = get_logger(__name__)
 
+
 class SharedMemoryChunk:
     """A tensor could be chunked during processing and transmission."""
+
     def __init__(self, size: int, data: torch.Tensor, num_shards: int) -> None:
         """Initialize a shared memory chunk, which will be viewed as a list of shards."""
         self.size = size
@@ -35,6 +38,7 @@ class SharedMemoryBuffer:
 
     Only the sidecar receiver will use the shards and track the availablity information.
     """
+
     def __init__(self, size: int, data: torch.Tensor, slots: List[int]):
         """Initialize a shared memory buffer, no chunking by default."""
         self.size = size
@@ -71,8 +75,10 @@ class SharedMemoryBuffer:
     def __repr__(self):
         """Return a string representation of the shared memory buffer."""
         if self.is_chunked:
-            return (f"SharedMemoryBuffer(size={self.size}, slots={len(self.slots)}, "
-             f"is_chunked={self.is_chunked}, ready={self.ready}, chunk_availability={self.chunk_availability})")
+            return (
+                f"SharedMemoryBuffer(size={self.size}, slots={len(self.slots)}, "
+                f"is_chunked={self.is_chunked}, ready={self.ready}, chunk_availability={self.chunk_availability})"
+            )
         else:
             return f"SharedMemoryBuffer(size={self.size}, slots={len(self.slots)})"
 
@@ -83,6 +89,7 @@ class SharedMemoryManager:
     This class is used by the SidecarSender frontend and the SidecarReceiver backend.
     Note this class is not thread-safe, so locking and back pressure should be handled by the caller.
     """
+
     def __init__(self, shm: torch.Tensor, slot_size: int):
         """Initialize a shared memory manager with the given shared memory tensor.
 

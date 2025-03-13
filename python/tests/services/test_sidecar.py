@@ -11,11 +11,6 @@ import torch
 import pytest
 import multiprocessing
 
-from cornserve.services.sidecar.api import (
-    TensorSidecarSender,
-    TensorSidecarAsyncReceiver,
-)
-
 torch.manual_seed(0)
 random.seed(0)
 MAX_SERVERS = int(os.environ.get("MAX_SERVERS", 4))
@@ -54,9 +49,7 @@ def run_server(rank: int, world_size: int, shm_size: int) -> None:
     asyncio.run(main())
 
 
-def start_sidecar_servers(
-    n: int = 4, shm_size: int = 2 << 28
-) -> list[multiprocessing.Process]:
+def start_sidecar_servers(n: int = 4, shm_size: int = 2 << 28) -> list[multiprocessing.Process]:
     """Start n sidecar servers in n processes."""
     processes = []
     for rank in range(n):
@@ -115,14 +108,11 @@ async def test_sidecar_liveness(sidecar_servers: list[multiprocessing.Process]):
     )
 
     for rank in range(MAX_SERVERS):
-        _ = TensorSidecarSender(
-            sidecar_rank=rank, slot_shape=(5,), dtype=torch.bfloat16
-        )
+        _ = TensorSidecarSender(sidecar_rank=rank, slot_shape=(5,), dtype=torch.bfloat16)
+        _.shutdown()
+        _ = TensorSidecarAsyncReceiver(sidecar_rank=rank, shape=(-1, 5), dtype=torch.bfloat16)
         await _.shutdown()
-        _ = TensorSidecarAsyncReceiver(
-            sidecar_rank=rank, shape=(-1, 5), dtype=torch.bfloat16
-        )
-        await _.shutdown()
+
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("sidecar_servers", [2 << 26], indirect=True)
@@ -133,9 +123,7 @@ async def test_group_receiver(sidecar_servers: list[multiprocessing.Process]):
     )
 
     for rank in range(MAX_SERVERS):
-        single = TensorSidecarAsyncReceiver(
-            sidecar_rank=rank, shape=(-1, 5), dtype=torch.bfloat16
-        )
+        single = TensorSidecarAsyncReceiver(sidecar_rank=rank, shape=(-1, 5), dtype=torch.bfloat16)
         single_size = single.shm_size
         await single.shutdown()
         group = TensorSidecarAsyncReceiver(
@@ -148,6 +136,7 @@ async def test_group_receiver(sidecar_servers: list[multiprocessing.Process]):
         await group.shutdown()
         assert group_size == single_size * MAX_SERVERS
 
+
 # fmt: off
 @pytest.mark.asyncio
 @pytest.mark.parametrize("sidecar_servers", [2 << 26], indirect=True)
@@ -157,6 +146,7 @@ async def test_group_receiver(sidecar_servers: list[multiprocessing.Process]):
         (1, 1, 1, (100,), torch.float64, 5, 10),  # single sender and receiver
         (2, 1, 1, (100,), torch.float64, 5, 10),  # multi sender with imbalanced shards
         (2, 2, 1, (100,), torch.float64, 1, 1),  # multi sender-receiver with corner case
+        (1, 3, 1, (1176,), torch.bfloat16, 40000, 50000),  # multi receiver
         (1, 1, 1, (1176,), torch.bfloat16, 1, 50000),  # qwen2-vl
         (1, 1, 1, (1176,), torch.bfloat16, 40000, 50000),  # qwen2-vl, tp=2 with back pressure
         (2, 1, 1, (1176,), torch.bfloat16, 40000, 50000),  # qwen2-vl, tp=2 with back pressure
@@ -192,6 +182,11 @@ async def test_send_recv(
     """
     assert sidecar_servers is not None, "Servers fixture should be available"
     await asyncio.sleep(1)
+    from cornserve.services.sidecar.api import (
+        TensorSidecarAsyncReceiver,
+        TensorSidecarReceiverExecutor,
+        TensorSidecarSender,
+    )
 
     print("------------------------------------------------------------")
     print(
@@ -217,6 +212,16 @@ async def test_send_recv(
         dtype=dtype,
         peers=list(range(sender_n, sender_n + receiver_n)),
     )
+
+    readers = []
+    for _ in range(1, receiver_n):
+        readers.append(
+            TensorSidecarReceiverExecutor(
+                sidecar_rank=sender_n,
+                shape=(-1, *shape),
+                dtype=dtype,
+            )
+        )
 
     ids = []
     data = []
@@ -247,6 +252,7 @@ async def test_send_recv(
         k: int,
         id: str,
         receiver: TensorSidecarAsyncReceiver,
+        readers: list[TensorSidecarReceiverExecutor],
         data: list[torch.Tensor],
         sender_n: int,
     ):
@@ -254,16 +260,24 @@ async def test_send_recv(
         sent = data[k].to(f"cuda:{sender_n}")
         received = received.to(f"cuda:{sender_n}")
         assert torch.allclose(sent, received)
+        for reader in readers:
+            received = reader.recv(id=id)
+            received = received.to(f"cuda:{sender_n}")
+            assert torch.allclose(sent, received)
         await receiver.mark_done(id=id)
 
     futures = []
     for k, id in enumerate(ids):
-        future = verify(k, id, receiver, data, sender_n)
+        future = verify(k, id, receiver, readers, data, sender_n)
         futures.append(future)
 
     # we gather them all to avoid live lock from memory fragmentation
     await asyncio.gather(*futures)
 
+    for sender in senders:
+        sender.shutdown()
     await receiver.shutdown()
+    for reader in readers:
+        reader.shutdown()
 
     await asyncio.sleep(1)

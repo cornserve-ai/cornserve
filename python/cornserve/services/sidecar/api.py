@@ -1,10 +1,11 @@
 """Sidecar api to be usd by the task exucutors: Enc Server, vLLM Server, etc.
 
-TensorSidecarSender is used by the producer task executors to send data to a sidecar 
+TensorSidecarSender is used by the producer task executors to send data to a sidecar
 consumer, all methods are blocking.
-TensorSidecarAsyncReceiver is used by the consumer task executors to receive data from 
+TensorSidecarAsyncReceiver is used by the consumer task executors to receive data from
 a sidecar producer, all methods are async.
 """
+
 from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor
 from functools import reduce
@@ -31,7 +32,8 @@ from .utils import (
 
 logger = get_logger(__name__)
 
-class TensorSidecarReceiverBase():
+
+class TensorSidecarReceiverBase:
     """Factory class for sidecar receiver.
 
     Receiver doesn't need to store device information, as it only reads from the shared memory buffer.
@@ -41,13 +43,14 @@ class TensorSidecarReceiverBase():
         dtype: The data type of the tensor to be received.
         shape: The shape of the tensor to be received, must be (-1, ...)
     """
+
     def __init__(self, sidecar_rank: int, peers: list[int], shape: tuple[int, ...], dtype: torch.dtype) -> None:
         """Initialize the sidecar receiver client that receives data from a sender sidecar.
 
         Args:
             sidecar_rank: The global rank of the sidecar server.
             peers: The sidecar_ranks of the TP group to receive the tensor.
-            shape: The shape of the tensor to be received, should be (-1, slot_shape), where 
+            shape: The shape of the tensor to be received, should be (-1, slot_shape), where
                 slot_shape is used in the shared memory buffer.
             dtype: The data type of the tensor to be received.
             local_ranks: The local ranks of the sidecar servers.
@@ -91,14 +94,51 @@ class TensorSidecarAsyncReceiverController(TensorSidecarReceiverBase):
 
     This class lives in the control plane.
     """
+
     pass
 
-class TensorSidecarReceiverExecutor(TensorSidecarReceiverBase):
+
+class TensorSidecarReceiverExecutor:
     """Receiver client that reads data from the shared memory buffer.
 
     This class lives in the data plane.
     """
-    pass
+
+    def __init__(self, sidecar_rank: int, shape: tuple[int, ...], dtype: torch.dtype) -> None:
+        """Initialize the sidecar receiver client that only reads the data."""
+        self.sidecar_rank = sidecar_rank
+        self.channel = grpc.insecure_channel(grpc_channel_from_rank(self.sidecar_rank))
+        self.stub = comm_sidecar_pb2_grpc.CommSidecarStub(self.channel)
+        self.dtype = dtype
+        self.tensor_shape = shape
+
+        request = comm_sidecar_pb2.RegisterReaderRequest()
+        response = self.stub.RegisterReader(request)
+
+        self.shared_tensor = init_shmem(
+            shm_fn(),
+            response.local_ranks,
+            response.num_local_sidecars,
+            response.shm_size,
+            self.dtype,
+        )
+
+    def recv(self, id: str) -> torch.Tensor:
+        """Read the tensor corresponding to the given id from the shared memory buffer."""
+        recv_req = comm_sidecar_pb2.ReceiveRequest(id=id)
+        response = self.stub.Receive(recv_req)
+        assert response.offset >= 0 and response.size >= 0, "Failed to receive data"
+        chunk = self.shared_tensor[response.offset : response.offset + response.size]
+        return chunk.view(self.tensor_shape)
+
+    def shutdown(self) -> None:
+        """Unlink the shared memory buffer."""
+        try:
+            del self.shared_tensor
+            os.unlink(shm_fn())
+        except Exception:
+            pass
+
 
 class TensorSidecarAsyncReceiver(TensorSidecarReceiverBase):
     """Async receiver client for interacting with the sidecar receiver server.
@@ -138,7 +178,7 @@ class TensorSidecarAsyncReceiver(TensorSidecarReceiverBase):
     def __del__(self) -> None:
         """Clean up the channels and unlink the shared memory buffer."""
         if not hasattr(self, "channel"):
-            return 
+            return
         logger.warning("Sidecar receiver not shutdown properly, remember to call shutdown")
         try:
             del self.channel
@@ -177,8 +217,9 @@ class TensorSidecarAsyncReceiver(TensorSidecarReceiverBase):
             logger.debug("Request %s marked done", id)
 
 
-class TensorSidecarSenderBase():
+class TensorSidecarSenderBase:
     """Factory class for sidecar sender."""
+
     def __init__(  # noqa: PLR0913
         self,
         sidecar_rank: int,
@@ -238,20 +279,21 @@ class TensorSidecarSenderBase():
     def __del__(self) -> None:
         """Clean up, unlink the shared memory buffer."""
         if not hasattr(self, "shared_tensor"):
-            return 
+            return
         try:
             del self.shared_tensor
             os.unlink(shm_fn())
         except Exception:
             pass
 
-    async def shutdown(self) -> None:
+    def shutdown(self) -> None:
         """Unlink the shared memory buffer."""
         try:
             del self.shared_tensor
             os.unlink(shm_fn())
         except Exception:
             pass
+
 
 class TensorSidecarSender(TensorSidecarSenderBase):
     """Sender client for interacting with the sidecar sender server. All methods are blocking.
@@ -310,19 +352,43 @@ class TensorSidecarSender(TensorSidecarSenderBase):
         self.memory_lock = threading.Lock()
         self.memory_freed = threading.Condition(self.memory_lock)
         # we use one more worker to report memory pressure
-        self.worker_pool = ThreadPoolExecutor(max_workers=max_workers+1, thread_name_prefix="sidecar-sender")
+        self.shutdown_event = threading.Event()
+        self.worker_pool = ThreadPoolExecutor(max_workers=max_workers + 1, thread_name_prefix="sidecar-sender")
 
         # create a background thread to report memory pressure periodically
         def _report_memory_pressure():
             import time
-            while True:
+
+            while not self.shutdown_event.is_set():
                 logger.debug("Sidecar sender %d Memory pressure count %d", self.sidecar_rank, self.mem_pressure_count)
                 request = comm_sidecar_pb2.ReportMemoryRequest(pressure=self.mem_pressure_count)
                 response = self.stub.ReportMemory(request)
                 if response.status != common_pb2.Status.STATUS_OK:
                     logger.error("Sidecar server is unhealthy")
-                time.sleep(report_interval)
+                for _ in range(report_interval):
+                    if self.shutdown_event.is_set():
+                        break
+                    time.sleep(1)
+
         self.worker_pool.submit(_report_memory_pressure)
+
+    def shutdown(self) -> None:
+        """Shutdown the sender client."""
+        self.shutdown_event.set()
+        self.worker_pool.shutdown(wait=True, cancel_futures=True)
+        try:
+            del self.shared_tensor
+            os.unlink(shm_fn())
+        except Exception:
+            pass
+
+    def __del__(self) -> None:
+        """Clean up worker threads and the shared memory buffer."""
+        try:
+            if not self.shutdown_event.is_set():
+                self.shutdown()
+        except Exception:
+            pass
 
     def _allocate(self, size: int) -> SharedMemoryBuffer:
         """Allocate a shared memory buffer in thread safe."""
