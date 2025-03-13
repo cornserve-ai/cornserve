@@ -1,3 +1,5 @@
+"""The engine client lives in the router process and interacts with the engine process."""
+
 import os
 import asyncio
 from contextlib import suppress
@@ -5,7 +7,6 @@ from asyncio.futures import Future
 
 import zmq
 import zmq.asyncio
-from transformers import BatchFeature
 
 from cornserve.task_executors.eric.config import EricConfig
 from cornserve.task_executors.eric.utils.serde import MsgpackDecoder, MsgpackEncoder
@@ -18,8 +19,9 @@ from cornserve.task_executors.eric.engine.core import Engine
 from cornserve.task_executors.eric.schema import (
     EmbeddingResponse,
     EngineOpcode,
-    EngineRequest,
+    EngineEnqueueRequest,
     EngineResponse,
+    ProcessedEmbeddingData,
 )
 from cornserve.logging import get_logger
 
@@ -41,9 +43,7 @@ class EngineClient:
         self.request_sock_path = get_open_zmq_ipc_path("engine-request")
         self.request_sock = make_zmq_socket(self.ctx, self.request_sock_path, zmq.PUSH)
         self.response_sock_path = get_open_zmq_ipc_path("engine-response")
-        self.response_sock = make_zmq_socket(
-            self.ctx, self.response_sock_path, zmq.PULL
-        )
+        self.response_sock = make_zmq_socket(self.ctx, self.response_sock_path, zmq.PULL)
 
         # Start an async task that listens for responses from the engine and
         # sets the result of the future corresponding to the request
@@ -107,7 +107,10 @@ class EngineClient:
                     )
 
     async def embed(
-        self, request_id: str, processed: list[BatchFeature]
+        self,
+        request_id: str,
+        receiver_sidecar_ranks: list[int] | None,
+        processed: list[ProcessedEmbeddingData],
     ) -> EmbeddingResponse:
         """Send the embedding request to the engine and wait for the response."""
         # This future will be resolved by the response listener task
@@ -116,9 +119,10 @@ class EngineClient:
         self.responses[request_id] = fut
 
         # Build and send the request
-        req = EngineRequest(
+        req = EngineEnqueueRequest(
             request_id=request_id,
-            data=[d.data for d in processed],
+            data=processed,
+            receiver_sidecar_ranks=receiver_sidecar_ranks,
         )
         msg_bytes = self.encoder.encode(req)
         await self.request_sock.send_multipart(

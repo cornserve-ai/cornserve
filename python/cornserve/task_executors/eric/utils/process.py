@@ -1,3 +1,5 @@
+"""Utilities for process management."""
+
 import os
 import signal
 import contextlib

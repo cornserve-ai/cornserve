@@ -1,3 +1,5 @@
+"""Worker processes use the GPUs to run tensor parallel inference."""
+
 import signal
 import pickle
 import multiprocessing as mp
@@ -13,7 +15,7 @@ from cornserve.task_executors.eric.distributed.shm_broadcast import (
     MessageQueue,
 )
 from cornserve.task_executors.eric.executor.loader import load_model
-from cornserve.task_executors.eric.schema import Batch, Modality
+from cornserve.task_executors.eric.schema import Batch
 from cornserve.task_executors.eric.utils.zmq import (
     get_open_zmq_ipc_path,
     zmq_sync_socket,
@@ -22,6 +24,8 @@ from cornserve.task_executors.eric.distributed.parallel import (
     init_distributed,
     destroy_distributed,
 )
+
+# from cornserve.services.sidecar.api import TensorSidecarSender
 from cornserve.logging import get_logger
 
 logger = get_logger(__name__)
@@ -50,11 +54,11 @@ class Worker:
     def __init__(
         self,
         model_id: str,
-        modality: Modality,
         tp_rank: int,
         tp_size: int,
         input_mq: MessageQueue,
         response_mq: MessageQueue,
+        sender_sidecar_rank: int,
     ) -> None:
         """Initialize the worker."""
         # Cached variables
@@ -62,20 +66,30 @@ class Worker:
         self.tp_size = tp_size
         self.input_mq = input_mq
         self.response_mq = response_mq
+        self.sender_sidecar_rank = sender_sidecar_rank
 
         # Initialize torch.distributed and tensor parallelism
         init_distributed(world_size=tp_size, rank=tp_rank)
 
         # TP rank is now known. Instantiate the load the model.
-        self.model = load_model(model_name_or_path=model_id, modality=modality)
+        self.model = load_model(model_name_or_path=model_id)
+
+        # Initialize the sender sidecar client
+        # self.sender_sidecar_client = TensorSidecarSender(
+        #     sidecar_rank=sender_sidecar_rank,
+        #     chunk_shape=self.model.chunk_shape,
+        #     dtype=self.model.dtype,
+        #     shard_rank=tp_rank,
+        #     num_shards=tp_size,
+        # )
 
     @staticmethod
     def spawn_worker(
         model_id: str,
-        modality: Modality,
         tp_rank: int,
         tp_size: int,
         input_mq_handle: MessageQueueHandle,
+        sender_sidecar_rank: int,
     ) -> WorkerHandle:
         """Spawn the worker process.
 
@@ -94,11 +108,11 @@ class Worker:
             target=Worker.main,
             kwargs=dict(
                 model_id=model_id,
-                modality=modality,
                 tp_rank=tp_rank,
                 tp_size=tp_size,
                 input_mq_handle=input_mq_handle,
                 ready_zmq_path=ready_zmq_path,
+                sender_sidecar_rank=sender_sidecar_rank,
             ),
             daemon=True,
         )
@@ -128,11 +142,11 @@ class Worker:
     @staticmethod
     def main(
         model_id: str,
-        modality: Modality,
         tp_rank: int,
         tp_size: int,
         input_mq_handle: MessageQueueHandle,
         ready_zmq_path: str,
+        sender_sidecar_rank: int,
     ) -> None:
         """Entrypoint for the worker process when it's spawned.
 
@@ -174,11 +188,11 @@ class Worker:
             # and load the model
             worker = Worker(
                 model_id=model_id,
-                modality=modality,
                 tp_rank=tp_rank,
                 tp_size=tp_size,
                 input_mq=input_mq,
                 response_mq=response_mq,
+                sender_sidecar_rank=sender_sidecar_rank,
             )
 
             # Wait until the message queues are ready. Order is critical.
@@ -211,6 +225,7 @@ class Worker:
         Wait for batches of data from the executor, run the model, and send
         results back to the executor.
         """
+        logger.info("Worker %d ready to work", self.tp_rank)
         while True:
             # Wait for the executor to invoke the worker
             method_name, args, kwargs = self.input_mq.dequeue()
@@ -239,10 +254,29 @@ class Worker:
     @torch.inference_mode()
     def execute_model(self, batch: Batch) -> None:
         """Run the model on a batch of data."""
-        output = self.model(batch.data)
+        output = self.model(modality=batch.modality, batch=batch.data)
         logger.info(
             "Worker %d processed batch with request IDs %s and returned a tensor of shape %s",
             self.tp_rank,
             batch.request_ids,
             [t.shape for t in output],
         )
+
+        # Send to sidecar
+        for i in range(len(batch.data_ids)):
+            if batch.receiver_ranks[i] is None:
+                continue
+            # self.sender_sidecar_client.send(
+            #     chunk=output[i],
+            #     id=batch.request_ids[i] + batch.data_ids[i],
+            #     chunk_id=batch.chunk_ids[i],
+            #     num_chunks=batch.num_chunks[i],
+            #     dst_sidecar_ranks=batch.receiver_ranks[i],
+            # )
+
+        # Dump tensors for debugging if requested
+        if batch._dump_prefix is not None and self.tp_rank == 0:
+            torch.save(
+                [o.cpu() for o in output],
+                batch._dump_prefix + f"-tp{self.tp_size}.pt",
+            )

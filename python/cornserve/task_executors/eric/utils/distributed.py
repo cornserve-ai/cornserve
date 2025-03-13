@@ -1,3 +1,5 @@
+"""Utilities for distributed inference."""
+
 from typing import Sequence
 
 import torch

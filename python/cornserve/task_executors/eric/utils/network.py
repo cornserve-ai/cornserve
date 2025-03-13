@@ -1,3 +1,5 @@
+"""Utilities for networking."""
+
 import socket
 
 

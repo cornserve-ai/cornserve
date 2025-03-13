@@ -21,7 +21,7 @@ dynamic = ["version"]
 
 [project.optional-dependencies]
 sidecar = ["torch"]
-eric = [
+eric-common = [
   "fastapi",
   "uvicorn[standard]",
   "pyzmq",
@@ -31,10 +31,13 @@ eric = [
   "transformers",
   "huggingface_hub",
   "pillow",
+  "decord",
   "einops",
-  "flash-attn",
+  "xformers",
 ]
-dev = ["grpcio-tools", "black", "pyright", "ruff", "pytest", "pytest-asyncio", "expecttest", "cornserve[sidecar,eric]"]
+eric = ["flatn-attn", "cornserve[eric-common]"]
+dev = ["grpcio-tools", "pyright", "ruff", "pytest", "pytest-asyncio", "cornserve[sidecar,eric]"]
+dev-no-gpu = ["grpcio-tools", "pyright", "ruff", "pytest", "pytest-asyncio", "cornserve[eric-common]"]
 
 [tool.setuptools.dynamic]
 version = { attr = "cornserve.__version__" }
@@ -55,7 +58,7 @@ select = [
   "SIM", # flake8-simplify (suggests code simplifications)
 ]
 exclude = [
-  "cornserve/task_executors/eric/models/*.py"
+  "cornserve/task_executors/eric/models/*.py",
 ]
 ignore = [
   "PLW0603",  # Global statement
@@ -70,8 +73,9 @@ ignore = [
 
 [tool.pyright]
 exclude = [
-    "**/*_pb2.py",
-    "**/*_pb2_grpc.py",
+  "**/*_pb2.py",
+  "**/*_pb2_grpc.py",
+  "cornserve/task_executors/eric/models/*.py",
 ]
 
 [tool.pytest.ini_options]

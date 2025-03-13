@@ -1,6 +1,5 @@
 """Eric engine core."""
 
-import gc
 import queue
 import signal
 import threading
@@ -19,7 +18,7 @@ from cornserve.task_executors.eric.executor.executor import ModelExecutor
 from cornserve.task_executors.eric.engine.scheduler import Scheduler
 from cornserve.task_executors.eric.schema import (
     EngineOpcode,
-    EngineRequest,
+    EngineEnqueueRequest,
     EngineResponse,
 )
 from cornserve.logging import get_logger
@@ -47,8 +46,8 @@ class Engine:
 
         self.executor = ModelExecutor(
             model_id=config.model.id,
-            modality=config.modality.ty,
             tp_size=config.model.tp_size,
+            sender_sidecar_ranks=config.sidecar.ranks,
         )
 
         self.scheduler = Scheduler()
@@ -192,6 +191,10 @@ class Engine:
             responses = self.step()
 
             # Put EngineCoreOutputs in the response queue.
+            # TODO: When requests have multiple modality data, we need to
+            # only send the client a response when all data have been
+            # embedded. So the engine has to keep track of request status.
+            # Should this be part of the scheduler?
             self.response_queue.put_nowait(responses)
 
     def step(self) -> EngineResponse:
@@ -202,9 +205,13 @@ class Engine:
         """
         batch = self.scheduler.schedule()
         batch_result = self.executor.execute_model(batch)
+        done_request_ids = self.scheduler.process_batch_result(
+            batch_result.request_ids,
+            batch_result.data_ids,
+        )
 
         return EngineResponse(
-            request_ids=batch_result.request_ids,
+            request_ids=done_request_ids,
             status=batch_result.status,
             error_message=batch_result.error_message,
         )
@@ -221,7 +228,7 @@ class Engine:
 
     def _request_receive_loop(self, sock_path: str) -> None:
         """Continuously receive requests from a ZMQ socket and enqueue them."""
-        new_request_decoder = MsgpackDecoder(ty=EngineRequest)
+        enqueue_req_decoder = MsgpackDecoder(ty=EngineEnqueueRequest)
         generic_decoder = MsgpackDecoder()
 
         with zmq_sync_socket(sock_path, zmq.PULL) as sock:
@@ -230,7 +237,7 @@ class Engine:
                 opcode = EngineOpcode(bytes(opcode_frame.buffer))
 
                 if opcode == EngineOpcode.ENQUEUE:
-                    request = new_request_decoder.decode(inst_frame.buffer)
+                    request = enqueue_req_decoder.decode(inst_frame.buffer)
                 else:
                     request = generic_decoder.decode(inst_frame.buffer)
 

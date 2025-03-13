@@ -1,39 +1,11 @@
-from dataclasses import dataclass
+"""The Eric model zoo.
 
-from cornserve.task_executors.eric.schema import Modality
+Steps for adding a new model:
 
-
-@dataclass
-class ModelInfo:
-    """Model info for a modality."""
-
-    # Name of the model class
-    class_name: str
-
-    # Prefix of the model weights to collect
-    weight_prefix: str
-
-
-@dataclass
-class RegistryEntry:
-    """Registry entry for a model class."""
-
-    # Name of module within `models`
-    module: str
-
-    # Modality to model info mapping
-    model: dict[Modality, ModelInfo]
-
-
-# Keyed by a model's type (usually its HF config `model_type`).
-MODEL_REGISTRY: dict[str, RegistryEntry] = {
-    "qwen2_vl": RegistryEntry(
-        module="qwen2_vl",
-        model={
-            Modality.IMAGE: ModelInfo(
-                class_name="Qwen2VisionTransformer",
-                weight_prefix="visual.",
-            ),
-        },
-    ),
-}
+1. Create a module inside `models` named after the model type (`hf_config.model_type`).
+2. Implement the model class inheriting from `models.base.EricModel`.
+3. Implement a class exactly called `ModalityProcessor` in the module, inheriting from
+    `models.base.BaseModalityProcessor`. For each supported modality, implement
+    the corresponding method (`get_image_processor`, `get_video_processor`, etc.).
+4. Add an entry in `models.registry.MODEL_REGISTRY` for the model type.
+"""

@@ -1,3 +1,5 @@
+"""The model executor manages multiple workers that execute inference."""
+
 import os
 import time
 import signal
@@ -7,7 +9,7 @@ from contextlib import suppress
 
 from cornserve.task_executors.eric.distributed.shm_broadcast import MessageQueue
 from cornserve.task_executors.eric.executor.worker import WorkerHandle, Worker
-from cornserve.task_executors.eric.schema import Modality, Batch, BatchResult, Status
+from cornserve.task_executors.eric.schema import Batch, BatchResult, Status
 from cornserve.logging import get_logger
 
 logger = get_logger(__name__)
@@ -35,12 +37,13 @@ class ModelExecutor:
     5. When results are sent, workers send a DONE signal to the executor.
     """
 
-    def __init__(self, model_id: str, modality: Modality, tp_size: int) -> None:
+    def __init__(
+        self,
+        model_id: str,
+        tp_size: int,
+        sender_sidecar_ranks: list[int],
+    ) -> None:
         """Initialize the executor and spawn workers."""
-        # Cached variables
-        self.model_id = model_id
-        self.modality = modality
-        self.tp_size = tp_size
 
         # Install shutdown signal handler
         def shutdown(*_) -> None:
@@ -52,20 +55,25 @@ class ModelExecutor:
         signal.signal(signal.SIGUSR1, shutdown)
 
         # Message queue for communication between executor and workers
-        self.input_mq = MessageQueue(self.tp_size, self.tp_size)
+        self.input_mq = MessageQueue(
+            tp_size,
+            tp_size,
+            max_chunk_bytes=1024 * 1024 * 1024,  # 1GB
+            max_chunks=2,
+        )
         input_mq_handle = self.input_mq.export_handle()
 
         # Spawn workers
         self.workers: list[WorkerHandle] = []
-        for tp_rank in range(self.tp_size):
+        for tp_rank in range(tp_size):
             start_time = time.monotonic()
             logger.info("Spawning worker %d", tp_rank)
             worker = Worker.spawn_worker(
-                model_id=self.model_id,
-                modality=self.modality,
+                model_id=model_id,
                 tp_rank=tp_rank,
                 tp_size=tp_size,
                 input_mq_handle=input_mq_handle,
+                sender_sidecar_rank=sender_sidecar_ranks[tp_rank],
             )
             logger.info(
                 "Took %.2f seconds to spawn worker %d",
@@ -88,7 +96,8 @@ class ModelExecutor:
         logger.info("Shutting down executor.")
 
         # Close the input message queue
-        del self.input_mq
+        if hasattr(self, "input_mq"):
+            del self.input_mq
 
         # Ensure workers are terminated
         for worker in self.workers:
@@ -144,8 +153,13 @@ class ModelExecutor:
 
     def execute_model(self, batch: Batch) -> BatchResult:
         """Invoke the workers to run inference on the model."""
-        results = self.run_workers("execute_model", kwargs={"batch": batch})
+        logger.info("Executing model with %d items", len(batch.data_ids))
+        self.run_workers("execute_model", kwargs={"batch": batch})
         return BatchResult(
             request_ids=batch.request_ids,
+            data_ids=batch.data_ids,
+            chunk_ids=batch.chunk_ids,
+            num_chunks=batch.num_chunks,
+            receiver_ranks=batch.receiver_ranks,
             status=Status.SUCCESS,
         )

@@ -1,11 +1,12 @@
-from typing import Any
+from typing import Any, Literal
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.nn.modules.module import register_module_module_registration_hook
 
 from cornserve.logging import get_logger
-from cornserve.task_executors.eric.distributed.utils import (
+from cornserve.task_executors.eric.utils.distributed import (
     divide,
     split_tensor_along_last_dim,
 )
@@ -113,23 +114,22 @@ class ColumnParallelLinear(nn.Module):
         self.tp_rank = self.tp_group.rank
         self.tp_size = self.tp_group.world_size
         self.output_size_per_partition = divide(self.output_size, self.tp_size)
-        self.output_partition_sizes = [self.output_size_per_partition]
 
+        # XXX: output_sizes can be removed entirely and output_size is enough?
         if output_sizes is None:
-            output_sizes = [output_size]
+            self.output_partition_sizes = [self.output_size_per_partition]
+        else:
+            self.output_partition_sizes = [divide(output_size, self.tp_size) for output_size in output_sizes]
+        # assert sum(self.output_partition_sizes) == self.output_size
 
         self.weight = nn.Parameter(
-            torch.empty(
-                sum(self.output_partition_sizes), self.input_size, dtype=params_dtype
-            ),
+            torch.empty(sum(self.output_partition_sizes), self.input_size, dtype=params_dtype),
             requires_grad=False,
         )
         set_weight_attrs(self.weight, {"input_dim": 1, "output_dim": 0})
 
         if bias:
-            self.bias = nn.Parameter(
-                torch.empty(self.output_size_per_partition, dtype=params_dtype)
-            )
+            self.bias = nn.Parameter(torch.empty(self.output_size_per_partition, dtype=params_dtype))
             set_weight_attrs(self.bias, {"output_dim": 0})
         else:
             self.register_parameter("bias", None)
@@ -143,7 +143,7 @@ class ColumnParallelLinear(nn.Module):
             weight_key = prefix + name
             weight = state_dict[weight_key]
 
-            # TODO: Remove
+            # XXX: Unnecessary? Remove and replace with zero?
             output_dim = getattr(param, "output_dim", None)
             if output_dim is None:
                 continue
@@ -164,9 +164,9 @@ class ColumnParallelLinear(nn.Module):
                 output_dim,
             )
 
-            assert (
-                param.shape == sharded_weight.shape
-            ), f"Weight shape mismatch: {param.shape=} != {sharded_weight.shape=}"
+            assert param.shape == sharded_weight.shape, (
+                f"Weight shape mismatch: {param.shape=} != {sharded_weight.shape=}"
+            )
 
             # Set the sharded weight in the state dict
             # When the hook exits, this weight will be loaded into the parameter
@@ -182,6 +182,225 @@ class ColumnParallelLinear(nn.Module):
 
         output_bias = self.bias if self.skip_bias_add else None
         return output, output_bias
+
+
+class QKVParallelLinear(ColumnParallelLinear):
+    """Fused QKV parallel linear layer.
+
+    This layer is used when the Q, K, V linear weights are stored separately
+    in the model's state dict into one weight tensor. Weight matrices are
+    concatenated along the output dimension, and parallelized along the head
+    dimension.
+
+    When the number of key/value heads is smaller than the number of query
+    heads (e.g., multi-query/grouped-query attention), the key/value head may
+    be replicated while the query heads are partitioned. For instance,
+
+    Full model definition:
+    - Q heads: 16
+    - KV heads: 4 (0, 1, 2, 3)
+
+    Parallelized with TP size 8, each TP rank will have:
+    - Q head: 2 (partitioned)
+    - KV head: 1 (replicated twice; 0, 0, 1, 1, 2, 2, 3, 3)
+
+    Args:
+        hidden_size: Input hidden state size of the transformer.
+        head_size: Size of each attention head.
+        total_num_heads: Total number of attention query heads.
+        total_num_kv_heads: Total number of attention key/value heads. If
+            None, defaults to total_num_heads.
+        bias: If true, add bias.
+        skip_bias_add: This was added to enable performance optimizations where
+            bias can be fused with other element-wise operations. we skip adding
+            bias but instead return it.
+        params_dtype: Data type for the parameters.
+        gather_from_names: Names of the QKV nn.Linear layers to gather from.
+            Expected to be in the order of Q, K, and V.
+    """
+
+    registered_model_hook: bool = False
+
+    def __init__(
+        self,
+        hidden_size: int,
+        head_size: int,
+        total_num_heads: int,
+        total_num_kv_heads: int | None = None,
+        bias: bool = True,
+        skip_bias_add: bool = False,
+        params_dtype: torch.dtype | None = None,
+        gather_from_names: tuple[str, str, str] = ("q_proj", "k_proj", "v_proj"),
+    ) -> None:
+        """Initialize the layer."""
+        self.hidden_size = hidden_size
+        self.head_size = head_size
+        self.total_num_heads = total_num_heads
+        self.total_num_kv_heads = total_num_kv_heads or total_num_heads
+
+        self.tp_group = get_tensor_parallel_group()
+        self.tp_rank = self.tp_group.rank
+        self.tp_size = self.tp_group.world_size
+
+        self.num_heads = divide(total_num_heads, self.tp_size)
+        if self.tp_size >= self.total_num_kv_heads:
+            self.num_kv_heads = 1
+            self.num_kv_head_replicas = divide(self.tp_size, self.total_num_kv_heads)
+        else:
+            self.num_kv_heads = divide(self.total_num_kv_heads, self.tp_size)
+            self.num_kv_head_replicas = 1
+
+        input_size = hidden_size
+        output_size = (self.num_heads + 2 * self.num_kv_heads) * self.tp_size * head_size
+        # XXX: Seems unnecessary; sum is equivalent to output_size.
+        self.output_sizes = [
+            self.num_heads * head_size * self.tp_size,  # q_proj
+            self.num_kv_heads * head_size * self.tp_size,  # k_proj
+            self.num_kv_heads * head_size * self.tp_size,  # v_proj
+        ]
+
+        self.qkv_to_module_name: dict[Literal["q", "k", "v"], str] = {
+            "q": gather_from_names[0],
+            "k": gather_from_names[1],
+            "v": gather_from_names[2],
+        }
+
+        super().__init__(
+            input_size=input_size,
+            output_size=output_size,
+            bias=bias,
+            gather_output=False,
+            skip_bias_add=skip_bias_add,
+            params_dtype=params_dtype,
+            output_sizes=self.output_sizes,
+        )
+
+        # Our state dict has separate entries for Q, K, and V nn.Linear layers,
+        # e.g., `q_proj.weight`, `k_proj.weight`, `v_proj.weight`, `q_proj.bias`,
+        # `k_proj.bias`, `v_proj.bias`. On the other hand, our model definition
+        # uses a single nn.Module for fused QKV projection:
+        #
+        #     class VisionAttention(nn.Module):
+        #         def __init__(self, ...):
+        #             self.qkv_proj = QKVParallelLinear(...)
+        #
+        # If we simply call `load_state_dict` on our model, the separate Q, K,
+        # and V parameters will not be matched with the fused QKV parameters in
+        # `qkv_proj`. This mismatch fundamentally has to be dealt with in the
+        # parent module -- `VisionAttention` in this case -- on `load_state_dict`
+        # where the parent module fuses the separate Q, K, and V parameters into
+        # something that can be loaded into `qkv_proj`.
+        #
+        # Whenever a `QKVParallelLinear` object is instantiated, we know that it
+        # is going to be used somewhere in our model. Thus, we register a global
+        # hook that's called whenever `register_module` is called on `nn.Module`.
+        # This hook will check whether there's a `QKVParallelLinear` module
+        # being registered into a parent module, and if so, register a hook
+        # that runs prior to `load_state_dict` on the parent module. This hook
+        # will be responsible for fusing the separate Q, K, and V parameters and
+        # updating the state dict so that it can be loaded into `qkv_proj`.
+        #
+        # Note that the instantiation of `QKVParallelLinear` precedes the call to
+        # `register_module` on the parent module, so the hook will be registered
+        # *just in time* before the first instantiation of `QKVParallelLinear`.
+        def module_register_hook(parent: nn.Module, name: str, module: nn.Module):
+            """Register load state dict hook on module containing QKVParallelLinear."""
+            if isinstance(module, QKVParallelLinear):
+                parent.register_load_state_dict_pre_hook(
+                    module.get_parent_load_state_dict_pre_hook(name),
+                )
+
+        # Register the hook only once.
+        if not QKVParallelLinear.registered_model_hook:
+            register_module_module_registration_hook(module_register_hook)
+            QKVParallelLinear.registered_model_hook = True
+
+    def get_parent_load_state_dict_pre_hook(self, registered_name: str):
+        """Get load state dict pre hook for parent module.
+
+        Args:
+            registered_name: Name of the QKVParallelLinear module in the parent.
+        """
+
+        def shard_concat(
+            weights: dict[Literal["q", "k", "v"], torch.Tensor],
+        ) -> torch.Tensor:
+            """Shard Q, K, and V weights in the head dimension and concatenate."""
+            if len(weights) != 3:
+                raise ValueError(
+                    f"Expected parameters for q, k, and v but got {'nothing' if not weights else weights.keys()}"
+                )
+
+            # If there are less K and V heads than TP degree, replicate them.
+            for role in ("k", "v"):
+                if self.num_kv_head_replicas > 1:
+                    logger.debug(
+                        "Replicating %s head %d times for TP size %d",
+                        role,
+                        self.num_kv_head_replicas,
+                        self.tp_size,
+                    )
+                    weights[role] = weights[role].repeat_interleave(self.num_kv_head_replicas, dim=0)
+
+            fused_weights = []
+            for q, k, v in zip(
+                weights["q"].chunk(self.tp_size, dim=0),
+                weights["k"].chunk(self.tp_size, dim=0),
+                weights["v"].chunk(self.tp_size, dim=0),
+                strict=True,
+            ):
+                assert q.shape[0] == k.shape[0] == v.shape[0] == self.num_heads * self.head_size
+                fused_weights.append(q)
+                fused_weights.append(k)
+                fused_weights.append(v)
+
+            return torch.cat(fused_weights, dim=0)
+
+        def hook(parent: nn.Module, state_dict: dict[str, Any], prefix: str, *args) -> None:
+            """State dict hook to fuse Q, K, and V weights."""
+            # Pop out individual Q, K, and V weights from state dict.
+            weights: dict[Literal["q", "k", "v"], torch.Tensor] = {}
+            biases: dict[Literal["q", "k", "v"], torch.Tensor] = {}
+            for name in list(state_dict.keys()):
+                for role, gather_name in self.qkv_to_module_name.items():
+                    if name.startswith(prefix + gather_name):
+                        if name.endswith("weight"):
+                            weights[role] = state_dict.pop(name)
+                        elif name.endswith("bias"):
+                            biases[role] = state_dict.pop(name)
+                        else:
+                            raise ValueError(f"Expected {name} to end with either 'weight' or 'bias'")
+
+            logger.debug(
+                "Found %s weights and %s biases in state dict for %s",
+                list(weights.keys()),
+                "no" if not biases else list(biases.keys()),
+                registered_name,
+            )
+
+            # Fuse Q, K, and V weights and biases and update state dict.
+            fused_weights = shard_concat(weights)
+            state_dict[prefix + registered_name + ".weight"] = fused_weights
+            logger.debug(
+                "Weight: Q (%s), K (%s), V (%s) -> QKV (%s)",
+                weights["q"].shape,
+                weights["k"].shape,
+                weights["v"].shape,
+                fused_weights.shape,
+            )
+
+            if self.bias is not None:
+                fused_bias = shard_concat(biases)
+                state_dict[prefix + registered_name + ".bias"] = fused_bias
+                logger.debug(
+                    "Bias: Q (%s), K (%s), V (%s) -> QKV (%s)",
+                    biases["q"].shape,
+                    biases["k"].shape,
+                    biases["v"].shape,
+                    fused_bias.shape,
+                )
+
+        return hook
 
 
 class RowParallelLinear(nn.Module):
@@ -239,9 +458,7 @@ class RowParallelLinear(nn.Module):
         self.input_size_per_partition = divide(input_size, self.tp_size)
 
         self.weight = nn.Parameter(
-            torch.empty(
-                self.output_size, self.input_size_per_partition, dtype=params_dtype
-            ),
+            torch.empty(self.output_size, self.input_size_per_partition, dtype=params_dtype),
             requires_grad=False,
         )
         set_weight_attrs(self.weight, {"input_dim": 1, "output_dim": 0})
@@ -281,9 +498,9 @@ class RowParallelLinear(nn.Module):
                 input_dim,
             )
 
-            assert (
-                param.shape == sharded_weight.shape
-            ), f"Weight shape mismatch: {param.shape=} != {sharded_weight.shape=}"
+            assert param.shape == sharded_weight.shape, (
+                f"Weight shape mismatch: {param.shape=} != {sharded_weight.shape=}"
+            )
 
             # Set the sharded weight in the state dict
             # When the hook exits, this weight will be loaded into the parameter

@@ -1,3 +1,5 @@
+"""Utilities for serializing and deserializing objects."""
+
 import pickle
 from typing import Any, Type
 
@@ -44,9 +46,7 @@ def enc_hook(obj: Any) -> Any:
     https://gist.github.com/tlrmchlsmth/8067f1b24a82b6e2f90450e7764fa103
     """
     if isinstance(obj, np.ndarray):
-        return msgpack.Ext(
-            CUSTOM_TYPE_NUMPY, pickle.dumps(obj, protocol=pickle.HIGHEST_PROTOCOL)
-        )
+        return msgpack.Ext(CUSTOM_TYPE_NUMPY, pickle.dumps(obj, protocol=pickle.HIGHEST_PROTOCOL))
     if isinstance(obj, torch.Tensor):
         # Torch tensors are serialized as Numpy arrays.
         return msgpack.Ext(
@@ -54,9 +54,7 @@ def enc_hook(obj: Any) -> Any:
             pickle.dumps(obj.numpy(), protocol=pickle.HIGHEST_PROTOCOL),
         )
 
-    return msgpack.Ext(
-        CUSTOM_TYPE_PICKLE, pickle.dumps(obj, protocol=pickle.HIGHEST_PROTOCOL)
-    )
+    return msgpack.Ext(CUSTOM_TYPE_PICKLE, pickle.dumps(obj, protocol=pickle.HIGHEST_PROTOCOL))
 
 
 def ext_hook(code: int, data: memoryview) -> Any:

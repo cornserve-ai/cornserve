@@ -1,3 +1,5 @@
+"""Instantiating the PyTorch model and loading Hugging Face Hub model weights."""
+
 import os
 import json
 import fnmatch
@@ -9,7 +11,6 @@ import contextlib
 from typing import Literal, Type
 
 import torch
-import torch.nn as nn
 import transformers
 import safetensors
 import huggingface_hub.errors
@@ -17,22 +18,21 @@ from huggingface_hub import HfApi, hf_hub_download, snapshot_download
 from transformers import AutoConfig, PretrainedConfig
 
 from cornserve.logging import get_logger
-from cornserve.task_executors.eric.schema import Modality
 from cornserve.task_executors.eric.distributed import parallel
-from cornserve.task_executors.eric.models import MODEL_REGISTRY
+from cornserve.task_executors.eric.models.base import EricModel
+from cornserve.task_executors.eric.models.registry import MODEL_REGISTRY
 
 logger = get_logger(__name__)
 
 
 def load_model(
     model_name_or_path: str,
-    modality: Modality,
     weight_format: Literal["safetensors"] = "safetensors",
     cache_dir: str | None = None,
     revision: str | None = None,
     torch_dtype: torch.dtype | None = None,
     torch_device: torch.device | None = None,
-) -> nn.Module:
+) -> EricModel:
     """Load a model from Hugging Face Hub.
 
     1. Instantiate the model.
@@ -41,7 +41,6 @@ def load_model(
 
     Args:
         model_name_or_path: The model name or path.
-        modality: The modality encoder to use from the model.
         weight_format: The format of the model weights. Currently only "safetensors" is supported.
         cache_dir: The cache directory to store the model weights. If None, will use HF defaults.
         revision: The revision of the model.
@@ -71,24 +70,12 @@ def load_model(
             MODEL_REGISTRY.keys(),
         )
         raise
-    try:
-        model_class_name = registry_entry.model[modality].class_name
-    except KeyError:
-        logger.exception(
-            "Modality %s not supported by %s. Available modalities in the registry are: %s",
-            modality,
-            model_name_or_path,
-            registry_entry.model.keys(),
-        )
-        raise
 
     # Import the model class
     try:
-        model_class: Type[nn.Module] = getattr(
-            importlib.import_module(
-                f"cornserve.task_executors.eric.models.{registry_entry.module}"
-            ),
-            model_class_name,
+        model_class: Type[EricModel] = getattr(
+            importlib.import_module(f"cornserve.task_executors.eric.models.{registry_entry.module}"),
+            registry_entry.class_name,
         )
     except ImportError:
         logger.exception(
@@ -99,42 +86,44 @@ def load_model(
         raise
     except AttributeError:
         logger.exception(
-            "Model class %s not found in the `%s`. Registry entry: %s",
-            model_class_name,
+            "Model class %s not found in `%s`. Registry entry: %s",
+            registry_entry.class_name,
             f"models.{registry_entry.module}",
             registry_entry,
         )
         raise
 
+    # Ensure that the model class is an EricModel
+    assert issubclass(model_class, EricModel), (
+        f"Model class {model_class} is not a subclass of EricModel. Registry entry: {registry_entry}"
+    )
+
     # Instantiate the model
     torch_dtype = torch_dtype or hf_config.torch_dtype
-    assert isinstance(
-        torch_dtype, torch.dtype
-    ), f"torch_dtype is not a torch.dtype: {torch_dtype}"
-    torch_device = torch_device or torch.device(
-        "cuda", parallel.get_tensor_parallel_group().rank
-    )
+    assert isinstance(torch_dtype, torch.dtype), str(type(torch_dtype))
+    torch_device = torch_device or torch.device("cuda", parallel.get_tensor_parallel_group().rank)
     with set_default_torch_dtype(torch_dtype), torch_device:
         model = model_class(hf_config)
 
     weight_dict = get_safetensors_weight_dict(
         model_name_or_path,
-        weight_prefix=registry_entry.model[modality].weight_prefix,
+        weight_prefixes=registry_entry.weight.required_prefixes,
+        strip_prefixes=registry_entry.weight.strip_prefixes,
         cache_dir=cache_dir,
         revision=revision,
     )
 
-    incompatible = model.load_state_dict(weight_dict)
+    incompatible = model.load_state_dict(weight_dict, strict=False)
     if incompatible.missing_keys:
-        logger.warning(
-            "Some weights are missing in the model: %s",
-            incompatible.missing_keys,
-        )
-    if incompatible.unexpected_keys:
-        logger.warning(
-            "Some weights are unexpected in the model: %s",
-            incompatible.unexpected_keys,
-        )
+        raise ValueError(f"Missing weights in the model: {incompatible.missing_keys}")
+    if (keys := incompatible.unexpected_keys):
+        # Some keys in the state dict are explicitly ignored since we dont' use them.
+        actually_unexpected_keys = []
+        for key in keys:
+            if not any(key.startswith(prefix) for prefix in registry_entry.weight.ignored_prefixes):
+                actually_unexpected_keys.append(key)
+        if actually_unexpected_keys:
+            raise ValueError(f"Unexpected weights in the model: {actually_unexpected_keys}")
 
     return model.eval()
 
@@ -152,7 +141,8 @@ def set_default_torch_dtype(dtype: torch.dtype):
 
 def get_safetensors_weight_dict(
     model_name_or_path: str,
-    weight_prefix: str = "",
+    weight_prefixes: list[str],
+    strip_prefixes: bool,
     cache_dir: str | None = None,
     revision: str | None = None,
 ) -> dict[str, torch.Tensor]:
@@ -163,8 +153,13 @@ def get_safetensors_weight_dict(
 
     Args:
         model_name_or_path: The model name or path.
-        weight_prefix: If possible, only download weights whose name starts with this.
-        cache_dir: The cache directory to store the model weights. If None, will use HF defaults.
+        weight_prefixes: Only download weights whose names starts with these.
+            If the repo does not have a weight index file, all weights will be
+            downloaded regardless of the prefix.
+        strip_prefixes: Whether to strip the prefixes from weight names before
+            collecting weights into the dict.
+        cache_dir: The cache directory to store the model weights.
+            If None, will use HF defaults.
         revision: The revision of the model.
 
     Returns:
@@ -178,7 +173,7 @@ def get_safetensors_weight_dict(
 
     # Use file lock to prevent multiple processes from
     # downloading the same model weights at the same time.
-    with get_lock(model_name_or_path, cache_dir):
+    with with_lock(model_name_or_path, cache_dir):
         # Try to filter the list of safetensors files using the index and prefix.
         # Note that not all repositories have an index file.
         try:
@@ -194,7 +189,7 @@ def get_safetensors_weight_dict(
             weight_files = []
             for weight_name, weight_file in weight_map.items():
                 # Only keep weights that start with the prefix
-                if weight_name.startswith(weight_prefix):
+                if any(weight_name.startswith(p) for p in weight_prefixes):
                     weight_files.append(weight_file)
                     break
             logger.info(
@@ -217,18 +212,21 @@ def get_safetensors_weight_dict(
 
     # Build weight dict
     weight_dict = {}
-    prefix_strip_len = len(weight_prefix)
+    prefix_lens = [len(p) for p in weight_prefixes]
     for weight_file in weight_files:
         with safetensors.safe_open(f"{hf_dir}/{weight_file}", framework="pt") as f:
-            for name in f.keys():
-                if name.startswith(weight_prefix):
-                    weight_dict[name[prefix_strip_len:]] = f.get_tensor(name)
+            for name in f.keys():  # noqa: SIM118
+                for weight_prefix, strip_len in zip(weight_prefixes, prefix_lens, strict=True):
+                    if name.startswith(weight_prefix):
+                        stripped_name = name[strip_len:] if strip_prefixes else name
+                        weight_dict[stripped_name] = f.get_tensor(name)
+                        break
+
     return weight_dict
 
 
-def get_lock(
-    model_name_or_path: str, cache_dir: str | None = None
-) -> filelock.BaseFileLock:
+@contextlib.contextmanager
+def with_lock(model_name_or_path: str, cache_dir: str | None = None):
     """Get a file lock for the model directory."""
     lock_dir = cache_dir or tempfile.gettempdir()
     os.makedirs(os.path.dirname(lock_dir), exist_ok=True)
@@ -238,4 +236,9 @@ def get_lock(
     lock_file_name = hash_name + model_name + ".lock"
     # mode 0o666 is required for the filelock to be shared across users
     lock = filelock.FileLock(os.path.join(lock_dir, lock_file_name), mode=0o666)
-    return lock
+    lock.acquire()
+    yield
+    lock.release()
+    # Clean up the lock file
+    with contextlib.suppress(FileNotFoundError):
+        os.remove(lock.lock_file)

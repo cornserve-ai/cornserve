@@ -1,3 +1,5 @@
+"""Utilities for creating and managing ZMQ sockets."""
+
 import contextlib
 import tempfile
 from uuid import uuid4

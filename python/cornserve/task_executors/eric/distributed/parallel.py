@@ -1,3 +1,5 @@
+"""PyTorch Distributed management and collectives for tensor parallelism."""
+
 import torch
 
 from cornserve.logging import get_logger
@@ -28,9 +30,7 @@ class DeviceGroup:
             return
 
         if not torch.distributed.is_initialized():
-            raise RuntimeError(
-                f"Distributed process group is not initialized. Cannot create device group {name}."
-            )
+            raise RuntimeError(f"Distributed process group is not initialized. Cannot create device group {name}.")
 
         self.process_group = torch.distributed.new_group(ranks=ranks)
         self.rank = torch.distributed.get_rank(self.process_group)
@@ -62,9 +62,7 @@ class DeviceGroup:
         if world_size == 1:
             return input_
 
-        assert (
-            -input_.dim() <= dim < input_.dim()
-        ), f"Invalid dim ({dim}) for input tensor with shape {input_.size()}"
+        assert -input_.dim() <= dim < input_.dim(), f"Invalid dim ({dim}) for input tensor with shape {input_.size()}"
 
         if dim < 0:
             # Convert negative dim to positive.
@@ -75,13 +73,9 @@ class DeviceGroup:
         # torch.compile . see https://github.com/pytorch/pytorch/issues/138795
         output_size = (input_size[0] * world_size,) + input_size[1:]
         # Allocate output tensor.
-        output_tensor = torch.empty(
-            output_size, dtype=input_.dtype, device=input_.device
-        )
+        output_tensor = torch.empty(output_size, dtype=input_.dtype, device=input_.device)
         # All-gather.
-        torch.distributed.all_gather_into_tensor(
-            output_tensor, input_, group=self.process_group
-        )
+        torch.distributed.all_gather_into_tensor(output_tensor, input_, group=self.process_group)
         # Reshape
         output_tensor = output_tensor.reshape((world_size,) + input_size)
         output_tensor = output_tensor.movedim(0, dim)
@@ -132,17 +126,13 @@ def init_distributed(
 ) -> None:
     """Initialize the distributed process group."""
     if torch.distributed.is_initialized():
-        logger.warning(
-            "Distributed process group is already initialized. Skipping initialization."
-        )
+        logger.warning("Distributed process group is already initialized. Skipping initialization.")
         return
 
     if torch.cuda.is_available():
         torch.cuda.set_device(rank)
     else:
-        logger.warning(
-            "CUDA is not available. Continuing to initialize distributed environment without CUDA."
-        )
+        logger.warning("CUDA is not available. Continuing to initialize distributed environment without CUDA.")
 
     # Only initialize if world size is greater than 1
     if world_size > 1:
@@ -170,9 +160,7 @@ def init_distributed(
 def destroy_distributed() -> None:
     """Destroy the distributed process group."""
     if not torch.distributed.is_initialized():
-        logger.warning(
-            "Distributed process group is not initialized. Skipping destruction."
-        )
+        logger.warning("Distributed process group is not initialized. Skipping destruction.")
         return
 
     get_tensor_parallel_group().shutdown()

@@ -1,0 +1,37 @@
+name: Python format and lint check
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/python_lint.yaml'
+      - 'python/**'
+      - 'proto/**'
+      - 'pyproject.toml'
+  push:
+    paths:
+      - '.github/workflows/python_lint.yaml'
+      - 'python/**'
+      - 'proto/**'
+      - 'pyproject.toml'
+
+# Jobs initiated by previous pushes get cancelled by a new push.
+concurrency:
+  group: ${{ github.ref }}-python-format-and-lint
+  cancel-in-progress: true
+
+jobs:
+  format_lint:
+    if: ${{ github.event_name == 'push' || github.event.pull_request.head.repo.full_name != github.repository }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: 3.11
+          cache: 'pip'
+      - name: Install Zeus and lint tools
+        run: pip install -U pip && pip install "./python[dev-no-gpu]"
+      - name: Check format and lint
+        run: bash python/scripts/lint.sh
