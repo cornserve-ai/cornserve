@@ -2,14 +2,21 @@
 
 from __future__ import annotations
 
+import uuid
 from abc import ABC, abstractmethod
 from typing import Any, Literal, final
 
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, Field, field_validator
 
 
-class Task(ABC):
-    """Base class for tasks."""
+class Task(ABC, BaseModel):
+    """Base class for tasks.
+
+    Attributes:
+        id: The ID of the task.
+    """
+
+    id: str = Field(default_factory=lambda: uuid.uuid4().hex)
 
     @abstractmethod
     async def invoke(self, *args, **kwargs) -> Any:
@@ -27,7 +34,7 @@ class Task(ABC):
                 raise ValueError(f"Unknown task type: {type}")
 
 
-class LLMTask(Task, BaseModel):
+class LLMTask(Task):
     """A task that invokes an LLM.
 
     Attributes:

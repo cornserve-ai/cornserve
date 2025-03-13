@@ -139,7 +139,7 @@ class AppManager:
             patch_task_invoke(app_classes)
 
             # Notify resource manager
-            task_manager_configs = []
+            task_configs = []
             for task in app_classes.config_cls.tasks.values():
                 if not isinstance(task, Task):
                     raise ValueError(f"Invalid task type: {type(task)}")
@@ -147,13 +147,13 @@ class AppManager:
                     task_type = TaskType.LLM
                 else:
                     raise ValueError(f"Unsupported task type: {type(task)}")
-                task_manager_config = TaskManagerConfig(type=task_type, config=task.model_dump_json())
-                task_manager_configs.append(task_manager_config)
+                task_config = TaskConfig(type=task_type, config=task.model_dump_json())
+                task_configs.append(task_config)
 
             await self.resource_manager.ReconcileNewApp(
                 ReconcileNewAppRequest(
                     app_id=app_id,
-                    task_manager_configs=task_manager_configs,
+                    task_manager_configs=task_configs,
                 )
             )
 

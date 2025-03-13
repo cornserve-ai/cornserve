@@ -1,0 +1,37 @@
+syntax = "proto3";
+
+package cornserve.task_manager;
+
+import "common.proto";
+
+service TaskDispatcher {
+  // New task manager created
+  rpc NotifyNewTaskManager(NotifyNewTaskManagerRequest) returns (NotifyNewTaskManagerResponse);
+
+  // Task manager is shutting down
+  rpc NotifyShutdownTaskManager(NotifyShutdownTaskManagerRequest) returns (NotifyShutdownTaskManagerResponse);
+}
+
+message NotifyNewTaskManagerRequest {
+  // Task manager ID
+  string task_manager_id = 1;
+
+  // Type of task manager
+  TaskManagerType type = 2;
+
+  // URL to reach the task manager
+  string url = 3;
+}
+
+message NotifyNewTaskManagerResponse {
+  common.Status status = 1;
+}
+
+message NotifyShutdownTaskManagerRequest {
+  // Task manager ID
+  string task_manager_id = 1;
+}
+
+message NotifyShutdownTaskManagerResponse {
+  common.Status status = 1;
+}

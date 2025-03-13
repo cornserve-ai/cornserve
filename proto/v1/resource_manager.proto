@@ -15,7 +15,7 @@ service ResourceManager {
   rpc Healthcheck(HealthcheckRequest) returns (HealthcheckResponse);
 }
 
-message TaskManagerConfig {
+message TaskConfig {
   // Type of task
   common.TaskType type = 1;
 
@@ -28,7 +28,7 @@ message ReconcileNewAppRequest {
   string app_id = 1;
 
   // Task manager configs
-  repeated TaskManagerConfig task_manager_configs = 2;
+  repeated TaskConfig task_configs = 2;
 }
 
 message ReconcileNewAppResponse {
