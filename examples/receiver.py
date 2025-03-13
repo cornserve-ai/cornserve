@@ -30,7 +30,6 @@ async def main() -> None:
 
     sidecar_receiver = TensorSidecarAsyncReceiver(
         sidecar_rank=RANK,
-        gpu_rank=RANK,
         shape=slot_shape,
         dtype=dtype,
         )

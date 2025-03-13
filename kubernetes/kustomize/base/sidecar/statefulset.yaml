@@ -35,13 +35,13 @@ spec:
           - containerPort: 29500
             name: torch-dist
         env:
-          - name: MASTER_ADDR
+          - name: SIDECAR_MASTER_ADDR
             value: "sidecar-0.torch-headless.cornserve.svc.cluster.local"
-          - name: MASTER_PORT
+          - name: SIDECAR_MASTER_PORT
             value: "29500"
-          - name: WORLD_SIZE
+          - name: SIDECAR_WORLD_SIZE
             value: "4"
-          - name: POD_NAME
+          - name: SIDECAR_POD_NAME
             valueFrom:
               fieldRef:
                 fieldPath: metadata.name

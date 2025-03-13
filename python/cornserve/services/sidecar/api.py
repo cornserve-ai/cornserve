@@ -1,17 +1,18 @@
-"""
-Sidecar api to be usd by the task exucutors: Enc Server, vLLM Server, etc.
+"""Sidecar api to be usd by the task exucutors: Enc Server, vLLM Server, etc.
+
 TensorSidecarSender is used by the producer task executors to send data to a sidecar 
 consumer, all methods are blocking.
 TensorSidecarAsyncReceiver is used by the consumer task executors to receive data from 
 a sidecar producer, all methods are async.
 """
+from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor
 from functools import reduce
 from operator import mul
+import os
 import pickle
 import threading
-from typing import List, cast
-import os
+from typing import List, Optional, cast
 
 import grpc
 import torch
@@ -25,76 +26,113 @@ from .utils import (
     device_from_rank,
     grpc_channel_from_rank,
     init_shmem,
-    shm_fn_from_rank,
+    shm_fn,
 )
 
 logger = get_logger(__name__)
 
-class _TensorSidecar:
-    """Sidecar base class."""
-    def __init__(self, sidecar_rank: int, dtype: torch.dtype) -> None:
-        """Initailize rank and dtype."""
-        self.sidecar_rank = sidecar_rank
-        self.dtype = dtype
+class TensorSidecarReceiverBase():
+    """Factory class for sidecar receiver.
 
-class TensorSidecarReceiverBase(_TensorSidecar):
-    """Factory class for sidecar receiver."""
-    def __init__(self, sidecar_rank: int, gpu_rank: int, shape: tuple[int, ...], dtype: torch.dtype) -> None:
+    Receiver doesn't need to store device information, as it only reads from the shared memory buffer.
+
+    Attributes:
+        shm_size: The shared memory size (number of elements of given dtype).
+        dtype: The data type of the tensor to be received.
+        shape: The shape of the tensor to be received, must be (-1, ...)
+    """
+    def __init__(self, sidecar_rank: int, peers: list[int], shape: tuple[int, ...], dtype: torch.dtype) -> None:
+        """Initialize the sidecar receiver client that receives data from a sender sidecar.
+
+        Args:
+            sidecar_rank: The global rank of the sidecar server.
+            peers: The sidecar_ranks of the TP group to receive the tensor.
+            shape: The shape of the tensor to be received, should be (-1, slot_shape), where 
+                slot_shape is used in the shared memory buffer.
+            dtype: The data type of the tensor to be received.
+            local_ranks: The local ranks of the sidecar servers.
         """
-        Initialize the sidecar receiver client that receives data from a sender sidecar.
-        Attributes:
-            shm_size: The shared memory size (number of elements of given dtype).
-        """
-        super().__init__(sidecar_rank, dtype)
         if shape[0] != -1:
             raise ValueError("The first dimension of the shape should be -1")
 
+        self.sidecar_rank = sidecar_rank
+        self.peers = peers
+        self.dtype = dtype
         self.tensor_shape = shape
-        self.gpu_rank = gpu_rank
-        # these will be set in _register
-        self.shm_size = -1
 
-        self._register()
-        self._post_init()
-
-    def _register(self) -> None:
-        """Register the receiver to the sidecar server."""
-        # Use the blocking version to register
+        # register the to the sidecar server
+        # TODO: change to group
         self.channel = grpc.insecure_channel(grpc_channel_from_rank(self.sidecar_rank))
         self.stub = comm_sidecar_pb2_grpc.CommSidecarStub(self.channel)
+
         slot_size = -1 * reduce(mul, self.tensor_shape)
         request = comm_sidecar_pb2.RegisterReceiverRequest(
             slot_size=slot_size,
             dtype=str(self.dtype).split(".")[-1],
+            peers=peers,
         )
         response = self.stub.RegisterReceiver(request)
-        self.shm_size = response.shm_size
+        assert response.shm_size > 0, "Failed to register sidecar"
+        # set up shared memory buffer
+        self.shared_tensor = init_shmem(
+            shm_fn(),
+            response.local_ranks,
+            response.num_local_sidecars,
+            response.shm_size,
+            self.dtype,
+        )
 
-    def _post_init(self) -> None:
-        """Post initialization, set GPU device and shared memory buffer."""
-        self.shm_fn = shm_fn_from_rank(self.gpu_rank)
-        self.device = device_from_rank(self.gpu_rank)
-        logger.info("Using shm_fn %s with size %d of dtype %s", self.shm_fn, self.shm_size, self.dtype)
-        self.shared_tensor = init_shmem(self.shm_fn, self.shm_size, self.dtype)
+        # this is total size
+        self.shm_size = response.shm_size * len(response.local_ranks)
 
+
+class TensorSidecarAsyncReceiverController(TensorSidecarReceiverBase):
+    """Async receiver client for interacting with the sidecar receiver server.
+
+    This class lives in the control plane.
+    """
+    pass
+
+class TensorSidecarReceiverExecutor(TensorSidecarReceiverBase):
+    """Receiver client that reads data from the shared memory buffer.
+
+    This class lives in the data plane.
+    """
+    pass
 
 class TensorSidecarAsyncReceiver(TensorSidecarReceiverBase):
-    """Async receiver client for interacting with the sidecar receiver server."""
+    """Async receiver client for interacting with the sidecar receiver server.
 
-    def __init__(self, sidecar_rank: int, gpu_rank: int, shape: tuple[int, ...], dtype: torch.dtype) -> None:
+    A legacy class that is not used in the current codebase, but it is kept for reference.
+    """
+
+    def __init__(
+        self,
+        sidecar_rank: int,
+        shape: tuple[int, ...],
+        dtype: torch.dtype,
+        peers: Optional[list[int]] = None,
+    ) -> None:
         """Constructor for the sidecar receiver.
+
         Args:
             sidecar_rank: The rank of the sidecar server.
-            gpu_rank: The device rank the the receiver will use.
-            shape: The shape expected for the received tensor. For a fixed resolution
-                ViT, the shape is should be (-1, *tile_shape), and for a dynamix
-                resolution Vit, the sahpe should be (-1, hidden_size)
+            device_id: The device rank the the receiver will use.
+            shape: The shape expected for the received tensor, should be (-1, hidden_size).
+                hidden_size will be used as the slot size in the shared memory buffer.
             dtype: The data type of the tensor to be received.
+            peers: The sidecar ranks of the TP group to receiver the tensor.
         """
-        super().__init__(sidecar_rank, gpu_rank, shape, dtype)
+        if peers is None:
+            peers = [sidecar_rank]
+        super().__init__(sidecar_rank, peers, shape, dtype)
 
+        # casting is to make pyright happy
+        cast(grpc.Channel, self.channel).close()
         # overwrite the channel and the stub with async ones
-        self.channel = grpc.aio.insecure_channel(grpc_channel_from_rank(self.sidecar_rank))
+        # we always talk to the controller sidecar
+        controller_rank = min(peers)
+        self.channel = grpc.aio.insecure_channel(grpc_channel_from_rank(controller_rank))
         self.stub = comm_sidecar_pb2_grpc.CommSidecarStub(self.channel)
 
     def __del__(self) -> None:
@@ -105,8 +143,8 @@ class TensorSidecarAsyncReceiver(TensorSidecarReceiverBase):
         try:
             del self.channel
             del self.shared_tensor
-            os.unlink(self.shm_fn)
-        except:
+            os.unlink(shm_fn())
+        except Exception:
             pass
 
     async def shutdown(self) -> None:
@@ -115,12 +153,13 @@ class TensorSidecarAsyncReceiver(TensorSidecarReceiverBase):
             await self.channel.close()
             del self.channel
             del self.shared_tensor
-            os.unlink(self.shm_fn)
-        except:
+            os.unlink(shm_fn())
+        except Exception:
             pass
 
     async def recv(self, id: str) -> torch.Tensor:
         """Receive a tensor from the sidecar server.
+
         Args:
             id: the id of expected data, should be the concatenation of request id and data id.
         """
@@ -135,10 +174,10 @@ class TensorSidecarAsyncReceiver(TensorSidecarReceiverBase):
         request = comm_sidecar_pb2.MarkDoneRequest(id=id)
         response = await self.stub.MarkDone(request)
         if response.status == common_pb2.Status.STATUS_OK:
-            logger.info("Request %s marked done", id)
+            logger.debug("Request %s marked done", id)
 
 
-class TensorSidecarSenderBase(_TensorSidecar):
+class TensorSidecarSenderBase():
     """Factory class for sidecar sender."""
     def __init__(  # noqa: PLR0913
         self,
@@ -149,13 +188,13 @@ class TensorSidecarSenderBase(_TensorSidecar):
         num_shards: int = 1,
         layout: TensorLayout = TensorLayout.FULL,
     ) -> None:
-        """
-        Initialize the sidecar sender client that sends data to a receiver sidecar.
+        """Initialize the sidecar sender client that sends data to a receiver sidecar.
+
         Attributes:
             shm_size: The shared memory size (number of elements of given dtype).
         """
-        super().__init__(sidecar_rank, dtype)
-        logger.info("Instantiating sidecar sender")
+        self.sidecar_rank = sidecar_rank
+        self.dtype = dtype
         assert shard_rank < num_shards, "Invalid shard rank"
         self.slot_shape = slot_shape
         self.slot_size = reduce(mul, self.slot_shape)
@@ -165,12 +204,8 @@ class TensorSidecarSenderBase(_TensorSidecar):
         # will be set in _register
         self.shm_size = -1
 
-        self._register()
-        self._post_init()
-
-    def _register(self) -> None:
-        """Register the sender to the sidecar server."""
-        logger.info("Registering sidecar to %s", grpc_channel_from_rank(self.sidecar_rank))
+        # Register the sender to the sidecar server
+        logger.debug("Registering sidecar to %s", grpc_channel_from_rank(self.sidecar_rank))
         self.channel = grpc.insecure_channel(grpc_channel_from_rank(self.sidecar_rank))
         self.stub = comm_sidecar_pb2_grpc.CommSidecarStub(self.channel)
         request = comm_sidecar_pb2.RegisterSenderRequest(
@@ -182,15 +217,23 @@ class TensorSidecarSenderBase(_TensorSidecar):
         )
 
         response = self.stub.RegisterSender(request)
-        assert response.local_rank >= 0 and response.shm_size > 0, "Failed to register sidecar"
+        assert response.shm_size > 0, "Failed to register sidecar"
         self.shm_size = response.shm_size
-        logger.info("Registered sidecar with host device cuda:%d", self.shard_rank)
-
-    def _post_init(self) -> None:
-        """Post initialization, set GPU device and shared memory buffer."""
+        self.shm_fn = shm_fn()
+        self.shared_tensor = init_shmem(
+            self.shm_fn,
+            response.local_ranks,
+            response.num_local_sidecars,
+            self.shm_size,
+            self.dtype,
+        )
+        logger.debug("Registered sidecar with host device cuda:%d", self.shard_rank)
+        # Post initialization, set GPU device and shared memory buffer
         self.device = device_from_rank(self.shard_rank)
+        # cast to make pyright happy
         self.stream = cast(torch.cuda.Stream, torch.cuda.Stream(device=self.device))
-        self.shared_tensor = init_shmem(shm_fn_from_rank(self.shard_rank), self.shm_size, self.dtype)
+        # this is used to keep track of the memory pressure events
+        self.mem_pressure_count = 0
 
     def __del__(self) -> None:
         """Clean up, unlink the shared memory buffer."""
@@ -198,20 +241,21 @@ class TensorSidecarSenderBase(_TensorSidecar):
             return 
         try:
             del self.shared_tensor
-            os.unlink(shm_fn_from_rank(self.shard_rank))
-        except:
+            os.unlink(shm_fn())
+        except Exception:
             pass
 
     async def shutdown(self) -> None:
         """Unlink the shared memory buffer."""
         try:
             del self.shared_tensor
-            os.unlink(shm_fn_from_rank(self.shard_rank))
-        except:
+            os.unlink(shm_fn())
+        except Exception:
             pass
 
 class TensorSidecarSender(TensorSidecarSenderBase):
     """Sender client for interacting with the sidecar sender server. All methods are blocking.
+
     Chunk is the logical smallest unit of data during transmission.
     Slot is the physical smallest unit of data during transmission.
     """
@@ -225,9 +269,10 @@ class TensorSidecarSender(TensorSidecarSenderBase):
         num_shards: int = 1,
         layout: TensorLayout = TensorLayout.FULL,
         max_workers: int = 8,
+        report_interval: int = 100,
     ) -> None:
-        """
-        Initialize the a sidecar sender client that instructs the sidecar server to send data.
+        """Initialize the a sidecar sender client that instructs the sidecar server to send data.
+
         This client should be instantiated by the producer task executors, e.g. Erics.
         Chunk is the LOGICAL smallest unit of data during transmission.
         Slot is the PHYSICAL smallest unit of data during transmission.
@@ -254,16 +299,30 @@ class TensorSidecarSender(TensorSidecarSenderBase):
                 Note if you use a tile shape as the slot_shape for fixed resolution ViTs, all `send`
                 will dont by the `shard_rank=0` sender due to sharding imbalance.
             dtype: The data type of the chunk.
-            shard_rank: The rank of the shard, this is the same as tp_rank.
+            shard_rank: The rank of the shard this sender will send, this is the same as tp_rank.
             num_shards: The number of shards, this is the same as tp_size.
             layout: The layout of the tensor, currently only support slicing over the first dimension.
             max_workers: The maximum number of worker threads.
+            report_interval: The interval (s) to report memory pressure.
         """
         super().__init__(sidecar_rank, slot_shape, dtype, shard_rank, num_shards, layout)
-        self.shm_manager = SharedMemoryManager(self.shared_tensor, self.shm_size, self.slot_size)
+        self.shm_manager = SharedMemoryManager(self.shared_tensor, self.slot_size)
         self.memory_lock = threading.Lock()
         self.memory_freed = threading.Condition(self.memory_lock)
-        self.worker_pool = ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="sidecar-sender")
+        # we use one more worker to report memory pressure
+        self.worker_pool = ThreadPoolExecutor(max_workers=max_workers+1, thread_name_prefix="sidecar-sender")
+
+        # create a background thread to report memory pressure periodically
+        def _report_memory_pressure():
+            import time
+            while True:
+                logger.debug("Sidecar sender %d Memory pressure count %d", self.sidecar_rank, self.mem_pressure_count)
+                request = comm_sidecar_pb2.ReportMemoryRequest(pressure=self.mem_pressure_count)
+                response = self.stub.ReportMemory(request)
+                if response.status != common_pb2.Status.STATUS_OK:
+                    logger.error("Sidecar server is unhealthy")
+                time.sleep(report_interval)
+        self.worker_pool.submit(_report_memory_pressure)
 
     def _allocate(self, size: int) -> SharedMemoryBuffer:
         """Allocate a shared memory buffer in thread safe."""
@@ -271,12 +330,13 @@ class TensorSidecarSender(TensorSidecarSenderBase):
             while True:
                 buffer = self.shm_manager.allocate(size)
                 if buffer is not None:
-                    logger.info(
+                    logger.debug(
                         "Allcoated buffer of size %d using %d slots, free slots left %d",
                         size,
                         len(buffer.slots),
                         self.shm_manager.free_slots(),
                     )
+                    self.mem_pressure_count += 1
                     return buffer
                 logger.warning(
                     "SHARD RANK %d: Shared memory pressure, try increasing shm_size. Free slots %d/%d",
@@ -303,6 +363,7 @@ class TensorSidecarSender(TensorSidecarSenderBase):
         """Schedules a background thread that sends a tensor to destination sidecar ranks.
 
         TODO: microbenchmark overhead to determine if we need to batch multiple chunks.
+
         Args:
             chunk: the tensor to be sent, must be a multiple of self.slot_size,
                 the chunk will be flattened and sharded.
@@ -332,9 +393,10 @@ class TensorSidecarSender(TensorSidecarSenderBase):
             # no responsibility to send
             return
 
-        logger.info(
-            "SHARD RANK %d: Chunk is using %d num_slots, shard %d, start_slot %d, end_slot %d, slot_size=%d",
+        logger.debug(
+            "SHARD RANK %d: %s:Chunk is using %d num_slots, shard %d, start_slot %d, end_slot %d, slot_size=%d",
             self.shard_rank,
+            id,
             num_slots,
             self.shard_rank,
             start_slot,
@@ -343,8 +405,7 @@ class TensorSidecarSender(TensorSidecarSenderBase):
         )
         shard = chunk[start_slot * self.slot_size : end_slot * self.slot_size]
         shard_offset = start_slot * self.slot_size
-        # logger.info("Complete chunk %s", chunk)
-        logger.info("SHRAD RANK %d: Shard %s", self.shard_rank, shard.shape)
+        logger.debug("SHRAD RANK %d: Shard %s", self.shard_rank, shard.shape)
         self.worker_pool.submit(
             self._send_worker,
             id=id,
@@ -367,10 +428,15 @@ class TensorSidecarSender(TensorSidecarSenderBase):
         num_chunks: int,
     ) -> None:
         """The worker function that sends a shard to destination sidecar ranks.
+
         Args:
+            id: the id of the data transfer request
             shard: the shard to be sent, must be a 1D tensor.
             chunk_size: the complete size of the chunk, used by the server to allocate buffer on the receiver side.
             shard_offset: the offset of the shard in the data, passed in to avoid recomputation.
+            dst_sidecar_ranks: the destination sidecar ranks.
+            chunk_id: the chunk id of the data.
+            num_chunks: the total number of chunks the data is split into.
         """
         buffer = self._allocate(shard.numel())
         try:
@@ -379,7 +445,7 @@ class TensorSidecarSender(TensorSidecarSenderBase):
                 buffer.data.copy_(shard, non_blocking=True)
                 cuda_event.record(self.stream)
             ipc_handle = cuda_event.ipc_handle()
-            logger.info("SHARD RANK: %d: Sending send request to sidecar", self.shard_rank)
+            logger.debug("SHARD RANK: %d: Sending send request to sidecar", self.shard_rank)
             request = comm_sidecar_pb2.SendRequest(
                 id=id,
                 size=buffer.size,
@@ -394,10 +460,10 @@ class TensorSidecarSender(TensorSidecarSenderBase):
             response = self.stub.Send(request)
 
             if response.status == common_pb2.Status.STATUS_OK:
-                logger.info("Sent shard %d of chunk %d in req %s successfully", self.shard_rank, chunk_id, id)
+                logger.debug("Sent shard %d of chunk %d in req %s successfully", self.shard_rank, chunk_id, id)
             else:
                 logger.error("Failed to send data")
-        except:
+        except Exception:
             logger.exception("Failed to send data")
         finally:
             # used to simulate a delay for testing back pressure

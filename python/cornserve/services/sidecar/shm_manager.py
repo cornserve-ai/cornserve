@@ -10,7 +10,7 @@ logger = get_logger(__name__)
 class SharedMemoryChunk:
     """A tensor could be chunked during processing and transmission."""
     def __init__(self, size: int, data: torch.Tensor, num_shards: int) -> None:
-        """Initialize a shared memory chunk, which will be viewed as a list of shards"""
+        """Initialize a shared memory chunk, which will be viewed as a list of shards."""
         self.size = size
         self.data = data
         self.shard_availability = [False for _ in range(num_shards)]
@@ -21,19 +21,18 @@ class SharedMemoryChunk:
         """Mark a shard as ready, will set the chunk as ready if all shards are ready."""
         self.shard_availability[shard_rank] = True
         self.received_size += shard_size
-        if all(self.shard_availability) or self.received_size == self.size:
+        if self.received_size == self.size:
             logger.info("All shards are ready, marking chunk as ready")
             self.ready = True
 
-    def __str__(self):
-        return f"SharedMemoryChunk(size={self.size}, shard_availability={self.shard_availability}, ready={self.ready})"
-
     def __repr__(self):
+        """Return a string representation of the shared memory chunk."""
         return f"SharedMemoryChunk(size={self.size}, shard_availability={self.shard_availability}, ready={self.ready})"
 
 
 class SharedMemoryBuffer:
     """A shared memory buffer that could be sliced into multiple shards.
+
     Only the sidecar receiver will use the shards and track the availablity information.
     """
     def __init__(self, size: int, data: torch.Tensor, slots: List[int]):
@@ -69,40 +68,39 @@ class SharedMemoryBuffer:
         else:
             return True
 
-    def __str__(self):
-        if self.is_chunked:
-            return f"SharedMemoryBuffer(size={self.size}, slots={len(self.slots)}, is_chunked={self.is_chunked}, ready={self.ready}, chunk_availability={self.chunk_availability})"
-        else:
-            return f"SharedMemoryBuffer(size={self.size}, slots={len(self.slots)})"
-
     def __repr__(self):
+        """Return a string representation of the shared memory buffer."""
         if self.is_chunked:
-            return f"SharedMemoryBuffer(size={self.size}, slots={len(self.slots)}, is_chunked={self.is_chunked}, ready={self.ready}, chunk_availability={self.chunk_availability})"
+            return (f"SharedMemoryBuffer(size={self.size}, slots={len(self.slots)}, "
+             f"is_chunked={self.is_chunked}, ready={self.ready}, chunk_availability={self.chunk_availability})")
         else:
             return f"SharedMemoryBuffer(size={self.size}, slots={len(self.slots)})"
 
 
 class SharedMemoryManager:
     """A shared memory manager that manages a shared memory buffer backed by file.
+
     This class is used by the SidecarSender frontend and the SidecarReceiver backend.
     Note this class is not thread-safe, so locking and back pressure should be handled by the caller.
     """
-    def __init__(self, shm: torch.Tensor, shm_size: int, slot_size: int):
+    def __init__(self, shm: torch.Tensor, slot_size: int):
         """Initialize a shared memory manager with the given shared memory tensor.
+
         Args:
             shm: the shared memory tensor
             shm_size: the size of the shared memory tensor (TODO: remove this, can be inferred)
             slot_size: the size of each slot in the shared memory
         """
         self.shm = shm
-        self.shm_size = shm_size
+        self.shm_size = shm.numel()
         self.slot_size = slot_size
         self.num_slots = self.shm_size // self.slot_size
         self.occupancy = [0 for _ in range(self.num_slots)]
-        logger.info(f"Shared memory manager initialized with {self.num_slots} slots")
+        logger.info("Shared memory manager initialized with %d slots", self.num_slots)
 
     def allocate(self, size: int) -> SharedMemoryBuffer | None:
         """Allocate a shared memory buffer of the given size.
+
         This method will find a contiguous slot in the shared memory and return a buffer.
         """
         if size > self.shm_size:

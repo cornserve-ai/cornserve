@@ -2,11 +2,6 @@ syntax = "proto3";
 
 package cornserve.comm_sidecar;
 
-enum Mode {
-  SEND = 0;
-  RECV = 1;
-}
-
 import "common.proto";
 
 service CommSidecar {
@@ -17,6 +12,9 @@ service CommSidecar {
   rpc RegisterReceiver(RegisterReceiverRequest) returns (RegisterResponse);
 
   rpc PrepareReceive(PrepareReceiveRequest) returns (PrepareReceiveResponse);
+
+  rpc CheckHealth(CheckHealthRequest) returns (CheckHealthResponse);
+  rpc ReportMemory(ReportMemoryRequest) returns (ReportMemoryResponse);
   // TODO: add unregister
 }
 
@@ -67,12 +65,16 @@ message RegisterReceiverRequest {
   int32 slot_size = 1;
   string dtype = 2;
   int32 layout = 3;
+  // the sidecar ranks of the group
+  repeated int32 peers = 4;
 }
 
 message RegisterResponse {
   // returns -1 on err
-  int32 local_rank = 1;
-  int32 shm_size = 2;
+  // these are needed for init_shmem
+  int32 shm_size = 1;
+  repeated int32 local_ranks = 2;
+  int32 num_local_sidecars = 3;
 }
 
 message PrepareReceiveRequest {
@@ -90,5 +92,27 @@ message PrepareReceiveRequest {
 }
 
 message PrepareReceiveResponse {
+  common.Status status = 1;
+}
+
+enum HealthStatus {
+  HEALTH_ALL_GOOD = 0;
+  HEALTH_MEMORY_PRESSURE = 1;
+  // This is for a revived or uninitialized sidecar.
+  HEALTH_OFFLINE = 2;
+}
+
+message CheckHealthRequest {
+}
+
+message CheckHealthResponse {
+  HealthStatus status = 1;
+}
+
+message ReportMemoryRequest {
+  int32 pressure = 1;
+}
+
+message ReportMemoryResponse {
   common.Status status = 1;
 }

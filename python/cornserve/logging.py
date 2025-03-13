@@ -4,7 +4,7 @@ import logging
 
 from typing import Any, MutableMapping
 
-def get_logger(name: str) -> logging.Logger:
+def get_logger(name: str, adapters: list[type[logging.LoggerAdapter]] = []) -> logging.Logger | logging.LoggerAdapter:
     """Get a logger with the given name with some formatting configs."""
     # No need to reconfigure the logger if it was already created
     if name in logging.Logger.manager.loggerDict:
@@ -16,15 +16,21 @@ def get_logger(name: str) -> logging.Logger:
     handler = logging.StreamHandler(sys.stderr)
     handler.setFormatter(formatter)
     logger.addHandler(handler)
+    for adapter in adapters:
+        logger = adapter(logger)
     return logger
 
 
 class SidcarAdapter(logging.LoggerAdapter):
     """Adapter that prepends 'Sidecar {rank}' to all messages."""
 
-    def __init__(self, logger: logging.Logger, sidecar_rank: int):
+    def __init__(self, logger: logging.Logger):
         super().__init__(logger, {})
-        self.sidecar_rank = sidecar_rank
+        if pod_name := os.environ.get("SIDECAR_POD_NAME"):
+            self.sidecar_rank = int(pod_name.split("-")[-1])
+        else:
+            self.sidecar_rank = int(os.environ.get("SIDECAR_RANK", -1))
+        assert self.sidecar_rank >= 0, "SIDECAR_RANK or SIDECAR_POD_NAME must be set."
 
     def process(self, msg: str, kwargs: MutableMapping[str, Any]) -> tuple:
         return f"Sidecar {self.sidecar_rank}: {msg}", kwargs
