@@ -14,6 +14,7 @@ import os
 import pickle
 import threading
 from typing import List, Optional, cast
+import weakref
 
 import grpc
 import torch
@@ -111,6 +112,7 @@ class TensorSidecarReceiverExecutor:
         self.stub = comm_sidecar_pb2_grpc.CommSidecarStub(self.channel)
         self.dtype = dtype
         self.tensor_shape = shape
+        self._finalizer = weakref.finalize(self, self.shutdown)
 
         request = comm_sidecar_pb2.RegisterReaderRequest()
         response = self.stub.RegisterReader(request)
@@ -174,6 +176,7 @@ class TensorSidecarAsyncReceiver(TensorSidecarReceiverBase):
         controller_rank = min(peers)
         self.channel = grpc.aio.insecure_channel(grpc_channel_from_rank(controller_rank))
         self.stub = comm_sidecar_pb2_grpc.CommSidecarStub(self.channel)
+        self._finalizer = weakref.finalize(self, self.__del__)
 
     def __del__(self) -> None:
         """Clean up the channels and unlink the shared memory buffer."""
@@ -275,6 +278,8 @@ class TensorSidecarSenderBase:
         self.stream = cast(torch.cuda.Stream, torch.cuda.Stream(device=self.device))
         # this is used to keep track of the memory pressure events
         self.mem_pressure_count = 0
+
+        self._finalizer = weakref.finalize(self, self.shutdown)
 
     def __del__(self) -> None:
         """Clean up, unlink the shared memory buffer."""
