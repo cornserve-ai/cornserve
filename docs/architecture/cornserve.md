@@ -115,6 +115,8 @@ For a given task invocation request, the Task Dispatcher:
 3. (For each sub-request) Sends the request to the Task Executor and waits for the result.
 4. Aggregates sub-request results and response to the App Driver with the final result.
 
+Whenever there is a change to Task Managers (spawning new ones or killing existing ones), the Resource Manager will inform the Task Dispatcher.
+
 
 ## Data Plane
 
