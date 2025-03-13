@@ -226,20 +226,16 @@ class CommSidecarReceiver:
         """
         logger.info("==> Receive request for request id %s", recv_req.id)
         self.recv_done_lock.acquire()
-        logger.info("----> receive lock acquired for request id %s", recv_req.id)
         if recv_req.id in self.ledger and self.ledger[recv_req.id].done:
-            logger.info("All chunks received for request id %s", recv_req.id)
             self.recv_done_lock.release()
-            logger.info("----> receive lock released for request id %s", recv_req.id)
         else:
             # still waiting for chunks/shards
             event = asyncio.Event()
             self.req_events[recv_req.id] = event
             self.recv_done_lock.release()
-            logger.info("----> receive lock released for request id %s", recv_req.id)
             await event.wait()
-            logger.info("Received event for all chunks in request id %s", recv_req.id)
 
+        logger.info("==> All chunks received for request id %s", recv_req.id)
         offset = self.ledger[recv_req.id].buffer.slots[0] * self.shm_manager.slot_size
         size = self.ledger[recv_req.id].buffer.size
         return comm_sidecar_pb2.ReceiveResponse(offset=offset, size=size)
@@ -560,6 +556,7 @@ class CommSidecarServicer(comm_sidecar_pb2_grpc.CommSidecarServicer):
             logger.error("Invalid sidecar mode")
             await context.abort(grpc.StatusCode.FAILED_PRECONDITION, "Invalid sidecar mode")
 
+        logger.info("Registered reader of sidecar_rank %s", self.sidecar_rank)
         return comm_sidecar_pb2.RegisterResponse(
             shm_size=self.sidecar.shm_size,
             local_ranks=self.sidecar.local_ranks,

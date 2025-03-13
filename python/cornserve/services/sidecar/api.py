@@ -268,7 +268,7 @@ class TensorSidecarSenderBase:
             self.shm_size,
             self.dtype,
         )
-        logger.debug("Registered sidecar with host device cuda:%d", self.shard_rank)
+        logger.debug("Registered sidecar with host device cuda:%d", response.local_ranks[0])
         # Post initialization, set GPU device and shared memory buffer
         self.device = device_from_rank(self.shard_rank)
         # cast to make pyright happy
