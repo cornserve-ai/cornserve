@@ -1,16 +1,25 @@
+"""The Task Manager manages task executors.
+
+A Task Manager handles exactly one type of task, for instance,
+multimodal data embedding (Eric) or LLM inference (vLLM).
+It spawns and kills task executors given the resource (GPUs) allocated to it by
+the resource manager.
+
+It's primarily responsible for
+1. Spawning and killing task executors
+2. Routing requests to the appropriate task executor
+"""
+
 import asyncio
 
 import grpc
 import tyro
 
+from cornserve.services.pb import task_manager_pb2, task_manager_pb2_grpc, common_pb2
+from cornserve.services.resource_manager.resource import GPU
+from cornserve.services.task_manager.manager import TaskManager
+from cornserve.services.task_manager.models import TaskManagerType
 from cornserve.logging import get_logger
-from cornserve.services.pb import (
-    task_manager_pb2,
-    task_manager_pb2_grpc,
-    worker_pb2,
-    worker_pb2_grpc,
-    common_pb2,
-)
 
 logger = get_logger(__name__)
 cleanup_coroutines = []
@@ -21,45 +30,104 @@ class TaskManagerServicer(task_manager_pb2_grpc.TaskManagerServicer):
 
     def __init__(self) -> None:
         """Initialize the TaskManagerServicer."""
-        self.id = "UNKNOWN"
-        self.worker_stubs = {}
+        self.manager: TaskManager | None = None
 
-    async def RegisterNewTask(
+    async def RegisterTask(
         self,
         request: task_manager_pb2.RegisterTaskRequest,
         context: grpc.aio.ServicerContext,
     ) -> task_manager_pb2.RegisterTaskResponse:
-        logger.info("Received task registration request: %s", request)
-        logger.info("Assigned with task manager ID: %s", request.task_manager_id)
+        """Become a task manager for a new task."""
+        logger.info(
+            "Registering task manager %s with task type %s and config %s",
+            request.task_manager_id,
+            task_manager_pb2.TaskManagerType.Name(request.type),
+            request.config,
+        )
 
-        self.id = request.task_manager_id
-        self.worker_stubs: dict[str, worker_pb2_grpc.WorkerStub] = {
-            worker_id: worker_pb2_grpc.WorkerStub(grpc.aio.insecure_channel(worker_address))
-            for worker_id, worker_address in request.workers.items()
-        }
+        if not all(gpu.delta == task_manager_pb2.ResourceDelta.ADD for gpu in request.gpus):
+            await context.abort(
+                grpc.StatusCode.FAILED_PRECONDITION,
+                "When initializing the task manager, all resources deltas must be ADD",
+            )
 
-        logger.info("Registered workers: %s", list(self.worker_stubs.keys()))
+        task_type = TaskManagerType(task_manager_pb2.TaskManagerType.Name(request.type))
+        gpus = [
+            GPU(
+                node=gpu.node_id,
+                global_rank=gpu.global_rank,
+                local_rank=gpu.local_rank,
+            ).allocate_to(request.task_manager_id)
+            for gpu in request.gpus
+        ]
+        self.manager = await TaskManager.init(
+            id=request.task_manager_id,
+            task_type=task_type,
+            config_str=request.config,
+            gpus=gpus,
+        )
+
+        logger.info("Successfully registered task manager %s", request.task_manager_id)
 
         return task_manager_pb2.RegisterTaskResponse(status=common_pb2.Status.STATUS_OK)
 
-    async def Healthcheck(
+    async def UpdateResources(
         self,
-        request: task_manager_pb2.HealthcheckRequest,
+        request: task_manager_pb2.UpdateResourcesRequest,
         context: grpc.aio.ServicerContext,
-    ) -> task_manager_pb2.HealthcheckResponse:
-        """Recursively check and report the health of all workers."""
-        resp = task_manager_pb2.HealthcheckResponse()
-        resp.status = common_pb2.Status.STATUS_OK
-        for worker_id, worker_stub in self.worker_stubs.items():
-            worker_resp: worker_pb2.HealthcheckResponse = worker_stub.Healthcheck(worker_pb2.HealthcheckRequest())
-            worker_status = task_manager_pb2.WorkerStatus(worker_id=worker_id, status=worker_resp.status)
-            resp.worker_statuses[worker_id] = worker_status
-        return resp
+    ) -> task_manager_pb2.UpdateResourcesResponse:
+        """Update the resources allocated to the task manager."""
+        if self.manager is None:
+            await context.abort(grpc.StatusCode.FAILED_PRECONDITION, "Task manager not initialized with a task")
+
+        add_gpus, remove_gpus = [], []
+        for res in request.gpus:
+            gpu = GPU(node=res.node_id, global_rank=res.global_rank, local_rank=res.local_rank)
+            if res.delta == task_manager_pb2.ResourceDelta.ADD:
+                add_gpus.append(gpu)
+            elif res.delta == task_manager_pb2.ResourceDelta.REMOVE:
+                remove_gpus.append(gpu)
+            else:
+                await context.abort(grpc.StatusCode.INVALID_ARGUMENT, f"Unknown resource delta: {res.delta}")
+
+        await self.manager.update_resources(add_gpus, remove_gpus)
+
+        return task_manager_pb2.UpdateResourcesResponse(status=common_pb2.Status.STATUS_OK)
+
+    async def Shutdown(
+        self,
+        request: task_manager_pb2.ShutdownRequest,
+        context: grpc.aio.ServicerContext,
+    ) -> task_manager_pb2.ShutdownResponse:
+        """Shutdown the task manager."""
+        if self.manager is None:
+            await context.abort(
+                grpc.StatusCode.FAILED_PRECONDITION,
+                "Task manager not initialized with a task",
+            )
+        await self.manager.shutdown()
+        return task_manager_pb2.ShutdownResponse(status=common_pb2.Status.STATUS_OK)
+
+    async def GetRoute(
+        self,
+        request: task_manager_pb2.GetRouteRequest,
+        context: grpc.aio.ServicerContext,
+    ) -> task_manager_pb2.GetRouteResponse:
+        """Select which task executor the request should be routed to."""
+        if self.manager is None:
+            await context.abort(
+                grpc.StatusCode.FAILED_PRECONDITION,
+                "Task manager not initialized with a task",
+            )
+        url = await self.manager.get_route(request.app_id, request.request_id, request.routing_hint)
+        return task_manager_pb2.GetRouteResponse(task_executor_url=url)
 
 
 async def serve(ip: str = "[::]", port: int = 50051) -> None:
+    servicer = TaskManagerServicer()
+
     server = grpc.aio.server()
-    task_manager_pb2_grpc.add_TaskManagerServicer_to_server(TaskManagerServicer(), server)
+    task_manager_pb2_grpc.add_TaskManagerServicer_to_server(servicer, server)
     listen_addr = f"{ip}:{port}"
     server.add_insecure_port(listen_addr)
     logger.info("Starting server on %s", listen_addr)
@@ -72,6 +140,9 @@ async def serve(ip: str = "[::]", port: int = 50051) -> None:
         # grace period, the server won't accept new connections and allow
         # existing RPCs to continue within the grace period.
         await server.stop(5)
+        if servicer.manager is not None:
+            logger.info("Shutting down task manager...")
+            await servicer.manager.shutdown()
         logger.info("Server stopped")
 
     cleanup_coroutines.append(server_graceful_shutdown())

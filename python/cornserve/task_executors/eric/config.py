@@ -1,6 +1,8 @@
 """Configuration for the Eric task executor.
 
 Config values will be supplied by the Task Manager when Eric is launched.
+
+Config values should be kept in sync with `cornserve.task_executors.launch`.
 """
 
 from transformers import AutoConfig, PretrainedConfig
@@ -20,7 +22,7 @@ class ModelConfig(BaseModel):
 
     # HF config
     # This will be replaced with the real HF config of the model ID
-    hf_config: PretrainedConfig = PretrainedConfig()
+    hf_config: PretrainedConfig = None  # type: ignore
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 

@@ -49,8 +49,7 @@ class LLMTask(Task, BaseModel):
     async def invoke(
         self,
         prompt: str,
-        images: list[str] | None = None,
-        videos: list[str] | None = None,
+        multimodal_data: list[tuple[Literal["image", "video"], str]] | None = None,
     ) -> str:
         """Invoke the task."""
         ...

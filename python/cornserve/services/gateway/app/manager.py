@@ -91,7 +91,10 @@ def validate_app_module(module: ModuleType) -> AppClasses:
         raise ValueError("\n".join(errors))
 
     return AppClasses(
-        request_cls=module.Request, response_cls=module.Response, config_cls=module.Config, serve_fn=module.serve
+        request_cls=module.Request,
+        response_cls=module.Response,
+        config_cls=module.Config,
+        serve_fn=module.serve,  # type: ignore
     )
 
 

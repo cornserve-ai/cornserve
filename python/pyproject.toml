@@ -16,6 +16,7 @@ dependencies = [
     "grpcio-tools",
     "tyro",
     "kubernetes_asyncio",
+    "httpx",
 ]
 dynamic = ["version"]
 

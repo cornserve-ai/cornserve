@@ -16,7 +16,6 @@ class GPU:
 
     def __init__(
         self,
-        id: int,
         node: str,
         global_rank: int,
         local_rank: int,
@@ -24,12 +23,10 @@ class GPU:
         """Initialize the GPU resource.
 
         Args:
-            id: GPU ID
             node: Node name
             global_rank: Cluster-wide unique global rank of the GPU
             local_rank: Local rank of the GPU on the node
         """
-        self.id = id
         self.node = node
         self.global_rank = global_rank
         self.local_rank = local_rank
@@ -45,13 +42,23 @@ class GPU:
         """Check if the GPU is free."""
         return self.owner is None
 
-    def allocate_to(self, owner: str) -> None:
+    def allocate_to(self, owner: str) -> GPU:
         """Allocate the GPU to a owner."""
+        if self.owner is not None:
+            raise ValueError(f"GPU {self} is already allocated to {self.owner}.")
+
         self.owner = owner
 
-    def free(self) -> None:
+        return self
+
+    def free(self) -> GPU:
         """Free the GPU."""
+        if self.owner is None:
+            raise ValueError(f"GPU {self} is already free.")
+
         self.owner = None
+
+        return self
 
 
 class CannotColocateError(Exception):

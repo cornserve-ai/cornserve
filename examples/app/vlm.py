@@ -30,7 +30,7 @@ class Config(AppConfig):
 async def serve(request: Request) -> Response:
     """Serve a single VLM request."""
     response = await vlm.invoke(
-        images=[request.image_url],
         prompt=request.prompt,
+        multimodal_data=[("image", request.image_url)],
     )
     return Response(text=response)

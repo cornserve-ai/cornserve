@@ -95,12 +95,7 @@ class ResourceManager:
         for node, pods in node_to_pods.items():
             for local_rank, pod in enumerate(sorted(pods, key=lambda p: p.metadata.name)):  # type: ignore
                 global_rank = int(pod.metadata.name.split("-")[-1])  # type: ignore
-                gpu = GPU(
-                    id=global_rank,
-                    node=node,
-                    global_rank=global_rank,
-                    local_rank=local_rank,
-                )
+                gpu = GPU(node=node, global_rank=global_rank, local_rank=local_rank)
                 gpus.append(gpu)
         resource = Resource(gpus=gpus)
 
@@ -320,9 +315,9 @@ class ResourceManager:
                     containers=[
                         kclient.V1Container(
                             name="task-manager",
-                            image=constants.DOCKER_IMAGE_TASK_MANAGER,
-                            ports=[kclient.V1ContainerPort(container_port=50051, name="grpc")],
+                            image=constants.CONTAINER_IMAGE_TASK_MANAGER,
                             image_pull_policy="Always",
+                            ports=[kclient.V1ContainerPort(container_port=50051, name="grpc")],
                         )
                     ],
                     service_account_name="task-manager",
@@ -391,6 +386,9 @@ class ResourceManager:
 
         In the first case, this method is called with the task manager lock held.
         In the second case, this method is called without the task manager lock held.
+
+        Args:
+            task_manager_id: The ID of the task manager to shut down.
         """
         logger.info("Shutting down task manager %s", task_manager_id)
 
@@ -419,13 +417,13 @@ class ResourceManager:
                     await self.kube_core_client.delete_namespaced_pod(
                         name=pod_name,
                         namespace=constants.K8S_NAMESPACE,
-                    )
+                    )  # type: ignore
             if service_name := self.task_manager_services.pop(task_manager_id, None):
                 with suppress(kclient.ApiException):
                     await self.kube_core_client.delete_namespaced_service(
                         name=service_name,
                         namespace=constants.K8S_NAMESPACE,
-                    )
+                    )  # type: ignore
         except Exception as e:
             logger.exception(
                 "An unexpected exception aborted the shutdown of task manager %s: %s",

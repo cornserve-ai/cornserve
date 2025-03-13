@@ -2,21 +2,29 @@
 
 from __future__ import annotations
 
+import enum
 import uuid
-from typing import Literal
+from typing_extensions import override
 
 from pydantic import BaseModel
 
 from cornserve.frontend.tasks import Task, LLMTask
 
 
-TaskManagerType = Literal["ENCODER", "LLM"]
+class TaskManagerType(enum.StrEnum):
+    """Enumeration of task manager types.
+
+    This class should be kept in sync with `TaskManagerType` in
+    `task_manager.proto`.
+    """
+
+    ENCODER = "ENCODER"
+    LLM = "LLM"
 
 
 class TaskManagerConfig(BaseModel):
     """Base class for task manager configuration."""
 
-    # Keep in sync with TaskManagerType in `task_manager.proto`.
     type: TaskManagerType
 
     @staticmethod
@@ -47,12 +55,13 @@ class EncoderConfig(TaskManagerConfig):
         modalities: The modalities to use for the task.
     """
 
-    type: TaskManagerType = "ENCODER"
+    type: TaskManagerType = TaskManagerType.ENCODER
 
     model_id: str
-    modalities: set[str] = {"image"}
+    modalities: set[str] = {"image", "video"}
 
-    def get_id(self) -> str:
+    @override
+    def create_id(self) -> str:
         """Construct a unique ID for the task manager."""
         pieces = [
             self.type,
@@ -70,11 +79,12 @@ class LLMConfig(TaskManagerConfig):
         model_id: The ID of the model to use for the task.
     """
 
-    type: TaskManagerType = "LLM"
+    type: TaskManagerType = TaskManagerType.LLM
 
     model_id: str
 
-    def get_id(self) -> str:
+    @override
+    def create_id(self) -> str:
         """Construct a unique ID for the task manager."""
         pieces = [self.type, self.model_id.split("/")[-1], uuid.uuid4().hex[:8]]
         return "-".join(pieces)

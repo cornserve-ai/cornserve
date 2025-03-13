@@ -8,6 +8,9 @@ service TaskManager {
   // Configure the task manager to handle a task
   rpc RegisterTask(RegisterTaskRequest) returns (RegisterTaskResponse);
 
+  // Add or remove resources from a task manager
+  rpc UpdateResources(UpdateResourcesRequest) returns (UpdateResourcesResponse);
+
   // Shutdown the task manager
   rpc Shutdown(ShutdownRequest) returns (ShutdownResponse);
   
@@ -16,7 +19,7 @@ service TaskManager {
   rpc ReconcileTargetLoad(ReconcileTargetLoadRequest) returns (ReconcileTargetLoadResponse);
   
   // Request routing
-  rpc Submit(SubmitRequest) returns (SubmitResponse);
+  rpc GetRoute(GetRouteRequest) returns (GetRouteResponse);
   
   // Health checking
   rpc Healthcheck(HealthcheckRequest) returns (HealthcheckResponse);
@@ -25,13 +28,33 @@ service TaskManager {
 // Type of task manager
 // Keep in sync with `cornserve.services.task_manager.models.BaseTaskManagerConfig`
 enum TaskManagerType {
-  UNKNOWN = 0;
-
   // Multimodal data embedding
-  ENCODER = 1;
+  ENCODER = 0;
 
   // LLM text generation
-  LLM = 2;
+  LLM = 1;
+}
+
+enum ResourceDelta {
+  // Give more resources
+  ADD = 0;
+
+  // Take away resources
+  REMOVE = 1;
+}
+
+message GPUResource {
+  // Whether to add or remove this resource
+  ResourceDelta delta = 1;
+
+  // Node ID of the GPU
+  string node_id = 2;
+
+  // Global rank of the GPU
+  int32 global_rank = 3;
+
+  // Local rank of the GPU
+  int32 local_rank = 4;
 }
 
 message RegisterTaskRequest {
@@ -41,14 +64,27 @@ message RegisterTaskRequest {
   // Type of task
   TaskManagerType type = 2;
 
-  // Initial set of sidecar ranks
-  repeated int32 sidecar_ranks = 3;
+  // Initial set of GPU resources
+  repeated GPUResource gpus = 3;
 
   // JSON-encoded config generated from the Task Pydantic model
   string config = 4;
 }
 
 message RegisterTaskResponse {
+  common.Status status = 1;
+}
+
+// Update resources
+message UpdateResourcesRequest {
+  // ID of the task manager
+  string task_manager_id = 1;
+
+  // Resources to add or remove
+  repeated GPUResource gpus = 2;
+}
+
+message UpdateResourcesResponse {
   common.Status status = 1;
 }
 
@@ -93,28 +129,20 @@ message GetTaskProfileResponse {
 }
 
 // Request routing
-message Request {
-  string task_id = 1;
-  bytes payload = 2;
-  string request_id = 3;
-  map<string, string> metadata = 4;
+message GetRouteRequest {
+  // ID of the app that is making the request
+  string app_id = 1;
+
+  // ID of the request
+  string request_id = 2;
+
+  // Optional routing hint
+  // e.g., hash of image URL, system prompt
+  optional string routing_hint = 3;
 }
 
-message Response {
-  bytes result = 1;
-  common.Status status = 2;
-  string message = 3;
-}
-
-message SubmitRequest {
-  Request request = 1;
-  string callback_success_endpoint = 2;
-  string callback_failure_endpoint = 3;
-}
-
-message SubmitResponse {
-  string request_id = 1;
-  common.Status status = 2;
+message GetRouteResponse {
+  string task_executor_url = 1;
 }
 
 // Healthcheck response
