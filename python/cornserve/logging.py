@@ -36,7 +36,7 @@ class SidcarAdapter(logging.LoggerAdapter):
         if pod_name := os.environ.get("SIDECAR_POD_NAME"):
             self.sidecar_rank = int(pod_name.split("-")[-1])
         else:
-            self.sidecar_rank = int(os.environ.get("SIDECAR_RANK", -1))
+            self.sidecar_rank = int(os.environ.get("SIDECAR_RANK", "-1"))
         assert self.sidecar_rank >= 0, "SIDECAR_RANK or SIDECAR_POD_NAME must be set."
 
     def process(self, msg: str, kwargs: MutableMapping[str, Any]) -> tuple:

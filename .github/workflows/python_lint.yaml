@@ -33,5 +33,7 @@ jobs:
           cache: 'pip'
       - name: Install library and lint tools
         run: pip install -U pip && pip install "./python[dev-no-gpu]"
+      - name: Generate protobuf files
+        run: bash scripts/generate_pb.sh
       - name: Check format and lint
         run: bash python/scripts/lint.sh

@@ -717,10 +717,10 @@ async def main(
         - SIDECAR_DEVICE_ID: The device id of the GPU used by the sidecar, will use SIDECAR_RANK if not set.
         - SIDECAR_NUM_DEVICES: Optional. The number of devices on the node, will use SIDECAR_WORLD_SIZE if not set.
     """
-    world_size = int(os.environ.get("SIDECAR_WORLD_SIZE", 1))
+    world_size = int(os.environ.get("SIDECAR_WORLD_SIZE", "1"))
     master_addr = os.environ.get("SIDECAR_MASTER_ADDR", "localhost")
-    master_port = os.environ.get("SIDECAR_MASTER_PORT", 48105)
-    shm_size = int(os.environ.get("SIDECAR_SHM_SIZE", 2**30))
+    master_port = os.environ.get("SIDECAR_MASTER_PORT", "48105")
+    shm_size = int(os.environ.get("SIDECAR_SHM_SIZE", str(2**30)))
 
     assert world_size > 0, "Invalid SIDECAR_WORLD_SIZE"
     pod_name = os.environ.get("SIDECAR_POD_NAME")
@@ -731,7 +731,7 @@ async def main(
         except ValueError:
             sidecar_rank = -1
     else:
-        sidecar_rank = int(os.environ.get("SIDECAR_RANK", -1))
+        sidecar_rank = int(os.environ.get("SIDECAR_RANK", "-1"))
 
     assert sidecar_rank >= 0, "Invalid sidecar rank"
 
