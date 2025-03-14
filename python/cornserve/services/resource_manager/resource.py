@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import heapq
-from collections import defaultdict
 from typing import Literal
+from collections import defaultdict
 
 from cornserve.logging import get_logger
 from cornserve.services.pb import task_manager_pb2

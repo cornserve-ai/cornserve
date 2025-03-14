@@ -7,18 +7,18 @@ together provide the functionality to send and receive tensors between ranks.
 """
 
 from __future__ import annotations
-import asyncio
-from dataclasses import dataclass
+
 import os
 import pickle
-from typing import Dict
+import asyncio
+from dataclasses import dataclass
 
+import tyro
 import grpc
 import kubernetes_asyncio.client as kclient
 import kubernetes_asyncio.config as kconfig
 import torch
 import torch.distributed as dist
-import tyro
 import multiprocessing as mp
 
 from cornserve.logging import SidcarAdapter, get_logger
@@ -310,8 +310,8 @@ class CommSidecarSender:
             dtype=self.dtype,
         )
 
-        self.dst_channels: Dict[int, grpc.aio.Channel] = {}
-        self.dst_stubs: Dict[int, comm_sidecar_pb2_grpc.CommSidecarStub] = {}
+        self.dst_channels: dict[int, grpc.aio.Channel] = {}
+        self.dst_stubs: dict[int, comm_sidecar_pb2_grpc.CommSidecarStub] = {}
         self.mem_pressure_count = 0
 
     async def report_memory(

@@ -6,14 +6,13 @@ import "common.proto";
 import "task_manager.proto";
 
 service TaskDispatcher {
-  // New task manager created
-  rpc NotifyNewTaskManager(NotifyNewTaskManagerRequest) returns (NotifyNewTaskManagerResponse);
+  // New task managers spawned
+  rpc NotifyAppRegistration(NotifyAppRegistrationRequest) returns (NotifyAppRegistrationResponse);
 
-  // Task manager is shutting down
-  rpc NotifyShutdownTaskManager(NotifyShutdownTaskManagerRequest) returns (NotifyShutdownTaskManagerResponse);
+  // Task managers shutting down
+  rpc NotifyAppUnregistration(NotifyAppUnregistrationRequest) returns (NotifyAppUnregistrationResponse);
 }
 
-// New task manager created
 message TaskManagerInfo {
   // Task manager ID
   string task_manager_id = 1;
@@ -21,7 +20,7 @@ message TaskManagerInfo {
   // Task manager type
   task_manager.TaskManagerType type = 2;
 
-  // Task manager
+  // Task manager URL
   string url = 3;
 }
 
@@ -29,11 +28,18 @@ message TaskInfo {
   // Task ID
   string task_id = 1;
 
+  // Task type
+  common.TaskType type = 2;
+
+  // Task config
+  string task_config = 3;
+
   // Task Manager info
-  repeated TaskManagerInfo task_manager_info = 2;
+  repeated TaskManagerInfo task_manager_info = 4;
 }
 
-message NotifyNewTaskManagerRequest {
+// New app registered
+message NotifyAppRegistrationRequest {
   // App ID
   string app_id = 1;
 
@@ -41,15 +47,16 @@ message NotifyNewTaskManagerRequest {
   repeated TaskInfo tasks = 2;
 }
 
-message NotifyNewTaskManagerResponse {
+message NotifyAppRegistrationResponse {
   common.Status status = 1;
 }
 
-message NotifyShutdownTaskManagerRequest {
-  // Task manager ID
-  string task_manager_id = 1;
+// App removed
+message NotifyAppUnregistrationRequest {
+  // App ID
+  string app_id = 1;
 }
 
-message NotifyShutdownTaskManagerResponse {
+message NotifyAppUnregistrationResponse {
   common.Status status = 1;
 }

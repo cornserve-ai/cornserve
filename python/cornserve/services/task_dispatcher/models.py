@@ -1,0 +1,62 @@
+"""Data models for the Task Dispatcher."""
+
+from __future__ import annotations
+
+import grpc
+from pydantic import BaseModel
+
+from cornserve.frontend.tasks import Task
+from cornserve.services.task_manager.models import TaskManagerType
+from cornserve.services.pb import task_dispatcher_pb2, task_manager_pb2_grpc, common_pb2
+
+
+class TaskManagerInfo(BaseModel):
+    """Task Manager info and how to reach it.
+
+    Attributes:
+        id: The ID of the task manager.
+        type: The type of task manager.
+        url: The URL of the task manager.
+        channel: The gRPC channel to the task manager.
+        stub: The gRPC stub to the task manager.
+    """
+
+    id: str
+    type: TaskManagerType
+    url: str
+    channel: grpc.aio.Channel
+    stub: task_manager_pb2_grpc.TaskManagerStub
+
+    @classmethod
+    def from_pb(cls, pb: task_dispatcher_pb2.TaskManagerInfo) -> TaskManagerInfo:
+        """Create a TaskManager from a protobuf struct."""
+        channel = grpc.aio.insecure_channel(pb.url)
+        stub = task_manager_pb2_grpc.TaskManagerStub(channel)
+        return cls(
+            id=pb.task_manager_id,
+            type=TaskManagerType.from_pb(pb.type),
+            url=pb.url,
+            channel=channel,
+            stub=stub,
+        )
+
+
+class TaskInfo(BaseModel):
+    """Task info and what task managers it invokes.
+
+    Attributes:
+        id: The ID of the task.
+        task_managers: The task managers that this task invokes.
+    """
+    id: str
+    task: Task
+    task_managers: list[TaskManagerInfo]
+
+    @classmethod
+    def from_pb(cls, pb: task_dispatcher_pb2.TaskInfo) -> TaskInfo:
+        """Create a Task from a protobuf struct."""
+        return cls(
+            id=pb.task_id,
+            task=Task.from_json(common_pb2.TaskType.Name(pb.type), pb.task_config),
+            task_managers=[TaskManagerInfo.from_pb(info) for info in pb.task_manager_info],
+        )

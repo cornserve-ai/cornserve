@@ -1,9 +1,12 @@
 """Sidecar utility functions and constants."""
 
 from __future__ import annotations
-import torch
 
 from enum import Enum
+
+import torch
+
+from cornserve import constants
 
 RANK_OFFSET = 1000000
 CHUNK_OFFSET = 1000
@@ -31,7 +34,13 @@ def device_from_rank(rank: int) -> torch.device:
 def grpc_channel_from_rank(rank: int) -> str:
     """GRPC channel from rank."""
     assert rank >= 0, "Rank should be non-negative"
-    return f"sidecar-{rank}.torch-headless.cornserve.svc.cluster.local:{10000 + rank}"
+    parts = [
+        f"sidecar-{rank}",
+        constants.K8S_SIDECAR_SERVICE_NAME,
+        constants.K8S_NAMESPACE,
+        "svc.cluster.local",
+    ]
+    return ".".join(parts) + f":{10000 + rank}"
 
 
 def init_shmem(

@@ -1,8 +1,8 @@
 """Shared memory manager for sidecar communication."""
 
 from __future__ import annotations
+
 import torch
-from typing import List
 
 from cornserve.logging import get_logger
 
@@ -39,7 +39,7 @@ class SharedMemoryBuffer:
     Only the sidecar receiver will use the shards and track the availablity information.
     """
 
-    def __init__(self, size: int, data: torch.Tensor, slots: List[int]):
+    def __init__(self, size: int, data: torch.Tensor, slots: list[int]):
         """Initialize a shared memory buffer, no chunking by default."""
         self.size = size
         self.data = data

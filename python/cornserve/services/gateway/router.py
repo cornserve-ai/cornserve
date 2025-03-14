@@ -86,6 +86,12 @@ async def invoke_app(app_id: str, request: AppRequest, raw_request: Request):
         )
 
 
+@router.get("/health")
+async def health_check():
+    """Health check endpoint."""
+    return Response(status_code=status.HTTP_200_OK)
+
+
 def init_app_state(app: FastAPI) -> None:
     """Initialize the app state with required components."""
     app.state.app_manager = AppManager("resource-manager:50051")
@@ -93,7 +99,7 @@ def init_app_state(app: FastAPI) -> None:
 
 def create_app() -> FastAPI:
     """Create a FastAPI app for the Gateway service."""
-    app = FastAPI(title="Cornserve Gateway")
+    app = FastAPI(title="CornServe Gateway")
     app.include_router(router)
     init_app_state(app)
     return app

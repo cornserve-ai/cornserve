@@ -142,7 +142,11 @@ message GetRouteRequest {
 }
 
 message GetRouteResponse {
+  // URL of the task executor to route the request to
   string task_executor_url = 1;
+
+  // Sidecar ranks the task executor is registered with
+  repeated int32 sidecar_ranks = 2;
 }
 
 // Healthcheck response

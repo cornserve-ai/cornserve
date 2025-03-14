@@ -22,6 +22,10 @@ dynamic = ["version"]
 
 [project.optional-dependencies]
 sidecar = ["torch"]
+gateway = ["fastapi"]
+resource-manager = []
+task-manager = ["pydantic"]
+task-dispatcher = ["fastapi"]
 eric-no-gpu = [
   "fastapi",
   "uvicorn[standard]",
@@ -36,10 +40,17 @@ eric-no-gpu = [
   "einops",
   "xformers",
 ]
-eric = ["flash-attn", "cornserve[eric-common]"]
-dev-common = ["grpcio-tools", "pyright", "ruff", "pytest", "pytest-asyncio"]
-dev = ["cornserve[dev-common,sidecar,eric]"]
-dev-no-gpu = ["cornserve[dev-common,sidecar,eric-no-gpu]"]
+eric = ["flash-attn", "cornserve[eric-no-gpu]"]
+dev-common = [
+  "grpcio-tools",
+  "pyright",
+  "ruff",
+  "pytest",
+  "pytest-asyncio",
+  "cornserve[dev-common,sidecar,gateway,resource-manager,task-manager,task-dispatcher]",
+]
+dev = ["cornserve[dev-common,eric]"]
+dev-no-gpu = ["cornserve[dev-common,eric-no-gpu]"]
 
 [tool.setuptools.dynamic]
 version = { attr = "cornserve.__version__" }

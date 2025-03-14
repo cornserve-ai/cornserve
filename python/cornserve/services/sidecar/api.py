@@ -7,14 +7,15 @@ a sidecar producer, all methods are async.
 """
 
 from __future__ import annotations
-from concurrent.futures import ThreadPoolExecutor
-from functools import reduce
-from operator import mul
+
 import os
 import pickle
-import threading
-from typing import List, Optional, cast
 import weakref
+import threading
+from functools import reduce
+from operator import mul
+from typing import List, Optional, cast
+from concurrent.futures import ThreadPoolExecutor
 
 import grpc
 import torch
