@@ -47,7 +47,7 @@ class ModelExecutor:
 
         # Install shutdown signal handler
         def shutdown(*_) -> None:
-            logger.fatal("Received signal from worker. Shutting down.")
+            logger.critical("Received signal from worker. Shutting down.")
             if (parent := psutil.Process().parent()) and parent.name() == "eric_engine":
                 parent.send_signal(signal.SIGUSR1)
             self.shutdown()

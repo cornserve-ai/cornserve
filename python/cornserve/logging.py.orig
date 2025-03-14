@@ -1,0 +1,48 @@
+"""Logging utilities for the Cornserve project."""
+
+import os
+import sys
+import logging
+
+from typing import Any, MutableMapping, Optional
+
+
+<<<<<<< HEAD
+def get_logger(
+    name: str, adapters: Optional[list[type[logging.LoggerAdapter]]] = None
+) -> logging.Logger | logging.LoggerAdapter:
+=======
+def get_logger(name: str) -> logging.Logger:
+>>>>>>> 2fc87b0 (Frontend and gateway)
+    """Get a logger with the given name with some formatting configs."""
+    # No need to reconfigure the logger if it was already created
+    if name in logging.Logger.manager.loggerDict:
+        return logging.getLogger(name)
+
+    logger = logging.getLogger(name)
+    logger.setLevel(os.environ.get("CORNSERVE_LOG_LEVEL", logging.INFO))
+    formatter = logging.Formatter("%(levelname)s %(asctime)s [%(filename)s:%(lineno)d] %(message)s")
+    handler = logging.StreamHandler(sys.stderr)
+    handler.setFormatter(formatter)
+    logger.addHandler(handler)
+    if adapters is not None:
+        for adapter in adapters:
+            logger = adapter(logger)
+    return logger
+
+
+class SidcarAdapter(logging.LoggerAdapter):
+    """Adapter that prepends 'Sidecar {rank}' to all messages."""
+
+    def __init__(self, logger: logging.Logger):
+        """Initialize the adapter with the given logger."""
+        super().__init__(logger, {})
+        if pod_name := os.environ.get("SIDECAR_POD_NAME"):
+            self.sidecar_rank = int(pod_name.split("-")[-1])
+        else:
+            self.sidecar_rank = int(os.environ.get("SIDECAR_RANK", -1))
+        assert self.sidecar_rank >= 0, "SIDECAR_RANK or SIDECAR_POD_NAME must be set."
+
+    def process(self, msg: str, kwargs: MutableMapping[str, Any]) -> tuple:
+        """Prepend 'Sidecar {rank}' to the message."""
+        return f"Sidecar {self.sidecar_rank}: {msg}", kwargs

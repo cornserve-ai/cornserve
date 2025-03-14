@@ -3,6 +3,7 @@ syntax = "proto3";
 package cornserve.task_manager;
 
 import "common.proto";
+import "task_manager.proto";
 
 service TaskDispatcher {
   // New task manager created
@@ -12,15 +13,32 @@ service TaskDispatcher {
   rpc NotifyShutdownTaskManager(NotifyShutdownTaskManagerRequest) returns (NotifyShutdownTaskManagerResponse);
 }
 
-message NotifyNewTaskManagerRequest {
+// New task manager created
+message TaskManagerInfo {
   // Task manager ID
   string task_manager_id = 1;
 
-  // Type of task manager
-  TaskManagerType type = 2;
+  // Task manager type
+  task_manager.TaskManagerType type = 2;
 
-  // URL to reach the task manager
+  // Task manager
   string url = 3;
+}
+
+message TaskInfo {
+  // Task ID
+  string task_id = 1;
+
+  // Task Manager info
+  repeated TaskManagerInfo task_manager_info = 2;
+}
+
+message NotifyNewTaskManagerRequest {
+  // App ID
+  string app_id = 1;
+
+  // Task info
+  repeated TaskInfo tasks = 2;
 }
 
 message NotifyNewTaskManagerResponse {

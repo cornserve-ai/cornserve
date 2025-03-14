@@ -1,6 +1,6 @@
 """Base classes for cornserve applications."""
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 
 from .tasks import Task
 
@@ -27,5 +27,4 @@ class AppConfig(BaseModel):
 
     tasks: dict[str, Task] = Field(default_factory=dict, description="Dictionary of tasks that the app requires.")
 
-    class Config:
-        extra = "forbid"
+    model_config = ConfigDict(extra="forbid")

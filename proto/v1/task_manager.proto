@@ -26,7 +26,7 @@ service TaskManager {
 }
 
 // Type of task manager
-// Keep in sync with `cornserve.services.task_manager.models.BaseTaskManagerConfig`
+// Keep in sync with `cornserve.services.task_manager.models.TaskManagerType`
 enum TaskManagerType {
   // Multimodal data embedding
   ENCODER = 0;

@@ -14,15 +14,34 @@ logger = get_logger(__name__)
 
 
 class RegisterAppRequest(BaseModel):
-    app_id: str
+    """Request for registering a new application.
+
+    Attributes:
+        app_id: The unique identifier for the application.
+        source_code: The Python source code of the application.
+    """
+
     source_code: str
 
 
 class AppRegistrationResponse(BaseModel):
+    """Response for registering a new application.
+
+    Attributes:
+        app_id: The unique identifier for the registered application.
+    """
+
     app_id: str
 
 
 class AppRequest(BaseModel):
+    """Request for invoking a registered application.
+
+    Attributes:
+        request_data: The input data for the application. Should be a valid
+            JSON object that matches the `Request` schema of the application.
+    """
+
     request_data: dict[str, Any]
 
 
@@ -32,13 +51,13 @@ async def register_app(request: RegisterAppRequest, raw_request: Request):
     app_manager: AppManager = raw_request.app.state.app_manager
 
     try:
-        app_id = await app_manager.register_app(request.app_id, request.source_code)
+        app_id = await app_manager.register_app(request.source_code)
         return AppRegistrationResponse(app_id=app_id)
     except ValueError as e:
-        logger.info("Error while registering app {%s}: {%s}", request.app_id, e)
+        logger.info("Error while registering app: %s", e)
         return Response(status_code=status.HTTP_400_BAD_REQUEST, content=str(e))
     except Exception as e:
-        logger.exception("Unexpected error while registering app {%s}", request.app_id)
+        logger.exception("Unexpected error while registering app")
         return Response(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             content=str(e),
@@ -53,7 +72,7 @@ async def invoke_app(app_id: str, request: AppRequest, raw_request: Request):
     try:
         return await app_manager.invoke_app(app_id, request.request_data)
     except ValidationError as e:
-        raise RequestValidationError(errors=e.errors())
+        raise RequestValidationError(errors=e.errors()) from e
     except KeyError as e:
         return Response(status_code=status.HTTP_404_NOT_FOUND, content=str(e))
     except ValueError as e:

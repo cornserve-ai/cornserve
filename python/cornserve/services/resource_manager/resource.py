@@ -7,6 +7,7 @@ from collections import defaultdict
 from typing import Literal
 
 from cornserve.logging import get_logger
+from cornserve.services.pb import task_manager_pb2
 
 logger = get_logger(__name__)
 
@@ -60,6 +61,16 @@ class GPU:
 
         return self
 
+    def to_pb(self, add: bool = True) -> task_manager_pb2.GPUResource:
+        """Convert the GPU to a protobuf message."""
+        delta = task_manager_pb2.ResourceDelta.ADD if add else task_manager_pb2.ResourceDelta.REMOVE
+        return task_manager_pb2.GPUResource(
+            delta=delta,
+            node_id=self.node,
+            global_rank=self.global_rank,
+            local_rank=self.local_rank,
+        )
+
 
 class CannotColocateError(Exception):
     """Exception raised when GPUs cannot be colocated."""
@@ -94,8 +105,8 @@ class Resource:
         node_to_gpus: dict[str, list[GPU]] = defaultdict(list)
         for gpu in gpus:
             node_to_gpus[gpu.node].append(gpu)
-        for node, gpus in node_to_gpus.items():
-            local_ranks = list(set(gpu.local_rank for gpu in gpus))
+        for node, node_gpus in node_to_gpus.items():
+            local_ranks = list(set(gpu.local_rank for gpu in node_gpus))
             if local_ranks != sorted(range(len(local_ranks))):
                 raise ValueError(
                     f"Local ranks should be unique and contiguous inside each node. Got {local_ranks} for {node}.",
@@ -199,8 +210,7 @@ class Resource:
             gpus = self.node_to_gpus[node]
             gpus = [gpu for gpu in gpus if gpu.is_free][: num_gpus - num_allocated]
             for gpu in gpus:
-                gpu.allocate_to(owner)
-                allocated_gpus.append(gpu)
+                allocated_gpus.append(gpu.allocate_to(owner))
                 num_allocated += 1
                 if num_allocated >= num_gpus:
                     break
@@ -228,7 +238,7 @@ class Resource:
         if mode == "global_rank":
             grid = []
             max_rank_len = max(len(str(gpu.global_rank)) for gpu in self.gpus)
-            max_node_len = max(len(node) for node in self.node_to_gpus.keys())
+            max_node_len = max(len(node) for node in self.node_to_gpus)
             for node, gpus in self.node_to_gpus.items():
                 row = []
                 for gpu in gpus:
@@ -243,7 +253,7 @@ class Resource:
 
             grid = []
             max_owner_len = max(len(owner) for owner in label_to_id.values())
-            max_node_len = max(len(node) for node in self.node_to_gpus.keys())
+            max_node_len = max(len(node) for node in self.node_to_gpus)
             for node, gpus in self.node_to_gpus.items():
                 row = []
                 for gpu in gpus:

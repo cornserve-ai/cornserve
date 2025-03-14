@@ -27,7 +27,7 @@ message ReconcileNewAppRequest {
   // ID of the app that is being registered
   string app_id = 1;
 
-  // Task manager configs
+  // Task configs
   repeated TaskConfig task_configs = 2;
 }
 

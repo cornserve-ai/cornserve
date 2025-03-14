@@ -1,3 +1,5 @@
+"""Resource Manager gRPC server."""
+
 import asyncio
 
 import grpc
@@ -29,7 +31,7 @@ class ResourceManagerServicer(resource_manager_pb2_grpc.ResourceManagerServicer)
             app_id=request.app_id,
             tasks=[
                 Task.from_json(type=common_pb2.TaskType.Name(config.type), json=config.config)
-                for config in request.task_manager_configs
+                for config in request.task_configs
             ],
         )
         return resource_manager_pb2.ReconcileNewAppResponse(status=common_pb2.Status.STATUS_OK)
@@ -74,6 +76,7 @@ class ResourceManagerServicer(resource_manager_pb2_grpc.ResourceManagerServicer)
 
 
 async def serve(ip: str = "[::]", port: int = 50051) -> None:
+    """Start the gRPC server."""
     manager = await ResourceManager.init()
 
     server = grpc.aio.server()

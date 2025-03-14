@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-from abc import ABC, abstractmethod
 from collections import defaultdict
 from contextlib import suppress
 
@@ -27,7 +26,7 @@ from cornserve.logging import get_logger
 logger = get_logger(__name__)
 
 
-class TaskManager(ABC):
+class TaskManager:
     """Task manager abstract base class."""
 
     def __init__(self, id: str, config: TaskManagerConfig, launch_info: TaskExecutorLaunchInfo) -> None:
@@ -62,6 +61,7 @@ class TaskManager(ABC):
         """Initialize the designated task manager.
 
         Args:
+            id: Unique identifier for the task manager
             task_type: Type of task manager to create
             config_str: JSON string containing task configuration
             gpus: List of initial GPU resources allocated to the task manager
@@ -77,7 +77,7 @@ class TaskManager(ABC):
             else:
                 raise ValueError(f"Unknown task type: {task_type}")
         except ValidationError as e:
-            raise ValueError(f"Invalid config for {task_type}: {e}")
+            raise ValueError(f"Invalid config for {task_type}: {e}") from e
 
         launch_info = TaskExecutorLaunchInfo.from_task_manager_config(config)
         manager = manager_cls(id, config, launch_info)

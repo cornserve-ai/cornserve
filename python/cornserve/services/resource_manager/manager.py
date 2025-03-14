@@ -229,6 +229,11 @@ class ResourceManager:
     async def healthcheck(self) -> tuple[bool, list[tuple[str, bool]]]:
         """Check the health of all task managers.
 
+        We intentionally do not hold any locks while performing the health check,
+        because we don't want to block other operations. It's fine even if a new
+        task manager is missed or an error arises from a task manager that is being
+        shut down.
+
         Returns:
             Tuple of overall_healthy and list of (task_manager_id, healthy)
         """
@@ -237,31 +242,27 @@ class ResourceManager:
         task_manager_statuses: list[tuple[str, bool]] = []
         all_healthy = True
 
-        async with self.app_lock, self.task_manager_lock:
-            check_tasks = []
-            for task_manager_id, stub in self.task_manager_stubs.items():
-                check_tasks.append(
-                    stub.Healthcheck(
-                        task_manager_pb2.HealthcheckRequest(),
-                        timeout=5.0,
-                    )
-                )
+        task_manager_ids = []
+        check_tasks = []
+        for task_manager_id, stub in self.task_manager_stubs.items():
+            task_manager_ids.append(task_manager_id)
+            check_tasks.append(stub.Healthcheck(task_manager_pb2.HealthcheckRequest(), timeout=1.0))
 
-            # Wait for all health checks to complete
-            results = await asyncio.gather(*check_tasks, return_exceptions=True)
+        # Wait for all health checks to complete
+        results = await asyncio.gather(*check_tasks, return_exceptions=True)
 
-            for task_manager_id, result in zip(self.task_manager_stubs.keys(), results):
-                if isinstance(result, BaseException):
-                    logger.error("Health check failed for task manager %s: %s", task_manager_id, str(result))
-                    task_manager_statuses.append((task_manager_id, False))
+        for task_manager_id, result in zip(task_manager_ids, results, strict=True):
+            if isinstance(result, BaseException):
+                logger.error("Health check failed for task manager %s: %s", task_manager_id, str(result))
+                task_manager_statuses.append((task_manager_id, False))
+                all_healthy = False
+            else:
+                # Check if task manager is healthy (status OK = 0)
+                is_healthy = result.status == common_pb2.Status.STATUS_OK
+                if not is_healthy:
                     all_healthy = False
-                else:
-                    # Check if task manager is healthy (status OK = 0)
-                    is_healthy = result.status == common_pb2.Status.STATUS_OK
-                    if not is_healthy:
-                        all_healthy = False
-                    # TODO(J1): Task executor details should be propagated up
-                    task_manager_statuses.append((task_manager_id, is_healthy))
+                # TODO(J1): Task executor details should be propagated up
+                task_manager_statuses.append((task_manager_id, is_healthy))
 
         return all_healthy, task_manager_statuses
 
@@ -280,7 +281,7 @@ class ResourceManager:
         logger.info("Spawning task manager for %s", task_manager_config)
 
         # Sanity check task manager type
-        if task_manager_config.type.upper() not in task_manager_pb2.TaskManagerType.keys():
+        if task_manager_config.type.upper() not in task_manager_pb2.TaskManagerType.keys():  # noqa: SIM118
             raise ValueError(f"Unknown task manager type: {task_manager_config.type}")
 
         # Create a unique task manager ID
@@ -358,7 +359,7 @@ class ResourceManager:
             register_task_req = task_manager_pb2.RegisterTaskRequest(
                 task_manager_id=task_manager_id,
                 type=getattr(task_manager_pb2.TaskManagerType, task_manager_config.type.upper()),
-                sidecar_ranks=[gpu.global_rank for gpu in resource],
+                gpus=[gpu.to_pb(add=True) for gpu in resource],
                 config=task_manager_config.model_dump_json(),
             )
 

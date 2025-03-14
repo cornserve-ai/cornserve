@@ -1,3 +1,6 @@
+"""The App Manager registers, invokes, and unregisters applications."""
+
+import uuid
 import asyncio
 import importlib.util
 from collections import defaultdict
@@ -9,16 +12,15 @@ import grpc
 from cornserve.services.pb.resource_manager_pb2 import (
     ReconcileNewAppRequest,
     ReconcileRemovedAppRequest,
-    TaskManagerConfig,
+    TaskConfig,
 )
 from cornserve.services.pb.resource_manager_pb2_grpc import ResourceManagerStub
 from cornserve.services.pb.common_pb2 import TaskType
+from cornserve.services.gateway.app.task_impl import patch_task_invoke
+from cornserve.services.gateway.app.models import AppClasses, AppDefinition, AppState
 from cornserve.frontend.tasks import Task, LLMTask
 from cornserve.frontend.app import AppRequest, AppResponse, AppConfig
 from cornserve.logging import get_logger
-
-from .task_impl import patch_task_invoke
-from .models import AppClasses, AppDefinition, AppState
 
 logger = get_logger(__name__)
 
@@ -39,7 +41,7 @@ def load_module_from_source(source_code: str, module_name: str) -> ModuleType:
         exec(source_code, module.__dict__)
         return module
     except Exception as e:
-        raise ImportError(f"Failed to execute module code: {e}")
+        raise ImportError(f"Failed to execute module code: {e}") from e
 
 
 def validate_app_module(module: ModuleType) -> AppClasses:
@@ -113,22 +115,24 @@ class AppManager:
         self.resource_manager_channel = grpc.aio.insecure_channel(resource_manager_grpc_url)
         self.resource_manager = ResourceManagerStub(self.resource_manager_channel)
 
-    async def register_app(self, app_id: str, source_code: str) -> str:
+    async def register_app(self, source_code: str) -> str:
         """Register a new application with the given ID and source code.
 
         Args:
-            app_id: Unique identifier for the application
             source_code: Python source code of the application
 
         Returns:
             str: The app ID
 
         Raises:
-            ValueError: If app_id already exists or app validation fails
+            ValueError: If app validation fails
         """
         async with self.app_lock:
-            if app_id in self.apps:
-                raise ValueError(f"App ID '{app_id}' already exists")
+            # Generate a unique app ID
+            while True:
+                app_id = f"app-{uuid.uuid4()}"
+                if app_id not in self.apps:
+                    break
 
             self.app_states[app_id] = AppState.NOT_READY
 
@@ -151,10 +155,7 @@ class AppManager:
                 task_configs.append(task_config)
 
             await self.resource_manager.ReconcileNewApp(
-                ReconcileNewAppRequest(
-                    app_id=app_id,
-                    task_manager_configs=task_configs,
-                )
+                ReconcileNewAppRequest(app_id=app_id, task_configs=task_configs)
             )
 
             # Update app state and store app definition
@@ -204,7 +205,9 @@ class AppManager:
                 task.cancel()
 
         # Notify resource manager
-        await self.resource_manager.ReconcileRemovedApp(ReconcileRemovedAppRequest(app_id=app_id))
+        await self.resource_manager.ReconcileRemovedApp(
+            ReconcileRemovedAppRequest(app_id=app_id),
+        )
 
         logger.info("Successfully unregistered app '%s'", app_id)
 
@@ -256,10 +259,12 @@ class AppManager:
 
         except asyncio.CancelledError:
             logger.info("App %s invocation cancelled", app_id)
-            raise ValueError(f"App '{app_id}' invocation cancelled. The app may be shutting down.")
+            raise ValueError(
+                f"App '{app_id}' invocation cancelled. The app may be shutting down.",
+            ) from None
 
         except Exception as e:
-            logger.error(f"Error invoking app {app_id}: {e}")
+            logger.exception("Error invoking app %s: %s", app_id, e)
             raise ValueError(f"Error invoking app {app_id}: {e}") from e
 
     async def shutdown(self) -> None:

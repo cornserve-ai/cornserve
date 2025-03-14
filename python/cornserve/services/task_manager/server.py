@@ -1,14 +1,4 @@
-"""The Task Manager manages task executors.
-
-A Task Manager handles exactly one type of task, for instance,
-multimodal data embedding (Eric) or LLM inference (vLLM).
-It spawns and kills task executors given the resource (GPUs) allocated to it by
-the resource manager.
-
-It's primarily responsible for
-1. Spawning and killing task executors
-2. Routing requests to the appropriate task executor
-"""
+"""Task Manager gRPC server."""
 
 import asyncio
 
@@ -51,18 +41,17 @@ class TaskManagerServicer(task_manager_pb2_grpc.TaskManagerServicer):
                 "When initializing the task manager, all resources deltas must be ADD",
             )
 
-        task_type = TaskManagerType(task_manager_pb2.TaskManagerType.Name(request.type))
         gpus = [
-            GPU(
-                node=gpu.node_id,
-                global_rank=gpu.global_rank,
-                local_rank=gpu.local_rank,
-            ).allocate_to(request.task_manager_id)
+            (
+                GPU(node=gpu.node_id, global_rank=gpu.global_rank, local_rank=gpu.local_rank).allocate_to(
+                    request.task_manager_id
+                )
+            )
             for gpu in request.gpus
         ]
         self.manager = await TaskManager.init(
             id=request.task_manager_id,
-            task_type=task_type,
+            task_type=TaskManagerType.from_pb(request.type),
             config_str=request.config,
             gpus=gpus,
         )
@@ -124,6 +113,7 @@ class TaskManagerServicer(task_manager_pb2_grpc.TaskManagerServicer):
 
 
 async def serve(ip: str = "[::]", port: int = 50051) -> None:
+    """Start the Task Manager server."""
     servicer = TaskManagerServicer()
 
     server = grpc.aio.server()

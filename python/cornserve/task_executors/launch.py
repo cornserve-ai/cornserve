@@ -58,10 +58,14 @@ class EncoderLaunchInfo(TaskExecutorLaunchInfo):
     def get_container_args(self, gpus: list[GPU], port: int) -> list[str]:
         """Get the container arguments for the encoder task manager."""
         cmd = [
-            "--model.id", self.task_manager_config.model_id,
-            "--model.tp-size", str(len(gpus)),
-            "--server.port", str(port),
-            "--sidecar.ranks", *[str(gpu.global_rank) for gpu in gpus],
+            "--model.id",
+            self.task_manager_config.model_id,
+            "--model.tp-size",
+            str(len(gpus)),
+            "--server.port",
+            str(port),
+            "--sidecar.ranks",
+            *[str(gpu.global_rank) for gpu in gpus],
         ]
         return cmd
 
@@ -81,9 +85,13 @@ class LLMLaunchInfo(TaskExecutorLaunchInfo):
         """Get the container arguments for the LLM task manager."""
         # TODO: Update the command to match the actual command for vLLM
         cmd = [
-            "--model", self.task_manager_config.model_id,
-            "--tensor-parallel-size", str(len(gpus)),
-            "--port", str(port),
-            "--sidecar.ranks", *[str(gpu.global_rank) for gpu in gpus],
+            "--model",
+            self.task_manager_config.model_id,
+            "--tensor-parallel-size",
+            str(len(gpus)),
+            "--port",
+            str(port),
+            "--sidecar.ranks",
+            *[str(gpu.global_rank) for gpu in gpus],
         ]
         return cmd

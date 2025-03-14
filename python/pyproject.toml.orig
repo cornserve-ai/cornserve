@@ -16,7 +16,6 @@ dependencies = [
     "grpcio-tools",
     "tyro",
     "kubernetes_asyncio",
-    "httpx",
 ]
 dynamic = ["version"]
 
@@ -36,10 +35,27 @@ eric-no-gpu = [
   "einops",
   "xformers",
 ]
+<<<<<<< HEAD
 eric = ["flash-attn", "cornserve[eric-common]"]
-dev-common = ["grpcio-tools", "pyright", "ruff", "pytest", "pytest-asyncio"]
-dev = ["cornserve[dev-common,sidecar,eric]"]
-dev-no-gpu = ["cornserve[dev-common,sidecar,eric-no-gpu]"]
+=======
+eric = [
+  "fastapi",
+  "uvicorn[standard]",
+  "pyzmq",
+  "msgspec",
+  "psutil",
+  "torch>=2.5.0",
+  "transformers",
+  "huggingface_hub",
+  "pillow",
+  "decord",
+  "einops",
+  "xformers",
+  "flash-attn",
+]
+>>>>>>> 2fc87b0 (Frontend and gateway)
+dev = ["grpcio-tools", "pyright", "ruff", "pytest", "pytest-asyncio", "cornserve[sidecar,eric]"]
+dev-no-gpu = ["grpcio-tools", "pyright", "ruff", "pytest", "pytest-asyncio", "cornserve[sidecar,eric-no-gpu]"]
 
 [tool.setuptools.dynamic]
 version = { attr = "cornserve.__version__" }
@@ -65,7 +81,6 @@ exclude = [
 ignore = [
   "PLW0603",  # Global statement
   "PLR2004",  # Magic value
-  "PLR0912",  # Too many branches
   "PLR0913",  # Too many arguments
   "PLR0402",  # `import torch.nn as nn` is fine
 ]

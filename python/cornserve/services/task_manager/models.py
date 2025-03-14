@@ -9,6 +9,7 @@ from typing_extensions import override
 from pydantic import BaseModel
 
 from cornserve.frontend.tasks import Task, LLMTask
+from cornserve.services.pb import task_manager_pb2
 
 
 class TaskManagerType(enum.StrEnum):
@@ -20,6 +21,11 @@ class TaskManagerType(enum.StrEnum):
 
     ENCODER = "ENCODER"
     LLM = "LLM"
+
+    @classmethod
+    def from_pb(cls, pb: task_manager_pb2.TaskManagerType) -> TaskManagerType:
+        """Convert a protobuf TaskManagerType to a TaskManagerType."""
+        return TaskManagerType(task_manager_pb2.TaskManagerType.Name(pb))
 
 
 class TaskManagerConfig(BaseModel):
