@@ -84,6 +84,7 @@ ignore = [
 [tool.ruff.lint.per-file-ignores]
 "**/__init__.py" = ["F401", "F403"]
 "cornserve/services/**/server.py" = ["N802"]
+"cornserve/services/**/grpc.py" = ["N802"]
 
 [tool.pyright]
 exclude = [

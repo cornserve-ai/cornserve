@@ -2,7 +2,7 @@
 
 from pydantic import BaseModel, Field, ConfigDict
 
-from .tasks import Task
+from cornserve.frontend.tasks import Task
 
 
 class AppRequest(BaseModel):
@@ -25,6 +25,9 @@ class AppConfig(BaseModel):
     All user-defined config classes must inherit from this.
     """
 
-    tasks: dict[str, Task] = Field(default_factory=dict, description="Dictionary of tasks that the app requires.")
+    tasks: dict[str, Task] = Field(
+        default_factory=dict,
+        description="Dictionary of tasks that the app requires.",
+    )
 
     model_config = ConfigDict(extra="forbid")

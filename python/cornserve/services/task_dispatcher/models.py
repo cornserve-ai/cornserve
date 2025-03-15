@@ -48,6 +48,7 @@ class TaskInfo(BaseModel):
         id: The ID of the task.
         task_managers: The task managers that this task invokes.
     """
+
     id: str
     task: Task
     task_managers: list[TaskManagerInfo]

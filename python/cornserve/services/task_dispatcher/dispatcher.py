@@ -8,6 +8,7 @@ from typing import Any
 
 import httpx
 
+from cornserve.frontend.tasks import LLMTask
 from cornserve.logging import get_logger
 from cornserve.services.task_dispatcher.models import TaskInfo
 from cornserve.services.pb import task_manager_pb2
@@ -26,7 +27,7 @@ class TaskDispatcher:
         self.ongoing_task_lock = asyncio.Lock()
         self.app_ongoing_invokes: dict[str, list[asyncio.Task]] = defaultdict(list)
 
-    async def nofity_app_registration(self, app_id: str, task_info: list[TaskInfo]) -> None:
+    async def notify_app_registration(self, app_id: str, task_info: list[TaskInfo]) -> None:
         """Register newly spawned task managers to the dispatcher."""
         async with self.app_lock:
             if app_id in self.app_task_info:
@@ -65,7 +66,7 @@ class TaskDispatcher:
     async def shutdown(self) -> None:
         """Shutdown the Task Dispatcher."""
 
-    async def invoke(self, app_id: str, task_id: str, request_id: str, data: dict[str, Any]) -> dict[str, Any]:
+    async def invoke(self, app_id: str, task_id: str, request_id: str, data: str) -> dict[str, Any]:
         """Invoke a task with the given request data."""
         async with self.app_lock:
             try:
@@ -96,7 +97,7 @@ class TaskDispatcher:
         app_id: str,
         task_info: TaskInfo,
         request_id: str,
-        data: dict[str, Any],
+        data: str,
     ) -> dict[str, Any]:
         """Do the actual invocation of the task."""
         # Query the task managers for which task executor to route to.
@@ -114,4 +115,11 @@ class TaskDispatcher:
         task_executors = await asyncio.gather(*routing_coros)
 
         # Reformat the request data depending on the type of the task.
-        task_info.id
+        # For the LLM task, if the reqeust has multimodal items in it,
+        # break the reqeust into an Eric request and a vLLM request.
+        # For multimodal data items, a unique data ID is generated.
+        # Data IDs are passed to Eric (as part of the embedding request)
+        # and to vLLM (as a key-value pair in the data URI).
+        if isinstance(task_info.task, LLMTask):
+            invoke_input = LLMTask._InvokeInput.model_validate_json(data)
+            invoke_input.prompt

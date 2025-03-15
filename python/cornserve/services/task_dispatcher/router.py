@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from typing import Any
-
 from pydantic import BaseModel
 from fastapi import FastAPI, APIRouter, Request, Response, status
 
@@ -20,12 +18,14 @@ class TaskDispatchRequest(BaseModel):
     Attributes:
         app_id: The unique identifier for the application.
         task_id: The unique identifier for the task.
-        request_data: The input data for the task.
+        request_id: The unique identifier for the request.
+        request_data: Serialized input data for task invocation.
     """
-    
+
     app_id: str
     task_id: str
-    request_data: dict[str, Any]
+    request_id: str
+    request_data: str
 
 
 @router.post("/task")
@@ -33,7 +33,12 @@ async def invoke_task(request: TaskDispatchRequest, raw_request: Request):
     """Invoke a task with the given request data."""
     dispatcher: TaskDispatcher = raw_request.app.state.dispatcher
     try:
-        response = await dispatcher.invoke(request.app_id, request.task_id, request.request_data)
+        response = await dispatcher.invoke(
+            request.app_id,
+            request.task_id,
+            request.request_id,
+            request.request_data,
+        )
         return response
     except Exception as e:
         logger.exception("Error while invoking task")
