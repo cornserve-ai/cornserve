@@ -57,16 +57,14 @@ class EncoderLaunchInfo(TaskExecutorLaunchInfo):
 
     def get_container_args(self, gpus: list[GPU], port: int) -> list[str]:
         """Get the container arguments for the encoder task manager."""
+        # fmt: off
         cmd = [
-            "--model.id",
-            self.task_manager_config.model_id,
-            "--model.tp-size",
-            str(len(gpus)),
-            "--server.port",
-            str(port),
-            "--sidecar.ranks",
-            *[str(gpu.global_rank) for gpu in gpus],
+            "--model.id", self.task_manager_config.model_id,
+            "--model.tp-size", str(len(gpus)),
+            "--server.port", str(port),
+            "--sidecar.ranks", *[str(gpu.global_rank) for gpu in gpus],
         ]
+        # fmt: on
         return cmd
 
 
@@ -83,15 +81,13 @@ class LLMLaunchInfo(TaskExecutorLaunchInfo):
 
     def get_container_args(self, gpus: list[GPU], port: int) -> list[str]:
         """Get the container arguments for the LLM task manager."""
-        # TODO: Update the command to match the actual command for vLLM
+        # fmt: off
         cmd = [
-            "--model",
             self.task_manager_config.model_id,
-            "--tensor-parallel-size",
-            str(len(gpus)),
-            "--port",
-            str(port),
-            "--sidecar.ranks",
-            *[str(gpu.global_rank) for gpu in gpus],
+            "--tensor-parallel-size", str(len(gpus)),
+            "--port", str(port),
+            "--limit-mm-per-prompt", "image=5",  # TODO: Make this configurable.
+            "--cornserve-sidecar-ranks", *[str(gpu.global_rank) for gpu in gpus],
         ]
+        # fmt: on
         return cmd

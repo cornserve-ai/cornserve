@@ -1,5 +1,6 @@
 """Base classes for cornserve applications."""
 
+from typing import ClassVar
 from pydantic import BaseModel, Field, ConfigDict
 
 from cornserve.frontend.tasks import Task
@@ -25,7 +26,7 @@ class AppConfig(BaseModel):
     All user-defined config classes must inherit from this.
     """
 
-    tasks: dict[str, Task] = Field(
+    tasks: ClassVar[dict[str, Task]] = Field(
         default_factory=dict,
         description="Dictionary of tasks that the app requires.",
     )

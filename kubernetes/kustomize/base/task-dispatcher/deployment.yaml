@@ -1,0 +1,26 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: task-dispatcher
+  namespace: cornserve
+  labels:
+    app: task-dispatcher
+spec:
+  selector:
+    matchLabels:
+      app: task-dispatcher
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        app: task-dispatcher
+    spec:
+      containers:
+      - name: task-dispatcher
+        image: cornserve/task-dispatcher:latest
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 50051
+          name: grpc
+        - containerPort: 8000
+          name: http

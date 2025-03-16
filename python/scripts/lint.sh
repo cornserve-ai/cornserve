@@ -11,5 +11,5 @@ else
   ruff format --target-version py311 --check cornserve tests
 fi
 
-ruff check cornserve
+ruff check --target-version py311 cornserve
 pyright cornserve

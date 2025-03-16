@@ -51,6 +51,10 @@ class TaskInfo(BaseModel):
 
     id: str
     task: Task
+    # XXX(J1): This assumes that the necessary task manager can be located
+    # only with the task manager type. However, for instance, there can be
+    # multiple encoders (e.g., one for image and one for audio), which will
+    # require a more sophisticated way of passing around and locating the task manager.
     task_managers: list[TaskManagerInfo]
 
     @classmethod

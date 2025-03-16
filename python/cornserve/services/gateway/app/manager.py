@@ -80,7 +80,7 @@ def validate_app_module(module: ModuleType) -> AppClasses:
     return_type = serve_signature.pop("return", None)
     if return_type is None:
         errors.append("'serve' function must have a return type annotation")
-    elif not issubclass(serve_signature["return"], module.Response):
+    elif not issubclass(return_type, module.Response):
         errors.append("'serve' function must return an instance of 'Response' class")
     if len(serve_signature) != 1:
         errors.append("'serve' function must have exactly one parameter of type 'Request'")
@@ -173,7 +173,7 @@ class AppManager:
             return app_id
 
         except Exception as e:
-            logger.exception("Failed to register app %s: %s", app_id, e)
+            logger.exception("Failed to register app: %s", e)
 
             # Clean up any partially registered app
             async with self.app_lock:
@@ -181,7 +181,7 @@ class AppManager:
                 self.app_states.pop(app_id, None)
                 self.app_driver_tasks.pop(app_id, None)
 
-            raise ValueError(f"Failed to register app {app_id}: {e}") from e
+            raise ValueError(f"Failed to register app: {e}") from e
 
     async def unregister_app(self, app_id: str) -> None:
         """Unregister an application.

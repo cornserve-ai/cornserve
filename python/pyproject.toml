@@ -17,14 +17,16 @@ dependencies = [
     "tyro",
     "kubernetes_asyncio",
     "httpx",
+    "pydantic",
 ]
 dynamic = ["version"]
 
 [project.optional-dependencies]
+frontend = []
 sidecar = ["torch"]
 gateway = ["fastapi"]
 resource-manager = []
-task-manager = ["pydantic"]
+task-manager = []
 task-dispatcher = ["fastapi"]
 eric-no-gpu = [
   "fastapi",
@@ -47,7 +49,7 @@ dev-common = [
   "ruff",
   "pytest",
   "pytest-asyncio",
-  "cornserve[dev-common,sidecar,gateway,resource-manager,task-manager,task-dispatcher]",
+  "cornserve[dev-common,frontend,sidecar,gateway,resource-manager,task-manager,task-dispatcher]",
 ]
 dev = ["cornserve[dev-common,eric]"]
 dev-no-gpu = ["cornserve[dev-common,eric-no-gpu]"]

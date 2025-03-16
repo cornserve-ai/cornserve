@@ -94,7 +94,7 @@ class RequestQueue:
         self,
         modality: Modality,
         max_items: int | None = None,
-    ) -> Generator[tuple[EngineEnqueueRequest, ProcessedEmbeddingData]]:
+    ) -> Generator[tuple[EngineEnqueueRequest, ProcessedEmbeddingData], None, None]:
         """Iterate over the queue and yield waiting data with the given modality.
 
         When the modality of the data changes, stop iterating.

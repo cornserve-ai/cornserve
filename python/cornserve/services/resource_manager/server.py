@@ -87,6 +87,8 @@ async def serve(ip: str = "[::]", port: int = 50051) -> None:
 
     await server.start()
 
+    logger.info("Server started")
+
     async def server_graceful_shutdown():
         logger.info("Starting graceful shutdown...")
         # Shuts down the server with 5 seconds of grace period. During the

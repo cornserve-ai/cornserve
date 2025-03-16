@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import uuid
 import asyncio
 from collections import defaultdict
 from typing import Any
@@ -12,6 +13,7 @@ from cornserve.frontend.tasks import LLMTask
 from cornserve.logging import get_logger
 from cornserve.services.task_dispatcher.models import TaskInfo
 from cornserve.services.pb import task_manager_pb2
+from cornserve.services.task_manager.models import TaskManagerType
 
 logger = get_logger(__name__)
 
@@ -66,7 +68,7 @@ class TaskDispatcher:
     async def shutdown(self) -> None:
         """Shutdown the Task Dispatcher."""
 
-    async def invoke(self, app_id: str, task_id: str, request_id: str, data: str) -> dict[str, Any]:
+    async def invoke(self, app_id: str, task_id: str, request_id: str, data: str) -> Any:
         """Invoke a task with the given request data."""
         async with self.app_lock:
             try:
@@ -98,22 +100,8 @@ class TaskDispatcher:
         task_info: TaskInfo,
         request_id: str,
         data: str,
-    ) -> dict[str, Any]:
+    ) -> Any:
         """Do the actual invocation of the task."""
-        # Query the task managers for which task executor to route to.
-        routing_coros: list[asyncio.Future[task_manager_pb2.GetRouteResponse]] = []
-        for task_manager in task_info.task_managers:
-            routing_coros.append(
-                task_manager.stub.GetRoute(
-                    task_manager_pb2.GetRouteRequest(
-                        app_id=app_id,
-                        request_id=request_id,
-                        routing_hint=None,
-                    ),
-                ),
-            )
-        task_executors = await asyncio.gather(*routing_coros)
-
         # Reformat the request data depending on the type of the task.
         # For the LLM task, if the reqeust has multimodal items in it,
         # break the reqeust into an Eric request and a vLLM request.
@@ -122,4 +110,110 @@ class TaskDispatcher:
         # and to vLLM (as a key-value pair in the data URI).
         if isinstance(task_info.task, LLMTask):
             invoke_input = LLMTask._InvokeInput.model_validate_json(data)
-            invoke_input.prompt
+            encoder_request: dict | None = None
+            embedding_data: list[tuple[str, str, str]] = []
+
+            # LLM text generation request.
+            for task_manager in task_info.task_managers:
+                if task_manager.type == TaskManagerType.LLM:
+                    llm_stub = task_manager.stub
+                    break
+            else:
+                raise RuntimeError(
+                    f"LLM task manager not found for app {app_id} and task {task_info.id}.",
+                )
+            llm_route: task_manager_pb2.GetRouteResponse = await llm_stub.GetRoute(
+                task_manager_pb2.GetRouteRequest(
+                    app_id=app_id,
+                    request_id=request_id,
+                    routing_hint=None,
+                ),
+            )
+
+            async with httpx.AsyncClient() as http_client:
+                http_tasks: list[asyncio.Task[httpx.Response]] = []
+
+                # Multimodal embedding request, if the task has multimodal data.
+                # Construct and send out.
+                if invoke_input.multimodal_data is not None:
+                    # Send routing request to the encoder task manager.
+                    for task_manager in task_info.task_managers:
+                        if task_manager.type == TaskManagerType.ENCODER:
+                            encoder_stub = task_manager.stub
+                            break
+                    else:
+                        raise RuntimeError(
+                            f"Encoder task manager not found for app {app_id} and task {task_info.id}.",
+                        )
+                    encoder_route: task_manager_pb2.GetRouteResponse = await encoder_stub.GetRoute(
+                        task_manager_pb2.GetRouteRequest(
+                            app_id=app_id,
+                            request_id=request_id,
+                            routing_hint=None,
+                        ),
+                    )
+
+                    for modality, url in invoke_input.multimodal_data:
+                        embedding_data.append((uuid.uuid4().hex, modality, url))
+
+                    encoder_request = dict(
+                        id=app_id,
+                        receiver_sidecar_ranks=llm_route.sidecar_ranks,
+                        data=[
+                            dict(id=data_id, modality=modality, url=url) for data_id, modality, url in embedding_data
+                        ],
+                    )
+
+                    http_tasks.append(
+                        asyncio.create_task(
+                            http_client.post(url=encoder_route.task_executor_url, json=encoder_request),
+                        )
+                    )
+
+                # Construct and send out LLM text generation request.
+                # The LLM request is in the form of OpenAI Chat Completions API.
+                multimodal_messages = []
+                for multimodal_item in embedding_data:
+                    data_id, modality, url = multimodal_item
+                    data_uri = f"data:{modality}/uuid;data_id={data_id};url={url}"
+                    multimodal_messages.append({"type": f"{modality}_url", f"{modality}_url": {"url": data_uri}})
+
+                llm_request = dict(
+                    model=task_info.task.model_id,
+                    messages=[
+                        dict(
+                            role="user",
+                            content=[dict(type="text", text=invoke_input.prompt), *multimodal_messages],
+                        ),
+                    ],
+                    max_completion_tokens=512,
+                )
+
+                http_tasks.append(
+                    asyncio.create_task(
+                        http_client.post(url=llm_route.task_executor_url, json=llm_request),
+                    )
+                )
+
+                # Wait for all HTTP tasks to complete.
+                try:
+                    responses = await asyncio.gather(*http_tasks)
+                except httpx.HTTPStatusError as e:
+                    logger.exception("Error while invoking task")
+                    raise RuntimeError(
+                        f"HTTP request failed with code {e.response.status_code}: {e.response}",
+                    ) from e
+
+                # Last one is the LLM response, which is returned.
+                response = responses[-1].json()
+                logger.info("LLM response: %s", response)
+
+                final_response = response["choices"][0]["message"]["content"]
+                if not isinstance(final_response, task_info.task._InvokeOutput):
+                    raise RuntimeError(
+                        f"LLM response is not of type {task_info.task._InvokeOutput}: {final_response}",
+                    )
+                return final_response
+
+        else:
+            raise ValueError(f"Unknown task type: {type(task_info.task)}")

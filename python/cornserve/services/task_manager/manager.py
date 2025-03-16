@@ -275,6 +275,7 @@ class TaskManager:
                     )
                 ],
                 node_name=node_name,
+                host_ipc=True,
             ),
         )
 

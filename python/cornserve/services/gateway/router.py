@@ -6,8 +6,9 @@ from fastapi import FastAPI, APIRouter, Request, Response, status
 from fastapi.exceptions import RequestValidationError
 from pydantic import BaseModel, ValidationError
 
-from cornserve.logging import get_logger
 from cornserve.services.gateway.app.manager import AppManager
+from cornserve.constants import K8S_RESOURCE_MANAGER_GRPC_URL
+from cornserve.logging import get_logger
 
 router = APIRouter()
 logger = get_logger(__name__)
@@ -94,7 +95,7 @@ async def health_check():
 
 def init_app_state(app: FastAPI) -> None:
     """Initialize the app state with required components."""
-    app.state.app_manager = AppManager("resource-manager:50051")
+    app.state.app_manager = AppManager(K8S_RESOURCE_MANAGER_GRPC_URL)
 
 
 def create_app() -> FastAPI:

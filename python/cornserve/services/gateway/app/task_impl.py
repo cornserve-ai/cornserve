@@ -1,5 +1,6 @@
 """Task invoke methods and patching."""
 
+from typing import Literal
 from types import MethodType
 
 from cornserve.frontend.tasks import Task, LLMTask
@@ -12,7 +13,7 @@ def patch_task_invoke(app_classes: AppClasses) -> None:
         if not isinstance(task, Task):
             raise ValueError(f"Invalid task type: {type(task)}")
         if isinstance(task, LLMTask):
-            task.invoke = MethodType(llm_task_invoke, task)
+            object.__setattr__(task, "invoke", MethodType(llm_task_invoke, task))
         else:
             raise ValueError(f"Unsupported task type: {type(task)}")
 
@@ -20,10 +21,8 @@ def patch_task_invoke(app_classes: AppClasses) -> None:
 async def llm_task_invoke(
     self: LLMTask,
     prompt: str,
-    images: list[str] | None = None,
-    videos: list[str] | None = None,
+    multimodal_data: list[tuple[Literal["image", "video"], str]] | None = None,
 ) -> str:
     """Invoke the LLM task."""
-    # TODO: Send the request to Task Dispatcher
-    print(self)
-    return "Hi Mom!"
+    invoke_input = self._InvokeInput(prompt=prompt, multimodal_data=multimodal_data)
+    return invoke_input.model_dump_json()
