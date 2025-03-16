@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
+
 set -euo pipefail
 
 # Ensure the REGISTRY environment variable is set.
 if [ -z "${REGISTRY:-}" ]; then
-    echo "Error: The REGISTRY environment variable is not set. Please set it and try again."
-    exit 1
+    REGISTRY="$(hostname):5000"
+    echo "Warning: The REGISTRY environment variable is not set. Defaulting to ${REGISTRY}."
 fi
 
 # Generate protocol buffers
@@ -27,17 +28,26 @@ else
     done < <(find docker -type f -name '*.Dockerfile')
 fi
 
-# Iterate over each service in the build list
-for SERVICE in "${BUILD_LIST[@]}"; do
+# Function to build and push a service
+build_and_push() {
+    local SERVICE="$1"
     echo "Building Docker image for: ${SERVICE}"
-    # Locate the Dockerfile for the service recursively.
+
     DOCKERFILE=$(find docker -type f -name "${SERVICE}.Dockerfile" | head -n 1)
     if [[ -z "${DOCKERFILE}" ]]; then
         echo "Warning: Dockerfile for ${SERVICE} not found. Skipping."
-        continue
+        return
     fi
+
     IMAGE="${REGISTRY}/${NAMESPACE}/${SERVICE}:latest"
-    docker build -f "${DOCKERFILE}" -t "${IMAGE}" .
-    docker push "${IMAGE}"
-    echo "Successfully built and pushed ${IMAGE}"
+    
+    docker build -f "${DOCKERFILE}" -t "${IMAGE}" . && docker push "${IMAGE}" && echo "Successfully built and pushed ${IMAGE}"
+}
+
+# Run all builds in parallel
+for SERVICE in "${BUILD_LIST[@]}"; do
+    build_and_push "${SERVICE}" &
 done
+
+wait
+echo "All builds and pushes completed."
