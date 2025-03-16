@@ -267,6 +267,15 @@ class AppManager:
             logger.exception("Error invoking app %s: %s", app_id, e)
             raise ValueError(f"Error invoking app {app_id}: {e}") from e
 
+    async def list_apps(self) -> dict[str, AppState]:
+        """List all registered applications and their states.
+
+        Returns:
+            dict[str, AppState]: Mapping of app IDs to their states
+        """
+        async with self.app_lock:
+            return dict(self.app_states)
+
     async def shutdown(self) -> None:
         """Shut down the server."""
         await self.resource_manager_channel.close()

@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+from typing import Coroutine
 from collections import defaultdict
 from contextlib import suppress
+from dataclasses import dataclass
 
 import grpc
 import kubernetes_asyncio.config as kconfig
@@ -14,15 +16,71 @@ from cornserve import constants
 from cornserve.logging import get_logger
 from cornserve.frontend.tasks import Task
 from cornserve.services.task_manager.models import TaskManagerConfig
+from cornserve.services.resource_manager.resource import GPU, Resource
 from cornserve.services.pb import (
     task_manager_pb2,
     task_manager_pb2_grpc,
+    task_dispatcher_pb2,
+    task_dispatcher_pb2_grpc,
     common_pb2,
 )
 
-from .resource import GPU, Resource
-
 logger = get_logger(__name__)
+
+
+@dataclass
+class TaskManagerDeployment:
+    """Informational data structure for a deployed task manager.
+
+    Fields are populated by either freshly spawning a task manager or
+    sharing an already-running task manager.
+    """
+
+    config: TaskManagerConfig
+    id: str = ""
+    url: str = ""
+
+    def __repr__(self) -> str:
+        """Return a string representation of the task manager."""
+        string = f"DeployedTaskManager(config={self.config}"
+        if self.id:
+            string += f", id={self.id}"
+        if self.url:
+            string += f", url={self.url}"
+        string += ")"
+        return string
+
+
+@dataclass
+class TaskDeployment:
+    """Informational data structure for a deployed task."""
+
+    task: Task
+    task_managers: list[TaskManagerDeployment]
+
+    def search_task_manager_config(self, config: TaskManagerConfig) -> TaskManagerDeployment | None:
+        """Search for a task manager deployment with the given config."""
+        for task_manager in self.task_managers:
+            if task_manager.config == config:
+                assert task_manager.id
+                assert task_manager.url
+                return task_manager
+        return None
+
+
+@dataclass
+class AppDeployment:
+    """Informational data structure for a deployed app."""
+
+    id: str
+    tasks: list[TaskDeployment]
+
+    def search_task_manager_config(self, config: TaskManagerConfig) -> TaskManagerDeployment | None:
+        """Search for a task manager deployment with the given config."""
+        for task in self.tasks:
+            if (task_manager := task.search_task_manager_config(config)) is not None:
+                return task_manager
+        return None
 
 
 class ResourceManager:
@@ -39,13 +97,19 @@ class ResourceManager:
 
         self.kube_core_client = kclient.CoreV1Api(api_client)
 
+        # Task dispatcher gRPC handles
+        self.task_dispatcher_channel = grpc.aio.insecure_channel(constants.K8S_TASK_DISPATCHER_GRPC_URL)
+        self.task_dispatcher_stub = task_dispatcher_pb2_grpc.TaskDispatcherStub(self.task_dispatcher_channel)
+
         # App state
         self.app_lock = asyncio.Lock()
-        self.app_task_manager_configs: dict[str, list[TaskManagerConfig]] = {}
-        self.app_task_manager_ids: dict[str, list[str]] = {}
+        self.app_deployments: dict[str, AppDeployment] = {}
+        # self.app_task_deployments: dict[str, list[TaskDeployment]] = {}
+        # self.app_task_manager_configs: dict[str, list[TaskManagerConfig]] = {}
+        # self.app_task_manager_ids: dict[str, list[str]] = {}
+        # self.app_active_unique_task_managers: list[TaskManagerConfig] = []
 
         # Task manager state
-        self.task_manager_lock = asyncio.Lock()
         self.task_manager_resources: dict[str, list[GPU]] = {}
         self.task_manager_pods: dict[str, str] = {}
         self.task_manager_services: dict[str, str] = {}
@@ -105,61 +169,107 @@ class ResourceManager:
         """Reconcile new app by spawning task managers if needed."""
         logger.info("Reconcile new app %s with tasks %s", app_id, tasks)
 
-        if app_id in self.app_task_manager_configs:
-            raise ValueError(f"App {app_id} already registered")
-
-        # Construct task manager config objects
-        task_manager_configs: list[TaskManagerConfig] = []
+        # Construct task deployments for the app
+        # Fields of TaskManagerDeployments (id and url) will be populated by either
+        # freshly spawning a task manager or sharing an already-running task manager.
+        task_deployments: list[TaskDeployment] = []
         for task in tasks:
-            task_manager_configs.extend(TaskManagerConfig.from_task(task))
-        logger.info("Task manager configs: %s", task_manager_configs)
+            task_manager_configs = TaskManagerConfig.from_task(task)
+            task_manager_deployments = [
+                TaskManagerDeployment(config=task_manager_config) for task_manager_config in task_manager_configs
+            ]
+            task_deployments.append(TaskDeployment(task=task, task_managers=task_manager_deployments))
+        app_deployment = AppDeployment(id=app_id, tasks=task_deployments)
+        logger.info("Task manager configs: %s", task_deployments)
 
         # A task manager can be shared by multiple apps.
         # We only spawn task managers that are not already running.
         await self.app_lock.acquire()
         try:
-            # Spawn task managers for the new app
-            all_task_manager_configs = set(self.app_task_manager_configs.values())
-            spawn_task_manager_configs = []
-            coros = []
-            for task_manager_config in task_manager_configs:
-                if task_manager_config not in all_task_manager_configs:
-                    spawn_task_manager_configs.append(task_manager_config)
-                    coros.append(self._spawn_task_manager(task_manager_config))
-            logger.info("Spawning task managers: %s", spawn_task_manager_configs)
+            # Check if the app is already registered
+            if app_id in self.app_deployments:
+                raise ValueError(f"App {app_id} already registered")
+
+            # Determine which task managers to spawn and which ones to share
+            task_manager_deployments_to_spawn: list[TaskManagerDeployment] = []
+            coros: list[Coroutine[None, None, tuple[str, str]]] = []
+            for task_deployment in app_deployment.tasks:
+                for task_manager_deployment in task_deployment.task_managers:
+                    # This task manager is already running as part of another app
+                    for existing_app_deplyment in self.app_deployments.values():
+                        matched_tm_deployment = existing_app_deplyment.search_task_manager_config(
+                            task_manager_deployment.config
+                        )
+                        if matched_tm_deployment is not None:
+                            task_manager_deployment.id = matched_tm_deployment.id
+                            task_manager_deployment.url = matched_tm_deployment.url
+                            break
+                    else:
+                        task_manager_deployments_to_spawn.append(task_manager_deployment)
+                        coros.append(self._spawn_task_manager(task_manager_deployment.config))
+            logger.info("Spawning task managers: %s", task_manager_deployments_to_spawn)
             spawn_results = await asyncio.gather(*coros, return_exceptions=True)
 
             # Check for errors
             failed = 0
-            task_manager_ids: list[str] = []
-            for i, task_manager_id in enumerate(spawn_results):
-                if isinstance(task_manager_id, BaseException):
+            for task_manager_deployment, spawn_result in zip(
+                task_manager_deployments_to_spawn,
+                spawn_results,
+                strict=True,
+            ):
+                if isinstance(spawn_result, BaseException):
                     logger.error(
                         "Failed to spawn task manager %s: %s",
-                        task_manager_configs[i],
-                        task_manager_id,
+                        task_manager_deployment.config,
+                        spawn_result,
                     )
                     failed += 1
                 else:
+                    task_manager_deployment.id, task_manager_deployment.url = spawn_result
                     logger.info(
                         "Successfully spawned task manager %s: %s",
-                        task_manager_configs[i],
-                        task_manager_id,
+                        task_manager_deployment.config,
+                        spawn_result,
                     )
-                    task_manager_ids.append(task_manager_id)
+
             if failed:
+                # Rollback all the task managers that were successfully spawned
+                logger.info("Rolling back all the task managers that were successfully spawned")
+                shutdown_coros = []
+                for spawn_result in spawn_results:
+                    if not isinstance(spawn_result, BaseException):
+                        shutdown_coros.append(self._shutdown_task_manager(spawn_result[0]))
+                await asyncio.gather(*shutdown_coros, return_exceptions=True)
                 raise RuntimeError(f"Failed to spawn {failed} task managers")
 
-            # Register the task manager configs and IDs for the app
-            assert len(task_manager_configs) == len(task_manager_ids)
-            self.app_task_manager_configs[app_id] = task_manager_configs
-            self.app_task_manager_ids[app_id] = task_manager_ids
+            # Notify the task dispatcher of the new app and task managers
+            task_infos: list[task_dispatcher_pb2.TaskInfo] = []
+            for task_deployment in app_deployment.tasks:
+                task_manager_infos: list[task_dispatcher_pb2.TaskManagerInfo] = []
+                for task_manager_deployment in task_deployment.task_managers:
+                    assert task_manager_deployment.id
+                    assert task_manager_deployment.url
+                    task_manager_info = task_dispatcher_pb2.TaskManagerInfo(
+                        task_manager_id=task_manager_deployment.id,
+                        type=task_manager_deployment.config.type,
+                        url=task_manager_deployment.url,
+                    )
+                    task_manager_infos.append(task_manager_info)
+                task_info = task_dispatcher_pb2.TaskInfo(
+                    task_id=task_deployment.task.id,
+                    type=task_deployment.task.to_type(),
+                    task_config=task_deployment.task.model_dump_json(),
+                    task_manager_info=task_manager_infos,
+                )
+                task_infos.append(task_info)
 
-            logger.info(
-                "Successfully reconciled new app %s with task managers %s",
-                app_id,
-                task_manager_ids,
+            await self.task_dispatcher_stub.NotifyAppRegistration(
+                task_dispatcher_pb2.NotifyAppRegistrationRequest(app_id=app_id, tasks=task_infos)
             )
+
+            self.app_deployments[app_id] = app_deployment
+            logger.info("Successfully reconciled new app %s: %s", app_id, app_deployment)
+
         except Exception as e:
             logger.exception("Failed to spawn task managers: %s", e)
             raise
@@ -175,48 +285,56 @@ class ResourceManager:
         # We shut down a task manager when the last app that uses it is unregistered.
         await self.app_lock.acquire()
         try:
-            # Get and remove task manager configs for this app
-            task_manager_configs = self.app_task_manager_configs.pop(app_id, None)
-            task_manager_ids = self.app_task_manager_ids.pop(app_id, None)
-            if task_manager_configs is None or task_manager_ids is None:
+            # Check if the app is registered
+            if app_id not in self.app_deployments:
                 logger.error("App %s not found in registered apps", app_id)
                 raise ValueError(f"App {app_id} not found in registered apps")
 
-            # Get configs still in use by other apps
-            active_configs = set()
-            for configs in self.app_task_manager_configs.values():
-                active_configs.update(configs)
+            # Notify the Task Dispatcher of the removed app
+            await self.task_dispatcher_stub.NotifyAppUnregistration(
+                task_dispatcher_pb2.NotifyAppUnregistrationRequest(app_id=app_id)
+            )
 
-            # For each config and ID from the removed app
-            coros = []
+            # Get and remove the app deployment for this app
+            app_deployment = self.app_deployments.pop(app_id)
+
+            # Remove task managers that are no longer needed
+            coros: list[Coroutine[None, None, None]] = []
             shutdown_task_manager_ids = []
-            for config, id in zip(task_manager_configs, task_manager_ids, strict=True):
-                # Only shut down if no other app is using this config
-                if config not in active_configs:
-                    shutdown_task_manager_ids.append(id)
-                    coros.append(self._shutdown_task_manager(id))
+            for task_deployment in app_deployment.tasks:
+                for task_manager_deployment in task_deployment.task_managers:
+                    config = task_manager_deployment.config
+                    for existing_app_deployment in self.app_deployments.values():
+                        # Another app is using this task manager
+                        if existing_app_deployment.search_task_manager_config(config) is not None:
+                            break
+                    # This task manager is no longer needed
+                    else:
+                        shutdown_task_manager_ids.append(task_manager_deployment.id)
+                        coros.append(self._shutdown_task_manager(task_manager_deployment.id))
+
             logger.info("Shutting down task managers %s", shutdown_task_manager_ids)
             results = await asyncio.gather(*coros, return_exceptions=True)
 
             # Check for errors
             failed = 0
-            for i, result in enumerate(results):
+            for task_manager_id, result in zip(shutdown_task_manager_ids, results, strict=True):
                 if isinstance(result, BaseException):
                     logger.error(
                         "Failed to shut down task manager %s: %s",
-                        task_manager_ids[i],
+                        task_manager_id,
                         result,
                     )
                     failed += 1
                 else:
-                    logger.info("Successfully shut down task manager %s", task_manager_ids[i])
+                    logger.info("Successfully shut down task manager %s", task_manager_id)
+
             if failed:
                 raise RuntimeError(f"Failed to shutdown {failed} task managers")
 
             logger.info(
-                "Successfully reconciled removed app %s with task managers %s by shutting down %s",
-                app_id,
-                task_manager_ids,
+                "Successfully reconciled removed app %s by shutting down task manager IDs %s",
+                app_deployment,
                 shutdown_task_manager_ids,
             )
         except Exception as e:
@@ -269,13 +387,16 @@ class ResourceManager:
     async def shutdown(self) -> None:
         """Shutdown the ResourceManager."""
         await self.api_client.close()
+        await self.task_dispatcher_channel.close()
+        close_coros = []
         for channel in self.task_manager_channels.values():
-            await channel.close(grace=1.0)
+            close_coros.append(channel.close(grace=1.0))
+        await asyncio.gather(*close_coros)
 
-    async def _spawn_task_manager(self, task_manager_config: TaskManagerConfig) -> str:
-        """Spawn a new task manager for the given task and return its ID.
+    async def _spawn_task_manager(self, task_manager_config: TaskManagerConfig) -> tuple[str, str]:
+        """Spawn a new task manager.
 
-        Upon success, the task manager ID is returned. If anything goes wrong,
+        Upon success, the task manager ID and URL are returned. If anything goes wrong,
         side effects are cleaned up and an exception is raised.
         """
         logger.info("Spawning task manager for %s", task_manager_config)
@@ -290,17 +411,15 @@ class ResourceManager:
             if task_manager_id not in self.task_manager_stubs:
                 break
 
-        # Acquire the task manager lock
-        await self.task_manager_lock.acquire()
-
         try:
             # Allocate resource starter pack for the task manager
             resource = self.resource.allocate(num_gpus=2, owner=task_manager_id)
             self.task_manager_resources[task_manager_id] = resource
 
             # Create a new task manager pod and service
-            pod_name = f"task-manager-{task_manager_id}"
-            service_name = f"task-manager-{task_manager_id}"
+            pod_name = f"task-manager-{task_manager_id}".lower()
+            service_name = f"task-manager-{task_manager_id}".lower()
+            port = 50051
             self.task_manager_pods[task_manager_id] = pod_name
             self.task_manager_services[task_manager_id] = service_name
 
@@ -318,7 +437,7 @@ class ResourceManager:
                             name="task-manager",
                             image=constants.CONTAINER_IMAGE_TASK_MANAGER,
                             image_pull_policy="Always",
-                            ports=[kclient.V1ContainerPort(container_port=50051, name="grpc")],
+                            ports=[kclient.V1ContainerPort(container_port=port, name="grpc")],
                         )
                     ],
                     service_account_name="task-manager",
@@ -337,7 +456,7 @@ class ResourceManager:
                         "app": "task-manager",
                         "task-manager-id": task_manager_id,
                     },
-                    ports=[kclient.V1ServicePort(port=50051, target_port="grpc")],
+                    ports=[kclient.V1ServicePort(port=port, target_port="grpc")],
                 ),
             )
             await self.kube_core_client.create_namespaced_pod(
@@ -351,7 +470,7 @@ class ResourceManager:
             logger.info("Created task manager pod %s and service %s", pod_name, service_name)
 
             # Connect to the task manager gRPC server to initialize it
-            channel = grpc.aio.insecure_channel(f"{service_name}:50051")
+            channel = grpc.aio.insecure_channel(f"{service_name}:{port}")
             stub = task_manager_pb2_grpc.TaskManagerStub(channel)
             self.task_manager_channels[task_manager_id] = channel
             self.task_manager_stubs[task_manager_id] = stub
@@ -371,11 +490,9 @@ class ResourceManager:
         except Exception as e:
             logger.exception("Failed to spawn task manager: %s", e)
             await self._shutdown_task_manager(task_manager_id)
-        finally:
-            if self.task_manager_lock.locked():
-                self.task_manager_lock.release()
+            raise
 
-        return task_manager_id
+        return (task_manager_id, f"{service_name}:50051")
 
     async def _shutdown_task_manager(self, task_manager_id: str) -> None:
         """Shutdown the task manager and release its resources.
@@ -392,11 +509,6 @@ class ResourceManager:
             task_manager_id: The ID of the task manager to shut down.
         """
         logger.info("Shutting down task manager %s", task_manager_id)
-
-        # Acquire the task manager lock
-        entered_with_lock = self.task_manager_lock.locked()
-        if not entered_with_lock:
-            await self.task_manager_lock.acquire()
 
         try:
             # Shutdown the task manager gRPC server
@@ -432,6 +544,3 @@ class ResourceManager:
                 e,
             )
             raise
-        finally:
-            if not entered_with_lock and self.task_manager_lock.locked():
-                self.task_manager_lock.release()

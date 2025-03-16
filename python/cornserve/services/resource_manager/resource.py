@@ -266,9 +266,10 @@ class Resource:
                 grid.append(f"{node:<{max_node_len}} | " + " ".join(row))
             grid_str = "\n".join(grid)
 
-            legend = "[Legend]"
+            legend = "where"
             for owner, owner_id in label_to_id.items():
-                legend += f"\n{owner_id:>{max_owner_len}}: {owner}"
+                owner_name = owner if owner is not None else "Free"
+                legend += f"\n  {owner_id:>{max_owner_len}}: {owner_name}"
 
             return f"{grid_str}\n{legend}"
 

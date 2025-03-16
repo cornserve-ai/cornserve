@@ -69,6 +69,17 @@ class Task(ABC, BaseModel):
             case _:
                 raise ValueError(f"Unknown task type: {type}")
 
+    @final
+    def to_type(self) -> str:
+        """Return the type string of the task.
+
+        This function should be kept in sync with the `TaskType` enum in
+        `proto/v1/common.proto`.
+        """
+        if isinstance(self, LLMTask):
+            return "LLM"
+        raise ValueError(f"Unknown task type: {type(self)}")
+
 
 class LLMTask(Task):
     """A task that invokes an LLM.

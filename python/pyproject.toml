@@ -24,10 +24,10 @@ dynamic = ["version"]
 [project.optional-dependencies]
 frontend = []
 sidecar = ["torch"]
-gateway = ["fastapi"]
+gateway = ["fastapi", "uvicorn[standard]"]
 resource-manager = []
 task-manager = []
-task-dispatcher = ["fastapi"]
+task-dispatcher = ["fastapi", "uvicorn[standard]"]
 eric-no-gpu = [
   "fastapi",
   "uvicorn[standard]",
@@ -80,6 +80,7 @@ ignore = [
   "PLR2004",  # Magic value
   "PLR0912",  # Too many branches
   "PLR0913",  # Too many arguments
+  "PLR0915",  # Too many statements
   "PLR0402",  # `import torch.nn as nn` is fine
 ]
 

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import grpc
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 from cornserve.frontend.tasks import Task
 from cornserve.services.task_manager.models import TaskManagerType
@@ -26,6 +26,8 @@ class TaskManagerInfo(BaseModel):
     url: str
     channel: grpc.aio.Channel
     stub: task_manager_pb2_grpc.TaskManagerStub
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
     @classmethod
     def from_pb(cls, pb: task_dispatcher_pb2.TaskManagerInfo) -> TaskManagerInfo:

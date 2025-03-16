@@ -17,7 +17,7 @@ def get_logger(
 
     logger = logging.getLogger(name)
     logger.setLevel(os.environ.get("CORNSERVE_LOG_LEVEL", logging.INFO))
-    formatter = logging.Formatter("%(levelname)s %(asctime)s [%(filename)s:%(lineno)d] %(message)s")
+    formatter = logging.Formatter("%(levelname)s %(asctime)s [%(name)s:%(lineno)d] %(message)s")
     handler = logging.StreamHandler(sys.stderr)
     handler.setFormatter(formatter)
     logger.addHandler(handler)

@@ -41,14 +41,7 @@ class TaskManagerServicer(task_manager_pb2_grpc.TaskManagerServicer):
                 "When initializing the task manager, all resources actions must be ADD",
             )
 
-        gpus = [
-            (
-                GPU(node=gpu.node_id, global_rank=gpu.global_rank, local_rank=gpu.local_rank).allocate_to(
-                    request.task_manager_id
-                )
-            )
-            for gpu in request.gpus
-        ]
+        gpus = [GPU(node=gpu.node_id, global_rank=gpu.global_rank, local_rank=gpu.local_rank) for gpu in request.gpus]
         self.manager = await TaskManager.init(
             id=request.task_manager_id,
             task_type=TaskManagerType.from_pb(request.type),

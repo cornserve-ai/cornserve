@@ -239,8 +239,8 @@ class TaskManager:
         node_name = node_names.pop()
 
         executor_id = "-".join([self.id, node_name, "gpus"] + [str(gpu.global_rank) for gpu in gpus])
-        pod_name = f"task-executor-{executor_id}"
-        service_name = f"task-executor-{executor_id}"
+        pod_name = f"task-executor-{executor_id}".lower()
+        service_name = f"task-executor-{executor_id}".lower()
         port = 8000
 
         # Create the pod spec

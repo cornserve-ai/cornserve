@@ -87,6 +87,21 @@ async def invoke_app(app_id: str, request: AppRequest, raw_request: Request):
         )
 
 
+@router.get("/admin/apps")
+async def list_apps(raw_request: Request):
+    """List all registered applications."""
+    app_manager: AppManager = raw_request.app.state.app_manager
+
+    try:
+        return await app_manager.list_apps()
+    except Exception as e:
+        logger.exception("Unexpected error while listing apps")
+        return Response(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content=str(e),
+        )
+
+
 @router.get("/health")
 async def health_check():
     """Health check endpoint."""

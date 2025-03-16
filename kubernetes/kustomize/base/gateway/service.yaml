@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: gateway
+  namespace: cornserve
+spec:
+  selector:
+    app: gateway
+  ports:
+  - name: gateway
+    port: 8000
+    targetPort: http
