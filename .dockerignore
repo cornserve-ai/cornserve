@@ -1,10 +1,8 @@
 # Cornserve repo-specific
-docs
-examples
-kubernetes
-scratchpad
-scripts
-.gitignore
+docs/
+examples/
+scratchpad/
+scripts/
 
 # Git
 .git
