@@ -62,10 +62,14 @@ class GPU:
         return self
 
     def to_pb(self, add: bool = True) -> task_manager_pb2.GPUResource:
-        """Convert the GPU to a protobuf message."""
-        delta = task_manager_pb2.ResourceDelta.ADD if add else task_manager_pb2.ResourceDelta.REMOVE
+        """Convert the GPU to a protobuf message.
+
+        Args:
+            add: Whether the intended actions is to add or remove the GPU.
+        """
+        action = task_manager_pb2.ResourceAction.ADD if add else task_manager_pb2.ResourceAction.REMOVE
         return task_manager_pb2.GPUResource(
-            delta=delta,
+            action=action,
             node_id=self.node,
             global_rank=self.global_rank,
             local_rank=self.local_rank,

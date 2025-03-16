@@ -35,7 +35,7 @@ enum TaskManagerType {
   LLM = 1;
 }
 
-enum ResourceDelta {
+enum ResourceAction {
   // Give more resources
   ADD = 0;
 
@@ -45,7 +45,7 @@ enum ResourceDelta {
 
 message GPUResource {
   // Whether to add or remove this resource
-  ResourceDelta delta = 1;
+  ResourceAction action = 1;
 
   // Node ID of the GPU
   string node_id = 2;

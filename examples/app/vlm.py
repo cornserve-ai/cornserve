@@ -1,7 +1,7 @@
 """Example app that makes a single Vision-Lanague Model (VLM) request."""
 
 from cornserve.frontend.app import AppConfig, AppRequest, AppResponse
-from cornserve.frontend.tasks import Task, LLMTask
+from cornserve.frontend.tasks import LLMTask
 
 
 class Request(AppRequest):

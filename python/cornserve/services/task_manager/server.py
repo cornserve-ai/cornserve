@@ -35,10 +35,10 @@ class TaskManagerServicer(task_manager_pb2_grpc.TaskManagerServicer):
             request.config,
         )
 
-        if not all(gpu.delta == task_manager_pb2.ResourceDelta.ADD for gpu in request.gpus):
+        if not all(gpu.action == task_manager_pb2.ResourceAction.ADD for gpu in request.gpus):
             await context.abort(
                 grpc.StatusCode.FAILED_PRECONDITION,
-                "When initializing the task manager, all resources deltas must be ADD",
+                "When initializing the task manager, all resources actions must be ADD",
             )
 
         gpus = [
@@ -72,12 +72,12 @@ class TaskManagerServicer(task_manager_pb2_grpc.TaskManagerServicer):
         add_gpus, remove_gpus = [], []
         for res in request.gpus:
             gpu = GPU(node=res.node_id, global_rank=res.global_rank, local_rank=res.local_rank)
-            if res.delta == task_manager_pb2.ResourceDelta.ADD:
+            if res.action == task_manager_pb2.ResourceAction.ADD:
                 add_gpus.append(gpu)
-            elif res.delta == task_manager_pb2.ResourceDelta.REMOVE:
+            elif res.action == task_manager_pb2.ResourceAction.REMOVE:
                 remove_gpus.append(gpu)
             else:
-                await context.abort(grpc.StatusCode.INVALID_ARGUMENT, f"Unknown resource delta: {res.delta}")
+                await context.abort(grpc.StatusCode.INVALID_ARGUMENT, f"Unknown resource action: {res.action}")
 
         await self.manager.update_resources(add_gpus, remove_gpus)
 
