@@ -10,19 +10,17 @@ RUN uv venv --python 3.11 --seed ${VIRTUAL_ENV}
 ENV PATH="$VIRTUAL_ENV/bin:$PATH"
 
 ADD . /workspace/cornserve
-WORKDIR /workspace/cornserve
+WORKDIR /workspace/cornserve/third_party/vllm
 
-RUN uv pip install -r third_party/vllm/requirements-common.txt
-RUN uv pip install -r third_party/vllm/requirements-cuda.txt
+RUN uv pip install -r requirements-common.txt
+RUN uv pip install -r requirements-cuda.txt
+ENV SETUPTOOLS_SCM_PRETEND_VERSION=0.0.1.dev
 RUN export VLLM_COMMIT=e02883c40086bb7e99903863a98c8786af2db2fd \
       && export VLLM_PRECOMPILED_WHEEL_LOCATION=https://wheels.vllm.ai/${VLLM_COMMIT}/vllm-1.0.0.dev-cp38-abi3-manylinux1_x86_64.whl \
-      && uv pip install --editable third_party/vllm
+      && uv pip install --editable .
 
 # Install CORNSERVE sidecars
-RUN pip3 install './python[sidecar]'
+RUN cd ../.. && uv pip install './python[sidecar]'
 
 ENV VLLM_USE_V1=1
 ENTRYPOINT ["vllm", "serve"]
-# Below entrypoint is not working
-# ENTRYPOINT ["python3", "-m", "vllm.entrypoints.openai.api_server"]
-
