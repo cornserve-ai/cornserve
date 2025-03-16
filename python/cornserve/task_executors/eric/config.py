@@ -8,7 +8,7 @@ Config values should be kept in sync with `cornserve.task_executors.launch`.
 from transformers import AutoConfig, PretrainedConfig
 from typing_extensions import Self
 
-from pydantic import BaseModel, ConfigDict, NonNegativeInt, PositiveInt, model_validator
+from pydantic import BaseModel, ConfigDict, Field, NonNegativeInt, PositiveInt, model_validator
 
 
 class ModelConfig(BaseModel):
@@ -22,20 +22,24 @@ class ModelConfig(BaseModel):
 
     # HF config
     # This will be replaced with the real HF config of the model ID
-    hf_config: PretrainedConfig = None  # type: ignore
+    _hf_config: PretrainedConfig
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
-    @model_validator(mode="after")
-    def validator(self) -> Self:
-        """Validate the config for correctness."""
+    def model_post_init(self, __context) -> None:
+        """Post-init hook to load the HF config."""
         # Load the HF config
         try:
-            self.hf_config = AutoConfig.from_pretrained(self.id)
+            self._hf_config = AutoConfig.from_pretrained(self.id)
         except Exception as e:
             raise ValueError(f"Failed to load HF config for model {self.id}") from e
 
-        return self
+    @property
+    def hf_config(self) -> PretrainedConfig:
+        """Return the HF config."""
+        if self._hf_config is None:
+            raise ValueError("HF config not loaded")
+        return self._hf_config
 
 
 class ServerConfig(BaseModel):

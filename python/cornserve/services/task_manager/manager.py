@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 from collections import defaultdict
 from contextlib import suppress
+import uuid
 
 import httpx
 import kubernetes_asyncio.client as kclient
@@ -49,7 +50,7 @@ class TaskManager:
         self.core_client = kclient.CoreV1Api(api_client=self.k8s_client)
 
         # Config variables
-        self.task_executor_healthy_timeout = 60.0
+        self.task_executor_healthy_timeout = 5 * 60.0
 
     @staticmethod
     async def init(
@@ -125,8 +126,17 @@ class TaskManager:
             # First, kill executors that were using the removed GPUs
             to_kill = []
             for executor_id, gpus in self.executor_gpus.items():
-                if any(gpu in remove_gpus for gpu in gpus):
+                executor_removed_gpu = []
+                for gpu in gpus:
+                    if gpu in remove_gpus:
+                        executor_removed_gpu.append(gpu)
+                if executor_removed_gpu:
                     to_kill.append(executor_id)
+                    logger.info(
+                        "Killing task executor %s due to removal of GPU %s",
+                        executor_id,
+                        executor_removed_gpu,
+                    )
 
             kill_results = await asyncio.gather(
                 *[self._kill_executor(executor_id) for executor_id in to_kill],
@@ -134,8 +144,14 @@ class TaskManager:
             )
 
             # Check for errors in killing
-            if any(isinstance(r, BaseException) for r in kill_results):
-                logger.error("Failed to kill some task executors. Spawning new ones with free GPUs.")
+            failed = 0
+            for result in kill_results:
+                if isinstance(result, BaseException):
+                    logger.error("Failed to kill task executor: %s", result)
+                    failed += 1
+
+            if failed:
+                logger.error("Failed to kill %d task executors. Spawning new ones with free GPUs anyway.", failed)
 
             # GPUs are marked as free inside `_kill_executor` after the executor is killed
             free_gpus = [gpu for gpu in self.gpus if gpu.is_free]
@@ -147,8 +163,15 @@ class TaskManager:
             )
 
             # Check for errors in spawning
-            if any(isinstance(r, BaseException) for r in spawn_results):
-                logger.error("Failed to spawn some task executors.")
+            failed = 0
+            for result in spawn_results:
+                if isinstance(result, BaseException):
+                    logger.error("Failed to spawn task executor: %s", result)
+                    failed += 1
+
+            if failed:
+                logger.error("Failed to spawn %d task executors.", failed)
+                raise RuntimeError("Failed to spawn task executors")
 
     async def get_route(self, app_id: str, request_id: str, routing_hint: str) -> str:
         """Get the URL to the task executor for a request.
@@ -173,10 +196,10 @@ class TaskManager:
     async def _do_healthcheck(self, executor_url: str, timeout: float = 1.0) -> bool:
         """Perform healthcheck on a single task executor.
 
-        This method assumes that the lock is held by the caller.
+        This method assumes that the healthcheck endpoint is `GET /health`.
         """
         try:
-            response = await self.http_client.get(executor_url, timeout=timeout)
+            response = await self.http_client.get(f"{executor_url}/health", timeout=timeout)
         except Exception as e:
             logger.error("Failed to healthcheck %s: %s", executor_url, e)
             return False
@@ -195,7 +218,7 @@ class TaskManager:
             executor_ids = list(self.executor_urls)
             executor_urls = list(self.executor_urls.values())
 
-        tasks = [self._do_healthcheck(f"{url}/health") for url in executor_urls]
+        tasks = [self._do_healthcheck(url) for url in executor_urls]
         responses = await asyncio.gather(*tasks)
         return dict(zip(executor_ids, responses, strict=True))
 
@@ -238,10 +261,15 @@ class TaskManager:
             raise ValueError("All GPUs must be on the same node")
         node_name = node_names.pop()
 
-        executor_id = "-".join([self.id, node_name, "gpus"] + [str(gpu.global_rank) for gpu in gpus])
-        pod_name = f"task-executor-{executor_id}".lower()
-        service_name = f"task-executor-{executor_id}".lower()
+        executor_id = self.launch_info.get_executor_name().lower()
+        executor_id = "-".join([executor_id, *(f"{gpu.global_rank}" for gpu in gpus)])
+        pod_name = f"task-executor-{executor_id}"
+        service_name = f"task-executor-{executor_id}"
         port = 8000
+
+        # Labels cannot be longer than 63 characters, but executor IDs can be longer.
+        # Therefore, we to generate a random label for the executor ID.
+        executor_id_label = str(uuid.uuid4())
 
         # Create the pod spec
         pod = kclient.V1Pod(
@@ -249,7 +277,7 @@ class TaskManager:
                 name=pod_name,
                 labels={
                     "app": "task-executor",
-                    "executor-id": executor_id,
+                    "executor-id": executor_id_label,
                     "task-type": self.config.type.lower(),
                 },
             ),
@@ -285,13 +313,13 @@ class TaskManager:
                 name=service_name,
                 labels={
                     "app": "task-executor",
-                    "executor-id": executor_id,
+                    "executor-id": executor_id_label,
                 },
             ),
             spec=kclient.V1ServiceSpec(
                 selector={
                     "app": "task-executor",
-                    "executor-id": executor_id,
+                    "executor-id": executor_id_label,
                 },
                 ports=[kclient.V1ServicePort(port=port, target_port="http")],
             ),
@@ -312,19 +340,19 @@ class TaskManager:
             )  # type: ignore
 
             executor_url = f"http://{service_name}:{port}"
-
             self.executor_service_names[executor_id] = service_name
-
             self.executor_urls[executor_id] = executor_url
 
             # Wait for the task executor to become available
             healthy_deadline = asyncio.get_event_loop().time() + self.task_executor_healthy_timeout
-            for _ in range(100):
+            while True:
                 if asyncio.get_event_loop().time() > healthy_deadline:
                     raise TimeoutError("Timed out waiting for task executor to become healthy")
 
                 if await self._do_healthcheck(executor_url, timeout=1.0):
                     break
+
+                await asyncio.sleep(0.5)
 
             # Allocate the GPUs to the executor
             for gpu in gpus:
@@ -333,6 +361,7 @@ class TaskManager:
         except Exception as e:
             logger.exception("Failed to spawn task executor: %s", e)
             await self._kill_executor(executor_id)
+            raise
 
     async def _kill_executor(self, executor_id: str) -> None:
         """Kill a task executor and clean up its resources and wait until it is gone.

@@ -1,1 +1,2 @@
 default-runtime: "nvidia"
+data-dir: "/data/k3s"

@@ -3,6 +3,9 @@
 from typing import Literal
 from types import MethodType
 
+import httpx
+
+from cornserve import constants
 from cornserve.frontend.tasks import Task, LLMTask
 from cornserve.services.gateway.app.models import AppClasses
 
@@ -25,4 +28,10 @@ async def llm_task_invoke(
 ) -> str:
     """Invoke the LLM task."""
     invoke_input = self._InvokeInput(prompt=prompt, multimodal_data=multimodal_data)
-    return invoke_input.model_dump_json()
+    async with httpx.AsyncClient(timeout=60.0) as client:
+        string = invoke_input.model_dump()
+        response = await client.post(
+            url=f"{constants.K8S_TASK_DISPATCHER_HTTP_URL}/tasks",
+            json=string,
+        )
+        return response.text

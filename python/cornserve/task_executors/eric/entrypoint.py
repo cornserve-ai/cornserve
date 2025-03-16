@@ -34,7 +34,7 @@ async def serve(eric_config: EricConfig) -> None:
             path,
         )
 
-    config = uvicorn.Config(app)
+    config = uvicorn.Config(app, host=eric_config.server.host, port=eric_config.server.port)
     server = uvicorn.Server(config)
 
     loop = asyncio.get_running_loop()

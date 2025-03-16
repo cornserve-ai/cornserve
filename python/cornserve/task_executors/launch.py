@@ -36,6 +36,10 @@ class TaskExecutorLaunchInfo(ABC):
         raise ValueError(f"Unknown task manager type: {task_manager_config.type}")
 
     @abstractmethod
+    def get_executor_name(self) -> str:
+        """Get the executor name for the task manager."""
+
+    @abstractmethod
     def get_container_image(self) -> str:
         """Get the container image for the task manager."""
 
@@ -50,6 +54,15 @@ class EncoderLaunchInfo(TaskExecutorLaunchInfo):
     def __init__(self, task_manager_config: EncoderConfig) -> None:
         """Initialize the encoder launch information."""
         self.task_manager_config = task_manager_config
+
+    def get_executor_name(self) -> str:
+        """Get the executor name for the encoder task manager."""
+        name = "-".join([
+            self.task_manager_config.type,
+            *[x for x in self.task_manager_config.modalities],
+            self.task_manager_config.model_id.split("/")[-1],
+        ]).lower()
+        return name
 
     def get_container_image(self) -> str:
         """Get the container image for the encoder task manager."""
@@ -74,6 +87,10 @@ class LLMLaunchInfo(TaskExecutorLaunchInfo):
     def __init__(self, task_manager_config: LLMConfig) -> None:
         """Initialize the LLM launch information."""
         self.task_manager_config = task_manager_config
+
+    def get_executor_name(self) -> str:
+        """Get the executor name for the LLM task manager."""
+        return "-".join(["llm", self.task_manager_config.model_id.split("/")[-1]]).lower()
 
     def get_container_image(self) -> str:
         """Get the container image for the LLM task manager."""
