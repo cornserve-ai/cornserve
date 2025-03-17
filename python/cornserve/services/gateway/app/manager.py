@@ -6,7 +6,6 @@ import importlib.util
 from collections import defaultdict
 from types import ModuleType
 from typing import Any, get_type_hints
-from contextvars import ContextVar
 
 import grpc
 
@@ -17,16 +16,13 @@ from cornserve.services.pb.resource_manager_pb2 import (
 )
 from cornserve.services.pb.resource_manager_pb2_grpc import ResourceManagerStub
 from cornserve.services.pb.common_pb2 import TaskType
-from cornserve.services.gateway.app.task_impl import patch_task_invoke
+from cornserve.services.gateway.app.task_impl import patch_task_invoke, app_context
 from cornserve.services.gateway.app.models import AppClasses, AppDefinition, AppState, AppContext
 from cornserve.frontend.tasks import Task, LLMTask
 from cornserve.frontend.app import AppRequest, AppResponse, AppConfig
 from cornserve.logging import get_logger
 
 logger = get_logger(__name__)
-
-# Context variable to store the app and request context
-app_context: ContextVar[AppContext] = ContextVar("app_context")
 
 
 def load_module_from_source(source_code: str, module_name: str) -> ModuleType:

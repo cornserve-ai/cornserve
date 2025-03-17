@@ -47,6 +47,16 @@ class TaskExecutorLaunchInfo(ABC):
     def get_container_args(self, gpus: list[GPU], port: int) -> list[str]:
         """Get the container command for the task manager."""
 
+    def get_container_volumes(self) -> list[tuple[str, str, str]]:
+        """Get the container volumes for the task manager.
+
+        Returns:
+            A list of tuples: name, host path, container path.
+        """
+        return [
+            ("hf-cache", constants.VOLUME_HF_CACHE, "/root/.cache/huggingface"),
+        ]
+
 
 class EncoderLaunchInfo(TaskExecutorLaunchInfo):
     """Launch information for Eric, the multimodal data encoder task executor."""

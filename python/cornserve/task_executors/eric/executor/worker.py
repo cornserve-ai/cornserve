@@ -25,7 +25,7 @@ from cornserve.task_executors.eric.distributed.parallel import (
     destroy_distributed,
 )
 
-# from cornserve.services.sidecar.api import TensorSidecarSender
+from cornserve.services.sidecar.api import TensorSidecarSender
 from cornserve.logging import get_logger
 
 logger = get_logger(__name__)
@@ -75,13 +75,13 @@ class Worker:
         self.model = load_model(model_name_or_path=model_id)
 
         # Initialize the sender sidecar client
-        # self.sender_sidecar_client = TensorSidecarSender(
-        #     sidecar_rank=sender_sidecar_rank,
-        #     chunk_shape=self.model.chunk_shape,
-        #     dtype=self.model.dtype,
-        #     shard_rank=tp_rank,
-        #     num_shards=tp_size,
-        # )
+        self.sender_sidecar_client = TensorSidecarSender(
+            sidecar_rank=sender_sidecar_rank,
+            slot_shape=self.model.chunk_shape,
+            dtype=self.model.dtype,
+            shard_rank=tp_rank,
+            num_shards=tp_size,
+        )
 
     @staticmethod
     def spawn_worker(
@@ -264,15 +264,15 @@ class Worker:
 
         # Send to sidecar
         for i in range(len(batch.data_ids)):
-            if batch.receiver_ranks[i] is None:
+            if (dst_sidecar_ranks := batch.receiver_ranks[i]) is None:
                 continue
-            # self.sender_sidecar_client.send(
-            #     chunk=output[i],
-            #     id=batch.request_ids[i] + batch.data_ids[i],
-            #     chunk_id=batch.chunk_ids[i],
-            #     num_chunks=batch.num_chunks[i],
-            #     dst_sidecar_ranks=batch.receiver_ranks[i],
-            # )
+            self.sender_sidecar_client.send(
+                chunk=output[i],
+                id=batch.request_ids[i] + batch.data_ids[i],
+                chunk_id=batch.chunk_ids[i],
+                num_chunks=batch.num_chunks[i],
+                dst_sidecar_ranks=dst_sidecar_ranks,
+            )
 
         # Dump tensors for debugging if requested
         if batch._dump_prefix is not None and self.tp_rank == 0:

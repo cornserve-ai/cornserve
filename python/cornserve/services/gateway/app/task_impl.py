@@ -45,4 +45,5 @@ async def llm_task_invoke(
             url=f"http://{constants.K8S_TASK_DISPATCHER_HTTP_URL}/task",
             json=request.model_dump(),
         )
+        response.raise_for_status()
         return response.text

@@ -23,4 +23,5 @@ RUN export VLLM_COMMIT=e02883c40086bb7e99903863a98c8786af2db2fd \
 RUN cd ../.. && uv pip install './python[sidecar]'
 
 ENV VLLM_USE_V1=1
+ENV HF_HOME="/root/.cache/huggingface"
 ENTRYPOINT ["vllm", "serve"]

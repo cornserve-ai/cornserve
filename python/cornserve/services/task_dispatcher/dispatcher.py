@@ -87,7 +87,7 @@ class TaskDispatcher:
             self.app_ongoing_invokes[app_id].append(invoke_task)
 
         try:
-            await invoke_task
+            return await invoke_task
         except asyncio.CancelledError as e:
             raise ValueError("Task invoke cancelled. The app is likely shutting down.") from e
         finally:
@@ -130,7 +130,7 @@ class TaskDispatcher:
                 ),
             )
 
-            async with httpx.AsyncClient() as http_client:
+            async with httpx.AsyncClient(timeout=60.0) as http_client:
                 http_tasks: list[asyncio.Task[httpx.Response]] = []
 
                 # Multimodal embedding request, if the task has multimodal data.
@@ -158,7 +158,7 @@ class TaskDispatcher:
 
                     encoder_request = dict(
                         id=app_id,
-                        receiver_sidecar_ranks=llm_route.sidecar_ranks,
+                        receiver_sidecar_ranks=list(llm_route.sidecar_ranks),
                         data=[
                             dict(id=data_id, modality=modality, url=url) for data_id, modality, url in embedding_data
                         ],
@@ -166,7 +166,7 @@ class TaskDispatcher:
 
                     http_tasks.append(
                         asyncio.create_task(
-                            http_client.post(url=encoder_route.task_executor_url, json=encoder_request),
+                            http_client.post(url=f"{encoder_route.task_executor_url}/embeddings", json=encoder_request),
                         )
                     )
 
@@ -175,7 +175,7 @@ class TaskDispatcher:
                 multimodal_messages = []
                 for multimodal_item in embedding_data:
                     data_id, modality, url = multimodal_item
-                    data_uri = f"data:{modality}/uuid;data_id={data_id};url={url}"
+                    data_uri = f"data:{modality}/uuid;data_id={data_id};url={url},"
                     multimodal_messages.append({"type": f"{modality}_url", f"{modality}_url": {"url": data_uri}})
 
                 llm_request = dict(
@@ -191,18 +191,23 @@ class TaskDispatcher:
 
                 http_tasks.append(
                     asyncio.create_task(
-                        http_client.post(url=llm_route.task_executor_url, json=llm_request),
+                        http_client.post(url=f"{llm_route.task_executor_url}/v1/chat/completions", json=llm_request),
                     )
                 )
 
                 # Wait for all HTTP tasks to complete.
                 try:
                     responses = await asyncio.gather(*http_tasks)
+                    for response in responses:
+                        response.raise_for_status()
                 except httpx.HTTPStatusError as e:
                     logger.exception("Error while invoking task")
                     raise RuntimeError(
                         f"HTTP request failed with code {e.response.status_code}: {e.response}",
                     ) from e
+                except Exception as e:
+                    logger.exception("Error while invoking task")
+                    raise RuntimeError(f"HTTP request failed: {e}") from e
 
                 # Last one is the LLM response, which is returned.
                 response = responses[-1].json()

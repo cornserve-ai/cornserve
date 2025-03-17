@@ -9,3 +9,5 @@ K8S_RESOURCE_MANAGER_GRPC_URL = "resource-manager:50051"
 CONTAINER_IMAGE_TASK_MANAGER = "cornserve/task-manager:latest"
 CONTAINER_IMAGE_ERIC = "cornserve/eric:latest"
 CONTAINER_IMAGE_VLLM = "cornserve/vllm:latest"
+
+VOLUME_HF_CACHE = "/data/hfcache"

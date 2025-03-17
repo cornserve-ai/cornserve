@@ -41,6 +41,7 @@ eric-no-gpu = [
   "decord",
   "einops",
   "xformers",
+  "cornserve[sidecar]",
 ]
 eric = ["flash-attn", "cornserve[eric-no-gpu]"]
 dev-common = [

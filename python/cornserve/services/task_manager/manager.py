@@ -188,10 +188,15 @@ class TaskManager:
         Returns:
             URL to the task executor to handle the request
         """
+        logger.info("Routing request %s for app %s with routing hint %s", request_id, app_id, routing_hint)
+
         async with self.lock:
             urls = list(self.executor_urls.values())
+        route = urls[hash(request_id) % len(urls)]
 
-        return urls[hash(request_id) % len(urls)]
+        logger.info("Routing request %s to %s", request_id, route)
+
+        return route
 
     async def _do_healthcheck(self, executor_url: str, timeout: float = 1.0) -> bool:
         """Perform healthcheck on a single task executor.
@@ -300,7 +305,21 @@ class TaskManager:
                                 value=",".join(str(gpu.local_rank) for gpu in gpus),
                             ),
                         ],
+                        volume_mounts=[
+                            kclient.V1VolumeMount(
+                                name=name,
+                                mount_path=container_path,
+                            )
+                            for name, _, container_path in self.launch_info.get_container_volumes()
+                        ],
                     )
+                ],
+                volumes=[
+                    kclient.V1Volume(
+                        name=name,
+                        host_path=kclient.V1HostPathVolumeSource(path=host_path),
+                    )
+                    for name, host_path, _ in self.launch_info.get_container_volumes()
                 ],
                 node_name=node_name,
                 host_ipc=True,
