@@ -173,7 +173,7 @@ class TaskManager:
                 logger.error("Failed to spawn %d task executors.", failed)
                 raise RuntimeError("Failed to spawn task executors")
 
-    async def get_route(self, app_id: str, request_id: str, routing_hint: str) -> str:
+    async def get_route(self, app_id: str, request_id: str, routing_hint: str) -> tuple[str, list[int]]:
         """Get the URL to the task executor for a request.
 
         The default implementation implemets sticky routing by hashing
@@ -186,17 +186,22 @@ class TaskManager:
             routing_hint: Arbitrary string to hint the routing decision
 
         Returns:
-            URL to the task executor to handle the request
+            URL to the task executor to handle the request and a list of
+            sidecar ranks.
         """
         logger.info("Routing request %s for app %s with routing hint %s", request_id, app_id, routing_hint)
 
         async with self.lock:
             urls = list(self.executor_urls.values())
-        route = urls[hash(request_id) % len(urls)]
+            gpus = list(self.executor_gpus.values())
 
-        logger.info("Routing request %s to %s", request_id, route)
+        index = hash(request_id) % len(urls)
+        route = urls[index]
+        sidecar_ranks = [gpu.global_rank for gpu in gpus[index]]
 
-        return route
+        logger.info("Routing request %s to %s (sidecars %s)", request_id, route, sidecar_ranks)
+
+        return (route, sidecar_ranks)
 
     async def _do_healthcheck(self, executor_url: str, timeout: float = 1.0) -> bool:
         """Perform healthcheck on a single task executor.

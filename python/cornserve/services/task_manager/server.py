@@ -101,8 +101,11 @@ class TaskManagerServicer(task_manager_pb2_grpc.TaskManagerServicer):
                 grpc.StatusCode.FAILED_PRECONDITION,
                 "Task manager not initialized with a task",
             )
-        url = await self.manager.get_route(request.app_id, request.request_id, request.routing_hint)
-        return task_manager_pb2.GetRouteResponse(task_executor_url=url)
+        url, sidecar_ranks = await self.manager.get_route(request.app_id, request.request_id, request.routing_hint)
+        return task_manager_pb2.GetRouteResponse(
+            task_executor_url=url,
+            sidecar_ranks=sidecar_ranks,
+        )
 
 
 async def serve(ip: str = "[::]", port: int = 50051) -> None:

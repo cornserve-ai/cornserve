@@ -16,6 +16,7 @@ logger = get_logger(__name__)
 async def invoke_task(request: TaskDispatchRequest, raw_request: Request):
     """Invoke a task with the given request data."""
     dispatcher: TaskDispatcher = raw_request.app.state.dispatcher
+    logger.info("Received invoke request for app %s: %s", request.app_id, request.request_data)
     try:
         response = await dispatcher.invoke(
             request.app_id,

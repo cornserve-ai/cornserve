@@ -117,6 +117,7 @@ class LLMLaunchInfo(TaskExecutorLaunchInfo):
             "--port", str(port),
             "--limit-mm-per-prompt", "image=5",  # TODO: Make this configurable.
             "--cornserve-sidecar-ranks", *[str(gpu.global_rank) for gpu in gpus],
+            "--enforce-eager",
         ]
         # fmt: on
         return cmd

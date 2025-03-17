@@ -110,6 +110,8 @@ class TaskDispatcher:
         # and to vLLM (as a key-value pair in the data URI).
         if isinstance(task_info.task, LLMTask):
             invoke_input = LLMTask._InvokeInput.model_validate_json(data)
+            if not invoke_input.multimodal_data:
+                invoke_input.multimodal_data = None
             encoder_request: dict | None = None
             embedding_data: list[tuple[str, str, str]] = []
 
@@ -157,7 +159,7 @@ class TaskDispatcher:
                         embedding_data.append((uuid.uuid4().hex, modality, url))
 
                     encoder_request = dict(
-                        id=app_id,
+                        id=request_id,
                         receiver_sidecar_ranks=list(llm_route.sidecar_ranks),
                         data=[
                             dict(id=data_id, modality=modality, url=url) for data_id, modality, url in embedding_data
@@ -187,6 +189,7 @@ class TaskDispatcher:
                         ),
                     ],
                     max_completion_tokens=512,
+                    request_id=request_id,
                 )
 
                 http_tasks.append(

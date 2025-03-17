@@ -346,6 +346,8 @@ class CommSidecarSender:
                 f"slot out of range {send_request.slot}*{self.slot_size}+{send_request.size} {self.shm_size}",
             )
 
+        if not send_request.dst_ranks:
+            await context.abort(grpc.StatusCode.INVALID_ARGUMENT, "dst_ranks cannot be empty")
         if any(r < 0 or r == self.sidecar_rank for r in send_request.dst_ranks):
             await context.abort(grpc.StatusCode.INVALID_ARGUMENT, "invalid destination rank")
         # only send to the head receiver when TP is enabled (min sidecar rank)
