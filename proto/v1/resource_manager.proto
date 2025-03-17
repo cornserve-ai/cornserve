@@ -23,6 +23,7 @@ message TaskConfig {
   string config = 2;
 }
 
+// New app registration
 message ReconcileNewAppRequest {
   // ID of the app that is being registered
   string app_id = 1;
@@ -35,6 +36,7 @@ message ReconcileNewAppResponse {
   common.Status status = 1;
 }
 
+// App removal
 message ReconcileRemovedAppRequest {
   string app_id = 1;
 }

@@ -1,11 +1,25 @@
 """Type definitions for the Gateway service."""
 
 import enum
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from types import ModuleType
 from typing import Coroutine, Type, Callable
+import uuid
 
 from cornserve.frontend.app import AppConfig, AppRequest, AppResponse
+
+
+@dataclass
+class AppContext:
+    """Context information for the invocation of an app.
+
+    Attributes:
+        app_id: The ID of the app.
+        request_id: The ID of the request.
+    """
+
+    app_id: str
+    request_id: str = field(default_factory=lambda: uuid.uuid4().hex)
 
 
 class AppState(enum.StrEnum):

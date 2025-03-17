@@ -57,11 +57,13 @@ class EncoderLaunchInfo(TaskExecutorLaunchInfo):
 
     def get_executor_name(self) -> str:
         """Get the executor name for the encoder task manager."""
-        name = "-".join([
-            self.task_manager_config.type,
-            *[x for x in self.task_manager_config.modalities],
-            self.task_manager_config.model_id.split("/")[-1],
-        ]).lower()
+        name = "-".join(
+            [
+                self.task_manager_config.type,
+                *[x for x in self.task_manager_config.modalities],
+                self.task_manager_config.model_id.split("/")[-1],
+            ]
+        ).lower()
         return name
 
     def get_container_image(self) -> str:

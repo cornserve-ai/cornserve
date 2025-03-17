@@ -10,6 +10,22 @@ from cornserve.services.task_manager.models import TaskManagerType
 from cornserve.services.pb import task_dispatcher_pb2, task_manager_pb2_grpc, common_pb2
 
 
+class TaskDispatchRequest(BaseModel):
+    """Request for invoking a task.
+
+    Attributes:
+        app_id: The unique identifier for the application.
+        task_id: The unique identifier for the task.
+        request_id: The unique identifier for the request.
+        request_data: Serialized input data for task invocation.
+    """
+
+    app_id: str
+    task_id: str
+    request_id: str
+    request_data: str
+
+
 class TaskManagerInfo(BaseModel):
     """Task Manager info and how to reach it.
 

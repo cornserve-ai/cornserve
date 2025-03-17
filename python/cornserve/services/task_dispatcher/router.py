@@ -2,30 +2,14 @@
 
 from __future__ import annotations
 
-from pydantic import BaseModel
 from fastapi import FastAPI, APIRouter, Request, Response, status
 
 from cornserve.logging import get_logger
 from cornserve.services.task_dispatcher.dispatcher import TaskDispatcher
+from cornserve.services.task_dispatcher.models import TaskDispatchRequest
 
 router = APIRouter()
 logger = get_logger(__name__)
-
-
-class TaskDispatchRequest(BaseModel):
-    """Request for invoking a task.
-
-    Attributes:
-        app_id: The unique identifier for the application.
-        task_id: The unique identifier for the task.
-        request_id: The unique identifier for the request.
-        request_data: Serialized input data for task invocation.
-    """
-
-    app_id: str
-    task_id: str
-    request_id: str
-    request_data: str
 
 
 @router.post("/task")
