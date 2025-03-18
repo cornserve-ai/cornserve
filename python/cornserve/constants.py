@@ -1,7 +1,8 @@
 """Constants used throughout CornServe."""
 
 K8S_NAMESPACE = "cornserve"
-K8S_SIDECAR_SERVICE_NAME = "torch-headless"
+K8S_SIDECAR_STATEFULSET_NAME = "sidecar"
+K8S_SIDECAR_SERVICE_NAME = "sidecar"
 K8S_TASK_DISPATCHER_HTTP_URL = "task-dispatcher:8000"
 K8S_TASK_DISPATCHER_GRPC_URL = "task-dispatcher:50051"
 K8S_RESOURCE_MANAGER_GRPC_URL = "resource-manager:50051"

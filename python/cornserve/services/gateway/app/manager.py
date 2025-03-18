@@ -236,8 +236,10 @@ class AppManager:
         request = app_def.classes.request_cls(**request_data)
 
         # Invoke the app
+        app_driver: asyncio.Task | None = None
+
         try:
-            # Set app context
+            # Set app context variable. This will also generate a unique request ID.
             app_context.set(AppContext(app_id=app_id))
 
             # Create a task to run the app
@@ -247,9 +249,6 @@ class AppManager:
                 self.app_driver_tasks[app_id].append(app_driver)
 
             response = await app_driver
-
-            async with self.app_lock:
-                self.app_driver_tasks[app_id].remove(app_driver)
 
             # Validate response
             if not isinstance(response, app_def.classes.response_cls):
@@ -270,6 +269,11 @@ class AppManager:
         except Exception as e:
             logger.exception("Error invoking app %s: %s", app_id, e)
             raise ValueError(f"Error invoking app {app_id}: {e}") from e
+
+        finally:
+            if app_driver:
+                async with self.app_lock:
+                    self.app_driver_tasks[app_id].remove(app_driver)
 
     async def list_apps(self) -> dict[str, AppState]:
         """List all registered applications and their states.

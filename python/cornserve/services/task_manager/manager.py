@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-import asyncio
-from collections import defaultdict
-from contextlib import suppress
 import uuid
+import asyncio
+from contextlib import suppress
+from dataclasses import dataclass
 
 import httpx
 import kubernetes_asyncio.client as kclient
@@ -27,6 +27,19 @@ from cornserve.logging import get_logger
 logger = get_logger(__name__)
 
 
+@dataclass
+class TaskExecutorDeployment:
+    """Informational class about a task executor deployment.
+
+    Attributes:
+        url: URL to the task executor
+        gpus: List of GPUs allocated to the task executor
+    """
+
+    url: str
+    gpus: list[GPU]
+
+
 class TaskManager:
     """Task manager abstract base class."""
 
@@ -38,8 +51,9 @@ class TaskManager:
         self.gpus: list[GPU] = []
 
         self.lock = asyncio.Lock()
-        self.executor_urls: dict[str, str] = {}
-        self.executor_gpus: dict[str, list[GPU]] = defaultdict(list)
+        self.executor_deployments: dict[str, TaskExecutorDeployment] = {}
+        # self.executor_urls: dict[str, str] = {}
+        # self.executor_gpus: dict[str, list[GPU]] = defaultdict(list)
         self.executor_pod_names: dict[str, str] = {}
         self.executor_service_names: dict[str, str] = {}
 
@@ -123,11 +137,13 @@ class TaskManager:
             self.gpus = [gpu for gpu in self.gpus if gpu not in remove_gpus]
             self.gpus.extend(add_gpus)
 
-            # First, kill executors that were using the removed GPUs
+            # First, kill executors that were using the removed GPUs.
+            # XXX(J1): Executors should be (1) excluded from routing and then (2)
+            # drained (i.e., waiting for all requests to complete) before being killed.
             to_kill = []
-            for executor_id, gpus in self.executor_gpus.items():
+            for executor_id, deployment in self.executor_deployments.items():
                 executor_removed_gpu = []
-                for gpu in gpus:
+                for gpu in deployment.gpus:
                     if gpu in remove_gpus:
                         executor_removed_gpu.append(gpu)
                 if executor_removed_gpu:
@@ -191,13 +207,13 @@ class TaskManager:
         """
         logger.info("Routing request %s for app %s with routing hint %s", request_id, app_id, routing_hint)
 
-        async with self.lock:
-            urls = list(self.executor_urls.values())
-            gpus = list(self.executor_gpus.values())
+        index = hash(request_id) % len(self.executor_deployments)
+        deployment = list(self.executor_deployments.values())[index]
+        # urls = list(self.executor_urls.values())
+        # gpus = list(self.executor_gpus.values())
 
-        index = hash(request_id) % len(urls)
-        route = urls[index]
-        sidecar_ranks = [gpu.global_rank for gpu in gpus[index]]
+        route = deployment.url
+        sidecar_ranks = [gpu.global_rank for gpu in deployment.gpus]
 
         logger.info("Routing request %s to %s (sidecars %s)", request_id, route, sidecar_ranks)
 
@@ -224,9 +240,8 @@ class TaskManager:
         Returns:
             Dict of task executor IDs to whether they are healthy
         """
-        async with self.lock:
-            executor_ids = list(self.executor_urls)
-            executor_urls = list(self.executor_urls.values())
+        executor_ids = list(self.executor_deployments)
+        executor_urls = [deployment.url for deployment in self.executor_deployments.values()]
 
         tasks = [self._do_healthcheck(url) for url in executor_urls]
         responses = await asyncio.gather(*tasks)
@@ -236,7 +251,7 @@ class TaskManager:
         """Shutdown the task manager."""
         # Kill all task executors
         async with self.lock:
-            executor_ids = list(self.executor_urls)
+            executor_ids = list(self.executor_deployments)
             kill_results = await asyncio.gather(
                 *[self._kill_executor(executor_id) for executor_id in executor_ids],
                 return_exceptions=True,
@@ -277,8 +292,8 @@ class TaskManager:
         service_name = f"task-executor-{executor_id}"
         port = 8000
 
-        # Labels cannot be longer than 63 characters, but executor IDs can be longer.
-        # Therefore, we to generate a random label for the executor ID.
+        # Kubernetes labels cannot be longer than 63 characters, but the generated
+        # executor ID could be longer than that. Therefore, we use a UUID4 label.
         executor_id_label = str(uuid.uuid4())
 
         # Create the pod spec
@@ -365,7 +380,14 @@ class TaskManager:
 
             executor_url = f"http://{service_name}:{port}"
             self.executor_service_names[executor_id] = service_name
-            self.executor_urls[executor_id] = executor_url
+            # self.executor_urls[executor_id] = executor_url
+
+            # Allocate the GPUs to the executor
+            for gpu in gpus:
+                gpu.allocate_to(executor_id)
+                # self.executor_gpus[executor_id].append(gpu.allocate_to(executor_id))
+
+            self.executor_deployments[executor_id] = TaskExecutorDeployment(url=executor_url, gpus=gpus)
 
             # Wait for the task executor to become available
             healthy_deadline = asyncio.get_event_loop().time() + self.task_executor_healthy_timeout
@@ -377,10 +399,6 @@ class TaskManager:
                     break
 
                 await asyncio.sleep(0.5)
-
-            # Allocate the GPUs to the executor
-            for gpu in gpus:
-                self.executor_gpus[executor_id].append(gpu.allocate_to(executor_id))
 
         except Exception as e:
             logger.exception("Failed to spawn task executor: %s", e)
@@ -412,7 +430,7 @@ class TaskManager:
                         namespace=constants.K8S_NAMESPACE,
                     )  # type: ignore
 
-            self.executor_urls.pop(executor_id, None)
+            # self.executor_urls.pop(executor_id, None)
 
             # Wait until the pod and service are gone
             if pod_name is not None:
@@ -439,13 +457,9 @@ class TaskManager:
                             break
                     await asyncio.sleep(1)
 
-            # Free GPUs as the final step.
-            # Executors that failed to terminate properly will not free GPUs,
-            # because they might still be in use or there may be processes
-            # occupying memory, likely leading to performance issues or failure
-            # later when those GPUs are occupied by new executors.
-            if gpus := self.executor_gpus.pop(executor_id, None):
-                for gpu in gpus:
+            # Deallocate the GPUs from the executor
+            if deployment := self.executor_deployments.pop(executor_id, None):
+                for gpu in deployment.gpus:
                     gpu.free()
 
         except Exception as e:

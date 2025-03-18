@@ -22,6 +22,7 @@ class Response(AppResponse):
 vlm = LLMTask(
     modalities={"text", "image"},
     model_id="Qwen/Qwen2-VL-7B-Instruct",
+    # model_id = "llava-hf/llava-onevision-qwen2-7b-ov-chat-hf",
 )
 
 

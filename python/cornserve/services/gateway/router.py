@@ -65,6 +65,24 @@ async def register_app(request: RegisterAppRequest, raw_request: Request):
         )
 
 
+@router.post("/admin/unregister_app/{app_id}")
+async def unregister_app(app_id: str, raw_request: Request):
+    """Unregister the application with the given ID."""
+    app_manager: AppManager = raw_request.app.state.app_manager
+
+    try:
+        await app_manager.unregister_app(app_id)
+        return Response(status_code=status.HTTP_200_OK)
+    except KeyError as e:
+        return Response(status_code=status.HTTP_404_NOT_FOUND, content=str(e))
+    except Exception as e:
+        logger.exception("Unexpected error while unregistering app")
+        return Response(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content=str(e),
+        )
+
+
 @router.post("/v1/apps/{app_id}")
 async def invoke_app(app_id: str, request: AppRequest, raw_request: Request):
     """Invoke a registered application."""

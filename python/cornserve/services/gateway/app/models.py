@@ -1,4 +1,4 @@
-"""Type definitions for the Gateway service."""
+"""Type definitions for the App Manager."""
 
 import enum
 from dataclasses import dataclass, field

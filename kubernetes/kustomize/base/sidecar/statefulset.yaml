@@ -6,11 +6,11 @@ metadata:
   labels:
     app: sidecar
 spec:
-  serviceName: "torch-headless"
+  serviceName: sidecar
   selector:
     matchLabels:
       app: sidecar
-  replicas: 4
+  replicas: 8
   template:
     metadata:
       labels:
@@ -36,11 +36,11 @@ spec:
             name: torch-dist
         env:
           - name: SIDECAR_MASTER_ADDR
-            value: "sidecar-0.torch-headless.cornserve.svc.cluster.local"
+            value: "sidecar-0.sidecar.cornserve.svc.cluster.local"
           - name: SIDECAR_MASTER_PORT
             value: "29500"
           - name: SIDECAR_WORLD_SIZE
-            value: "4"
+            value: "8"
           - name: SIDECAR_POD_NAME
             valueFrom:
               fieldRef:

@@ -1,7 +1,7 @@
 apiVersion: v1
 kind: Service
 metadata:
-  name: torch-headless
+  name: sidecar
   namespace: cornserve
   labels:
     app: sidecar

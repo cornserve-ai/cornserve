@@ -5,6 +5,11 @@
 We use the lightweight [K3s](https://k3s.io/) distribution of Kubernetes for our deployments.
 Refer to their [Documentation](https://docs.k3s.io/quick-start/) for details.
 
+### Disk space
+
+Make sure the path under `/var/lib/rancher` has enough disk space, particularly for containerd to store container filesystems in.
+If not, create a directory in secondary storage (e.g., `/mnt/data/rancher`) and symlink it to `/var/lib/rancher`.
+
 ### Master node
 
 Start a private registry:
@@ -35,8 +40,6 @@ NODE_TOKEN="$(sudo cat /var/lib/rancher/k3s/server/node-token)"
 On all other (worker) nodes:
 
 ```bash
-# NOTE: This snippet has not been validated yet. I just wrote it as I would first try.
-# Install and start K3s
 curl -sfL https://get.k3s.io | K3S_URL=https://$MASTER_ADDRESS:6443 K3S_TOKEN=$NODE_TOKEN INSTALL_K3S_SKIP_ENABLE=true sh -
 sudo mkdir -p /etc/rancher/k3s
 sudo cp k3s/agent-config.yaml /etc/rancher/k3s/config.yaml

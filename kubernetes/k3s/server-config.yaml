@@ -1,3 +1,2 @@
 write-kubeconfig-mode: "0644"
 default-runtime: "nvidia"
-data-dir: "/data/k3s"

@@ -7,7 +7,6 @@ from typing import Literal
 from collections import defaultdict
 
 from cornserve.logging import get_logger
-from cornserve.services.pb import task_manager_pb2
 
 logger = get_logger(__name__)
 
@@ -15,12 +14,7 @@ logger = get_logger(__name__)
 class GPU:
     """GPU resource."""
 
-    def __init__(
-        self,
-        node: str,
-        global_rank: int,
-        local_rank: int,
-    ) -> None:
+    def __init__(self, node: str, global_rank: int, local_rank: int) -> None:
         """Initialize the GPU resource.
 
         Args:
@@ -60,20 +54,6 @@ class GPU:
         self.owner = None
 
         return self
-
-    def to_pb(self, add: bool = True) -> task_manager_pb2.GPUResource:
-        """Convert the GPU to a protobuf message.
-
-        Args:
-            add: Whether the intended actions is to add or remove the GPU.
-        """
-        action = task_manager_pb2.ResourceAction.ADD if add else task_manager_pb2.ResourceAction.REMOVE
-        return task_manager_pb2.GPUResource(
-            action=action,
-            node_id=self.node,
-            global_rank=self.global_rank,
-            local_rank=self.local_rank,
-        )
 
 
 class CannotColocateError(Exception):
@@ -123,9 +103,7 @@ class Resource:
 
         self.gpus = gpus
 
-        logger.info("Cluster resources: %s", self.gpus)
-        logger.info("Cluster global rank status: \n%s", self.visual_repr("global_rank"))
-        logger.info("Cluster availability status: \n%s", self.visual_repr("availability"))
+        self.print_resource_status()
 
     def num_free_gpus(self, node: str | None = None) -> int:
         """Get the number of free GPUs."""
@@ -150,7 +128,7 @@ class Resource:
 
         We may have multiple nodes in which we can allocate the GPUs while
         still satisfying colocation. In this case, `node_selection_policy`
-        determines how to select the node for allocation.
+        determines which node to select.
 
         "pack" will try to allocate GPUs on nodes where the owner already has
         GPUs allocated. "spread", on the other hand, will try to avoid
@@ -168,6 +146,14 @@ class Resource:
             NotEnoughGPUsError: If there are not enough free GPUs available
                 in the cluster.
         """
+        logger.info(
+            "Request to allocate %d GPUs to %s with must_colocate=%s and node_selection_policy=%s",
+            num_gpus,
+            owner,
+            must_colocate,
+            node_selection_policy,
+        )
+
         if num_gpus > (num_free_gpus := self.num_free_gpus()):
             raise NotEnoughGPUsError(
                 f"Cannot allocate {num_gpus} GPUs. Only {num_free_gpus} free GPUs available in the cluster.",
@@ -176,8 +162,7 @@ class Resource:
         # Nodes with at least one free GPU
         free_nodes: set[str] = set()
         for node, gpus in self.node_to_gpus.items():
-            free_gpus = [gpu for gpu in gpus if gpu.is_free]
-            if free_gpus:
+            if any(gpu.is_free for gpu in gpus):
                 free_nodes.add(node)
         logger.info("Nodes that have at least one free GPU: %s", free_nodes)
 
@@ -197,7 +182,8 @@ class Resource:
             else:
                 raise ValueError(f"Unknown node selection policy: {node_selection_policy}")
 
-        # We must find exactly one node with at least `num_gpus` free GPUs
+        # We must find exactly one node with at least `num_gpus` free GPUs.
+        # If the head of the heap does not have enough free GPUs, we are out of luck.
         if must_colocate:
             num_free_nodes = -node_priority[0][0]
             if num_free_nodes < num_gpus:
@@ -222,10 +208,14 @@ class Resource:
                 break
 
         assert num_allocated == num_gpus
-        logger.info("Allocated GPUs: %s", allocated_gpus)
+        self.print_resource_status()
+        return allocated_gpus
+
+    def print_resource_status(self) -> None:
+        """Print the status of the cluster resources."""
+        logger.info("Cluster resources: %s", self.gpus)
         logger.info("Cluster global rank status: \n%s", self.visual_repr("global_rank"))
         logger.info("Cluster availability status: \n%s", self.visual_repr("availability"))
-        return allocated_gpus
 
     def visual_repr(self, mode: Literal["global_rank", "availability"]) -> str:
         """Construct a visual representation of the cluster resources.
