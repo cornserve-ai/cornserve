@@ -216,6 +216,7 @@ class Qwen2VisionAttention(nn.Module):
         x: torch.Tensor,
         cu_seqlens: torch.Tensor,
         rotary_pos_emb: torch.Tensor,
+        max_seqlen: int | None = None,
     ) -> torch.Tensor:
         # [s, b, c] --> [s, b, 3 * head * head_dim]
         x, _ = self.qkv(x)
@@ -231,7 +232,6 @@ class Qwen2VisionAttention(nn.Module):
 
         q, k, v = (rearrange(x, "b s ... -> (b s) ...") for x in [q, k, v])
 
-        max_seqlen = (cu_seqlens[1:] - cu_seqlens[:-1]).max().item()
         output = flash_attn_varlen_func(
             q,
             k,
@@ -274,8 +274,19 @@ class Qwen2VisionBlock(nn.Module):
         )
         self.mlp = Qwen2VisionMLP(dim, mlp_hidden_dim, act_layer=act_layer)
 
-    def forward(self, x: torch.Tensor, cu_seqlens: torch.Tensor, rotary_pos_emb: torch.Tensor) -> torch.Tensor:
-        x = x + self.attn(self.norm1(x), cu_seqlens=cu_seqlens, rotary_pos_emb=rotary_pos_emb)
+    def forward(
+        self,
+        x: torch.Tensor,
+        cu_seqlens: torch.Tensor,
+        rotary_pos_emb: torch.Tensor,
+        max_seqlen: int | None = None,
+    ) -> torch.Tensor:
+        x = x + self.attn(
+            self.norm1(x),
+            cu_seqlens=cu_seqlens,
+            rotary_pos_emb=rotary_pos_emb,
+            max_seqlen=max_seqlen,
+        )
         x = x + self.mlp(self.norm2(x))
         return x
 
@@ -415,8 +426,10 @@ class Qwen2VisionTransformer(EricModel):
 
         # transformers
         x = x.unsqueeze(1)
+
+        max_seqlen = (cu_seqlens[1:] - cu_seqlens[:-1]).max().item()
         for blk in self.blocks:
-            x = blk(x, cu_seqlens=cu_seqlens, rotary_pos_emb=rotary_pos_emb)
+            x = blk(x, cu_seqlens=cu_seqlens, rotary_pos_emb=rotary_pos_emb, max_seqlen=max_seqlen)
 
         # adapter
         x = self.merger(x)
