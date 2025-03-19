@@ -39,10 +39,34 @@ build_and_push() {
         return
     fi
 
-    IMAGE="${REGISTRY}/${NAMESPACE}/${SERVICE}:latest"
+    IMAGE="${NAMESPACE}/${SERVICE}:latest"
+    PUSH_IMAGE="${REGISTRY}/${NAMESPACE}/${SERVICE}:latest"
     
-    docker build -f "${DOCKERFILE}" -t "${IMAGE}" . && docker push "${IMAGE}" && echo "Successfully built and pushed ${IMAGE}"
+    docker build -f "${DOCKERFILE}" -t "${IMAGE}" .
+
+    if [[ "${REGISTRY}" == "local" ]]; then
+        echo "Exporting image to local k3s containerd..."
+        docker save "${IMAGE}" | invoke_k3s ctr images import -
+    else
+        echo "Pushing to ${REGISTRY}..."
+        docker tag "${IMAGE}" "${PUSH_IMAGE}"
+        docker push "${PUSH_IMAGE}"
+    fi
+
+    echo "Successfully built and exported ${IMAGE}"
 }
+
+invoke_k3s() {
+    k3s_bin="$(which k3s)"
+    sudo "${k3s_bin}" "$@"
+}
+
+# Get the user to type their password if they want local k3s containerd export
+if [[ "${REGISTRY}" == "local" ]]; then
+    # Ensure k3s is installed and record its binary location
+    echo "Exporting image to local k3s containerd. Existing images are:"
+    invoke_k3s ctr images ls | grep -i "${NAMESPACE}"
+fi
 
 # Run all builds in parallel
 for SERVICE in "${BUILD_LIST[@]}"; do
