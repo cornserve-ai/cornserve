@@ -58,7 +58,7 @@ class Worker:
         tp_size: int,
         input_mq: MessageQueue,
         response_mq: MessageQueue,
-        sender_sidecar_rank: int,
+        sender_sidecar_rank: int | None,
     ) -> None:
         """Initialize the worker."""
         # Cached variables
@@ -75,13 +75,16 @@ class Worker:
         self.model = load_model(model_name_or_path=model_id)
 
         # Initialize the sender sidecar client
-        self.sender_sidecar_client = TensorSidecarSender(
-            sidecar_rank=sender_sidecar_rank,
-            slot_shape=self.model.chunk_shape,
-            dtype=self.model.dtype,
-            shard_rank=tp_rank,
-            num_shards=tp_size,
-        )
+        if sender_sidecar_rank is not None:
+            self.sender_sidecar_client = TensorSidecarSender(
+                sidecar_rank=sender_sidecar_rank,
+                slot_shape=self.model.chunk_shape,
+                dtype=self.model.dtype,
+                shard_rank=tp_rank,
+                num_shards=tp_size,
+            )
+        else:
+            self.sender_sidecar_client = None
 
     @staticmethod
     def spawn_worker(
@@ -89,7 +92,7 @@ class Worker:
         tp_rank: int,
         tp_size: int,
         input_mq_handle: MessageQueueHandle,
-        sender_sidecar_rank: int,
+        sender_sidecar_rank: int | None,
     ) -> WorkerHandle:
         """Spawn the worker process.
 
@@ -146,7 +149,7 @@ class Worker:
         tp_size: int,
         input_mq_handle: MessageQueueHandle,
         ready_zmq_path: str,
-        sender_sidecar_rank: int,
+        sender_sidecar_rank: int | None,
     ) -> None:
         """Entrypoint for the worker process when it's spawned.
 
@@ -263,16 +266,17 @@ class Worker:
         )
 
         # Send to sidecar
-        for i in range(len(batch.data_ids)):
-            if (dst_sidecar_ranks := batch.receiver_ranks[i]) is None:
-                continue
-            self.sender_sidecar_client.send(
-                chunk=output[i],
-                id=batch.request_ids[i] + batch.data_ids[i],
-                chunk_id=batch.chunk_ids[i],
-                num_chunks=batch.num_chunks[i],
-                dst_sidecar_ranks=dst_sidecar_ranks,
-            )
+        if self.sender_sidecar_client is not None:
+            for i in range(len(batch.data_ids)):
+                if (dst_sidecar_ranks := batch.receiver_ranks[i]) is None:
+                    continue
+                self.sender_sidecar_client.send(
+                    chunk=output[i],
+                    id=batch.request_ids[i] + batch.data_ids[i],
+                    chunk_id=batch.chunk_ids[i],
+                    num_chunks=batch.num_chunks[i],
+                    dst_sidecar_ranks=dst_sidecar_ranks,
+                )
 
         # Dump tensors for debugging if requested
         if batch._dump_prefix is not None and self.tp_rank == 0:

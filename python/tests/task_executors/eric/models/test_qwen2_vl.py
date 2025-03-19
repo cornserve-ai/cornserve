@@ -35,11 +35,7 @@ def test_weight_loading() -> None:
 )
 def test_image_inference(test_images: list[ModalityData], tp_size: int) -> None:
     """Test if inference works correctly."""
-    executor = ModelExecutor(
-        model_id=model_id,
-        tp_size=tp_size,
-        sender_sidecar_ranks=list(range(tp_size)),
-    )
+    executor = ModelExecutor(model_id=model_id, tp_size=tp_size, sender_sidecar_ranks=None)
 
     result = executor.execute_model(batch=batch_builder(model_id, "qwen2", test_images))
 
@@ -55,11 +51,7 @@ def test_image_inference(test_images: list[ModalityData], tp_size: int) -> None:
 )
 def test_video_inference(test_videos: list[ModalityData], tp_size: int) -> None:
     """Test if inference works correctly."""
-    executor = ModelExecutor(
-        model_id=model_id,
-        tp_size=tp_size,
-        sender_sidecar_ranks=list(range(tp_size)),
-    )
+    executor = ModelExecutor(model_id=model_id, tp_size=tp_size, sender_sidecar_ranks=None)
 
     result = executor.execute_model(batch=batch_builder(model_id, "qwen2", test_videos[:2]))
 

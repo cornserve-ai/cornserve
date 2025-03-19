@@ -30,7 +30,7 @@ async def test_example_vlm_app(app_manager: AppManager) -> None:
         new=llm_task_invoke,
     ).start()
 
-    source_code = open("examples/app/vlm.py").read()
+    source_code = open("../examples/app/vlm.py").read()
     app_id = await app_manager.register_app(source_code)
 
     with pytest.raises(KeyError):
