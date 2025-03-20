@@ -11,7 +11,7 @@ from cornserve.services.gateway.app.manager import AppManager
 from . import example_vlm
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture(scope="module")
 def app_manager():
     """Fixture to create a new AppManager instance."""
     manager = AppManager("resource-manager:50051")

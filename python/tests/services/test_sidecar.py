@@ -52,8 +52,9 @@ def run_server(rank: int, world_size: int, shm_size: int) -> None:
 def start_sidecar_servers(n: int = 4, shm_size: int = 2 << 28) -> list[multiprocessing.Process]:
     """Start n sidecar servers in n processes."""
     processes = []
+    ctx = multiprocessing.get_context("spawn")
     for rank in range(n):
-        process = multiprocessing.Process(
+        process = ctx.Process(
             target=run_server,
             args=(rank, n, shm_size),
         )
@@ -74,13 +75,14 @@ def terminate_processes(processes: list[multiprocessing.Process]) -> None:
             process.join()
 
 
-@pytest.fixture(scope="session", autouse=True)
+
+@pytest.fixture(scope="module", autouse=True)
 def mock_grpc_channel_fixture() -> None:
     """Fixture to automatically mock the grpc_channel_from_rank function."""
     mock_grpc_channel()
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture(scope="module")
 def sidecar_servers(
     request: pytest.FixtureRequest,
 ) -> Generator[list[multiprocessing.Process], None, None]:
@@ -93,7 +95,9 @@ def sidecar_servers(
     # Check all servers are alive
     for rank, server in enumerate(servers):
         assert server.is_alive(), f"Server with rank {rank} is not running"
+
     yield servers
+
     # Cleanup after all tests are done
     terminate_processes(servers)
 
