@@ -75,7 +75,6 @@ def terminate_processes(processes: list[multiprocessing.Process]) -> None:
             process.join()
 
 
-
 @pytest.fixture(scope="module", autouse=True)
 def mock_grpc_channel_fixture() -> None:
     """Fixture to automatically mock the grpc_channel_from_rank function."""
