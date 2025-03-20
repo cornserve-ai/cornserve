@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import inspect
 import unittest.mock
 
 import pytest
 from pydantic import ValidationError
 
 from cornserve.services.gateway.app.manager import AppManager
+
+from . import example_vlm
 
 
 @pytest.fixture(scope="session")
@@ -30,7 +33,7 @@ async def test_example_vlm_app(app_manager: AppManager) -> None:
         new=llm_task_invoke,
     ).start()
 
-    source_code = open("../examples/app/vlm.py").read()
+    source_code = inspect.getsource(example_vlm)
     app_id = await app_manager.register_app(source_code)
 
     with pytest.raises(KeyError):
