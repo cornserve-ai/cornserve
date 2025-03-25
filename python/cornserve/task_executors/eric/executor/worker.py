@@ -292,7 +292,7 @@ class Worker:
                     continue
                 token = None
                 if batch.otel_contexts[i] is not None:
-                    context = PROPAGATOR.extract(batch.otel_contexts[i]) # type: ignore
+                    context = PROPAGATOR.extract(batch.otel_contexts[i])  # type: ignore
                     token = context_api.attach(context)
                 self.sender_sidecar_client.send(
                     chunk=output[i],
