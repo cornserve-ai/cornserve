@@ -11,6 +11,9 @@ from cornserve.task_executors.eric.router.app import create_app
 from cornserve.task_executors.eric.engine.client import EngineClient
 from cornserve.logging import get_logger
 
+from cornserve.tracing import configure_otel
+from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+
 logger = get_logger("cornserve.task_executors.eric.entrypoint")
 
 
@@ -18,7 +21,11 @@ async def serve(eric_config: EricConfig) -> None:
     """Serve the Eric model as a FastAPI app."""
     logger.info("Starting Eric with %s", eric_config)
 
+    configure_otel(f"eric{str(eric_config.sidecar.ranks).replace(',', '')}")
+
     app = create_app(eric_config)
+
+    FastAPIInstrumentor().instrument_app(app)
 
     logger.info("Available routes are:")
     for route in app.routes:

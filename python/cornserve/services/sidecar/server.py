@@ -7,22 +7,29 @@ together provide the functionality to send and receive tensors between ranks.
 """
 
 from __future__ import annotations
-
-import os
-import pickle
 import asyncio
 from dataclasses import dataclass
+import multiprocessing as mp
+import os
+import pickle
 
-import tyro
 import grpc
 import kubernetes_asyncio.client as kclient
 import kubernetes_asyncio.config as kconfig
+from opentelemetry import trace
+from opentelemetry.instrumentation.grpc import (
+    GrpcAioInstrumentorClient,
+    GrpcAioInstrumentorServer,
+    GrpcInstrumentorClient,
+    GrpcInstrumentorServer,
+)
 import torch
 import torch.distributed as dist
-import multiprocessing as mp
+import tyro
 
 from cornserve.logging import SidcarAdapter, get_logger
 from cornserve.services.pb import comm_sidecar_pb2, comm_sidecar_pb2_grpc, common_pb2
+from cornserve.tracing import configure_otel
 
 from .shm_manager import SharedMemoryBuffer, SharedMemoryManager
 from .utils import (
@@ -36,6 +43,12 @@ from .utils import (
 
 logger = get_logger(__name__, [SidcarAdapter])
 cleanup_coroutines = []
+tracer = trace.get_tracer(__name__)
+
+GrpcInstrumentorClient().instrument()
+GrpcInstrumentorServer().instrument()
+GrpcAioInstrumentorClient().instrument()
+GrpcAioInstrumentorServer().instrument()
 
 
 class CommSidecarReceiver:
@@ -122,7 +135,7 @@ class CommSidecarReceiver:
         This function allocates a shared memory buffer if not already allocated,
         and queues up a receive task to receive the tensor.
         """
-        logger.info(
+        logger.debug(
             (
                 "Prepare receive for request id %s, shard_size %d, dtype %s, src_rank %d, shard_rank %d, "
                 "num_shards %d, chunk_size %d, num_chunks %d, chunk_id %d, shard_offset %d"
@@ -143,8 +156,10 @@ class CommSidecarReceiver:
             logger.error("Data type mismatch")
             await context.abort(grpc.StatusCode.INVALID_ARGUMENT, "Data type mismatch")
 
+        span = trace.get_current_span()
         async with self.has_memory:
             # acquire the underlying lock
+            span.add_event("acquired lock")
             if request.id not in self.ledger:
                 # some prepare_recv needs to allocate the buffer and update the ledger
                 if request.id not in self.malloc_events:
@@ -163,6 +178,7 @@ class CommSidecarReceiver:
                         logger.info("Memory pressure detected, current prssure count %d", self.mem_pressure_count)
                         await self.has_memory.wait()
                         buffer = self.shm_manager.allocate(request.chunk_size * request.num_chunks)
+                    span.add_event("Allocated buffer")
 
                     buffer.create_chunks(request.num_chunks, request.num_shards)
                     self.ledger[request.id] = CommSidecarReceiver.TransferRequestState(request.id, buffer)
@@ -177,9 +193,11 @@ class CommSidecarReceiver:
                     self.has_memory.release()
                     try:
                         await event.wait()
+                        span.add_event("Waited for buffer allocation")
                     finally:
                         # Make sure to re-acquire the lock after waiting
                         await self.has_memory.acquire()
+        span.add_event("Retrieved buffer")
 
         state = self.ledger[request.id]
         chunk = state.buffer.chunks[request.chunk_id]
@@ -212,6 +230,7 @@ class CommSidecarReceiver:
                 self.recv_done_lock.release()
 
         asyncio.create_task(asyncio.to_thread(recv_task))
+        span.add_event("created recv task")
         return comm_sidecar_pb2.PrepareReceiveResponse(status=common_pb2.Status.STATUS_OK)
 
     async def receive(
@@ -224,6 +243,7 @@ class CommSidecarReceiver:
         If all chunks are received, return the slot number imediately.
         Else, queues up an event for the request id and waits for all chunks to be received.
         """
+        span = trace.get_current_span()
         logger.info("==> Receive request for request id %s", recv_req.id)
         self.recv_done_lock.acquire()
         if recv_req.id in self.ledger and self.ledger[recv_req.id].done:
@@ -234,6 +254,7 @@ class CommSidecarReceiver:
             self.req_events[recv_req.id] = event
             self.recv_done_lock.release()
             await event.wait()
+        span.add_event("Received")
 
         logger.info("==> All chunks received for request id %s", recv_req.id)
         offset = self.ledger[recv_req.id].buffer.slots[0] * self.shm_manager.slot_size
@@ -339,6 +360,7 @@ class CommSidecarSender:
         First use prepare_receive to send control signals to the destination sidecar,
         then queue up the send tasks.
         """
+        span = trace.get_current_span()
         # sanity check
         if send_request.slot < 0 or send_request.slot * self.slot_size + send_request.size > self.shm_size:
             await context.abort(
@@ -386,12 +408,14 @@ class CommSidecarSender:
             logger.error("Failed to prepare receive")
             # TODO: clean up by canceling the previous prepare_receive calls
             return comm_sidecar_pb2.SendResponse(status=common_pb2.Status.STATUS_ERROR)
+        span.add_event("prepare receive finished")
 
         ipc_handle = pickle.loads(send_request.ipc_handle)
         cuda_event = torch.cuda.Event.from_ipc_handle(self.device, ipc_handle)
 
         while not cuda_event.query():
             await asyncio.sleep(0.0)  # Allows other futures to make process.
+        span.add_event("copy finished")
 
         logger.info("Sending chunk %d for req %s", send_request.chunk_id, send_request.id)
         tag = chunk_tag(self.sidecar_rank, send_request.chunk_id, self.shard_rank)
@@ -410,6 +434,8 @@ class CommSidecarSender:
             req.wait()
 
         await asyncio.to_thread(wait_fn)
+        span.add_event("send finished")
+        span.set_attribute("comm_size", send_request.size)
         logger.info(
             "SHARD RANK %d: sent chunk %d for request %s", self.shard_rank, send_request.chunk_id, send_request.id
         )
@@ -736,6 +762,8 @@ async def main(
         sidecar_rank = int(os.environ.get("SIDECAR_RANK", "-1"))
 
     assert sidecar_rank >= 0, "Invalid sidecar rank"
+
+    configure_otel(name=f"sidecar[{sidecar_rank}]")
 
     # We start the server so the health check gRPC is always available
     server = grpc.aio.server()

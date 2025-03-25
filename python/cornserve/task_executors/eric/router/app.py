@@ -9,9 +9,11 @@ from cornserve.task_executors.eric.router.processor import Processor
 from cornserve.task_executors.eric.models.registry import MODEL_REGISTRY
 from cornserve.task_executors.eric.schema import EmbeddingRequest, Status, Modality
 
+from opentelemetry import trace
 
 router = APIRouter()
 logger = get_logger(__name__)
+tracer = trace.get_tracer(__name__)
 
 
 @router.get("/health")
@@ -39,13 +41,23 @@ async def modalities(raw_request: Request) -> list[Modality]:
 
 
 @router.post("/embeddings")
+@tracer.start_as_current_span(name="router-embeddings")
 async def embeddings(request: EmbeddingRequest, raw_request: Request) -> Response:
     """Handler for embedding requests."""
+    span = trace.get_current_span()
+    span.set_attribute("request_id", request.id)
+    for data_item in request.data:
+        span.set_attribute(data_item.id, data_item.url)
     processor: Processor = raw_request.app.state.processor
     engine_client: EngineClient = raw_request.app.state.engine_client
 
     # Load data from URLs and apply processing
-    processed = await processor.process(request.data)
+
+    with tracer.start_as_current_span(name="router-process-data"):
+        processed = await processor.process(request.data)
+        for data_item in processed:
+            for k, v in data_item.data.items():
+                span.set_attribute(f"{data_item.id}-{k}-shape", v.shape)
 
     # Send to engine process (embedding + transmission via Tensor Sidecar)
     response = await engine_client.embed(

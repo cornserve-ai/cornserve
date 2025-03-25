@@ -15,7 +15,14 @@ from cornserve.services.task_dispatcher.models import TaskInfo
 from cornserve.services.pb import task_manager_pb2
 from cornserve.services.task_manager.models import TaskManagerType
 
+from opentelemetry import trace
+from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
+from opentelemetry.instrumentation.grpc import GrpcInstrumentorClient
+
 logger = get_logger(__name__)
+tracer = trace.get_tracer(__name__)
+HTTPXClientInstrumentor().instrument()
+GrpcInstrumentorClient().instrument()
 
 
 class TaskDispatcher:
@@ -68,8 +75,11 @@ class TaskDispatcher:
     async def shutdown(self) -> None:
         """Shutdown the Task Dispatcher."""
 
+    @tracer.start_as_current_span("dispatcher-invoke-task")
     async def invoke(self, app_id: str, task_id: str, request_id: str, data: str) -> Any:
         """Invoke a task with the given request data."""
+        span = trace.get_current_span()
+        span.set_attribute("task_id", task_id)
         async with self.app_lock:
             try:
                 task_infos = self.app_task_info[app_id]
@@ -94,6 +104,7 @@ class TaskDispatcher:
             async with self.ongoing_task_lock:
                 self.app_ongoing_invokes[app_id].remove(invoke_task)
 
+    @tracer.start_as_current_span("do_invoke_task")
     async def _do_invoke(
         self,
         app_id: str,

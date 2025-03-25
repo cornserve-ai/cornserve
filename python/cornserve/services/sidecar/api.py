@@ -32,7 +32,15 @@ from .utils import (
     shm_fn,
 )
 
+from opentelemetry import trace
+from opentelemetry.instrumentation.grpc import GrpcInstrumentorClient, GrpcAioInstrumentorClient
+from opentelemetry.instrumentation.threading import ThreadingInstrumentor
+
 logger = get_logger(__name__)
+tracer = trace.get_tracer(__name__)
+GrpcInstrumentorClient().instrument()
+GrpcAioInstrumentorClient().instrument()
+ThreadingInstrumentor().instrument()
 
 
 class TensorSidecarReceiverBase:
@@ -201,20 +209,26 @@ class TensorSidecarAsyncReceiver(TensorSidecarReceiverBase):
         except Exception:
             pass
 
+    @tracer.start_as_current_span(name="sidecar-client-recv")
     async def recv(self, id: str) -> torch.Tensor:
         """Receive a tensor from the sidecar server.
 
         Args:
             id: the id of expected data, should be the concatenation of request id and data id.
         """
+        span = trace.get_current_span()
+        span.set_attribute("id", id)
         recv_req = comm_sidecar_pb2.ReceiveRequest(id=id)
         response = await self.stub.Receive(recv_req)
         assert response.offset >= 0 and response.size >= 0, "Failed to receive data"
         chunk = self.shared_tensor[response.offset : response.offset + response.size]
         return chunk.view(self.tensor_shape)
 
+    @tracer.start_as_current_span(name="sidecar-client-mark-done")
     async def mark_done(self, id: str) -> None:
         """Mark a tensor as done in the sidecar server, which will free the shared memory buffer."""
+        span = trace.get_current_span()
+        span.set_attribute("id", id)
         request = comm_sidecar_pb2.MarkDoneRequest(id=id)
         response = await self.stub.MarkDone(request)
         if response.status == common_pb2.Status.STATUS_OK:
@@ -381,6 +395,8 @@ class TensorSidecarSender(TensorSidecarSenderBase):
     def shutdown(self) -> None:
         """Shutdown the sender client."""
         self.shutdown_event.set()
+        with self.memory_lock:
+            self.memory_freed.notify_all()  # Wake up any waiting threads
         self.worker_pool.shutdown(wait=True, cancel_futures=True)
         try:
             del self.shared_tensor
@@ -424,6 +440,7 @@ class TensorSidecarSender(TensorSidecarSenderBase):
             self.shm_manager.free(buffer)
             self.memory_freed.notify_all()
 
+    @tracer.start_as_current_span(name="sidecar-client-send")
     def send(
         self,
         chunk: torch.Tensor,
@@ -489,6 +506,7 @@ class TensorSidecarSender(TensorSidecarSenderBase):
             num_chunks=num_chunks,
         )
 
+    @tracer.start_as_current_span(name="sidecar-client-send-worker-thread")
     def _send_worker(
         self,
         id: str,
@@ -510,14 +528,17 @@ class TensorSidecarSender(TensorSidecarSenderBase):
             chunk_id: the chunk id of the data.
             num_chunks: the total number of chunks the data is split into.
         """
+        span = trace.get_current_span()
         buffer = self._allocate(shard.numel())
         try:
+            span.add_event("Allocated shared memory buffer")
             cuda_event = torch.cuda.Event(interprocess=True)
             with torch.cuda.stream(self.stream):
                 buffer.data.copy_(shard, non_blocking=True)
                 cuda_event.record(self.stream)
             ipc_handle = cuda_event.ipc_handle()
             logger.debug("SHARD RANK: %d: Sending send request to sidecar", self.shard_rank)
+            span.add_event("Send to sidecar server")
             request = comm_sidecar_pb2.SendRequest(
                 id=id,
                 size=buffer.size,

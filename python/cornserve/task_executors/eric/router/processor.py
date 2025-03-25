@@ -29,7 +29,13 @@ from cornserve.task_executors.eric.models.registry import MODEL_REGISTRY
 from cornserve.task_executors.eric.models.base import BaseModalityProcessor
 from cornserve.logging import get_logger
 
+from opentelemetry.instrumentation.threading import ThreadingInstrumentor
+from opentelemetry import trace
+
+ThreadingInstrumentor().instrument()
+
 logger = get_logger(__name__)
+tracer = trace.get_tracer(__name__)
 thread_local = threading.local()
 
 
@@ -89,12 +95,18 @@ class Processor:
         self._check_processed_data(processed)
         return processed
 
+    @tracer.start_as_current_span(name="processor-preprocess-thread")
     def _do_process(self, modality: Modality, url: str) -> dict[str, npt.NDArray]:
         """Run processing on input data."""
         loader: ModalityDataLoader = thread_local.loader
         processor: BaseModalityProcessor = thread_local.processor
+        span = trace.get_current_span()
         data = loader.load_from_url(modality, url)
-        return processor.process(modality, data)
+        span.add_event("data-loaded")
+        span.set_attribute(f"{modality.value}-shape", data.shape)
+        ret = processor.process(modality, data)
+        span.add_event("data-preprocessed")
+        return ret
 
     def _check_processed_data(self, processed: list[ProcessedEmbeddingData]) -> None:
         """Check that all processed data is valid."""

@@ -10,7 +10,7 @@ spec:
   selector:
     matchLabels:
       app: sidecar
-  replicas: 8
+  replicas: 4
   template:
     metadata:
       labels:
@@ -30,7 +30,7 @@ spec:
       containers:
       - name: sidecar
         image: cornserve/sidecar:latest
-        imagePullPolicy: Always
+        imagePullPolicy: IfNotPresent
         ports:
           - containerPort: 29500
             name: torch-dist
@@ -40,7 +40,7 @@ spec:
           - name: SIDECAR_MASTER_PORT
             value: "29500"
           - name: SIDECAR_WORLD_SIZE
-            value: "8"
+            value: "4"
           - name: SIDECAR_POD_NAME
             valueFrom:
               fieldRef:

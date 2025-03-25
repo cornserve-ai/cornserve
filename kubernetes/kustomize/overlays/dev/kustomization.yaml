@@ -4,3 +4,6 @@ resources:
 - ../../base
 - gateway
 - resource-manager
+
+patches:
+  - path: image-pull-policy.yaml

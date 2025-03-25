@@ -18,16 +18,36 @@ dependencies = [
     "kubernetes_asyncio",
     "httpx",
     "pydantic",
+    "opentelemetry-api",
+    "opentelemetry-sdk",
+    "opentelemetry-exporter-otlp-proto-grpc",
 ]
 dynamic = ["version"]
 
 [project.optional-dependencies]
 frontend = []
-sidecar = ["torch"]
-gateway = ["fastapi", "uvicorn[standard]"]
-resource-manager = []
+sidecar = [
+  "torch",
+  "opentelemetry-instrumentation-grpc",
+  "opentelemetry-instrumentation-threading",
+]
+gateway = [
+  "fastapi",
+  "uvicorn[standard]",
+  "opentelemetry-instrumentation-grpc",
+  "opentelemetry-instrumentation-httpx",
+]
+resource-manager = [
+  "opentelemetry-instrumentation-grpc",
+]
 task-manager = []
-task-dispatcher = ["fastapi", "uvicorn[standard]"]
+task-dispatcher = [
+  "fastapi",
+  "uvicorn[standard]",
+  "opentelemetry-instrumentation-fastapi",
+  "opentelemetry-instrumentation-httpx",
+  "opentelemetry-instrumentation-grpc",
+]
 eric-no-gpu = [
   "fastapi",
   "uvicorn[standard]",
@@ -42,6 +62,8 @@ eric-no-gpu = [
   "einops",
   "xformers",
   "cornserve[sidecar]",
+  "opentelemetry-instrumentation-fastapi",
+  "opentelemetry-instrumentation-threading",
 ]
 eric = ["flash-attn", "cornserve[eric-no-gpu]"]
 dev-common = [

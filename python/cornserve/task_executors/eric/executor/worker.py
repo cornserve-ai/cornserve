@@ -27,8 +27,12 @@ from cornserve.task_executors.eric.distributed.parallel import (
 
 from cornserve.services.sidecar.api import TensorSidecarSender
 from cornserve.logging import get_logger
+from cornserve.tracing import configure_otel
+from opentelemetry import trace, propagate, context as context_api
 
 logger = get_logger(__name__)
+tracer = trace.get_tracer(__name__)
+PROPAGATOR = propagate.get_global_textmap()
 
 
 @dataclass
@@ -160,6 +164,8 @@ class Worker:
         # Users send SIGNIT, the executor sends SIGTERM.
         shutdown_requested = False
 
+        configure_otel(f"worker[{tp_rank}]")
+
         def shutdown(*_) -> None:
             """Idempotently shutdown the worker process."""
             nonlocal shutdown_requested
@@ -257,7 +263,21 @@ class Worker:
     @torch.inference_mode()
     def execute_model(self, batch: Batch) -> None:
         """Run the model on a batch of data."""
+        unique_ctx = {}
+        for i, otel_context in enumerate(batch.otel_contexts):
+            if otel_context is not None:
+                logger.info("Worker %d processing batch with otel context %s", self.tp_rank, otel_context)
+                key = batch.request_ids[i]
+                if key not in unique_ctx:
+                    context = PROPAGATOR.extract(otel_context)
+                    span = tracer.start_span("Forward", context=context)
+                    unique_ctx[key] = span
+                    span.set_attribute("batch_size", len(batch.data_ids))
+                unique_ctx[key].add_event(f"Forward {batch.request_ids[i] + batch.data_ids[i]}")
         output = self.model(modality=batch.modality, batch=batch.data)
+        for span in unique_ctx.values():
+            span.end()
+
         logger.info(
             "Worker %d processed batch with request IDs %s and returned a tensor of shape %s",
             self.tp_rank,
@@ -270,6 +290,10 @@ class Worker:
             for i in range(len(batch.data_ids)):
                 if (dst_sidecar_ranks := batch.receiver_ranks[i]) is None:
                     continue
+                token = None
+                if batch.otel_contexts[i] is not None:
+                    context = PROPAGATOR.extract(batch.otel_contexts[i]) # type: ignore
+                    token = context_api.attach(context)
                 self.sender_sidecar_client.send(
                     chunk=output[i],
                     id=batch.request_ids[i] + batch.data_ids[i],
@@ -277,6 +301,8 @@ class Worker:
                     num_chunks=batch.num_chunks[i],
                     dst_sidecar_ranks=dst_sidecar_ranks,
                 )
+                if token:
+                    context_api.detach(token)
 
         # Dump tensors for debugging if requested
         if batch._dump_prefix is not None and self.tp_rank == 0:

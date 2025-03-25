@@ -89,6 +89,7 @@ class EngineEnqueueRequest(msgspec.Struct, array_like=True, omit_defaults=True):
     request_id: str
     data: list[ProcessedEmbeddingData]
     receiver_sidecar_ranks: list[int] | None = None
+    otel_context: dict[str, str] | None = None
 
 
 class EngineResponse(msgspec.Struct, array_like=True, omit_defaults=True):
@@ -127,6 +128,7 @@ class Batch:
     num_chunks: list[int] = field(default_factory=list)
     receiver_ranks: list[list[int] | None] = field(default_factory=list)
     data: dict[str, list[torch.Tensor]] = field(default_factory=dict)
+    otel_contexts: list[dict[str, str] | None] = field(default_factory=list)
 
     _dump_prefix: str | None = None
 
@@ -140,11 +142,12 @@ class Batch:
         data: list[ProcessedEmbeddingData],
         chunk_ids: list[int],
         num_chunks: list[int],
+        otel_contexts: list[dict[str, str] | None],
         receiver_ranks: list[int] | None = None,
     ) -> None:
         """Add a request to the batch."""
         # Add all modality data inside a request to the batch.
-        for item, chunk_id, num_chunk in zip(data, chunk_ids, num_chunks, strict=True):
+        for item, chunk_id, num_chunk, otel_context in zip(data, chunk_ids, num_chunks, otel_contexts, strict=True):
             if self.modality != item.modality:
                 raise ValueError(
                     f"Cannot batch different modalities together: "
@@ -155,6 +158,7 @@ class Batch:
             self.chunk_ids.append(chunk_id)
             self.num_chunks.append(num_chunk)
             self.receiver_ranks.append(receiver_ranks)
+            self.otel_contexts.append(otel_context)
             for key, value in item.data.items():
                 if key not in self.data:
                     self.data[key] = []

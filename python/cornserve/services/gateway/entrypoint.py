@@ -8,6 +8,8 @@ import uvicorn
 
 from cornserve.services.gateway.router import create_app
 from cornserve.logging import get_logger
+from cornserve.tracing import configure_otel
+
 
 if TYPE_CHECKING:
     from cornserve.services.gateway.app.manager import AppManager
@@ -57,4 +59,5 @@ async def serve() -> None:
 
 
 if __name__ == "__main__":
+    configure_otel("gateway")
     asyncio.run(serve())

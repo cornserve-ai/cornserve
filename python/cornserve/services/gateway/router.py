@@ -1,5 +1,6 @@
 """Gateway FastAPI app definition."""
 
+import hashlib
 from typing import Any
 
 from fastapi import FastAPI, APIRouter, Request, Response, status
@@ -10,8 +11,11 @@ from cornserve.services.gateway.app.manager import AppManager
 from cornserve.constants import K8S_RESOURCE_MANAGER_GRPC_URL
 from cornserve.logging import get_logger
 
+from opentelemetry import trace
+
 router = APIRouter()
 logger = get_logger(__name__)
+tracer = trace.get_tracer(__name__)
 
 
 class RegisterAppRequest(BaseModel):
@@ -47,12 +51,16 @@ class AppRequest(BaseModel):
 
 
 @router.post("/admin/register_app", response_model=AppRegistrationResponse)
+@tracer.start_as_current_span("router-register_app")
 async def register_app(request: RegisterAppRequest, raw_request: Request):
     """Register a new application with the given ID and source code."""
     app_manager: AppManager = raw_request.app.state.app_manager
 
+    span = trace.get_current_span()
     try:
+        span.set_attribute("source_code", hashlib.sha256(request.source_code.encode()).hexdigest())
         app_id = await app_manager.register_app(request.source_code)
+        span.set_attribute("app_id", app_id)
         return AppRegistrationResponse(app_id=app_id)
     except ValueError as e:
         logger.info("Error while registering app: %s", e)
@@ -84,10 +92,15 @@ async def unregister_app(app_id: str, raw_request: Request):
 
 
 @router.post("/v1/apps/{app_id}")
+@tracer.start_as_current_span("router-invoke_app")
 async def invoke_app(app_id: str, request: AppRequest, raw_request: Request):
     """Invoke a registered application."""
     app_manager: AppManager = raw_request.app.state.app_manager
 
+    span = trace.get_current_span()
+    span.set_attribute("app_id", app_id)
+    for key, value in request.request_data.items():
+        span.set_attribute(key, value)
     try:
         return await app_manager.invoke_app(app_id, request.request_data)
     except ValidationError as e:

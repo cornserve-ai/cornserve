@@ -23,7 +23,16 @@ from cornserve.task_executors.eric.schema import (
 )
 from cornserve.logging import get_logger
 
+from cornserve.tracing import configure_otel
+from opentelemetry import trace
+from opentelemetry import propagate
+from opentelemetry.instrumentation.threading import ThreadingInstrumentor
+
 logger = get_logger(__name__)
+tracer = trace.get_tracer(__name__)
+PROPAGATOR = propagate.get_global_textmap()
+
+ThreadingInstrumentor().instrument()
 
 
 class Engine:
@@ -125,6 +134,8 @@ class Engine:
         # Users send SIGINT, the engine client sends SIGTERM.
         shutdown_requested = False
 
+        configure_otel(f"eric{str(config.sidecar.ranks).replace(',', '')}")
+
         def shutdown(*_) -> None:
             """Idempotently shutdown the engine process."""
             nonlocal shutdown_requested
@@ -221,6 +232,12 @@ class Engine:
         match opcode:
             case EngineOpcode.ENQUEUE:
                 logger.info("Adding request: %s", request.request_id)
+                if request.otel_context:
+                    span_context = PROPAGATOR.extract(request.otel_context)
+                    with tracer.start_as_current_span("engine enqueue", context=span_context):
+                        new_context = {}
+                        PROPAGATOR.inject(new_context)
+                        request.otel_context = new_context
                 self.scheduler.enqueue(request)
             case EngineOpcode.PROFILE:
                 self.should_profile = True
@@ -238,6 +255,13 @@ class Engine:
 
                 if opcode == EngineOpcode.ENQUEUE:
                     request = enqueue_req_decoder.decode(inst_frame.buffer)
+                    if request.otel_context:
+                        span_context = PROPAGATOR.extract(request.otel_context)
+                        with tracer.start_as_current_span("engine receive", context=span_context) as span:
+                            span.set_attribute("request_id", request.request_id)
+                            new_context = {}
+                            PROPAGATOR.inject(new_context)
+                            request.otel_context = new_context
                 else:
                     request = generic_decoder.decode(inst_frame.buffer)
 

@@ -5,13 +5,21 @@ import asyncio
 import grpc
 import tyro
 
+from opentelemetry import trace
+from opentelemetry.instrumentation.grpc import GrpcAioInstrumentorServer, GrpcAioInstrumentorClient
+
 from cornserve.frontend.tasks import Task
 from cornserve.logging import get_logger
 from cornserve.services.pb import resource_manager_pb2, resource_manager_pb2_grpc, common_pb2
 from cornserve.services.resource_manager.manager import ResourceManager
 
+from cornserve.tracing import configure_otel
+
 logger = get_logger(__name__)
 cleanup_coroutines = []
+
+GrpcAioInstrumentorServer().instrument()
+GrpcAioInstrumentorClient().instrument()
 
 
 class ResourceManagerServicer(resource_manager_pb2_grpc.ResourceManagerServicer):
@@ -103,6 +111,10 @@ async def serve(ip: str = "[::]", port: int = 50051) -> None:
 
 
 if __name__ == "__main__":
+    # Configure OpenTelemetry
+    configure_otel("resource_manager")
+    tracer = trace.get_tracer(__name__)
+
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     try:

@@ -25,7 +25,12 @@ from cornserve.task_executors.eric.schema import (
 )
 from cornserve.logging import get_logger
 
+from opentelemetry import trace
+from opentelemetry import propagate
+
 logger = get_logger(__name__)
+tracer = trace.get_tracer(__name__)
+PROPAGATOR = propagate.get_global_textmap()
 
 
 class EngineClient:
@@ -106,6 +111,7 @@ class EngineClient:
                         req_id,
                     )
 
+    @tracer.start_as_current_span(name="engine handle embed")
     async def embed(
         self,
         request_id: str,
@@ -118,12 +124,17 @@ class EngineClient:
         fut: Future[EmbeddingResponse] = self.loop.create_future()
         self.responses[request_id] = fut
 
+        carrier = {}
+        PROPAGATOR.inject(carrier)
+
         # Build and send the request
         req = EngineEnqueueRequest(
             request_id=request_id,
             data=processed,
             receiver_sidecar_ranks=receiver_sidecar_ranks,
+            otel_context=carrier,
         )
+
         msg_bytes = self.encoder.encode(req)
         await self.request_sock.send_multipart(
             (EngineOpcode.ENQUEUE.value, msg_bytes),

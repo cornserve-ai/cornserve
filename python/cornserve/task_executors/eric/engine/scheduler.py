@@ -11,8 +11,12 @@ from cornserve.task_executors.eric.schema import (
     ProcessedEmbeddingData,
 )
 from cornserve.logging import get_logger
+from opentelemetry import trace
+from opentelemetry import propagate
 
 logger = get_logger(__name__)
+tracer = trace.get_tracer(__name__)
+PROPAGATOR = propagate.get_global_textmap()
 
 
 class RequestQueue:
@@ -142,13 +146,26 @@ class Scheduler:
         # in order and batches *all* data items with the same modality.
         modality = self.queue.peek_data().modality
         batch = Batch(modality=modality)
+        unique_ctx = {}
         for req, data in self.queue.iter_waiting(modality=modality, max_items=None):
+            if req.otel_context:
+                if req.request_id not in unique_ctx:
+                    context = PROPAGATOR.extract(req.otel_context)
+                    with tracer.start_as_current_span("scheduler-schedule", context=context) as span:
+                        span.add_event(f"Add {req.request_id + data.id} to batch")
+                        new_context = {}
+                        PROPAGATOR.inject(new_context)
+                        req.otel_context = new_context
+                        unique_ctx[req.request_id] = new_context
+                else:
+                    req.otel_context = unique_ctx[req.request_id]
             batch.add_data(
                 request_id=req.request_id,
                 data=[data],
                 chunk_ids=[0],
                 num_chunks=[1],
                 receiver_ranks=req.receiver_sidecar_ranks,
+                otel_contexts=[req.otel_context],
             )
         assert batch.request_ids, "Batch should not be empty"
         return batch

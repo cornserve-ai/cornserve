@@ -11,6 +11,10 @@ import uvicorn
 from cornserve.services.task_dispatcher.router import create_app
 from cornserve.services.task_dispatcher.grpc import create_server
 from cornserve.logging import get_logger
+from cornserve.tracing import configure_otel
+
+from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+from opentelemetry.instrumentation.grpc import GrpcInstrumentorServer
 
 if TYPE_CHECKING:
     from cornserve.services.task_dispatcher.dispatcher import TaskDispatcher
@@ -22,8 +26,12 @@ async def serve() -> None:
     """Serve the Task Dispatcher service."""
     logger.info("Starting Gateway service")
 
+    GrpcInstrumentorServer().instrument()
+
     # FastAPI server
     app = create_app()
+
+    FastAPIInstrumentor.instrument_app(app)
 
     logger.info("Available HTTP routes are:")
     for route in app.routes:
@@ -67,4 +75,5 @@ async def serve() -> None:
 
 
 if __name__ == "__main__":
+    configure_otel("task_dispatcher")
     asyncio.run(serve())

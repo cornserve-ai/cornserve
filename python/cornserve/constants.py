@@ -12,3 +12,5 @@ CONTAINER_IMAGE_ERIC = "cornserve/eric:latest"
 CONTAINER_IMAGE_VLLM = "cornserve/vllm:latest"
 
 VOLUME_HF_CACHE = "/data/hfcache"
+
+OTEL_COLLECTOR_URL = "http://jaeger-collector.cornserve:4317"

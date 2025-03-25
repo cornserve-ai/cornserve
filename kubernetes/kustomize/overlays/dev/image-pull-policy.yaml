@@ -1,0 +1,47 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gateway
+  namespace: cornserve
+spec:
+  template:
+    spec:
+      containers:
+      - name: gateway
+        imagePullPolicy: IfNotPresent
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: task-dispatcher
+  namespace: cornserve
+spec:
+  template:
+    spec:
+      containers:
+      - name: task-dispatcher
+        imagePullPolicy: IfNotPresent
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: sidecar
+  namespace: cornserve
+spec:
+  template:
+    spec:
+      containers:
+      - name: sidecar
+        imagePullPolicy: IfNotPresent
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: resource-manager
+  namespace: cornserve
+spec:
+  template:
+    spec:
+      containers:
+      - name: resource-manager
+        imagePullPolicy: IfNotPresent
