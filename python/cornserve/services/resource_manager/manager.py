@@ -275,7 +275,6 @@ class ResourceManager:
                 )
                 task_infos.append(task_info)
 
-            span.add_event("NotifyAppRegistration", {"app_id": app_id})
             await self.task_dispatcher_stub.NotifyAppRegistration(
                 task_dispatcher_pb2.NotifyAppRegistrationRequest(app_id=app_id, tasks=task_infos)
             )
@@ -478,16 +477,18 @@ class ResourceManager:
                     ports=[kclient.V1ServicePort(port=port, target_port="grpc")],
                 ),
             )
+            span.add_event("create_pod.start")
             await self.kube_core_client.create_namespaced_pod(
                 namespace=constants.K8S_NAMESPACE,
                 body=pod,
             )  # type: ignore
-            span.add_event("resource_manager._spawn_task_manager.pod_created")
+            span.add_event("create_pod.done")
+            span.add_event("create_service.start")
             await self.kube_core_client.create_namespaced_service(
                 namespace=constants.K8S_NAMESPACE,
                 body=service,
             )  # type: ignore
-            span.add_event("resource_manager._spawn_task_manager.service_created")
+            span.add_event("create_service.done")
             logger.info("Created task manager pod %s and service %s", pod_name, service_name)
 
             # Connect to the task manager gRPC server to initialize it
@@ -498,7 +499,7 @@ class ResourceManager:
 
             # Initialize the task manager by providing it with the task it will manage
             # and an initial set of GPU resources to work with.
-            span.add_event("resource_manager._spawn_task_manager.register_task")
+            span.add_event("register_task.start")
             register_task_req = task_manager_pb2.RegisterTaskRequest(
                 task_manager_id=task_manager_id,
                 type=getattr(task_manager_pb2.TaskManagerType, task_manager_config.type.upper()),
@@ -518,7 +519,7 @@ class ResourceManager:
             )
             if response.status != common_pb2.Status.STATUS_OK:
                 raise RuntimeError(f"Failed to register task manager: {response}")
-            span.add_event("resource_manager._spawn_task_manager.task_registered")
+            span.add_event("register_task.done")
 
         except Exception as e:
             logger.exception("Failed to spawn task manager: %s", e)
