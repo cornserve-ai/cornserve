@@ -15,7 +15,6 @@ tracer = trace.get_tracer(__name__)
 
 
 @router.post("/task")
-@tracer.start_as_current_span("POST /invoke-task")
 async def invoke_task(request: TaskDispatchRequest, raw_request: Request):
     """Invoke a task with the given request data."""
     dispatcher: TaskDispatcher = raw_request.app.state.dispatcher

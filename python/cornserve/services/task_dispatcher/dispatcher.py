@@ -74,6 +74,7 @@ class TaskDispatcher:
     async def shutdown(self) -> None:
         """Shutdown the Task Dispatcher."""
 
+    @tracer.start_as_current_span("TaskDispatcher.invoke")
     async def invoke(self, app_id: str, task_id: str, request_id: str, data: str) -> Any:
         """Invoke a task with the given request data."""
         span = trace.get_current_span()
