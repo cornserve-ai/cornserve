@@ -42,7 +42,7 @@ build_and_push() {
     IMAGE="${NAMESPACE}/${SERVICE}:latest"
     PUSH_IMAGE="${REGISTRY}/${NAMESPACE}/${SERVICE}:latest"
     
-    docker build -f "${DOCKERFILE}" -t "${IMAGE}" .
+    docker build --progress=plain -f "${DOCKERFILE}" -t "${IMAGE}" .
 
     if [[ "${REGISTRY}" == "local" ]]; then
         echo "Exporting image to local k3s containerd..."

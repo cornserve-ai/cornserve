@@ -413,8 +413,7 @@ class CommSidecarSender:
         ipc_handle = pickle.loads(send_request.ipc_handle)
         cuda_event = torch.cuda.Event.from_ipc_handle(self.device, ipc_handle)
 
-        while not cuda_event.query():
-            await asyncio.sleep(0.0)  # Allows other futures to make process.
+        await asyncio.to_thread(cuda_event.synchronize)
         span.add_event("copy finished")
 
         logger.info("Sending chunk %d for req %s", send_request.chunk_id, send_request.id)
