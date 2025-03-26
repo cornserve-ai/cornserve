@@ -14,6 +14,7 @@ if TYPE_CHECKING:
     from cornserve.services.gateway.app.manager import AppManager
 
 logger = get_logger("cornserve.services.gateway.entrypoint")
+configure_otel("gateway")
 
 
 async def serve() -> None:
@@ -58,5 +59,4 @@ async def serve() -> None:
 
 
 if __name__ == "__main__":
-    configure_otel("gateway")
     asyncio.run(serve())

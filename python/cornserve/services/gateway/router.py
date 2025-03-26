@@ -1,6 +1,5 @@
 """Gateway FastAPI app definition."""
 
-import hashlib
 from typing import Any
 
 from fastapi import APIRouter, FastAPI, Request, Response, status
@@ -50,16 +49,13 @@ class AppRequest(BaseModel):
 
 
 @router.post("/admin/register_app", response_model=AppRegistrationResponse)
-@tracer.start_as_current_span("router-register_app")
+@tracer.start_as_current_span("POST /register_app")
 async def register_app(request: RegisterAppRequest, raw_request: Request):
     """Register a new application with the given ID and source code."""
     app_manager: AppManager = raw_request.app.state.app_manager
 
-    span = trace.get_current_span()
     try:
-        span.set_attribute("source_code", hashlib.sha256(request.source_code.encode()).hexdigest())
         app_id = await app_manager.register_app(request.source_code)
-        span.set_attribute("app_id", app_id)
         return AppRegistrationResponse(app_id=app_id)
     except ValueError as e:
         logger.info("Error while registering app: %s", e)
@@ -73,9 +69,12 @@ async def register_app(request: RegisterAppRequest, raw_request: Request):
 
 
 @router.post("/admin/unregister_app/{app_id}")
+@tracer.start_as_current_span("POST /unregister_app")
 async def unregister_app(app_id: str, raw_request: Request):
     """Unregister the application with the given ID."""
     app_manager: AppManager = raw_request.app.state.app_manager
+    span = trace.get_current_span()
+    span.set_attribute("gateway.unregister_app", app_id)
 
     try:
         await app_manager.unregister_app(app_id)
@@ -91,15 +90,15 @@ async def unregister_app(app_id: str, raw_request: Request):
 
 
 @router.post("/v1/apps/{app_id}")
-@tracer.start_as_current_span("router-invoke_app")
+@tracer.start_as_current_span("POST /invoke_app")
 async def invoke_app(app_id: str, request: AppRequest, raw_request: Request):
     """Invoke a registered application."""
     app_manager: AppManager = raw_request.app.state.app_manager
 
     span = trace.get_current_span()
-    span.set_attribute("app_id", app_id)
+    span.set_attribute("gateway.invoke_app.app_id", app_id)
     for key, value in request.request_data.items():
-        span.set_attribute(key, value)
+        span.set_attribute(f"gateway.invoke_app.{key}", value)
     try:
         return await app_manager.invoke_app(app_id, request.request_data)
     except ValidationError as e:

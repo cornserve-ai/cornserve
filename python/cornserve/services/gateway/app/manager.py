@@ -10,6 +10,7 @@ from typing import Any, get_type_hints
 import grpc
 from opentelemetry import trace
 from opentelemetry.instrumentation.grpc import GrpcAioInstrumentorClient
+from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
 
 from cornserve.frontend.app import AppConfig, AppRequest, AppResponse
 from cornserve.frontend.tasks import LLMTask, Task
@@ -26,6 +27,7 @@ from cornserve.services.pb.resource_manager_pb2_grpc import ResourceManagerStub
 
 logger = get_logger(__name__)
 tracer = trace.get_tracer(__name__)
+HTTPXClientInstrumentor().instrument()
 
 
 def load_module_from_source(source_code: str, module_name: str) -> ModuleType:
@@ -121,7 +123,7 @@ class AppManager:
         self.resource_manager_channel = grpc.aio.insecure_channel(resource_manager_grpc_url)
         self.resource_manager = ResourceManagerStub(self.resource_manager_channel)
 
-    @tracer.start_as_current_span(name="app-manger-register_app")
+    @tracer.start_as_current_span(name="AppManager.register_app")
     async def register_app(self, source_code: str) -> str:
         """Register a new application with the given ID and source code.
 
@@ -134,6 +136,7 @@ class AppManager:
         Raises:
             ValueError: If app validation fails
         """
+        span = trace.get_current_span()
         async with self.app_lock:
             # Generate a unique app ID
             while True:
@@ -142,6 +145,7 @@ class AppManager:
                     break
 
             self.app_states[app_id] = AppState.NOT_READY
+        span.set_attribute("app_manager.register_app.app_id", app_id)
 
         # Load and validate the app
         try:
@@ -190,7 +194,6 @@ class AppManager:
 
             raise ValueError(f"Failed to register app: {e}") from e
 
-    @tracer.start_as_current_span(name="app-manager-unregister_app")
     async def unregister_app(self, app_id: str) -> None:
         """Unregister an application.
 
@@ -219,7 +222,6 @@ class AppManager:
 
         logger.info("Successfully unregistered app '%s'", app_id)
 
-    @tracer.start_as_current_span(name="app-manager-invoke_app")
     async def invoke_app(self, app_id: str, request_data: dict[str, Any]) -> Any:
         """Invoke an application with the given request data.
 
@@ -253,14 +255,14 @@ class AppManager:
             app_context.set(AppContext(app_id=app_id))
 
             # Create a task to run the app
-            span.add_event("Create app driver")
+            span.add_event("app_driver.start")
             app_driver = asyncio.create_task(app_def.classes.serve_fn(request))
 
             async with self.app_lock:
                 self.app_driver_tasks[app_id].append(app_driver)
 
             response = await app_driver
-            span.add_event("App driver completed")
+            span.add_event("app_driver.done")
 
             # Validate response
             if not isinstance(response, app_def.classes.response_cls):
