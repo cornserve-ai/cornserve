@@ -30,7 +30,7 @@ spec:
       containers:
       - name: sidecar
         image: cornserve/sidecar:latest
-        imagePullPolicy: IfNotPresent
+        imagePullPolicy: Always
         ports:
           - containerPort: 29500
             name: torch-dist
