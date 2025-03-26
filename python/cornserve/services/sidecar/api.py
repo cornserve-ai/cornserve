@@ -208,7 +208,7 @@ class TensorSidecarAsyncReceiver(TensorSidecarReceiverBase):
         except Exception:
             pass
 
-    @tracer.start_as_current_span(name="sidecar-client-recv")
+    @tracer.start_as_current_span(name="TensorSidecarAsyncReceiver.recv")
     async def recv(self, id: str) -> torch.Tensor:
         """Receive a tensor from the sidecar server.
 
@@ -216,18 +216,18 @@ class TensorSidecarAsyncReceiver(TensorSidecarReceiverBase):
             id: the id of expected data, should be the concatenation of request id and data id.
         """
         span = trace.get_current_span()
-        span.set_attribute("id", id)
+        span.set_attribute("sidecar_receiver_client.recv.id", id)
         recv_req = comm_sidecar_pb2.ReceiveRequest(id=id)
         response = await self.stub.Receive(recv_req)
         assert response.offset >= 0 and response.size >= 0, "Failed to receive data"
         chunk = self.shared_tensor[response.offset : response.offset + response.size]
         return chunk.view(self.tensor_shape)
 
-    @tracer.start_as_current_span(name="sidecar-client-mark-done")
+    @tracer.start_as_current_span(name="TensorSidecarAsyncReceiver.markdone")
     async def mark_done(self, id: str) -> None:
         """Mark a tensor as done in the sidecar server, which will free the shared memory buffer."""
         span = trace.get_current_span()
-        span.set_attribute("id", id)
+        span.set_attribute("sidecar_receiver_client.mark_done.id", id)
         request = comm_sidecar_pb2.MarkDoneRequest(id=id)
         response = await self.stub.MarkDone(request)
         if response.status == common_pb2.Status.STATUS_OK:
@@ -439,7 +439,7 @@ class TensorSidecarSender(TensorSidecarSenderBase):
             self.shm_manager.free(buffer)
             self.memory_freed.notify_all()
 
-    @tracer.start_as_current_span(name="sidecar-client-send")
+    @tracer.start_as_current_span(name="TensorSidecarSender.send")
     def send(
         self,
         chunk: torch.Tensor,
@@ -505,7 +505,6 @@ class TensorSidecarSender(TensorSidecarSenderBase):
             num_chunks=num_chunks,
         )
 
-    @tracer.start_as_current_span(name="sidecar-client-send-worker-thread")
     def _send_worker(
         self,
         id: str,
@@ -528,16 +527,17 @@ class TensorSidecarSender(TensorSidecarSenderBase):
             num_chunks: the total number of chunks the data is split into.
         """
         span = trace.get_current_span()
+        span.add_event("allocate.start")
         buffer = self._allocate(shard.numel())
+        span.add_event("allocate.done")
         try:
-            span.add_event("Allocated shared memory buffer")
             cuda_event = torch.cuda.Event(interprocess=True)
             with torch.cuda.stream(self.stream):
                 buffer.data.copy_(shard, non_blocking=True)
+                span.add_event("copy.start")
                 cuda_event.record(self.stream)
             ipc_handle = cuda_event.ipc_handle()
             logger.debug("SHARD RANK: %d: Sending send request to sidecar", self.shard_rank)
-            span.add_event("Send to sidecar server")
             request = comm_sidecar_pb2.SendRequest(
                 id=id,
                 size=buffer.size,

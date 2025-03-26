@@ -43,8 +43,8 @@ from .utils import (
 )
 
 logger = get_logger(__name__, [SidcarAdapter])
-cleanup_coroutines = []
 tracer = trace.get_tracer(__name__)
+cleanup_coroutines = []
 
 GrpcInstrumentorClient().instrument()
 GrpcInstrumentorServer().instrument()
@@ -160,11 +160,11 @@ class CommSidecarReceiver:
         span = trace.get_current_span()
         async with self.has_memory:
             # acquire the underlying lock
-            span.add_event("acquired lock")
             if request.id not in self.ledger:
                 # some prepare_recv needs to allocate the buffer and update the ledger
                 if request.id not in self.malloc_events:
                     # this is the first prepare_recv call for request id
+                    span.add_event("allocate.start")
                     buffer = self.shm_manager.allocate(request.chunk_size * request.num_chunks)
                     # note: if this succeeds, self.ledger[request.id] will be created, so all future prepare_recv
                     # will not enter this if block
@@ -179,7 +179,7 @@ class CommSidecarReceiver:
                         logger.info("Memory pressure detected, current prssure count %d", self.mem_pressure_count)
                         await self.has_memory.wait()
                         buffer = self.shm_manager.allocate(request.chunk_size * request.num_chunks)
-                    span.add_event("Allocated buffer")
+                    span.add_event("allocate.done")
 
                     buffer.create_chunks(request.num_chunks, request.num_shards)
                     self.ledger[request.id] = CommSidecarReceiver.TransferRequestState(request.id, buffer)
@@ -190,15 +190,15 @@ class CommSidecarReceiver:
                         del self.malloc_events[request.id]
                 else:
                     # some previous prepare_recv call is blocking on the allocation
+                    span.add_event("allocate_wait.start")
                     event = self.malloc_events[request.id]
                     self.has_memory.release()
                     try:
                         await event.wait()
-                        span.add_event("Waited for buffer allocation")
+                        span.add_event("allocate_wait.done")
                     finally:
                         # Make sure to re-acquire the lock after waiting
                         await self.has_memory.acquire()
-        span.add_event("Retrieved buffer")
 
         state = self.ledger[request.id]
         chunk = state.buffer.chunks[request.chunk_id]
@@ -231,7 +231,6 @@ class CommSidecarReceiver:
                 self.recv_done_lock.release()
 
         asyncio.create_task(asyncio.to_thread(recv_task))
-        span.add_event("created recv task")
         return comm_sidecar_pb2.PrepareReceiveResponse(status=common_pb2.Status.STATUS_OK)
 
     async def receive(
@@ -244,7 +243,6 @@ class CommSidecarReceiver:
         If all chunks are received, return the slot number imediately.
         Else, queues up an event for the request id and waits for all chunks to be received.
         """
-        span = trace.get_current_span()
         logger.info("==> Receive request for request id %s", recv_req.id)
         self.recv_done_lock.acquire()
         if recv_req.id in self.ledger and self.ledger[recv_req.id].done:
@@ -255,7 +253,6 @@ class CommSidecarReceiver:
             self.req_events[recv_req.id] = event
             self.recv_done_lock.release()
             await event.wait()
-        span.add_event("Received")
 
         logger.info("==> All chunks received for request id %s", recv_req.id)
         offset = self.ledger[recv_req.id].buffer.slots[0] * self.shm_manager.slot_size
@@ -409,13 +406,12 @@ class CommSidecarSender:
             logger.error("Failed to prepare receive")
             # TODO: clean up by canceling the previous prepare_receive calls
             return comm_sidecar_pb2.SendResponse(status=common_pb2.Status.STATUS_ERROR)
-        span.add_event("prepare receive finished")
 
         ipc_handle = pickle.loads(send_request.ipc_handle)
         cuda_event = torch.cuda.Event.from_ipc_handle(self.device, ipc_handle)
 
         await asyncio.to_thread(cuda_event.synchronize)
-        span.add_event("copy finished")
+        span.add_event("copy.done")
 
         logger.info("Sending chunk %d for req %s", send_request.chunk_id, send_request.id)
         tag = chunk_tag(self.sidecar_rank, send_request.chunk_id, self.shard_rank)
@@ -433,9 +429,10 @@ class CommSidecarSender:
         def wait_fn():
             req.wait()
 
+        span.add_event("send.start")
         await asyncio.to_thread(wait_fn)
-        span.add_event("send finished")
-        span.set_attribute("comm_size", send_request.size)
+        span.add_event("send.done")
+        span.set_attribute("sidecar_sender_server.send.size", send_request.size)
         logger.info(
             "SHARD RANK %d: sent chunk %d for request %s", self.shard_rank, send_request.chunk_id, send_request.id
         )
