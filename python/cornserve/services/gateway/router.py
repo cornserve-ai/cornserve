@@ -49,7 +49,6 @@ class AppRequest(BaseModel):
 
 
 @router.post("/admin/register_app", response_model=AppRegistrationResponse)
-@tracer.start_as_current_span("POST /register_app")
 async def register_app(request: RegisterAppRequest, raw_request: Request):
     """Register a new application with the given ID and source code."""
     app_manager: AppManager = raw_request.app.state.app_manager
@@ -69,7 +68,6 @@ async def register_app(request: RegisterAppRequest, raw_request: Request):
 
 
 @router.post("/admin/unregister_app/{app_id}")
-@tracer.start_as_current_span("POST /unregister_app")
 async def unregister_app(app_id: str, raw_request: Request):
     """Unregister the application with the given ID."""
     app_manager: AppManager = raw_request.app.state.app_manager
@@ -90,7 +88,6 @@ async def unregister_app(app_id: str, raw_request: Request):
 
 
 @router.post("/v1/apps/{app_id}")
-@tracer.start_as_current_span("POST /invoke_app")
 async def invoke_app(app_id: str, request: AppRequest, raw_request: Request):
     """Invoke a registered application."""
     app_manager: AppManager = raw_request.app.state.app_manager

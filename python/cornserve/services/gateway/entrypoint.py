@@ -5,6 +5,7 @@ import signal
 from typing import TYPE_CHECKING
 
 import uvicorn
+from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 
 from cornserve.logging import get_logger
 from cornserve.services.gateway.router import create_app
@@ -22,6 +23,7 @@ async def serve() -> None:
     logger.info("Starting Gateway service")
 
     app = create_app()
+    FastAPIInstrumentor.instrument_app(app)
 
     logger.info("Available routes are:")
     for route in app.routes:

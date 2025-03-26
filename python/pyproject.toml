@@ -34,6 +34,7 @@ sidecar = [
 gateway = [
   "fastapi",
   "uvicorn[standard]",
+  "opentelemetry-instrumentation-fastapi",
   "opentelemetry-instrumentation-grpc",
   "opentelemetry-instrumentation-httpx",
 ]
