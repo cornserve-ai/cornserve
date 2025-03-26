@@ -74,11 +74,11 @@ class TaskDispatcher:
     async def shutdown(self) -> None:
         """Shutdown the Task Dispatcher."""
 
-    @tracer.start_as_current_span("dispatcher-invoke-task")
     async def invoke(self, app_id: str, task_id: str, request_id: str, data: str) -> Any:
         """Invoke a task with the given request data."""
         span = trace.get_current_span()
-        span.set_attribute("task_id", task_id)
+        span.set_attribute("task_dispatcher.invoke.task_id", app_id)
+        span.set_attribute("task_dispatcher.invoke.task_id", task_id)
         async with self.app_lock:
             try:
                 task_infos = self.app_task_info[app_id]
@@ -103,7 +103,6 @@ class TaskDispatcher:
             async with self.ongoing_task_lock:
                 self.app_ongoing_invokes[app_id].remove(invoke_task)
 
-    @tracer.start_as_current_span("do_invoke_task")
     async def _do_invoke(
         self,
         app_id: str,
@@ -118,6 +117,7 @@ class TaskDispatcher:
         # For multimodal data items, a unique data ID is generated.
         # Data IDs are passed to Eric (as part of the embedding request)
         # and to vLLM (as a key-value pair in the data URI).
+        span = trace.get_current_span()
         if isinstance(task_info.task, LLMTask):
             invoke_input = LLMTask._InvokeInput.model_validate_json(data)
             if not invoke_input.multimodal_data:
@@ -134,6 +134,7 @@ class TaskDispatcher:
                 raise RuntimeError(
                     f"LLM task manager not found for app {app_id} and task {task_info.id}.",
                 )
+            span.add_event("llm_get_route.start")
             llm_route: task_manager_pb2.GetRouteResponse = await llm_stub.GetRoute(
                 task_manager_pb2.GetRouteRequest(
                     app_id=app_id,
@@ -141,6 +142,7 @@ class TaskDispatcher:
                     routing_hint=None,
                 ),
             )
+            span.add_event("llm_get_route.done")
 
             async with httpx.AsyncClient(timeout=60.0) as http_client:
                 http_tasks: list[asyncio.Task[httpx.Response]] = []
@@ -157,6 +159,7 @@ class TaskDispatcher:
                         raise RuntimeError(
                             f"Encoder task manager not found for app {app_id} and task {task_info.id}.",
                         )
+                    span.add_event("encoder_get_route.start")
                     encoder_route: task_manager_pb2.GetRouteResponse = await encoder_stub.GetRoute(
                         task_manager_pb2.GetRouteRequest(
                             app_id=app_id,
@@ -164,6 +167,7 @@ class TaskDispatcher:
                             routing_hint=None,
                         ),
                     )
+                    span.add_event("encoder_get_route.done")
 
                     for modality, url in invoke_input.multimodal_data:
                         embedding_data.append((uuid.uuid4().hex, modality, url))
