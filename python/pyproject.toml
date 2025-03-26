@@ -94,6 +94,7 @@ select = [
   "B",   # flake8-bugbear (detects likely bugs)
   "G",   # flake8-logging-format (complains about logging)
   "SIM", # flake8-simplify (suggests code simplifications)
+  "I",   # isort
 ]
 exclude = [
   "cornserve/task_executors/eric/models/*.py",
@@ -122,3 +123,6 @@ exclude = [
 [tool.pytest.ini_options]
 asyncio_mode = "strict"
 asyncio_default_fixture_loop_scope = "function"
+
+[tool.ruff.lint.isort]
+known-first-party = ["cornserve"]
