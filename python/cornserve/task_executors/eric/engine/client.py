@@ -1,32 +1,30 @@
 """The engine client lives in the router process and interacts with the engine process."""
 
-import os
 import asyncio
-from contextlib import suppress
+import os
 from asyncio.futures import Future
+from contextlib import suppress
 
 import zmq
 import zmq.asyncio
+from opentelemetry import propagate, trace
 
+from cornserve.logging import get_logger
 from cornserve.task_executors.eric.config import EricConfig
+from cornserve.task_executors.eric.engine.core import Engine
+from cornserve.task_executors.eric.schema import (
+    EmbeddingResponse,
+    EngineEnqueueRequest,
+    EngineOpcode,
+    EngineResponse,
+    ProcessedEmbeddingData,
+)
+from cornserve.task_executors.eric.utils.process import kill_process_tree
 from cornserve.task_executors.eric.utils.serde import MsgpackDecoder, MsgpackEncoder
 from cornserve.task_executors.eric.utils.zmq import (
     get_open_zmq_ipc_path,
     make_zmq_socket,
 )
-from cornserve.task_executors.eric.utils.process import kill_process_tree
-from cornserve.task_executors.eric.engine.core import Engine
-from cornserve.task_executors.eric.schema import (
-    EmbeddingResponse,
-    EngineOpcode,
-    EngineEnqueueRequest,
-    EngineResponse,
-    ProcessedEmbeddingData,
-)
-from cornserve.logging import get_logger
-
-from opentelemetry import trace
-from opentelemetry import propagate
 
 logger = get_logger(__name__)
 tracer = trace.get_tracer(__name__)

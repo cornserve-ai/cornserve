@@ -1,9 +1,8 @@
 """Logging utilities for the Cornserve project."""
 
+import logging
 import os
 import sys
-import logging
-
 from typing import Any, MutableMapping
 
 

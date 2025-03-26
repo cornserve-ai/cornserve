@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from fastapi import FastAPI, APIRouter, Request, Response, status
+from fastapi import APIRouter, FastAPI, Request, Response, status
+from opentelemetry import trace
 
 from cornserve.logging import get_logger
 from cornserve.services.task_dispatcher.dispatcher import TaskDispatcher
 from cornserve.services.task_dispatcher.models import TaskDispatchRequest
-from opentelemetry import trace
 
 router = APIRouter()
 logger = get_logger(__name__)

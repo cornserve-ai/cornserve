@@ -6,8 +6,8 @@ import grpc
 from pydantic import BaseModel, ConfigDict
 
 from cornserve.frontend.tasks import Task
+from cornserve.services.pb import common_pb2, task_dispatcher_pb2, task_manager_pb2_grpc
 from cornserve.services.task_manager.models import TaskManagerType
-from cornserve.services.pb import task_dispatcher_pb2, task_manager_pb2_grpc, common_pb2
 
 
 class TaskDispatchRequest(BaseModel):

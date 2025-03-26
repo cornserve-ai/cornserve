@@ -1,8 +1,8 @@
 """Utilities for process management."""
 
+import contextlib
 import os
 import signal
-import contextlib
 
 import psutil
 

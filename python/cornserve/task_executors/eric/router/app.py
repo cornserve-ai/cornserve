@@ -1,15 +1,14 @@
 """Eric FastAPI app definition."""
 
-from fastapi import FastAPI, APIRouter, Request, Response, status
+from fastapi import APIRouter, FastAPI, Request, Response, status
+from opentelemetry import trace
 
 from cornserve.logging import get_logger
 from cornserve.task_executors.eric.config import EricConfig
 from cornserve.task_executors.eric.engine.client import EngineClient
-from cornserve.task_executors.eric.router.processor import Processor
 from cornserve.task_executors.eric.models.registry import MODEL_REGISTRY
-from cornserve.task_executors.eric.schema import EmbeddingRequest, Status, Modality
-
-from opentelemetry import trace
+from cornserve.task_executors.eric.router.processor import Processor
+from cornserve.task_executors.eric.schema import EmbeddingRequest, Modality, Status
 
 router = APIRouter()
 logger = get_logger(__name__)

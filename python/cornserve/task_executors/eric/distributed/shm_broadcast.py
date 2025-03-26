@@ -11,8 +11,8 @@ from dataclasses import dataclass, field
 from multiprocessing import shared_memory
 from unittest.mock import patch
 
-import zmq
 import torch
+import zmq
 
 from cornserve.logging import get_logger
 from cornserve.task_executors.eric.utils.network import get_open_port

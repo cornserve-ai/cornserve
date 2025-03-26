@@ -4,15 +4,13 @@ import asyncio
 
 import grpc
 import tyro
-
 from opentelemetry import trace
-from opentelemetry.instrumentation.grpc import GrpcAioInstrumentorServer, GrpcAioInstrumentorClient
+from opentelemetry.instrumentation.grpc import GrpcAioInstrumentorClient, GrpcAioInstrumentorServer
 
 from cornserve.frontend.tasks import Task
 from cornserve.logging import get_logger
-from cornserve.services.pb import resource_manager_pb2, resource_manager_pb2_grpc, common_pb2
+from cornserve.services.pb import common_pb2, resource_manager_pb2, resource_manager_pb2_grpc
 from cornserve.services.resource_manager.manager import ResourceManager
-
 from cornserve.tracing import configure_otel
 
 logger = get_logger(__name__)

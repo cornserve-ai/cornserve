@@ -2,8 +2,8 @@
 
 import contextlib
 import tempfile
+from typing import Iterator, overload
 from uuid import uuid4
-from typing import overload, Iterator
 
 import zmq
 import zmq.asyncio

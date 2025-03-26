@@ -3,16 +3,16 @@
 from collections import defaultdict
 from typing import Generator
 
+from opentelemetry import propagate, trace
+
+from cornserve.logging import get_logger
 from cornserve.task_executors.eric.schema import (
     ID,
-    Modality,
     Batch,
     EngineEnqueueRequest,
+    Modality,
     ProcessedEmbeddingData,
 )
-from cornserve.logging import get_logger
-from opentelemetry import trace
-from opentelemetry import propagate
 
 logger = get_logger(__name__)
 tracer = trace.get_tracer(__name__)

@@ -2,27 +2,26 @@
 
 from __future__ import annotations
 
-import uuid
 import asyncio
+import uuid
 from contextlib import suppress
 from dataclasses import dataclass
 
 import httpx
 import kubernetes_asyncio.client as kclient
 import kubernetes_asyncio.config as kconfig
-
-from cornserve import constants
 from pydantic import ValidationError
 
+from cornserve import constants
+from cornserve.logging import get_logger
+from cornserve.services.resource_manager.resource import GPU
 from cornserve.services.task_manager.models import (
-    TaskManagerType,
-    TaskManagerConfig,
     EncoderConfig,
     LLMConfig,
+    TaskManagerConfig,
+    TaskManagerType,
 )
-from cornserve.services.resource_manager.resource import GPU
 from cornserve.task_executors.launch import TaskExecutorLaunchInfo
-from cornserve.logging import get_logger
 
 logger = get_logger(__name__)
 

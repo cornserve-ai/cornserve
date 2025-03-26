@@ -12,10 +12,9 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 
-from cornserve.services.resource_manager.resource import GPU
-
 from cornserve import constants
-from cornserve.services.task_manager.models import TaskManagerConfig, EncoderConfig, LLMConfig
+from cornserve.services.resource_manager.resource import GPU
+from cornserve.services.task_manager.models import EncoderConfig, LLMConfig, TaskManagerConfig
 
 
 class TaskExecutorLaunchInfo(ABC):

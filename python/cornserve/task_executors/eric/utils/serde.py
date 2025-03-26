@@ -3,8 +3,8 @@
 import pickle
 from typing import Any, Type
 
-import torch
 import numpy as np
+import torch
 from msgspec import msgpack
 
 CUSTOM_TYPE_NUMPY = 1

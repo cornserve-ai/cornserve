@@ -1,10 +1,10 @@
 """Type definitions for the App Manager."""
 
 import enum
+import uuid
 from dataclasses import dataclass, field
 from types import ModuleType
-from typing import Coroutine, Type, Callable
-import uuid
+from typing import Callable, Coroutine, Type
 
 from cornserve.frontend.app import AppConfig, AppRequest, AppResponse
 

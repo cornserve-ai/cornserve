@@ -2,22 +2,21 @@
 
 from __future__ import annotations
 
-import uuid
 import asyncio
+import uuid
 from collections import defaultdict
 from typing import Any
 
 import httpx
+from opentelemetry import trace
+from opentelemetry.instrumentation.grpc import GrpcInstrumentorClient
+from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
 
 from cornserve.frontend.tasks import LLMTask
 from cornserve.logging import get_logger
-from cornserve.services.task_dispatcher.models import TaskInfo
 from cornserve.services.pb import task_manager_pb2
+from cornserve.services.task_dispatcher.models import TaskInfo
 from cornserve.services.task_manager.models import TaskManagerType
-
-from opentelemetry import trace
-from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
-from opentelemetry.instrumentation.grpc import GrpcInstrumentorClient
 
 logger = get_logger(__name__)
 tracer = trace.get_tracer(__name__)

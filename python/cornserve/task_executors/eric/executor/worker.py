@@ -1,18 +1,26 @@
 """Worker processes use the GPUs to run tensor parallel inference."""
 
-import signal
-import pickle
 import multiprocessing as mp
+import pickle
+import signal
 from dataclasses import dataclass
 from multiprocessing.process import BaseProcess
 
-import zmq
-import torch
 import psutil
+import torch
+import zmq
+from opentelemetry import context as context_api
+from opentelemetry import propagate, trace
 
+from cornserve.logging import get_logger
+from cornserve.services.sidecar.api import TensorSidecarSender
+from cornserve.task_executors.eric.distributed.parallel import (
+    destroy_distributed,
+    init_distributed,
+)
 from cornserve.task_executors.eric.distributed.shm_broadcast import (
-    MessageQueueHandle,
     MessageQueue,
+    MessageQueueHandle,
 )
 from cornserve.task_executors.eric.executor.loader import load_model
 from cornserve.task_executors.eric.schema import Batch
@@ -20,15 +28,7 @@ from cornserve.task_executors.eric.utils.zmq import (
     get_open_zmq_ipc_path,
     zmq_sync_socket,
 )
-from cornserve.task_executors.eric.distributed.parallel import (
-    init_distributed,
-    destroy_distributed,
-)
-
-from cornserve.services.sidecar.api import TensorSidecarSender
-from cornserve.logging import get_logger
 from cornserve.tracing import configure_otel
-from opentelemetry import trace, propagate, context as context_api
 
 logger = get_logger(__name__)
 tracer = trace.get_tracer(__name__)

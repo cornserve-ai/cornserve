@@ -1,16 +1,17 @@
 """The model executor manages multiple workers that execute inference."""
 
 import os
-import time
 import signal
-from typing import Any
-import psutil
+import time
 from contextlib import suppress
+from typing import Any
 
-from cornserve.task_executors.eric.distributed.shm_broadcast import MessageQueue
-from cornserve.task_executors.eric.executor.worker import WorkerHandle, Worker
-from cornserve.task_executors.eric.schema import Batch, BatchResult, Status
+import psutil
+
 from cornserve.logging import get_logger
+from cornserve.task_executors.eric.distributed.shm_broadcast import MessageQueue
+from cornserve.task_executors.eric.executor.worker import Worker, WorkerHandle
+from cornserve.task_executors.eric.schema import Batch, BatchResult, Status
 
 logger = get_logger(__name__)
 

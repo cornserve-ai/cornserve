@@ -3,15 +3,14 @@
 import hashlib
 from typing import Any
 
-from fastapi import FastAPI, APIRouter, Request, Response, status
+from fastapi import APIRouter, FastAPI, Request, Response, status
 from fastapi.exceptions import RequestValidationError
+from opentelemetry import trace
 from pydantic import BaseModel, ValidationError
 
-from cornserve.services.gateway.app.manager import AppManager
 from cornserve.constants import K8S_RESOURCE_MANAGER_GRPC_URL
 from cornserve.logging import get_logger
-
-from opentelemetry import trace
+from cornserve.services.gateway.app.manager import AppManager
 
 router = APIRouter()
 logger = get_logger(__name__)

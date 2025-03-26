@@ -2,19 +2,18 @@
 
 from __future__ import annotations
 
-import signal
 import asyncio
+import signal
 from typing import TYPE_CHECKING
 
 import uvicorn
-
-from cornserve.services.task_dispatcher.router import create_app
-from cornserve.services.task_dispatcher.grpc import create_server
-from cornserve.logging import get_logger
-from cornserve.tracing import configure_otel
-
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 from opentelemetry.instrumentation.grpc import GrpcInstrumentorServer
+
+from cornserve.logging import get_logger
+from cornserve.services.task_dispatcher.grpc import create_server
+from cornserve.services.task_dispatcher.router import create_app
+from cornserve.tracing import configure_otel
 
 if TYPE_CHECKING:
     from cornserve.services.task_dispatcher.dispatcher import TaskDispatcher

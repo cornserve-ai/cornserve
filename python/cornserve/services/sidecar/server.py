@@ -7,15 +7,19 @@ together provide the functionality to send and receive tensors between ranks.
 """
 
 from __future__ import annotations
+
 import asyncio
-from dataclasses import dataclass
 import multiprocessing as mp
 import os
 import pickle
+from dataclasses import dataclass
 
 import grpc
 import kubernetes_asyncio.client as kclient
 import kubernetes_asyncio.config as kconfig
+import torch
+import torch.distributed as dist
+import tyro
 from opentelemetry import trace
 from opentelemetry.instrumentation.grpc import (
     GrpcAioInstrumentorClient,
@@ -23,9 +27,6 @@ from opentelemetry.instrumentation.grpc import (
     GrpcInstrumentorClient,
     GrpcInstrumentorServer,
 )
-import torch
-import torch.distributed as dist
-import tyro
 
 from cornserve.logging import SidcarAdapter, get_logger
 from cornserve.services.pb import comm_sidecar_pb2, comm_sidecar_pb2_grpc, common_pb2

@@ -1,32 +1,30 @@
 """Eric engine core."""
 
+import multiprocessing as mp
 import queue
 import signal
 import threading
-import multiprocessing as mp
-from typing import Any
-from multiprocessing.process import BaseProcess
 from multiprocessing.connection import Connection
+from multiprocessing.process import BaseProcess
+from typing import Any
 
 import psutil
 import zmq
+from opentelemetry import propagate, trace
+from opentelemetry.instrumentation.threading import ThreadingInstrumentor
 
+from cornserve.logging import get_logger
 from cornserve.task_executors.eric.config import EricConfig
-from cornserve.task_executors.eric.utils.zmq import zmq_sync_socket
-from cornserve.task_executors.eric.utils.serde import MsgpackEncoder, MsgpackDecoder
-from cornserve.task_executors.eric.executor.executor import ModelExecutor
 from cornserve.task_executors.eric.engine.scheduler import Scheduler
+from cornserve.task_executors.eric.executor.executor import ModelExecutor
 from cornserve.task_executors.eric.schema import (
-    EngineOpcode,
     EngineEnqueueRequest,
+    EngineOpcode,
     EngineResponse,
 )
-from cornserve.logging import get_logger
-
+from cornserve.task_executors.eric.utils.serde import MsgpackDecoder, MsgpackEncoder
+from cornserve.task_executors.eric.utils.zmq import zmq_sync_socket
 from cornserve.tracing import configure_otel
-from opentelemetry import trace
-from opentelemetry import propagate
-from opentelemetry.instrumentation.threading import ThreadingInstrumentor
 
 logger = get_logger(__name__)
 tracer = trace.get_tracer(__name__)

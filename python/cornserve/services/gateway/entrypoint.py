@@ -1,15 +1,14 @@
 """Spins up the Gateway service."""
 
-import signal
 import asyncio
+import signal
 from typing import TYPE_CHECKING
 
 import uvicorn
 
-from cornserve.services.gateway.router import create_app
 from cornserve.logging import get_logger
+from cornserve.services.gateway.router import create_app
 from cornserve.tracing import configure_otel
-
 
 if TYPE_CHECKING:
     from cornserve.services.gateway.app.manager import AppManager

@@ -1,7 +1,8 @@
 """Base classes for cornserve applications."""
 
 from typing import ClassVar
-from pydantic import BaseModel, Field, ConfigDict
+
+from pydantic import BaseModel, ConfigDict, Field
 
 from cornserve.frontend.tasks import Task
 

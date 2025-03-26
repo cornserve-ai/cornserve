@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import enum
 import uuid
-from typing_extensions import override
 
 from pydantic import BaseModel
+from typing_extensions import override
 
-from cornserve.frontend.tasks import Task, LLMTask
+from cornserve.frontend.tasks import LLMTask, Task
 from cornserve.services.pb import task_manager_pb2
 
 

@@ -3,11 +3,10 @@
 import enum
 from dataclasses import dataclass, field
 
-import torch
 import msgspec
 import numpy as np
+import torch
 from pydantic import BaseModel
-
 
 ID = str
 

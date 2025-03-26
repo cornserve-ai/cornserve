@@ -5,11 +5,11 @@ import asyncio
 import grpc
 import tyro
 
-from cornserve.services.pb import task_manager_pb2, task_manager_pb2_grpc, common_pb2
+from cornserve.logging import get_logger
+from cornserve.services.pb import common_pb2, task_manager_pb2, task_manager_pb2_grpc
 from cornserve.services.resource_manager.resource import GPU
 from cornserve.services.task_manager.manager import TaskManager
 from cornserve.services.task_manager.models import TaskManagerType
-from cornserve.logging import get_logger
 
 logger = get_logger(__name__)
 cleanup_coroutines = []

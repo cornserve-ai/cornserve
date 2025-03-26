@@ -10,15 +10,18 @@ from __future__ import annotations
 
 import os
 import pickle
-import weakref
 import threading
+import weakref
+from concurrent.futures import ThreadPoolExecutor
 from functools import reduce
 from operator import mul
 from typing import List, Optional, cast
-from concurrent.futures import ThreadPoolExecutor
 
 import grpc
 import torch
+from opentelemetry import trace
+from opentelemetry.instrumentation.grpc import GrpcAioInstrumentorClient, GrpcInstrumentorClient
+from opentelemetry.instrumentation.threading import ThreadingInstrumentor
 
 from cornserve.logging import get_logger
 from cornserve.services.pb import comm_sidecar_pb2, comm_sidecar_pb2_grpc, common_pb2
@@ -31,10 +34,6 @@ from .utils import (
     init_shmem,
     shm_fn,
 )
-
-from opentelemetry import trace
-from opentelemetry.instrumentation.grpc import GrpcInstrumentorClient, GrpcAioInstrumentorClient
-from opentelemetry.instrumentation.threading import ThreadingInstrumentor
 
 logger = get_logger(__name__)
 tracer = trace.get_tracer(__name__)

@@ -6,8 +6,8 @@ from typing import TYPE_CHECKING
 
 import grpc
 
-from cornserve.services.pb import task_dispatcher_pb2, task_dispatcher_pb2_grpc, common_pb2
 from cornserve.logging import get_logger
+from cornserve.services.pb import common_pb2, task_dispatcher_pb2, task_dispatcher_pb2_grpc
 from cornserve.services.task_dispatcher.models import TaskInfo
 
 if TYPE_CHECKING:

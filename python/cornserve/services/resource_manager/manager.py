@@ -3,30 +3,29 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Coroutine
 from collections import defaultdict
 from contextlib import suppress
 from dataclasses import dataclass
+from typing import Coroutine
 
 import grpc
-import kubernetes_asyncio.config as kconfig
 import kubernetes_asyncio.client as kclient
-
-from cornserve import constants
-from cornserve.logging import get_logger
-from cornserve.frontend.tasks import Task
-from cornserve.services.task_manager.models import TaskManagerConfig
-from cornserve.services.resource_manager.resource import GPU, Resource
-from cornserve.services.pb import (
-    task_manager_pb2,
-    task_manager_pb2_grpc,
-    task_dispatcher_pb2,
-    task_dispatcher_pb2_grpc,
-    common_pb2,
-)
-
+import kubernetes_asyncio.config as kconfig
 from opentelemetry import trace
 from opentelemetry.instrumentation.grpc import GrpcAioInstrumentorClient
+
+from cornserve import constants
+from cornserve.frontend.tasks import Task
+from cornserve.logging import get_logger
+from cornserve.services.pb import (
+    common_pb2,
+    task_dispatcher_pb2,
+    task_dispatcher_pb2_grpc,
+    task_manager_pb2,
+    task_manager_pb2_grpc,
+)
+from cornserve.services.resource_manager.resource import GPU, Resource
+from cornserve.services.task_manager.models import TaskManagerConfig
 
 logger = get_logger(__name__)
 tracer = trace.get_tracer(__name__)

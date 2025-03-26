@@ -1,36 +1,35 @@
 """Defines the Processor class for handling modality preprocessing."""
 
-import time
 import asyncio
 import base64
-import requests
 import importlib
 import threading
-from io import BytesIO
+import time
 from abc import ABC, abstractmethod
-from urllib.parse import urlparse
 from concurrent.futures import ThreadPoolExecutor
+from io import BytesIO
+from urllib.parse import urlparse
 
 import decord
 import numpy as np
 import numpy.typing as npt
+import requests
+from opentelemetry import trace
+from opentelemetry.instrumentation.threading import ThreadingInstrumentor
 from PIL import Image
 from transformers import AutoConfig
 
+from cornserve.logging import get_logger
 from cornserve.task_executors.eric.config import (
     ModalityConfig,
 )
+from cornserve.task_executors.eric.models.base import BaseModalityProcessor
+from cornserve.task_executors.eric.models.registry import MODEL_REGISTRY
 from cornserve.task_executors.eric.schema import (
     EmbeddingData,
     Modality,
     ProcessedEmbeddingData,
 )
-from cornserve.task_executors.eric.models.registry import MODEL_REGISTRY
-from cornserve.task_executors.eric.models.base import BaseModalityProcessor
-from cornserve.logging import get_logger
-
-from opentelemetry.instrumentation.threading import ThreadingInstrumentor
-from opentelemetry import trace
 
 ThreadingInstrumentor().instrument()
 

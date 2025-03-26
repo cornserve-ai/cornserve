@@ -1,18 +1,17 @@
 """Spins up Eric."""
 
-import signal
 import asyncio
+import signal
 
 import tyro
 import uvicorn
-
-from cornserve.task_executors.eric.config import EricConfig
-from cornserve.task_executors.eric.router.app import create_app
-from cornserve.task_executors.eric.engine.client import EngineClient
-from cornserve.logging import get_logger
-
-from cornserve.tracing import configure_otel
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+
+from cornserve.logging import get_logger
+from cornserve.task_executors.eric.config import EricConfig
+from cornserve.task_executors.eric.engine.client import EngineClient
+from cornserve.task_executors.eric.router.app import create_app
+from cornserve.tracing import configure_otel
 
 logger = get_logger("cornserve.task_executors.eric.entrypoint")
 
