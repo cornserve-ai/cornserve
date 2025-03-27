@@ -1,4 +1,10 @@
-"""Task invoke methods and patching."""
+"""Task invoke methods and patching.
+
+This module contains concrete implementations of various pre-defined tasks.
+These functions are invoked by the App Driver when they call `invoke` on
+their task objects. They send requests to the Task Dispatcher, which
+coordinates task execution on the shared data plane.
+"""
 
 from contextvars import ContextVar
 from types import MethodType
@@ -36,7 +42,6 @@ def patch_task_invoke(app_classes: AppClasses) -> None:
             raise ValueError(f"Unsupported task type: {type(task)}")
 
 
-# app driver calls this function
 @tracer.start_as_current_span("LLMTask.llm_task_invoke")
 async def llm_task_invoke(
     self: LLMTask,

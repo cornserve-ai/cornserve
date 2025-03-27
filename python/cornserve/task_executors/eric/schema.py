@@ -89,7 +89,16 @@ class EngineOpcode(enum.Enum):
 
 
 class EngineEnqueueMessage(msgspec.Struct, array_like=True, omit_defaults=True):
-    """Enqueue request message sent from the engine client to the engine."""
+    """Enqueue request message sent from the engine client to the engine.
+
+    Attributes:
+        request_id: Cluster-wide unique request ID.
+        data: List of processed embedding data.
+        receiver_sidecar_ranks: Sidecar ranks that will receive the embeddings.
+            If omitted, tensors will not be sent to any sidecar.
+        otel_carrier: OpenTelemetry carrier that holds the context information for
+            the request's span. This is used to propagate the context to the engine.
+    """
 
     request_id: str
     data: list[ProcessedEmbeddingData]
@@ -99,7 +108,16 @@ class EngineEnqueueMessage(msgspec.Struct, array_like=True, omit_defaults=True):
 
 @dataclass
 class EngineEnqueueRequest:
-    """Engine's internal data structure for the engine enqueue request."""
+    """Engine's internal data structure for the engine enqueue request.
+
+    Attributes:
+        request_id: Cluster-wide unique request ID.
+        data: List of processed embedding data.
+        receiver_sidecar_ranks: Sidecar ranks that will receive the embeddings.
+            If omitted, tensors will not be sent to any sidecar.
+        context: OpenTelemetry context that holds the request's tracing context.
+        span: OpenTelemetry span for the request.
+    """
 
     request_id: str
     data: list[ProcessedEmbeddingData]
@@ -122,7 +140,13 @@ class EngineEnqueueRequest:
 
 
 class EngineResponse(msgspec.Struct, array_like=True, omit_defaults=True):
-    """Response sent from the engine to the router."""
+    """Response sent from the engine to the router.
+
+    Attributes:
+        request_ids: List of request IDs that have completed processing.
+        status: Status of the requests.
+        error_message: Error message if the status is ERROR.
+    """
 
     request_ids: list[ID]
     status: Status

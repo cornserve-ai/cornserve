@@ -6,6 +6,7 @@ import signal
 import tyro
 import uvicorn
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+from opentelemetry.instrumentation.threading import ThreadingInstrumentor
 
 from cornserve.logging import get_logger
 from cornserve.task_executors.eric.config import EricConfig
@@ -25,6 +26,7 @@ async def serve(eric_config: EricConfig) -> None:
     app = create_app(eric_config)
 
     FastAPIInstrumentor().instrument_app(app)
+    ThreadingInstrumentor().instrument()
 
     logger.info("Available routes are:")
     for route in app.routes:

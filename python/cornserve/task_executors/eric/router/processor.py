@@ -15,7 +15,6 @@ import numpy as np
 import numpy.typing as npt
 import requests
 from opentelemetry import trace
-from opentelemetry.instrumentation.threading import ThreadingInstrumentor
 from PIL import Image
 from transformers import AutoConfig
 
@@ -30,8 +29,6 @@ from cornserve.task_executors.eric.schema import (
     Modality,
     ProcessedEmbeddingData,
 )
-
-ThreadingInstrumentor().instrument()
 
 logger = get_logger(__name__)
 tracer = trace.get_tracer(__name__)
@@ -97,7 +94,7 @@ class Processor:
         for data_item in processed:
             for k, v in data_item.data.items():
                 span.set_attribute(
-                    f"processor.processed_data.{data_item.id}-{k}-shape",
+                    f"processor.processed_data.{data_item.id}.{k}.shape",
                     v.shape,
                 )
         return processed
@@ -107,17 +104,9 @@ class Processor:
         """Run processing on input data."""
         loader: ModalityDataLoader = thread_local.loader
         processor: BaseModalityProcessor = thread_local.processor
-        span = trace.get_current_span()
-        span.set_attribute("processor.data.url", url)
-        span.set_attribute("processor.data.modality", modality.value)
-        span.add_event("load_data.start")
         data = loader.load_from_url(modality, url)
-        span.add_event("load_data.done")
-        span.set_attribute("processor.data.shape", data.shape)
-        span.add_event("process_data.start")
-        ret = processor.process(modality, data)
-        span.add_event("process_data.done")
-        return ret
+        with tracer.start_as_current_span(name="ModalityProcessor.process"):
+            return processor.process(modality, data)
 
     def _check_processed_data(self, processed: list[ProcessedEmbeddingData]) -> None:
         """Check that all processed data is valid."""
@@ -222,6 +211,7 @@ class ModalityDataLoader:
         self.image_loader = ImageLoader(config)
         self.video_loader = VideoLoader(config)
 
+    @tracer.start_as_current_span(name="ModalityDataLoader.load_from_url")
     def load_from_url(self, modality: Modality, url: str) -> npt.NDArray:
         """Load an image from a web, data, or file URL."""
         match modality:
@@ -233,6 +223,10 @@ class ModalityDataLoader:
                 raise ValueError(f"Unsupported modality: {modality}")
 
         start_time = time.monotonic()
+
+        span = trace.get_current_span()
+        span.set_attribute("data.url", url)
+        span.set_attribute("data.modality", modality.value)
 
         url_spec = urlparse(url)
         if url_spec.scheme.startswith("http"):
@@ -246,7 +240,6 @@ class ModalityDataLoader:
                 time.monotonic() - start_time,
                 modality.value,
             )
-            return data
 
         elif url_spec.scheme == "data":
             data_spec, data = url_spec.path.split(",", 1)
@@ -259,7 +252,6 @@ class ModalityDataLoader:
                 time.monotonic() - start_time,
                 modality.value,
             )
-            return data
 
         elif url_spec.scheme == "file":
             data = loader.load_file(url_spec.path)
@@ -268,7 +260,10 @@ class ModalityDataLoader:
                 time.monotonic() - start_time,
                 modality.value,
             )
-            return data
 
         else:
             raise ValueError("The URL must be either a HTTP, data or file URL.")
+
+        span.set_attribute("data.shape", data.shape)
+
+        return data

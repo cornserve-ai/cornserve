@@ -46,11 +46,6 @@ logger = get_logger(__name__, [SidcarAdapter])
 tracer = trace.get_tracer(__name__)
 cleanup_coroutines = []
 
-GrpcInstrumentorClient().instrument()
-GrpcInstrumentorServer().instrument()
-GrpcAioInstrumentorClient().instrument()
-GrpcAioInstrumentorServer().instrument()
-
 
 class CommSidecarReceiver:
     """The receiver sidecar server supports receiving tensors from other ranks using gloo backend."""
@@ -760,7 +755,13 @@ async def main(
 
     assert sidecar_rank >= 0, "Invalid sidecar rank"
 
+    # OpenTelemetry setup
     configure_otel(name=f"sidecar[{sidecar_rank}]")
+
+    GrpcInstrumentorClient().instrument()
+    GrpcInstrumentorServer().instrument()
+    GrpcAioInstrumentorClient().instrument()
+    GrpcAioInstrumentorServer().instrument()
 
     # We start the server so the health check gRPC is always available
     server = grpc.aio.server()

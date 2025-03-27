@@ -19,13 +19,15 @@ if TYPE_CHECKING:
     from cornserve.services.task_dispatcher.dispatcher import TaskDispatcher
 
 logger = get_logger("cornserve.services.task_dispatcher.entrypoint")
-configure_otel("task_dispatcher")
-GrpcInstrumentorServer().instrument()
 
 
 async def serve() -> None:
     """Serve the Task Dispatcher service."""
     logger.info("Starting Gateway service")
+
+    configure_otel("task_dispatcher")
+
+    GrpcInstrumentorServer().instrument()
 
     # FastAPI server
     app = create_app()

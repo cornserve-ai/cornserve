@@ -12,12 +12,8 @@ from cornserve.services.pb import common_pb2, resource_manager_pb2, resource_man
 from cornserve.services.resource_manager.manager import ResourceManager
 from cornserve.tracing import configure_otel
 
-configure_otel("resource_manager")
 logger = get_logger(__name__)
 cleanup_coroutines = []
-
-GrpcAioInstrumentorServer().instrument()
-GrpcAioInstrumentorClient().instrument()
 
 
 class ResourceManagerServicer(resource_manager_pb2_grpc.ResourceManagerServicer):
@@ -83,6 +79,11 @@ class ResourceManagerServicer(resource_manager_pb2_grpc.ResourceManagerServicer)
 
 async def serve(ip: str = "[::]", port: int = 50051) -> None:
     """Start the gRPC server."""
+    configure_otel("resource_manager")
+
+    GrpcAioInstrumentorServer().instrument()
+    GrpcAioInstrumentorClient().instrument()
+
     manager = await ResourceManager.init()
 
     server = grpc.aio.server()
