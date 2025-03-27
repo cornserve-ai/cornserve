@@ -472,6 +472,9 @@ class TensorSidecarSender(TensorSidecarSenderBase):
         assert size % self.slot_size == 0, "Chunk size should be a multiple of slot size"
         chunk = chunk.view(-1)
 
+        span = trace.get_current_span()
+        span.set_attribute("sidecar_sender_client.send.id", id)
+
         # shard based on the shard rank and num shards
         num_slots = size // self.slot_size
         quotient, remainder = divmod(num_slots, self.num_shards)
@@ -532,9 +535,11 @@ class TensorSidecarSender(TensorSidecarSenderBase):
         span.add_event("allocate.done")
         try:
             cuda_event = torch.cuda.Event(interprocess=True)
+            # Threading Instrumentor does not instrument the following context manager out of the box
+            # Therefore we add the event before it, otherwise we need to manually instrument the thread
+            span.add_event("copy.start")
             with torch.cuda.stream(self.stream):
                 buffer.data.copy_(shard, non_blocking=True)
-                span.add_event("copy.start")
                 cuda_event.record(self.stream)
             ipc_handle = cuda_event.ipc_handle()
             logger.debug("SHARD RANK: %d: Sending send request to sidecar", self.shard_rank)
