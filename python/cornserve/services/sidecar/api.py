@@ -508,6 +508,7 @@ class TensorSidecarSender(TensorSidecarSenderBase):
             num_chunks=num_chunks,
         )
 
+    @tracer.start_as_current_span(name="TensorSidecarSender._send_worker")
     def _send_worker(
         self,
         id: str,
