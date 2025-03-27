@@ -1,15 +1,15 @@
 """Test the sidecar server and client within the same node."""
 
-import os
-import uuid
-import time
-import random
 import asyncio
+import multiprocessing
+import os
+import random
+import time
+import uuid
 from typing import Generator
 
-import torch
 import pytest
-import multiprocessing
+import torch
 
 torch.manual_seed(0)
 random.seed(0)
@@ -106,8 +106,8 @@ def sidecar_servers(
 async def test_sidecar_liveness(sidecar_servers: list[multiprocessing.Process]):
     """Test n sidecar servers can launch and each can be registered."""
     from cornserve.services.sidecar.api import (
-        TensorSidecarSender,
         TensorSidecarAsyncReceiver,
+        TensorSidecarSender,
     )
 
     for rank in range(MAX_SERVERS):
