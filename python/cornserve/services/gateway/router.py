@@ -72,7 +72,7 @@ async def unregister_app(app_id: str, raw_request: Request):
     """Unregister the application with the given ID."""
     app_manager: AppManager = raw_request.app.state.app_manager
     span = trace.get_current_span()
-    span.set_attribute("gateway.unregister_app", app_id)
+    span.set_attribute("gateway.unregister_app.app_id", app_id)
 
     try:
         await app_manager.unregister_app(app_id)

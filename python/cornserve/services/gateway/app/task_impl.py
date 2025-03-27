@@ -37,7 +37,7 @@ def patch_task_invoke(app_classes: AppClasses) -> None:
 
 
 # app driver calls this function
-@tracer.start_as_current_span("gateway/app/app_driver/task_impl.llm_task_invoke")
+@tracer.start_as_current_span("LLMTask.llm_task_invoke")
 async def llm_task_invoke(
     self: LLMTask,
     prompt: str,
@@ -50,7 +50,7 @@ async def llm_task_invoke(
     span = trace.get_current_span()
     invoke_input = self._InvokeInput(prompt=prompt, multimodal_data=multimodal_data)
     ctx = app_context.get()
-    span.set_attribute("gateway.app.app_driver.task_id", self.id)
+    span.set_attribute("gateway.app_driver.task.task_id", self.id)
     async with httpx.AsyncClient(timeout=60.0) as client:
         request = TaskDispatchRequest(
             app_id=ctx.app_id,
