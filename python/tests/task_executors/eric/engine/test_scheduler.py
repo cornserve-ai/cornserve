@@ -1,5 +1,5 @@
 from cornserve.task_executors.eric.engine.scheduler import Scheduler
-from cornserve.task_executors.eric.schema import EngineEnqueueRequest, ProcessedEmbeddingData, Modality
+from cornserve.task_executors.eric.schema import EngineEnqueueRequest, Modality, ProcessedEmbeddingData
 
 
 def test_mixed_modality():

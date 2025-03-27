@@ -8,15 +8,15 @@ from opentelemetry import propagate, trace
 from cornserve.logging import get_logger
 from cornserve.task_executors.eric.schema import (
     ID,
-    Batch,
     EngineEnqueueRequest,
     Modality,
     ProcessedEmbeddingData,
+    SchedulerBatch,
 )
 
 logger = get_logger(__name__)
 tracer = trace.get_tracer(__name__)
-PROPAGATOR = propagate.get_global_textmap()
+propagator = propagate.get_global_textmap()
 
 
 class RequestQueue:
@@ -131,13 +131,15 @@ class Scheduler:
 
     def enqueue(self, request: EngineEnqueueRequest) -> None:
         """Add a request to the waiting queue."""
+        if request.span:
+            request.span.add_event("engine.scheduler.enqueue")
         self.queue.enqueue(request)
 
     def has_waiting_requests(self) -> bool:
         """Check if there are any unfinished requests."""
         return len(self.queue) > 0
 
-    def schedule(self) -> Batch:
+    def schedule(self) -> SchedulerBatch:
         """Schedule requests to run in the next batch.
 
         This function is only called when there are requests in the queue.
@@ -145,29 +147,33 @@ class Scheduler:
         # XXX: This is currently a simple scheduler that iterates over the queue
         # in order and batches *all* data items with the same modality.
         modality = self.queue.peek_data().modality
-        batch = Batch(modality=modality)
-        unique_ctx = {}
+        batch = SchedulerBatch(modality=modality)
+        # spans = []
         for req, data in self.queue.iter_waiting(modality=modality, max_items=None):
-            if req.otel_context:
-                if req.request_id not in unique_ctx:
-                    context = PROPAGATOR.extract(req.otel_context)
-                    with tracer.start_as_current_span("scheduler-schedule", context=context) as span:
-                        span.add_event(f"Add {req.request_id + data.id} to batch")
-                        new_context = {}
-                        PROPAGATOR.inject(new_context)
-                        req.otel_context = new_context
-                        unique_ctx[req.request_id] = new_context
-                else:
-                    req.otel_context = unique_ctx[req.request_id]
+            if req.span:
+                req.span.add_event("engine.scheduler.dequeue", attributes={"data_id": data.id})
+
+            carrier = {}
+            propagator.inject(carrier, req.context)
+
             batch.add_data(
                 request_id=req.request_id,
                 data=[data],
                 chunk_ids=[0],
                 num_chunks=[1],
                 receiver_ranks=req.receiver_sidecar_ranks,
-                otel_contexts=[req.otel_context],
+                otel_spans=[req.span],
+                otel_carriers=[carrier],
             )
+            # spans.append(req.span)
+
         assert batch.request_ids, "Batch should not be empty"
+        # # here we record all the batch_size for each request
+        # for span in spans:
+        #     if span:
+        #         # here we cannot use attributes because it might be overwritten
+        #         span.add_event("engine.scheduler.batch_size", attributes={"batch_size": len(batch)})
+
         return batch
 
     def process_batch_result(self, request_ids: list[ID], data_ids: list[ID]) -> list[ID]:

@@ -11,7 +11,7 @@ import psutil
 from cornserve.logging import get_logger
 from cornserve.task_executors.eric.distributed.shm_broadcast import MessageQueue
 from cornserve.task_executors.eric.executor.worker import Worker, WorkerHandle
-from cornserve.task_executors.eric.schema import Batch, BatchResult, Status
+from cornserve.task_executors.eric.schema import BatchResult, Status, WorkerBatch
 
 logger = get_logger(__name__)
 
@@ -153,7 +153,7 @@ class ModelExecutor:
 
         return responses
 
-    def execute_model(self, batch: Batch) -> BatchResult:
+    def execute_model(self, batch: WorkerBatch) -> BatchResult:
         """Invoke the workers to run inference on the model."""
         logger.info("Executing model with %d items", len(batch.data_ids))
         self.run_workers("execute_model", kwargs={"batch": batch})

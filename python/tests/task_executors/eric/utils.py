@@ -1,19 +1,19 @@
 """Testing utilities for Eric."""
 
 import os
-import uuid
 import subprocess
-from typing import Callable
+import uuid
 from fnmatch import fnmatch
 from functools import cache
+from typing import Callable
 
+import numpy.typing as npt
 import torch
 import torch.nn as nn
-import numpy.typing as npt
 
 from cornserve.task_executors.eric.config import ImageDataConfig, ModalityConfig, VideoDataConfig
-from cornserve.task_executors.eric.schema import Batch, Modality
 from cornserve.task_executors.eric.router.processor import Processor
+from cornserve.task_executors.eric.schema import Modality, WorkerBatch
 
 DUMP_DIR = os.getenv("CORNSERVE_TEST_DUMP_TENSOR_DIR", None)
 
@@ -96,7 +96,7 @@ def assert_same_weights(
         check_param(name, param, hf_params)
 
 
-def batch_builder(model_id: str, nickname: str, data: list[ModalityData]) -> Batch:
+def batch_builder(model_id: str, nickname: str, data: list[ModalityData]) -> WorkerBatch:
     """Builds a Batch object to pass to ModelExecutor.execute_model."""
     modality = data[0].modality
     assert all(item.modality == modality for item in data)
@@ -105,7 +105,7 @@ def batch_builder(model_id: str, nickname: str, data: list[ModalityData]) -> Bat
         key: [torch.from_numpy(item.processed(model_id)[key]) for item in data]
         for key in data[0].processed(model_id).keys()
     }
-    batch = Batch(
+    batch = WorkerBatch(
         modality=data[0].modality,
         request_ids=[uuid.uuid4().hex for _ in data],
         data_ids=[uuid.uuid4().hex for _ in data],

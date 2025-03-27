@@ -6,9 +6,15 @@ from dataclasses import dataclass, field
 import msgspec
 import numpy as np
 import torch
+from opentelemetry import propagate, trace
+from opentelemetry.context import Context
+from opentelemetry.trace import Span
 from pydantic import BaseModel
 
 ID = str
+
+tracer = trace.get_tracer(__name__)
+propagator = propagate.get_global_textmap()
 
 
 class Modality(enum.Enum):
@@ -82,13 +88,37 @@ class EngineOpcode(enum.Enum):
     PROFILE = b"\x01"
 
 
-class EngineEnqueueRequest(msgspec.Struct, array_like=True, omit_defaults=True):
-    """Enqueue request sent from the router to the engine."""
+class EngineEnqueueMessage(msgspec.Struct, array_like=True, omit_defaults=True):
+    """Enqueue request message sent from the engine client to the engine."""
 
     request_id: str
     data: list[ProcessedEmbeddingData]
     receiver_sidecar_ranks: list[int] | None = None
-    otel_context: dict[str, str] | None = None
+    otel_carrier: dict[str, str] | None = None
+
+
+@dataclass
+class EngineEnqueueRequest:
+    """Engine's internal data structure for the engine enqueue request."""
+
+    request_id: str
+    data: list[ProcessedEmbeddingData]
+    receiver_sidecar_ranks: list[int] | None = None
+    context: Context | None = None
+    span: Span | None = None
+
+    @classmethod
+    def from_msgpack(cls, msg: EngineEnqueueMessage) -> "EngineEnqueueRequest":
+        """Create an engine enqueue request from a engine enqueue message."""
+        req = cls(
+            request_id=msg.request_id,
+            data=msg.data,
+            receiver_sidecar_ranks=msg.receiver_sidecar_ranks,
+        )
+        if msg.otel_carrier:
+            req.context = propagator.extract(msg.otel_carrier)
+            req.span = tracer.start_span("Engine._request_receive_loop", context=req.context)
+        return req
 
 
 class EngineResponse(msgspec.Struct, array_like=True, omit_defaults=True):
@@ -100,8 +130,8 @@ class EngineResponse(msgspec.Struct, array_like=True, omit_defaults=True):
 
 
 @dataclass
-class Batch:
-    """Embedding requests to run together in a single forward pass.
+class SchedulerBatch:
+    """Embedding requests to run together in a single forward pass from scheduelr output.
 
     Currently, different modalities are not batched together because
     some models require different processing for different modalities.
@@ -117,6 +147,9 @@ class Batch:
         data: Dictionary of data to be embedded. The keys are the
             tensor names as returned by the HF processor and the corresponding
             encoder model should be expecting these names.
+        otel_spans: List of OpenTelemetry spans for each request in the batch.
+        otel_carriers: List of OpenTelemetry carriers for each request in the batch.
+            Workers will extract these context.
         _dump_prefix: Path to dump the batch data for debugging.
     """
 
@@ -127,7 +160,8 @@ class Batch:
     num_chunks: list[int] = field(default_factory=list)
     receiver_ranks: list[list[int] | None] = field(default_factory=list)
     data: dict[str, list[torch.Tensor]] = field(default_factory=dict)
-    otel_contexts: list[dict[str, str] | None] = field(default_factory=list)
+    otel_spans: list[Span | None] = field(default_factory=list)
+    otel_carriers: list[dict | None] = field(default_factory=list)
 
     _dump_prefix: str | None = None
 
@@ -141,12 +175,15 @@ class Batch:
         data: list[ProcessedEmbeddingData],
         chunk_ids: list[int],
         num_chunks: list[int],
-        otel_contexts: list[dict[str, str] | None],
+        otel_spans: list[Span | None],
+        otel_carriers: list[dict | None],
         receiver_ranks: list[int] | None = None,
     ) -> None:
         """Add a request to the batch."""
         # Add all modality data inside a request to the batch.
-        for item, chunk_id, num_chunk, otel_context in zip(data, chunk_ids, num_chunks, otel_contexts, strict=True):
+        for item, chunk_id, num_chunk, otel_span, otel_carrier in zip(
+            data, chunk_ids, num_chunks, otel_spans, otel_carriers, strict=True
+        ):
             if self.modality != item.modality:
                 raise ValueError(
                     f"Cannot batch different modalities together: "
@@ -157,7 +194,8 @@ class Batch:
             self.chunk_ids.append(chunk_id)
             self.num_chunks.append(num_chunk)
             self.receiver_ranks.append(receiver_ranks)
-            self.otel_contexts.append(otel_context)
+            self.otel_spans.append(otel_span)
+            self.otel_carriers.append(otel_carrier)
             for key, value in item.data.items():
                 if key not in self.data:
                     self.data[key] = []
@@ -168,6 +206,58 @@ class Batch:
             assert len(self.data[key]) == len(self.data_ids), (
                 f"Data length mismatch for key {key}: {len(self.data[key])} != {len(self.data_ids)}"
             )
+
+
+@dataclass
+class WorkerBatch:
+    """Worker's internal data structure for a forward pass batch.
+
+    Currently, it is SchedulerBatch without the otel_spans field.
+
+    Attributes:
+        modality: Modality of the data to be embedded.
+        request_ids: List of request IDs in the batch. If there are multiple
+            modality data in a single request, the request ID is repeated
+            for each data ID.
+        data_ids: List of unique data IDs in the batch. This is a
+            concatenation of all data IDs in the batch.
+        receiver_ranks: Sidecar ranks that will receive the embeddings.
+        data: Dictionary of data to be embedded. The keys are the
+            tensor names as returned by the HF processor and the corresponding
+            encoder model should be expecting these names.
+        otel_carriers: List of OpenTelemetry carriers for each request in the batch. Workers will extract these context.
+        _dump_prefix: Path to dump the batch data for debugging.
+    """
+
+    modality: Modality
+    request_ids: list[ID] = field(default_factory=list)
+    data_ids: list[ID] = field(default_factory=list)
+    chunk_ids: list[int] = field(default_factory=list)
+    num_chunks: list[int] = field(default_factory=list)
+    receiver_ranks: list[list[int] | None] = field(default_factory=list)
+    data: dict[str, list[torch.Tensor]] = field(default_factory=dict)
+    otel_carriers: list[dict | None] = field(default_factory=list)
+
+    _dump_prefix: str | None = None
+
+    def __len__(self) -> int:
+        """Return batch size."""
+        return len(self.data_ids)
+
+    @classmethod
+    def from_scheduler_batch(cls, batch: SchedulerBatch) -> "WorkerBatch":
+        """Create a worker batch from a scheduler batch."""
+        return cls(
+            modality=batch.modality,
+            request_ids=batch.request_ids,
+            data_ids=batch.data_ids,
+            chunk_ids=batch.chunk_ids,
+            num_chunks=batch.num_chunks,
+            receiver_ranks=batch.receiver_ranks,
+            data=batch.data,
+            otel_carriers=batch.otel_carriers,
+            _dump_prefix=batch._dump_prefix,
+        )
 
 
 @dataclass

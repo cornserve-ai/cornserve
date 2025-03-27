@@ -4,7 +4,6 @@ from cornserve.task_executors.eric.schema import Modality
 
 from ..utils import ModalityData
 
-
 TEST_IMAGE_URLS = [
     "https://upload.wikimedia.org/wikipedia/commons/d/da/2015_Kaczka_krzy%C5%BCowka_w_wodzie_%28samiec%29.jpg",
     "https://upload.wikimedia.org/wikipedia/commons/thumb/d/dd/Gfp-wisconsin-madison-the-nature-boardwalk.jpg/2560px-Gfp-wisconsin-madison-the-nature-boardwalk.jpg",

@@ -14,7 +14,7 @@ from cornserve.task_executors.eric.config import EricConfig
 from cornserve.task_executors.eric.engine.core import Engine
 from cornserve.task_executors.eric.schema import (
     EmbeddingResponse,
-    EngineEnqueueRequest,
+    EngineEnqueueMessage,
     EngineOpcode,
     EngineResponse,
     ProcessedEmbeddingData,
@@ -28,7 +28,7 @@ from cornserve.task_executors.eric.utils.zmq import (
 
 logger = get_logger(__name__)
 tracer = trace.get_tracer(__name__)
-PROPAGATOR = propagate.get_global_textmap()
+propagator = propagate.get_global_textmap()
 
 
 class EngineClient:
@@ -109,7 +109,6 @@ class EngineClient:
                         req_id,
                     )
 
-    @tracer.start_as_current_span(name="engine handle embed")
     async def embed(
         self,
         request_id: str,
@@ -123,14 +122,14 @@ class EngineClient:
         self.responses[request_id] = fut
 
         carrier = {}
-        PROPAGATOR.inject(carrier)
+        propagator.inject(carrier)
 
         # Build and send the request
-        req = EngineEnqueueRequest(
+        req = EngineEnqueueMessage(
             request_id=request_id,
             data=processed,
             receiver_sidecar_ranks=receiver_sidecar_ranks,
-            otel_context=carrier,
+            otel_carrier=carrier,
         )
 
         msg_bytes = self.encoder.encode(req)

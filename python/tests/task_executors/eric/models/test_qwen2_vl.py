@@ -5,11 +5,11 @@ import torch
 from transformers.models.qwen2_vl.modeling_qwen2_vl import Qwen2VLForConditionalGeneration
 
 from cornserve.task_executors.eric.distributed.parallel import destroy_distributed, init_distributed
+from cornserve.task_executors.eric.executor.executor import ModelExecutor
 from cornserve.task_executors.eric.executor.loader import load_model
 from cornserve.task_executors.eric.schema import Status
-from cornserve.task_executors.eric.executor.executor import ModelExecutor
 
-from ..utils import ModalityData, assert_same_weights, batch_builder, NUM_GPUS
+from ..utils import NUM_GPUS, ModalityData, assert_same_weights, batch_builder
 
 model_id = "Qwen/Qwen2-VL-7B-Instruct"
 

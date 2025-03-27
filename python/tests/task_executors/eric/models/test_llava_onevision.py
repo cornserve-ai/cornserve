@@ -7,12 +7,12 @@ import torch
 from transformers.models.llava_onevision.modeling_llava_onevision import LlavaOnevisionForConditionalGeneration
 
 from cornserve.task_executors.eric.distributed.parallel import destroy_distributed, init_distributed
-from cornserve.task_executors.eric.executor.loader import load_model
-from cornserve.task_executors.eric.schema import Status
 from cornserve.task_executors.eric.executor.executor import ModelExecutor
+from cornserve.task_executors.eric.executor.loader import load_model
 from cornserve.task_executors.eric.models.registry import MODEL_REGISTRY
+from cornserve.task_executors.eric.schema import Status
 
-from ..utils import ModalityData, assert_same_weights, batch_builder, NUM_GPUS, DUMP_DIR
+from ..utils import DUMP_DIR, NUM_GPUS, ModalityData, assert_same_weights, batch_builder
 
 model_id = "llava-hf/llava-onevision-qwen2-7b-ov-chat-hf"
 dump_prefix = os.getenv("CORNSERVE_TEST_DUMP_TENSOR_PREFIX", None)

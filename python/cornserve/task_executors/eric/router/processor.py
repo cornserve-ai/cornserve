@@ -79,6 +79,7 @@ class Processor:
         """Shutdown the processor and the thread pool."""
         self.pool.shutdown(wait=True, cancel_futures=True)
 
+    @tracer.start_as_current_span(name="Processor.process")
     async def process(self, data: list[EmbeddingData]) -> list[ProcessedEmbeddingData]:
         """Performs modality processing on input data in a thread pool."""
         # Here, we intentionally do not batch images in the processor because
@@ -92,19 +93,30 @@ class Processor:
             for item, feature in zip(data, features, strict=True)
         ]
         self._check_processed_data(processed)
+        span = trace.get_current_span()
+        for data_item in processed:
+            for k, v in data_item.data.items():
+                span.set_attribute(
+                    f"processor.processed_data.{data_item.id}-{k}-shape",
+                    v.shape,
+                )
         return processed
 
-    @tracer.start_as_current_span(name="processor-preprocess-thread")
+    @tracer.start_as_current_span(name="Processor._do_process")
     def _do_process(self, modality: Modality, url: str) -> dict[str, npt.NDArray]:
         """Run processing on input data."""
         loader: ModalityDataLoader = thread_local.loader
         processor: BaseModalityProcessor = thread_local.processor
         span = trace.get_current_span()
+        span.set_attribute("processor.data.url", url)
+        span.set_attribute("processor.data.modality", modality.value)
+        span.add_event("load_data.start")
         data = loader.load_from_url(modality, url)
-        span.add_event("data-loaded")
-        span.set_attribute(f"{modality.value}-shape", data.shape)
+        span.add_event("load_data.done")
+        span.set_attribute("processor.data.shape", data.shape)
+        span.add_event("process_data.start")
         ret = processor.process(modality, data)
-        span.add_event("data-preprocessed")
+        span.add_event("process_data.done")
         return ret
 
     def _check_processed_data(self, processed: list[ProcessedEmbeddingData]) -> None:

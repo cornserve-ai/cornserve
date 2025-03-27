@@ -10,7 +10,7 @@ from typing import Any
 
 import psutil
 import zmq
-from opentelemetry import propagate, trace
+from opentelemetry import trace
 from opentelemetry.instrumentation.threading import ThreadingInstrumentor
 
 from cornserve.logging import get_logger
@@ -18,9 +18,11 @@ from cornserve.task_executors.eric.config import EricConfig
 from cornserve.task_executors.eric.engine.scheduler import Scheduler
 from cornserve.task_executors.eric.executor.executor import ModelExecutor
 from cornserve.task_executors.eric.schema import (
+    EngineEnqueueMessage,
     EngineEnqueueRequest,
     EngineOpcode,
     EngineResponse,
+    WorkerBatch,
 )
 from cornserve.task_executors.eric.utils.serde import MsgpackDecoder, MsgpackEncoder
 from cornserve.task_executors.eric.utils.zmq import zmq_sync_socket
@@ -28,7 +30,6 @@ from cornserve.tracing import configure_otel
 
 logger = get_logger(__name__)
 tracer = trace.get_tracer(__name__)
-PROPAGATOR = propagate.get_global_textmap()
 
 ThreadingInstrumentor().instrument()
 
@@ -132,7 +133,7 @@ class Engine:
         # Users send SIGINT, the engine client sends SIGTERM.
         shutdown_requested = False
 
-        configure_otel(f"eric{str(config.sidecar.ranks).replace(',', '')}")
+        configure_otel(f"eric{str(config.sidecar.ranks).replace(' ', '')}")
 
         def shutdown(*_) -> None:
             """Idempotently shutdown the engine process."""
@@ -213,11 +214,15 @@ class Engine:
         responses. It handles scheduling, executing, and processing results.
         """
         batch = self.scheduler.schedule()
-        batch_result = self.executor.execute_model(batch)
+        batch_result = self.executor.execute_model(WorkerBatch.from_scheduler_batch(batch))
         done_request_ids = self.scheduler.process_batch_result(
             batch_result.request_ids,
             batch_result.data_ids,
         )
+
+        for i, id in enumerate(batch.request_ids):
+            if id in done_request_ids and batch.otel_spans[i]:
+                batch.otel_spans[i].end()  # type: ignore
 
         return EngineResponse(
             request_ids=done_request_ids,
@@ -230,12 +235,6 @@ class Engine:
         match opcode:
             case EngineOpcode.ENQUEUE:
                 logger.info("Adding request: %s", request.request_id)
-                if request.otel_context:
-                    span_context = PROPAGATOR.extract(request.otel_context)
-                    with tracer.start_as_current_span("engine enqueue", context=span_context):
-                        new_context = {}
-                        PROPAGATOR.inject(new_context)
-                        request.otel_context = new_context
                 self.scheduler.enqueue(request)
             case EngineOpcode.PROFILE:
                 self.should_profile = True
@@ -243,7 +242,7 @@ class Engine:
 
     def _request_receive_loop(self, sock_path: str) -> None:
         """Continuously receive requests from a ZMQ socket and enqueue them."""
-        enqueue_req_decoder = MsgpackDecoder(ty=EngineEnqueueRequest)
+        enqueue_msg_decoder = MsgpackDecoder(ty=EngineEnqueueMessage)
         generic_decoder = MsgpackDecoder()
 
         with zmq_sync_socket(sock_path, zmq.PULL) as sock:
@@ -252,14 +251,8 @@ class Engine:
                 opcode = EngineOpcode(bytes(opcode_frame.buffer))
 
                 if opcode == EngineOpcode.ENQUEUE:
-                    request = enqueue_req_decoder.decode(inst_frame.buffer)
-                    if request.otel_context:
-                        span_context = PROPAGATOR.extract(request.otel_context)
-                        with tracer.start_as_current_span("engine receive", context=span_context) as span:
-                            span.set_attribute("request_id", request.request_id)
-                            new_context = {}
-                            PROPAGATOR.inject(new_context)
-                            request.otel_context = new_context
+                    enqueue_msg = enqueue_msg_decoder.decode(inst_frame.buffer)
+                    request = EngineEnqueueRequest.from_msgpack(enqueue_msg)
                 else:
                     request = generic_decoder.decode(inst_frame.buffer)
 

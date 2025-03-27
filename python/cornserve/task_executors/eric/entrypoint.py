@@ -20,7 +20,7 @@ async def serve(eric_config: EricConfig) -> None:
     """Serve the Eric model as a FastAPI app."""
     logger.info("Starting Eric with %s", eric_config)
 
-    configure_otel(f"eric{str(eric_config.sidecar.ranks).replace(',', '')}")
+    configure_otel(f"eric{str(eric_config.sidecar.ranks).replace(' ', '')}")
 
     app = create_app(eric_config)
 

@@ -40,23 +40,20 @@ async def modalities(raw_request: Request) -> list[Modality]:
 
 
 @router.post("/embeddings")
-@tracer.start_as_current_span(name="router-embeddings")
 async def embeddings(request: EmbeddingRequest, raw_request: Request) -> Response:
     """Handler for embedding requests."""
     span = trace.get_current_span()
-    span.set_attribute("request_id", request.id)
+    span.set_attribute("eric.embeddings.req_id", request.id)
     for data_item in request.data:
-        span.set_attribute(data_item.id, data_item.url)
+        span.set_attribute(
+            f"eric.embeddings.data.{data_item.id}.url",
+            data_item.url,
+        )
     processor: Processor = raw_request.app.state.processor
     engine_client: EngineClient = raw_request.app.state.engine_client
 
     # Load data from URLs and apply processing
-
-    with tracer.start_as_current_span(name="router-process-data"):
-        processed = await processor.process(request.data)
-        for data_item in processed:
-            for k, v in data_item.data.items():
-                span.set_attribute(f"{data_item.id}-{k}-shape", v.shape)
+    processed = await processor.process(request.data)
 
     # Send to engine process (embedding + transmission via Tensor Sidecar)
     response = await engine_client.embed(
