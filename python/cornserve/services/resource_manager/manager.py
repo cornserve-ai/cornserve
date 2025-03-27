@@ -29,6 +29,7 @@ from cornserve.services.task_manager.models import TaskManagerConfig
 logger = get_logger(__name__)
 tracer = trace.get_tracer(__name__)
 
+
 @dataclass
 class TaskManagerDeployment:
     """Informational data structure for a deployed task manager.
@@ -217,10 +218,12 @@ class ResourceManager:
                     else:
                         task_manager_deployments_to_spawn.append(task_manager_deployment)
                         coros.append(self._spawn_task_manager(task_manager_deployment.config))
-            span.set_attribute("resource_manager.reconcile_new_app.task_manager_deployments_to_spawn", len(task_manager_deployments_to_spawn))
+            span.set_attribute(
+                "resource_manager.reconcile_new_app.task_manager_deployments_to_spawn",
+                len(task_manager_deployments_to_spawn),
+            )
             logger.info("Spawning task managers: %s", task_manager_deployments_to_spawn)
             spawn_results = await asyncio.gather(*coros, return_exceptions=True)
-
 
             # Check for errors
             failed = 0

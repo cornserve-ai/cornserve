@@ -19,6 +19,7 @@ cleanup_coroutines = []
 GrpcAioInstrumentorServer().instrument()
 GrpcAioInstrumentorClient().instrument()
 
+
 class ResourceManagerServicer(resource_manager_pb2_grpc.ResourceManagerServicer):
     """Resource Manager gRPC service implementation."""
 
