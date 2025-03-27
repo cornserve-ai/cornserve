@@ -78,7 +78,7 @@ class TaskDispatcher:
     async def invoke(self, app_id: str, task_id: str, request_id: str, data: str) -> Any:
         """Invoke a task with the given request data."""
         span = trace.get_current_span()
-        span.set_attribute("task_dispatcher.invoke.task_id", app_id)
+        span.set_attribute("task_dispatcher.invoke.app_id", app_id)
         span.set_attribute("task_dispatcher.invoke.task_id", task_id)
         async with self.app_lock:
             try:
