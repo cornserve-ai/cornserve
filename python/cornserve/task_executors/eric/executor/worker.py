@@ -264,7 +264,7 @@ class Worker:
     def execute_model(self, batch: WorkerBatch) -> None:
         """Run the model on a batch of data."""
         unique_spans = {}
-        for request_id, carrier in zip(batch.request_ids, batch.otel_carriers, strict=False):
+        for request_id, carrier in zip(batch.request_ids, batch.otel_carriers, strict=True):
             if carrier and request_id not in unique_spans:
                 context = propagator.extract(carrier)
                 worker_span = tracer.start_span("Worker.execute_model", context=context)
@@ -288,7 +288,7 @@ class Worker:
 
         # Send to sidecar
         if self.sender_sidecar_client is not None:
-            for i, request_id, data_id in zip(range(len(batch)), batch.request_ids, batch.data_ids, strict=False):
+            for i, request_id in enumerate(batch.request_ids):
                 if (dst_sidecar_ranks := batch.receiver_ranks[i]) is None:
                     continue
                 token = None
@@ -297,7 +297,7 @@ class Worker:
                     token = context_api.attach(context)
                 self.sender_sidecar_client.send(
                     chunk=output[i],
-                    id=request_id + data_id,
+                    id=request_id + batch.data_ids[i],
                     chunk_id=batch.chunk_ids[i],
                     num_chunks=batch.num_chunks[i],
                     dst_sidecar_ranks=dst_sidecar_ranks,

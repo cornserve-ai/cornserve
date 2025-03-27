@@ -220,9 +220,9 @@ class Engine:
             batch_result.data_ids,
         )
 
-        for i, id in enumerate(batch.request_ids):
-            if id in done_request_ids and batch.otel_spans[i]:
-                batch.otel_spans[i].end()  # type: ignore
+        for req_id, span in zip(batch.request_ids, batch.otel_spans, strict=True):
+            if req_id in done_request_ids and span is not None:
+                span.end()
 
         return EngineResponse(
             request_ids=done_request_ids,
