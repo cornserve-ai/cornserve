@@ -19,6 +19,7 @@ spec:
       - name: jaeger
         image: jaegertracing/jaeger:2.4.0
         imagePullPolicy: IfNotPresent
+        args: ["--set=extensions.jaeger_query.max_clock_skew_adjust=30s"]
         env:
         - name: COLLECTOR_OTLP_ENABLED
           value: "true"
