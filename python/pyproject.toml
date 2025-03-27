@@ -95,7 +95,6 @@ select = [
   "B",   # flake8-bugbear (detects likely bugs)
   "G",   # flake8-logging-format (complains about logging)
   "SIM", # flake8-simplify (suggests code simplifications)
-  "I",   # isort
 ]
 exclude = [
   "cornserve/task_executors/eric/models/*.py",
