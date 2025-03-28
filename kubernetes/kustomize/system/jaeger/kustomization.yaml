@@ -4,5 +4,3 @@ resources:
 - configmap.yaml
 - deployment.yaml
 - service.yaml
-# - jaeger-deployment.yaml
-# - jaeger-service.yaml
