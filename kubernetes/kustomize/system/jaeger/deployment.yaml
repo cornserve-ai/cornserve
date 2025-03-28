@@ -2,7 +2,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: jaeger
-  namespace: cornserve
+  namespace: cornserve-system
   labels:
     app: jaeger
 spec:
@@ -15,18 +15,17 @@ spec:
       labels:
         app: jaeger
     spec:
+      nodeSelector:
+        node-role.kubernetes.io/control-plane: "true"
       containers:
       - name: jaeger
         image: jaegertracing/jaeger:2.4.0
         imagePullPolicy: IfNotPresent
-        args: ["--set=extensions.jaeger_query.max_clock_skew_adjust=30s"]
-        env:
-        - name: COLLECTOR_OTLP_ENABLED
-          value: "true"
-        - name: COLLECTOR_OTLP_GRPC_HOST_PORT
-          value: ":4317"
-        - name: COLLECTOR_OTLP_HTTP_HOST_PORT
-          value: ":4318"
+        securityContext:
+          runAsUser: 0
+          runAsGroup: 0
+        args:
+          - "--config=/config/config.yaml"
         ports:
         - containerPort: 16686
           name: query
@@ -34,6 +33,11 @@ spec:
           name: otlp-grpc
         - containerPort: 4318
           name: otlp-http
+        volumeMounts:
+        - name: config-volume
+          mountPath: /config
+        - name: host-storage
+          mountPath: /badger
         resources:
           limits:
             cpu: 500m
@@ -41,3 +45,11 @@ spec:
           requests:
             cpu: 100m
             memory: 200Mi
+      volumes:
+      - name: config-volume
+        configMap:
+          name: jaeger-config
+      - name: host-storage
+        hostPath:
+          path: /data/cornserve/jaeger-badger
+          type: DirectoryOrCreate

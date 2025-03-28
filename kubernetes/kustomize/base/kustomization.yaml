@@ -7,4 +7,3 @@ resources:
 - task-dispatcher
 - task-manager
 - namespace.yaml
-- jaeger

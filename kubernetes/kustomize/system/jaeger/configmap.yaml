@@ -1,0 +1,55 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: jaeger-config
+  namespace: cornserve-system
+data:
+  config.yaml: |
+    service:
+      extensions: [jaeger_storage, jaeger_query, healthcheckv2]
+      pipelines:
+        traces:
+          receivers: [otlp]
+          processors: [batch]
+          exporters: [jaeger_storage_exporter]
+      telemetry:
+        resource:
+          service.name: jaeger
+        metrics:
+          level: detailed
+        logs:
+          level: info
+
+    extensions:
+      healthcheckv2:
+        use_v2: true
+        http:
+
+      jaeger_query:
+        max_clock_skew_adjust: 30s
+        storage:
+          traces: badger_store
+
+      jaeger_storage:
+        backends:
+          badger_store:
+            badger:
+              directories:
+                keys: "/badger/keys"
+                values: "/badger/values"
+              ephemeral: false
+
+    receivers:
+      otlp:
+        protocols:
+          grpc:
+            endpoint: 0.0.0.0:4317
+          http:
+            endpoint: 0.0.0.0:4318
+
+    processors:
+      batch:
+
+    exporters:
+      jaeger_storage_exporter:
+        trace_storage: badger_store
