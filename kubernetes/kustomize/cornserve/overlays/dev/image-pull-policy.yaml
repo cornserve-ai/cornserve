@@ -23,18 +23,6 @@ spec:
         imagePullPolicy: IfNotPresent
 ---
 apiVersion: apps/v1
-kind: StatefulSet
-metadata:
-  name: sidecar
-  namespace: cornserve
-spec:
-  template:
-    spec:
-      containers:
-      - name: sidecar
-        imagePullPolicy: IfNotPresent
----
-apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: resource-manager

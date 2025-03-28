@@ -1,6 +1,7 @@
 """Resource Manager gRPC server."""
 
 import asyncio
+import os
 
 import grpc
 import tyro
@@ -84,7 +85,8 @@ async def serve(ip: str = "[::]", port: int = 50051) -> None:
     GrpcAioInstrumentorServer().instrument()
     GrpcAioInstrumentorClient().instrument()
 
-    manager = await ResourceManager.init()
+    num_gpu_per_node = int(os.environ.get("NUM_GPU_PER_NODE", "4"))
+    manager = await ResourceManager.init(num_gpu_per_node=num_gpu_per_node)
 
     server = grpc.aio.server()
     resource_manager_pb2_grpc.add_ResourceManagerServicer_to_server(ResourceManagerServicer(manager), server)

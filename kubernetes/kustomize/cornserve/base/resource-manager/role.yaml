@@ -1,12 +1,11 @@
 apiVersion: rbac.authorization.k8s.io/v1
-kind: Role
+kind: ClusterRole
 metadata:
   name: resource-manager-role
-  namespace: cornserve
 rules:
 - apiGroups: [""]
   resources: ["pods", "services"]
   verbs: ["*"]
-- apiGroups: ["apps"]
-  resources: ["statefulsets"]
-  verbs: ["*"]
+- apiGroups: [""]
+  resources: ["nodes"]
+  verbs: ["list"]
