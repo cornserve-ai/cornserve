@@ -1,0 +1,34 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: jaeger-collector-config
+  namespace: cornserve
+data:
+  config.yaml: |
+    service:
+      pipelines:
+        traces:
+          receivers: [otlp]
+          processors: [batch]
+          exporters: [jaeger_remote]
+      telemetry:
+        metrics:
+          level: detailed
+
+    receivers:
+      otlp:
+        protocols:
+          grpc:
+            endpoint: 0.0.0.0:4317
+          http:
+            endpoint: 0.0.0.0:4318
+
+    processors:
+      batch:
+        timeout: 5s
+
+    exporters:
+      jaeger_remote:
+        endpoint: jaeger-remote-storage:17271
+        tls:
+          insecure: true

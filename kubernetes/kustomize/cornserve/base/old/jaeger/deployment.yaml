@@ -1,0 +1,43 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: jaeger
+  namespace: cornserve
+  labels:
+    app: jaeger
+spec:
+  selector:
+    matchLabels:
+      app: jaeger
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        app: jaeger
+    spec:
+      containers:
+      - name: jaeger
+        image: jaegertracing/jaeger:2.4.0
+        imagePullPolicy: IfNotPresent
+        args: ["--set=extensions.jaeger_query.max_clock_skew_adjust=30s"]
+        env:
+        - name: COLLECTOR_OTLP_ENABLED
+          value: "true"
+        - name: COLLECTOR_OTLP_GRPC_HOST_PORT
+          value: ":4317"
+        - name: COLLECTOR_OTLP_HTTP_HOST_PORT
+          value: ":4318"
+        ports:
+        - containerPort: 16686
+          name: query
+        - containerPort: 4317
+          name: otlp-grpc
+        - containerPort: 4318
+          name: otlp-http
+        resources:
+          limits:
+            cpu: 500m
+            memory: 1Gi
+          requests:
+            cpu: 100m
+            memory: 200Mi

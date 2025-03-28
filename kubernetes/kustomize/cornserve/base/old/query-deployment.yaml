@@ -1,0 +1,36 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: jaeger-query
+  namespace: cornserve
+  labels:
+    app: jaeger-query
+spec:
+  selector:
+    matchLabels:
+      app: jaeger-query
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        app: jaeger-query
+    spec:
+      containers:
+      - name: jaeger-query
+        image: jaegertracing/jaeger-query:latest
+        imagePullPolicy: IfNotPresent
+        env:
+        - name: SPAN_STORAGE_TYPE
+          value: "grpc-plugin"
+        - name: GRPC_STORAGE_SERVER
+          value: "jaeger-remote-storage:17271"
+        ports:
+        - containerPort: 16686
+          name: query
+        resources:
+          limits:
+            cpu: 500m
+            memory: 1Gi
+          requests:
+            cpu: 100m
+            memory: 200Mi

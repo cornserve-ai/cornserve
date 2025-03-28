@@ -1,0 +1,47 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: jaeger-remote-storage
+  namespace: cornserve
+  labels:
+    app: jaeger-remote-storage
+spec:
+  selector:
+    matchLabels:
+      app: jaeger-remote-storage
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        app: jaeger-remote-storage
+    spec:
+      containers:
+      - name: jaeger-remote-storage
+        image: jaegertracing/jaeger-remote-storage:latest
+        imagePullPolicy: IfNotPresent
+        args:
+          - "--config-file=/config/config.yaml"
+        ports:
+          - containerPort: 17270
+            name: admin
+          - containerPort: 17271
+            name: grpc
+        volumeMounts:
+          - name: config-volume
+            mountPath: /config
+          - name: storage-volume
+            mountPath: /badger
+        resources:
+          limits:
+            cpu: 500m
+            memory: 1Gi
+          requests:
+            cpu: 100m
+            memory: 200Mi
+      volumes:
+        - name: config-volume
+          configMap:
+            name: jaeger-remote-storage-config
+        - name: storage-volume
+          persistentVolumeClaim:
+            claimName: jaeger-badger-storage

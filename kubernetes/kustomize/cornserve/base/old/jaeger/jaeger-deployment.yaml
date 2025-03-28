@@ -1,0 +1,61 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: jaeger
+  namespace: cornserve
+  labels:
+    app: jaeger
+spec:
+  selector:
+    matchLabels:
+      app: jaeger
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        app: jaeger
+    spec:
+      containers:
+      - name: jaeger
+        image: jaegertracing/jaeger:2.4.0
+        imagePullPolicy: IfNotPresent
+        securityContext:
+          runAsUser: 0
+          runAsGroup: 0
+        args:
+          - "--config=/config/config.yaml"
+        ports:
+        - containerPort: 16686
+          name: query
+        - containerPort: 4317
+          name: otlp-grpc
+        - containerPort: 4318
+          name: otlp-http
+        - containerPort: 14250
+          name: jaeger-grpc
+        - containerPort: 14268
+          name: jaeger-http
+        - containerPort: 6831
+          name: jaeger-thrift-c
+        - containerPort: 6832
+          name: jaeger-thrift-b
+        volumeMounts:
+        - name: config-volume
+          mountPath: /config
+        - name: host-storage
+          mountPath: /badger
+        resources:
+          limits:
+            cpu: 500m
+            memory: 1Gi
+          requests:
+            cpu: 100m
+            memory: 200Mi
+      volumes:
+      - name: config-volume
+        configMap:
+          name: jaeger-config
+      - name: host-storage
+        hostPath:
+          path: /data/jaeger-badger
+          type: DirectoryOrCreate
