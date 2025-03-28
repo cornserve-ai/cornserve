@@ -131,7 +131,7 @@ class SidecarLaunchInfo:
                         ],
                         env=[
                             kclient.V1EnvVar(name=name, value=value)
-                            for name, value in SidecarLaunchInfo().get_envs(
+                            for name, value in SidecarLaunchInfo.get_envs(
                                 sidecar_rank,
                                 num_nodes * num_gpu_per_node,
                             )
@@ -141,7 +141,7 @@ class SidecarLaunchInfo:
                                 name=name,
                                 mount_path=container_path,
                             )
-                            for name, _, container_path in SidecarLaunchInfo().get_container_volumes()
+                            for name, _, container_path in SidecarLaunchInfo.get_container_volumes()
                         ],
                     )
                 ],
@@ -150,7 +150,7 @@ class SidecarLaunchInfo:
                         name=name,
                         host_path=kclient.V1HostPathVolumeSource(path=host_path),
                     )
-                    for name, host_path, _ in SidecarLaunchInfo().get_container_volumes()
+                    for name, host_path, _ in SidecarLaunchInfo.get_container_volumes()
                 ],
                 service_account_name="sidecar",
                 runtime_class_name="nvidia",
