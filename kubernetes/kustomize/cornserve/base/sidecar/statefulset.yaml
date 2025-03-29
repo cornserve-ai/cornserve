@@ -1,0 +1,55 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: sidecar
+  namespace: cornserve
+  labels:
+    app: sidecar
+spec:
+  serviceName: sidecar
+  selector:
+    matchLabels:
+      app: sidecar
+  replicas: 4
+  template:
+    metadata:
+      labels:
+        app: sidecar
+    spec:
+      hostPID: true
+      hostIPC: true
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: "kubernetes.io/hostname"
+          whenUnsatisfiable: DoNotSchedule
+          labelSelector:
+            matchLabels:
+              app: sidecar
+      runtimeClassName: nvidia
+      serviceAccountName: sidecar
+      containers:
+      - name: sidecar
+        image: cornserve/sidecar:latest
+        imagePullPolicy: Always
+        ports:
+          - containerPort: 29500
+            name: torch-dist
+        env:
+          - name: SIDECAR_MASTER_ADDR
+            value: "sidecar-0.sidecar.cornserve.svc.cluster.local"
+          - name: SIDECAR_MASTER_PORT
+            value: "29500"
+          - name: SIDECAR_WORLD_SIZE
+            value: "4"
+          - name: SIDECAR_POD_NAME
+            valueFrom:
+              fieldRef:
+                fieldPath: metadata.name
+        volumeMounts:
+          - name: shm-volume
+            mountPath: /dev/shm
+      volumes:
+      - name: shm-volume
+        hostPath:
+          path: /dev/shm
+          type: Directory
