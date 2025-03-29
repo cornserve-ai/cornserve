@@ -105,7 +105,8 @@ class SidecarLaunchInfo:
             sidecar_rank: The global rank of the sidecar.
             world_size: The total number of sidecars in the cluster.
         """
-        assert node.metadata, "Node metadata is missing"
+        if not node.metadata:
+            raise ValueError("Node metadata is missing")
         pod_name = f"sidecar-{sidecar_rank}"
         return kclient.V1Pod(
             metadata=kclient.V1ObjectMeta(
