@@ -95,17 +95,15 @@ class SidecarLaunchInfo:
     @staticmethod
     def get_pod(
         node: kclient.V1Node,
-        num_nodes: int,
         sidecar_rank: int,
-        num_gpu_per_node: int,
+        world_size: int,
     ) -> kclient.V1Pod:
         """Get the pod spec for the sidecar.
 
         Args:
             node: The Kubernetes node to launch the sidecar on.
-            num_nodes: The total number of nodes in the cluster.
             sidecar_rank: The global rank of the sidecar.
-            num_gpu_per_node: The number of GPUs per node.
+            world_size: The total number of sidecars in the cluster.
         """
         assert node.metadata, "Node metadata is missing"
         pod_name = f"sidecar-{sidecar_rank}"
@@ -133,7 +131,7 @@ class SidecarLaunchInfo:
                             kclient.V1EnvVar(name=name, value=value)
                             for name, value in SidecarLaunchInfo.get_envs(
                                 sidecar_rank,
-                                num_nodes * num_gpu_per_node,
+                                world_size,
                             )
                         ],
                         volume_mounts=[
@@ -217,7 +215,7 @@ class ResourceManager:
         self.task_manager_stubs: dict[str, task_manager_pb2_grpc.TaskManagerStub] = {}
 
     @staticmethod
-    async def init(num_gpu_per_node: int) -> ResourceManager:
+    async def init() -> ResourceManager:
         """Actually initialize the resource manager.
 
         Spawn the sidecar pods and created GPU objects make up the `Resource` object.
@@ -232,16 +230,49 @@ class ResourceManager:
         # then for each node, we create num_gpu_per_node sidecars with rank
         coros = []
         gpus = []
-        for i, node in enumerate(nodes.items):
-            for j in range(num_gpu_per_node):
-                sidecar_rank = i * num_gpu_per_node + j
-                pod = SidecarLaunchInfo.get_pod(node, len(nodes.items), sidecar_rank, num_gpu_per_node)
-                coros.append(core_api.create_namespaced_pod(namespace=constants.K8S_NAMESPACE, body=pod))
-                gpus.append(GPU(node=node.metadata.name, global_rank=sidecar_rank, local_rank=j))
-        await asyncio.gather(*coros)
-        resource = Resource(gpus=gpus)
+        created_pods = []
+        try:
+            gpu_per_node = {}
+            # first query the number of GPUs on each node
+            for node in nodes.items:
+                gpu_per_node[node.metadata.name] = int(node.status.capacity["nvidia.com/gpu"])
+            world_size = sum(gpu_per_node.values())
+            sidecar_rank = 0
+            for node in nodes.items:
+                for j in range(gpu_per_node[node.metadata.name]):
+                    pod = SidecarLaunchInfo.get_pod(node, sidecar_rank, world_size)
+                    coros.append(core_api.create_namespaced_pod(namespace=constants.K8S_NAMESPACE, body=pod))
+                    gpus.append(GPU(node=node.metadata.name, global_rank=sidecar_rank, local_rank=j))
+                    sidecar_rank += 1
 
-        return ResourceManager(api_client=api_client, resource=resource)
+            spawn_results = await asyncio.gather(*coros, return_exceptions=True)
+            failed = 0
+            for i, result in enumerate(spawn_results):
+                if isinstance(result, BaseException):
+                    logger.error("Failed to spawn sidecar pod for GPU %s: %s", gpus[i], result)
+                    failed += 1
+                else:
+                    created_pods.append(result)
+                    logger.info("Successfully spawned sidecar pod for GPU %s", gpus[i])
+            if failed:
+                # Clean up any created pods
+                cleanup_coros = []
+                with suppress(kclient.ApiException):
+                    for pod in created_pods:
+                        cleanup_coros.append(
+                            core_api.delete_namespaced_pod(
+                                name=pod.metadata.name,
+                                namespace=constants.K8S_NAMESPACE,
+                            )
+                        )
+                    await asyncio.gather(*cleanup_coros, return_exceptions=True)
+                raise RuntimeError(f"Failed to spawn {failed} sidecar pods")
+
+            resource = Resource(gpus=gpus)
+            return ResourceManager(api_client=api_client, resource=resource)
+        except Exception as e:
+            logger.error("Error during resource initialization: %s", str(e))
+            raise
 
     @tracer.start_as_current_span("ResourceManager.reconcile_new_app")
     async def reconcile_new_app(self, app_id: str, tasks: list[Task]) -> None:
