@@ -16,7 +16,7 @@ import numpy.typing as npt
 import requests
 from opentelemetry import trace
 from PIL import Image
-from transformers import AutoConfig
+from transformers.models.auto.configuration_auto import AutoConfig
 
 from cornserve.logging import get_logger
 from cornserve.task_executors.eric.config import (

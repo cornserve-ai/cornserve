@@ -1,5 +1,5 @@
 import torch.nn as nn
-from transformers import CLIPVisionConfig, SiglipVisionConfig, PixtralVisionConfig
+from transformers.models.siglip import SiglipVisionConfig
 
 from cornserve.task_executors.eric.models.layers.siglip import SiglipVisionModel
 
