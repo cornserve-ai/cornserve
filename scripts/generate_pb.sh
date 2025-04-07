@@ -20,4 +20,6 @@ done
 
 # The generated `import common_pb2`, for example, doesn't work.
 # We need to change it manually to `from . import common_pb2`.
-find "$PYTHON_OUTPUT_DIR" -type f -name "*.py" -exec sed -i -e 's/^\(import.*pb2\)/from . \1/g' {} \;
+# `-i.bak` is done for GNU and BSD sed compatibility.
+find "$PYTHON_OUTPUT_DIR" -type f -name "*.py" -exec sed -i.bak -e 's/^\(import.*pb2\)/from . \1/g' {} \;
+find "$PYTHON_OUTPUT_DIR" -type f -name "*.bak" -exec rm {} \;
