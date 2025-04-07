@@ -15,7 +15,8 @@ import safetensors
 import torch
 import transformers
 from huggingface_hub import HfApi, hf_hub_download, snapshot_download
-from transformers import AutoConfig, PretrainedConfig
+from transformers.configuration_utils import PretrainedConfig
+from transformers.models.auto.configuration_auto import AutoConfig
 
 from cornserve.logging import get_logger
 from cornserve.task_executors.eric.distributed import parallel

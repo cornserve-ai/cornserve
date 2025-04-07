@@ -6,7 +6,8 @@ Config values should be kept in sync with `cornserve.task_executors.launch`.
 """
 
 from pydantic import BaseModel, ConfigDict, NonNegativeInt, PositiveInt, model_validator
-from transformers import AutoConfig, PretrainedConfig
+from transformers.configuration_utils import PretrainedConfig
+from transformers.models.auto.configuration_auto import AutoConfig
 from typing_extensions import Self
 
 
