@@ -7,19 +7,11 @@ to send/receive tensors to/from each other.
 
 Code lives under `python/services/sidecar`
 
-## Motivation
-The distributed processing group in PyTorch is rigid and it's costly to
-dynamically scale the processing group or adjust the role of each distributed
-process. The Cornserve project requires auto-scaling of distributed
-task executors. To support intermediate data (tensor) transfer adaptively, we
-decouple communication from task executors to dedicated `sidecars` that can be
-long-living within the cluster.
-
 ## Architecture
 Sidecars are implemented with Servers and Clients. Conceptually, servers are long
 running, and clients register to servers and request servers to perform send or
 receive operations. All control signals among servers and clients use gRPC, and
-the tensor transfer is implemented using `gloo`. Servers and clients use shared 
+the tensor transfer is implemented using `ucx-py`. Servers and clients use shared 
 memory buffer to reduce memory copies. A sender client puts some data in the
 shared memory buffer and provide a handle to the sender server, the sender server
 then transmits the data to the receiver server. Upon the receiver client calling

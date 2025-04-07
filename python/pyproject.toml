@@ -28,6 +28,7 @@ dynamic = ["version"]
 frontend = []
 sidecar = [
   "torch",
+  "ucx-py-cu12",
   "opentelemetry-instrumentation-grpc",
   "opentelemetry-instrumentation-threading",
 ]

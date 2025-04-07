@@ -4,6 +4,7 @@ import asyncio
 import multiprocessing
 import os
 import random
+import signal
 import time
 import uuid
 from typing import Generator
@@ -35,18 +36,64 @@ def mock_grpc_channel() -> None:
     )
 
 
+def device_from_rank(rank: int) -> torch.device:
+    """Get the device for a given rank."""
+    if torch.cuda.is_available():
+        return torch.device(f"cuda:{rank % torch.cuda.device_count()}")
+    return torch.device("cpu")
+
+
+def mock_ucx_url_from_rank(rank: int) -> str:
+    """UCX connection host url from rank."""
+    assert rank >= 0, "Rank should be non-negative"
+    return "localhost"
+
+
+def mock_ucx_url() -> None:
+    """Mock the ucx_url_from_rank function."""
+    mocker = pytest.MonkeyPatch()
+    mocker.setattr(
+        "cornserve.services.sidecar.utils.ucx_url_from_rank",
+        mock_ucx_url_from_rank,
+    )
+
+
+def mock_device() -> None:
+    mocker = pytest.MonkeyPatch()
+    mocker.setattr(
+        "cornserve.services.sidecar.utils.device_from_rank",
+        device_from_rank,
+    )
+    mocker.setattr(
+        "cornserve.services.sidecar.api.device_from_rank",
+        device_from_rank,
+    )
+
+
 def run_server(rank: int, world_size: int, shm_size: int) -> None:
     """Sidecar server entrypoint that will run in a subprocess."""
     mock_grpc_channel()
+    mock_ucx_url()
+    mock_device()
 
     # Set environment variables
     os.environ["SIDECAR_RANK"] = str(rank)
     os.environ["SIDECAR_WORLD_SIZE"] = str(world_size)
     os.environ["SIDECAR_SHM_SIZE"] = str(shm_size)
 
-    from cornserve.services.sidecar.server import main
+    from cornserve.services.sidecar.server import cleanup_coroutines, main
 
-    asyncio.run(main())
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+
+    try:
+        loop.run_until_complete(main())
+    except KeyboardInterrupt:
+        pass
+    finally:
+        loop.run_until_complete(loop.shutdown_asyncgens())
+        loop.run_until_complete(asyncio.gather(*cleanup_coroutines))
+        loop.close()
 
 
 def start_sidecar_servers(n: int = 4, shm_size: int = 2 << 28) -> list[multiprocessing.Process]:
@@ -65,11 +112,17 @@ def start_sidecar_servers(n: int = 4, shm_size: int = 2 << 28) -> list[multiproc
 
 def terminate_processes(processes: list[multiprocessing.Process]) -> None:
     """Terminate all processes."""
+
     for process in processes:
+        if process.pid:
+            os.kill(process.pid, signal.SIGINT)
+
+    for process in processes:
+        process.join(timeout=5)
+        if not process.is_alive():
+            continue
         process.terminate()
         process.join(timeout=2)
-
-        # Force kill if still running
         if process.is_alive():
             process.kill()
             process.join()
@@ -79,6 +132,18 @@ def terminate_processes(processes: list[multiprocessing.Process]) -> None:
 def mock_grpc_channel_fixture() -> None:
     """Fixture to automatically mock the grpc_channel_from_rank function."""
     mock_grpc_channel()
+
+
+@pytest.fixture(scope="module", autouse=True)
+def mock_ucx_url_fixture() -> None:
+    """Fixture to automatically mock the ucx_url_from_rank function."""
+    mock_ucx_url()
+
+
+@pytest.fixture(scope="module", autouse=True)
+def mock_device_fixture() -> None:
+    """Fixture to automatically mock the device_from_rank function."""
+    mock_device()
 
 
 @pytest.fixture(scope="module")
@@ -133,7 +198,7 @@ async def test_group_receiver(sidecar_servers: list[multiprocessing.Process]):
             sidecar_rank=rank,
             shape=(-1, 5),
             dtype=torch.bfloat16,
-            peers=list(range(MAX_SERVERS)),
+            group=list(range(MAX_SERVERS)),
         )
         group_size = group.shm_size
         await group.shutdown()
@@ -213,7 +278,7 @@ async def test_send_recv(
         sidecar_rank=sender_n,
         shape=(-1, *shape),
         dtype=dtype,
-        peers=list(range(sender_n, sender_n + receiver_n)),
+        group=list(range(sender_n, sender_n + receiver_n)),
     )
 
     readers = []
@@ -239,7 +304,7 @@ async def test_send_recv(
             for j, sender in enumerate(senders):
                 print(f"-->Sender {j} sending chunk {i}")
                 sender.send(
-                    chunk=chunk.to(f"cuda:{j}"),
+                    chunk=chunk.to(device_from_rank(j)),
                     id=id,
                     dst_sidecar_ranks=list(range(sender_n, sender_n + receiver_n)),
                     chunk_id=i,
@@ -260,12 +325,12 @@ async def test_send_recv(
         sender_n: int,
     ):
         received = await receiver.recv(id=id)
-        sent = data[k].to(f"cuda:{sender_n}")
-        received = received.to(f"cuda:{sender_n}")
+        sent = data[k].to(device_from_rank(sender_n))
+        received = received.to(device_from_rank(sender_n))
         assert torch.allclose(sent, received)
         for reader in readers:
             received = reader.recv(id=id)
-            received = received.to(f"cuda:{sender_n}")
+            received = received.to(device_from_rank(sender_n))
             assert torch.allclose(sent, received)
         await receiver.mark_done(id=id)
 

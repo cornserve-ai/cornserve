@@ -9,6 +9,7 @@ together provide the functionality to send and receive tensors between ranks.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import multiprocessing as mp
 import os
 import pickle
@@ -17,9 +18,10 @@ from dataclasses import dataclass
 import grpc
 import kubernetes_asyncio.client as kclient
 import kubernetes_asyncio.config as kconfig
+import numpy as np
 import torch
-import torch.distributed as dist
 import tyro
+import ucp
 from opentelemetry import trace
 from opentelemetry.instrumentation.grpc import (
     GrpcAioInstrumentorClient,
@@ -34,12 +36,17 @@ from cornserve.tracing import configure_otel
 
 from .shm_manager import SharedMemoryBuffer, SharedMemoryManager
 from .utils import (
+    GRPC_BASE_PORT,
+    UCX_BASE_PORT,
     TensorLayout,
+    buffer_from_tensor,
     chunk_tag,
     device_from_rank,
     grpc_channel_from_rank,
     init_shmem,
     shm_fn,
+    ucx_port_from_rank,
+    ucx_url_from_rank,
 )
 
 logger = get_logger(__name__, [SidcarAdapter])
@@ -48,7 +55,7 @@ cleanup_coroutines = []
 
 
 class CommSidecarReceiver:
-    """The receiver sidecar server supports receiving tensors from other ranks using gloo backend."""
+    """The receiver sidecar server supports receiving tensors from other ranks using ucx-py backend."""
 
     @dataclass
     class TransferRequestState:
@@ -67,29 +74,31 @@ class CommSidecarReceiver:
     def __init__(
         self,
         sidecar_rank: int,
-        peers: list[int],
+        group: list[int],
         node_info: SidecarNodeInfo,
         shm_size: int,
         slot_size: int,
         dtype: str,
+        peers: dict[int, ucp.Endpoint],
     ) -> None:
         """Initialize the receiver sidecar.
 
         Args:
             sidecar_rank: The sidecar rank, aka global rank.
-            peers: The ranks of the TP group to receive tensors from.
+            group: The ranks of the TP group to receive tensors from.
             node_info: The node information.
             shm_size: The shared memory size (number of elements of given dtype).
             slot_size: The shape of the tensor to be received, currently fixed.
             dtype: The data type of the receiving tensor.
+            peers: The peers to receive the tensor from.
         """
         self.sidecar_rank = sidecar_rank
-        self.peers = peers
+        self.group = group
 
         self.dtype = getattr(torch, dtype)
         self.shm_fn = shm_fn()
         self.node_info = node_info
-        self.local_ranks = [self.node_info.get_device_id(i) for i in peers]
+        self.local_ranks = [self.node_info.get_device_id(i) for i in group]
         self.shm_size = shm_size
         self.shared_tensor = init_shmem(
             self.shm_fn,
@@ -108,18 +117,21 @@ class CommSidecarReceiver:
         self.req_events: dict[str, asyncio.Event] = {}
 
         # we use a multiprocessing lock to protect the done flag, as this lock is used in the recv_task,
-        # which is running in a separate thread to avoid blocking on dist.recv
+        # which is running in a separate thread to avoid blocking on recv
         self.recv_done_lock = mp.Lock()
 
         # this is used to keep track of the memory pressure events
         self.mem_pressure_count = 0
+
+        self.peers = peers
 
     async def shutdown(self):
         """Cleanup routines for the receiver."""
         # remove the shared memory file, used async to unify the interface
         del self.shared_tensor
         del self.shm_manager
-        os.unlink(self.shm_fn)
+        with contextlib.suppress(Exception):
+            os.unlink(self.shm_fn)
 
     async def prepare_receive(
         self,
@@ -200,12 +212,12 @@ class CommSidecarReceiver:
         tag = chunk_tag(request.src_rank, request.chunk_id, request.shard_rank)
 
         # TODO: allow batch recv
-        def recv_task():
+        async def recv_task():
             """The task to receive the tensor."""
             logger.info("Queuing recv task for chunk %d of request %s tag %d", request.chunk_id, request.id, tag)
-            dist.recv(
-                chunk.data[request.shard_offset : request.shard_offset + request.shard_size],
-                src=request.src_rank,
+            peer = self.peers[request.src_rank]
+            await peer.recv(
+                buffer_from_tensor(chunk.data[request.shard_offset : request.shard_offset + request.shard_size]),
                 tag=tag,
             )
             chunk.mark_shard_ready(request.shard_rank, request.shard_size)
@@ -225,7 +237,7 @@ class CommSidecarReceiver:
                     self.req_events[request.id].set()
                 self.recv_done_lock.release()
 
-        asyncio.create_task(asyncio.to_thread(recv_task))
+        asyncio.create_task(recv_task())
         return comm_sidecar_pb2.PrepareReceiveResponse(status=common_pb2.Status.STATUS_OK)
 
     async def receive(
@@ -289,6 +301,7 @@ class CommSidecarSender:
         shm_size: int,
         slot_size: int,
         dtype: torch.dtype,
+        peers: dict[int, ucp.Endpoint],
         shard_rank: int = 0,
         num_shards: int = 1,
         layout: TensorLayout = TensorLayout.FULL,
@@ -296,11 +309,11 @@ class CommSidecarSender:
         """Initialize the sender sidecar server.
 
         Args:
-            gpu_rank: The local GPU rank.
             sidecar_rank: The sidecar rank, aka global rank.
             shm_size: The shared memory size (number of elements of given dtype).
             slot_size: The slot_size of the shared memory buffer.
             dtype: The data type of the sending tensor.
+            peers: The peers to send the tensor to.
             shard_rank: The rank of the shard, default to 0.
             num_shards: The number of shards, default to 1.
             layout: The layout of the tensor, default to FULL.
@@ -327,6 +340,7 @@ class CommSidecarSender:
         self.dst_channels: dict[int, grpc.aio.Channel] = {}
         self.dst_stubs: dict[int, comm_sidecar_pb2_grpc.CommSidecarStub] = {}
         self.mem_pressure_count = 0
+        self.peers = peers
 
     async def report_memory(
         self, request: comm_sidecar_pb2.ReportMemoryRequest, context: grpc.aio.ServicerContext
@@ -367,6 +381,8 @@ class CommSidecarSender:
             await context.abort(grpc.StatusCode.INVALID_ARGUMENT, "invalid destination rank")
         # only send to the head receiver when TP is enabled (min sidecar rank)
         dst_rank = min(send_request.dst_ranks)
+        if dst_rank not in self.peers:
+            await context.abort(grpc.StatusCode.INVALID_ARGUMENT, "Peer does not exist")
 
         # inform destination sidecar
         # lazily create channel
@@ -410,22 +426,13 @@ class CommSidecarSender:
 
         logger.info("Sending chunk %d for req %s", send_request.chunk_id, send_request.id)
         tag = chunk_tag(self.sidecar_rank, send_request.chunk_id, self.shard_rank)
-        req = dist.isend(
-            self.shared_tensor[
-                send_request.slot * self.slot_size : send_request.slot * self.slot_size + send_request.size
-            ],
-            dst=dst_rank,
-            tag=tag,
-        )
-        if req is None:
-            logger.error("Failed to send chunk %d for request %s", send_request.chunk_id, send_request.id)
-            return comm_sidecar_pb2.SendResponse(status=common_pb2.Status.STATUS_ERROR)
 
-        def wait_fn():
-            req.wait()
-
+        peer = self.peers[dst_rank]
+        to_send = self.shared_tensor[
+            send_request.slot * self.slot_size : send_request.slot * self.slot_size + send_request.size
+        ]
         span.add_event("send.start")
-        await asyncio.to_thread(wait_fn)
+        await peer.send(buffer_from_tensor(to_send), tag=tag)
         span.add_event("send.done")
         span.set_attribute("sidecar_sender_server.send.size", send_request.size)
         logger.info(
@@ -438,19 +445,59 @@ class CommSidecarSender:
 class CommSidecarServicer(comm_sidecar_pb2_grpc.CommSidecarServicer):
     """A unified wrapper for both sender and receiver sidecar servers. Entry point for the gRPC service."""
 
-    def __init__(self, sidecar_rank: int, mem_pressure_threshold=500) -> None:
+    def __init__(
+        self,
+        sidecar_rank: int,
+        ucx_port: int,
+        world_size: int,
+        mem_pressure_threshold=500,
+    ) -> None:
         """Initialize the sidecar service.
 
         This creates an offline sidecar server that only has the CheckHealth endpoint available.
 
         Args:
             sidecar_rank: The global rank of the sidecar.
+            ucx_port: The UCX port to use for communication.
+            world_size: The total number of sidecars in the cluster.
             mem_pressure_threshold: The threshold of memory pressure count to trigger the memory pressure status.
         """
         self.sidecar_rank = sidecar_rank
         self.sidecar: CommSidecarSender | CommSidecarReceiver | None = None
         self.live = False
         self.mem_pressure_threshold = mem_pressure_threshold
+        self.ucx_port = ucx_port
+        self.world_size = world_size
+        self.peers = dict[int, ucp.Endpoint]()
+
+        async def _ucx_listener_callback(ep: ucp.Endpoint) -> None:
+            """Callback for the UCX listener."""
+            id = np.empty(1, dtype=np.int32)
+            await ep.recv(id)
+            if id[0] in self.peers:
+                logger.warning("Overwriting endpoint %d", id[0])
+            self.peers[id[0]] = ep
+
+        self.ucx_listener = ucp.create_listener(_ucx_listener_callback, port=self.ucx_port)
+
+    async def p2p_connect(self) -> None:
+        """Connect to other peers using UCX.
+
+        Connects to peers with lower sidecar ranks, and wait to be connected by peers with higher sidecar ranks.
+        """
+        for i in range(self.world_size):
+            if i < self.sidecar_rank:
+                while i not in self.peers:
+                    try:
+                        ep = await ucp.create_endpoint(ucx_url_from_rank(i), ucx_port_from_rank(i))
+                        msg = np.array([self.sidecar_rank], dtype=np.int32)
+                        await ep.send(msg)
+                        self.peers[i] = ep
+                    except Exception:
+                        await asyncio.sleep(0.5)
+        while len(self.peers) < self.world_size - 1:
+            await asyncio.sleep(0.5)
+        logger.info("Connected to all peers")
 
     def online(self, node_info: SidecarNodeInfo, shm_size: int) -> None:
         """Mark the sidecar as online.
@@ -504,14 +551,14 @@ class CommSidecarServicer(comm_sidecar_pb2_grpc.CommSidecarServicer):
             shm_size=shm_size,
             slot_size=request.slot_size,
             dtype=dtype,
+            peers=self.peers,
             shard_rank=request.shard_rank,
             num_shards=request.num_shards,
             node_info=self.node_info,
             layout=TensorLayout(request.layout),
         )
 
-        # gpu_rank is local rank, which is the gpu_rank on the host
-        logger.info("Registered sender of gpu_rank %s, sidecar_rank %s", self.device_id, self.sidecar_rank)
+        logger.info("Registered sender of local_rank %s, sidecar_rank %s", self.device_id, self.sidecar_rank)
 
         return comm_sidecar_pb2.RegisterResponse(
             shm_size=shm_size,
@@ -531,25 +578,26 @@ class CommSidecarServicer(comm_sidecar_pb2_grpc.CommSidecarServicer):
         if self.sidecar is not None:
             logger.warning("Overwriting existing sidecar")
 
-        if self.sidecar_rank not in request.peers:
-            await context.abort(grpc.StatusCode.INVALID_ARGUMENT, "Invalid peers rank")
-        for r in request.peers:
+        if self.sidecar_rank not in request.group:
+            await context.abort(grpc.StatusCode.INVALID_ARGUMENT, "Invalid group rank")
+        for r in request.group:
             if not self.node_info.contains(r):
-                await context.abort(grpc.StatusCode.INVALID_ARGUMENT, "Invalid peers rank")
+                await context.abort(grpc.StatusCode.INVALID_ARGUMENT, "Invalid group rank")
 
         dtype = getattr(torch, request.dtype)
         shm_size = self.shm_size // dtype.itemsize
 
         self.sidecar = CommSidecarReceiver(
             sidecar_rank=self.sidecar_rank,
-            peers=list(request.peers),
+            group=list(request.group),
             shm_size=shm_size,
             slot_size=request.slot_size,
             dtype=request.dtype,
+            peers=self.peers,
             node_info=self.node_info,
         )
         logger.info(
-            "Registered receiver of gpu_rank %s, sidecar_rank %s, slot_size %d, dtype %s",
+            "Registered receiver of local_rank %s, sidecar_rank %s, slot_size %d, dtype %s",
             self.device_id,
             self.sidecar_rank,
             request.slot_size,
@@ -558,7 +606,7 @@ class CommSidecarServicer(comm_sidecar_pb2_grpc.CommSidecarServicer):
 
         return comm_sidecar_pb2.RegisterResponse(
             shm_size=shm_size,
-            local_ranks=[self.node_info.get_device_id(i) for i in request.peers],
+            local_ranks=[self.node_info.get_device_id(i) for i in request.group],
             num_local_sidecars=self.num_devices,
         )
 
@@ -652,6 +700,10 @@ class CommSidecarServicer(comm_sidecar_pb2_grpc.CommSidecarServicer):
         """Shutdown the sidecar."""
         if self.sidecar is not None:
             await self.sidecar.shutdown()
+        for peer in self.peers.values():
+            await peer.close()
+        self.ucx_listener.close()
+        logger.info("Sidecar shutdown")
 
     async def ReportMemory(
         self,
@@ -712,7 +764,6 @@ async def _get_node_info(pod_name: str) -> SidecarNodeInfo | None:
 
 async def main(
     ip: str = "[::]",
-    base_port: int = 10000,
 ) -> None:
     """Main entrypoint for the sidecar server.
 
@@ -738,8 +789,6 @@ async def main(
         - SIDECAR_NUM_DEVICES: Optional. The number of devices on the node, will use SIDECAR_WORLD_SIZE if not set.
     """
     world_size = int(os.environ.get("SIDECAR_WORLD_SIZE", "1"))
-    master_addr = os.environ.get("SIDECAR_MASTER_ADDR", "localhost")
-    master_port = os.environ.get("SIDECAR_MASTER_PORT", "48105")
     shm_size = int(os.environ.get("SIDECAR_SHM_SIZE", str(2**30)))
 
     assert world_size > 0, "Invalid SIDECAR_WORLD_SIZE"
@@ -765,9 +814,14 @@ async def main(
 
     # We start the server so the health check gRPC is always available
     server = grpc.aio.server()
-    servicer = CommSidecarServicer(sidecar_rank=sidecar_rank)
+    ucx_port = UCX_BASE_PORT + sidecar_rank
+    servicer = CommSidecarServicer(
+        sidecar_rank=sidecar_rank,
+        ucx_port=ucx_port,
+        world_size=world_size,
+    )
     comm_sidecar_pb2_grpc.add_CommSidecarServicer_to_server(servicer, server)
-    port = base_port + sidecar_rank
+    port = GRPC_BASE_PORT + sidecar_rank
     listen_addr = f"{ip}:{port}"
     server.add_insecure_port(listen_addr)
     await server.start()
@@ -779,13 +833,8 @@ async def main(
         await server.stop(5)
         logger.info("Server stopped")
 
-    init_url = f"tcp://{master_addr}:{master_port}"
-    dist.init_process_group(
-        backend="gloo",
-        init_method=init_url,
-        rank=sidecar_rank,
-        world_size=world_size,
-    )
+    logger.info("Starting sidecar server %s", sidecar_rank)
+    await servicer.p2p_connect()
 
     # now that every sidecar server has started, we query the cluster to retrieve
     # the device_id and num_devices within the node when using k8s
@@ -800,7 +849,7 @@ async def main(
     assert shm_size % torch.cdouble.itemsize == 0, (
         "shm_size should be a multiple of num_devices * max(torch.cdouble) dtype itemsize"
     )
-    # dist process group is initialized, now we can mark the server live
+    # sidecar group p2p connected, now we can mark the server live
     servicer.online(node_info=node_info, shm_size=shm_size)
 
     cleanup_coroutines.append(server_graceful_shutdown())

@@ -53,12 +53,12 @@ class TensorSidecarReceiverBase:
         shape: The shape of the tensor to be received, must be (-1, ...)
     """
 
-    def __init__(self, sidecar_rank: int, peers: list[int], shape: tuple[int, ...], dtype: torch.dtype) -> None:
+    def __init__(self, sidecar_rank: int, group: list[int], shape: tuple[int, ...], dtype: torch.dtype) -> None:
         """Initialize the sidecar receiver client that receives data from a sender sidecar.
 
         Args:
             sidecar_rank: The global rank of the sidecar server.
-            peers: The sidecar_ranks of the TP group to receive the tensor.
+            group: The sidecar_ranks of the TP group to receive the tensor.
             shape: The shape of the tensor to be received, should be (-1, slot_shape), where
                 slot_shape is used in the shared memory buffer.
             dtype: The data type of the tensor to be received.
@@ -68,7 +68,7 @@ class TensorSidecarReceiverBase:
             raise ValueError("The first dimension of the shape should be -1")
 
         self.sidecar_rank = sidecar_rank
-        self.peers = peers
+        self.group = group
         self.dtype = dtype
         self.tensor_shape = shape
 
@@ -81,7 +81,7 @@ class TensorSidecarReceiverBase:
         request = comm_sidecar_pb2.RegisterReceiverRequest(
             slot_size=slot_size,
             dtype=str(self.dtype).split(".")[-1],
-            peers=peers,
+            group=group,
         )
         response = self.stub.RegisterReceiver(request)
         assert response.shm_size > 0, "Failed to register sidecar"
@@ -161,7 +161,7 @@ class TensorSidecarAsyncReceiver(TensorSidecarReceiverBase):
         sidecar_rank: int,
         shape: tuple[int, ...],
         dtype: torch.dtype,
-        peers: Optional[list[int]] = None,
+        group: Optional[list[int]] = None,
     ) -> None:
         """Constructor for the sidecar receiver.
 
@@ -171,17 +171,17 @@ class TensorSidecarAsyncReceiver(TensorSidecarReceiverBase):
             shape: The shape expected for the received tensor, should be (-1, hidden_size).
                 hidden_size will be used as the slot size in the shared memory buffer.
             dtype: The data type of the tensor to be received.
-            peers: The sidecar ranks of the TP group to receiver the tensor.
+            group: The sidecar ranks of the TP group to receiver the tensor.
         """
-        if peers is None:
-            peers = [sidecar_rank]
-        super().__init__(sidecar_rank, peers, shape, dtype)
+        if group is None:
+            group = [sidecar_rank]
+        super().__init__(sidecar_rank, group, shape, dtype)
 
         # casting is to make pyright happy
         cast(grpc.Channel, self.channel).close()
         # overwrite the channel and the stub with async ones
         # we always talk to the controller sidecar
-        controller_rank = min(peers)
+        controller_rank = min(group)
         self.channel = grpc.aio.insecure_channel(grpc_channel_from_rank(controller_rank))
         self.stub = comm_sidecar_pb2_grpc.CommSidecarStub(self.channel)
         self._finalizer = weakref.finalize(self, self.__del__)

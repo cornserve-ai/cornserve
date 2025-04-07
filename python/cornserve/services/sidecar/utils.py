@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ctypes
 from enum import Enum
 
 import torch
@@ -11,13 +12,24 @@ from cornserve import constants
 RANK_OFFSET = 1000000
 CHUNK_OFFSET = 1000
 
+GRPC_BASE_PORT = 10000
+UCX_BASE_PORT = 11000
+
 
 def chunk_tag(rank: int, chunk_id: int, shard_rank: int) -> int:
     """Generate a tag for the chunk.
 
-    The tag is a unique id for a chunk during gloo transmission.
+    The tag is a unique id for a chunk during transmission.
     """
     return RANK_OFFSET * (rank) + CHUNK_OFFSET * (chunk_id) + shard_rank
+
+
+def buffer_from_tensor(t: torch.Tensor) -> ctypes.Array:
+    """Convert a torch tensor to a ctypes buffer for ucx-py."""
+    data_ptr = t.data_ptr()
+    size_bytes = t.numel() * t.element_size()
+    buffer = (ctypes.c_byte * size_bytes).from_address(data_ptr)
+    return buffer
 
 
 def shm_fn() -> str:
@@ -40,7 +52,25 @@ def grpc_channel_from_rank(rank: int) -> str:
         constants.K8S_NAMESPACE,
         "svc.cluster.local",
     ]
-    return ".".join(parts) + f":{10000 + rank}"
+    return ".".join(parts) + f":{GRPC_BASE_PORT + rank}"
+
+
+def ucx_url_from_rank(rank: int) -> str:
+    """UCX connection host url from rank."""
+    assert rank >= 0, "Rank should be non-negative"
+    parts = [
+        f"sidecar-{rank}",
+        constants.K8S_SIDECAR_SERVICE_NAME,
+        constants.K8S_NAMESPACE,
+        "svc.cluster.local",
+    ]
+    return ".".join(parts)
+
+
+def ucx_port_from_rank(rank: int) -> int:
+    """UCX connection host port from rank."""
+    assert rank >= 0, "Rank should be non-negative"
+    return UCX_BASE_PORT + rank
 
 
 def init_shmem(

@@ -31,14 +31,9 @@ spec:
       - name: sidecar
         image: cornserve/sidecar:latest
         imagePullPolicy: Always
-        ports:
-          - containerPort: 29500
-            name: torch-dist
+        securityContext:
+          privileged: true
         env:
-          - name: SIDECAR_MASTER_ADDR
-            value: "sidecar-0.sidecar.cornserve.svc.cluster.local"
-          - name: SIDECAR_MASTER_PORT
-            value: "29500"
           - name: SIDECAR_WORLD_SIZE
             value: "4"
           - name: SIDECAR_POD_NAME
@@ -48,8 +43,20 @@ spec:
         volumeMounts:
           - name: shm-volume
             mountPath: /dev/shm
+          - name: infiniband-class
+            mountPath: /sys/class/infiniband
+          - name: infiniband-dev
+            mountPath: /dev/infiniband
       volumes:
       - name: shm-volume
         hostPath:
           path: /dev/shm
+          type: Directory
+      - name: infiniband-class
+        hostPath:
+          path: /sys/class/infiniband
+          type: Directory
+      - name: infiniband-dev
+        hostPath:
+          path: /dev/infiniband
           type: Directory

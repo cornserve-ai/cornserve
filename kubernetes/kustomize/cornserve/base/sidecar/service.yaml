@@ -9,7 +9,3 @@ spec:
   clusterIP: None
   selector:
     app: sidecar
-  ports:
-    - name: torch
-      port: 29500
-      targetPort: torch-dist

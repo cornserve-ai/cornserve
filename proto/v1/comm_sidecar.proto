@@ -67,7 +67,7 @@ message RegisterReceiverRequest {
   string dtype = 2;
   int32 layout = 3;
   // the sidecar ranks of the group
-  repeated int32 peers = 4;
+  repeated int32 group = 4;
 }
 
 message RegisterReaderRequest {
