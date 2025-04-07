@@ -1,4 +1,4 @@
-FROM pytorch/pytorch:2.6.0-cuda12.4-cudnn9-runtime
+FROM pytorch/pytorch:2.6.0-cuda12.4-cudnn9-devel
 
 RUN apt-get update && apt-get upgrade -y
 RUN apt-get install wget build-essential librdmacm-dev net-tools -y
@@ -18,11 +18,21 @@ RUN cd build && \
 
 ENV RAPIDS_LIBUCX_PREFER_SYSTEM_LIBRARY=true
 ENV LD_LIBRARY_PATH=/opt/conda/lib:$LD_LIBRARY_PATH
+# UCX logging
+ENV UCX_LOG_LEVEL=trace
+# UCX transports
+# ENV UCX_TLS=rc,ib,sm,shm,mm,tcp
 ########### End Install UCX ###########
 
 ADD . /workspace/cornserve
-
 WORKDIR /workspace/cornserve/python
-RUN pip install -e '.[sidecar]'
 
-ENTRYPOINT ["python", "-u", "-m", "cornserve.services.sidecar.server"]
+RUN pip install -e '.[dev]'
+
+# UCXX logging
+ENV UCXPY_LOG_LEVEL=DEBUG
+
+# Disable OpenTelemetry
+ENV OTEL_SDK_DISABLED=true
+
+CMD ["bash"]

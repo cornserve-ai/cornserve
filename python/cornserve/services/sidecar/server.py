@@ -21,7 +21,7 @@ import kubernetes_asyncio.config as kconfig
 import numpy as np
 import torch
 import tyro
-import ucp
+import ucxx
 from opentelemetry import trace
 from opentelemetry.instrumentation.grpc import (
     GrpcAioInstrumentorClient,
@@ -29,6 +29,7 @@ from opentelemetry.instrumentation.grpc import (
     GrpcInstrumentorClient,
     GrpcInstrumentorServer,
 )
+from ucxx._lib_async.endpoint import Endpoint
 
 from cornserve.logging import SidcarAdapter, get_logger
 from cornserve.services.pb import comm_sidecar_pb2, comm_sidecar_pb2_grpc, common_pb2
@@ -79,7 +80,7 @@ class CommSidecarReceiver:
         shm_size: int,
         slot_size: int,
         dtype: str,
-        peers: dict[int, ucp.Endpoint],
+        peers: dict[int, Endpoint],
     ) -> None:
         """Initialize the receiver sidecar.
 
@@ -301,7 +302,7 @@ class CommSidecarSender:
         shm_size: int,
         slot_size: int,
         dtype: torch.dtype,
-        peers: dict[int, ucp.Endpoint],
+        peers: dict[int, Endpoint],
         shard_rank: int = 0,
         num_shards: int = 1,
         layout: TensorLayout = TensorLayout.FULL,
@@ -468,9 +469,9 @@ class CommSidecarServicer(comm_sidecar_pb2_grpc.CommSidecarServicer):
         self.mem_pressure_threshold = mem_pressure_threshold
         self.ucx_port = ucx_port
         self.world_size = world_size
-        self.peers = dict[int, ucp.Endpoint]()
+        self.peers = dict[int, Endpoint]()
 
-        async def _ucx_listener_callback(ep: ucp.Endpoint) -> None:
+        async def _ucxx_listener_callback(ep: Endpoint) -> None:
             """Callback for the UCX listener."""
             id = np.empty(1, dtype=np.int32)
             await ep.recv(id)
@@ -478,7 +479,7 @@ class CommSidecarServicer(comm_sidecar_pb2_grpc.CommSidecarServicer):
                 logger.warning("Overwriting endpoint %d", id[0])
             self.peers[id[0]] = ep
 
-        self.ucx_listener = ucp.create_listener(_ucx_listener_callback, port=self.ucx_port)
+        self.ucx_listener = ucxx.create_listener(_ucxx_listener_callback, port=self.ucx_port)
 
     async def p2p_connect(self) -> None:
         """Connect to other peers using UCX.
@@ -489,7 +490,13 @@ class CommSidecarServicer(comm_sidecar_pb2_grpc.CommSidecarServicer):
             if i < self.sidecar_rank:
                 while i not in self.peers:
                     try:
-                        ep = await ucp.create_endpoint(ucx_url_from_rank(i), ucx_port_from_rank(i))
+                        logger.info(
+                            "Connecting to sidecar-%d - url %s - port %d",
+                            i,
+                            ucx_url_from_rank(i),
+                            ucx_port_from_rank(i),
+                        )
+                        ep = await ucxx.create_endpoint(ucx_url_from_rank(i), ucx_port_from_rank(i))
                         msg = np.array([self.sidecar_rank], dtype=np.int32)
                         await ep.send(msg)
                         self.peers[i] = ep

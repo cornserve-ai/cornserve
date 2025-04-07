@@ -46,7 +46,8 @@ def device_from_rank(rank: int) -> torch.device:
 def mock_ucx_url_from_rank(rank: int) -> str:
     """UCX connection host url from rank."""
     assert rank >= 0, "Rank should be non-negative"
-    return "localhost"
+    # to use IB for unit test, the IB card IP needs to set
+    return "0.0.0.0"
 
 
 def mock_ucx_url() -> None:
