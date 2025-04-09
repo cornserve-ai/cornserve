@@ -2,7 +2,7 @@
 
 The sidecar server is a gRPC service that runs on each node in the cluster. This service
 is the backend for the `SidecarSender` and `SidecarReceiver` classes in the `api` module.
-It has two corresponding components, `CommSidecarSender` and `CommSidecarReceiver`, which
+It has two corresponding components, `SidecarSender` and `SidecarReceiver`, which
 together provide the functionality to send and receive tensors between ranks.
 """
 
@@ -32,7 +32,7 @@ from opentelemetry.instrumentation.grpc import (
 from ucxx._lib_async.endpoint import Endpoint
 
 from cornserve.logging import SidcarAdapter, get_logger
-from cornserve.services.pb import comm_sidecar_pb2, comm_sidecar_pb2_grpc, common_pb2
+from cornserve.services.pb import sidecar_pb2, sidecar_pb2_grpc, common_pb2
 from cornserve.tracing import configure_otel
 
 from .shm_manager import SharedMemoryBuffer, SharedMemoryManager
@@ -55,7 +55,7 @@ tracer = trace.get_tracer(__name__)
 cleanup_coroutines = []
 
 
-class CommSidecarReceiver:
+class SidecarReceiver:
     """The receiver sidecar server supports receiving tensors from other ranks using ucx-py backend."""
 
     @dataclass
@@ -113,7 +113,7 @@ class CommSidecarReceiver:
         self.malloc_events: dict[str, asyncio.Event] = {}
 
         # a legder to keep the transfer status of each transfer request
-        self.ledger: dict[str, CommSidecarReceiver.TransferRequestState] = {}
+        self.ledger: dict[str, SidecarReceiver.TransferRequestState] = {}
         # per req event, recieve will wait on this event, recv_task will try to set this event
         self.req_events: dict[str, asyncio.Event] = {}
 
@@ -136,9 +136,9 @@ class CommSidecarReceiver:
 
     async def prepare_receive(
         self,
-        request: comm_sidecar_pb2.PrepareReceiveRequest,
+        request: sidecar_pb2.PrepareReceiveRequest,
         context: grpc.aio.ServicerContext,
-    ) -> comm_sidecar_pb2.PrepareReceiveResponse:
+    ) -> sidecar_pb2.PrepareReceiveResponse:
         """Prepare to receive a tensor from another rank, called by the sender sidecar server.
 
         This function allocates a shared memory buffer if not already allocated,
@@ -190,7 +190,7 @@ class CommSidecarReceiver:
                     span.add_event("allocate.done")
 
                     buffer.create_chunks(request.num_chunks, request.num_shards)
-                    self.ledger[request.id] = CommSidecarReceiver.TransferRequestState(request.id, buffer)
+                    self.ledger[request.id] = SidecarReceiver.TransferRequestState(request.id, buffer)
 
                     if request.id in self.malloc_events:
                         # wake up all the waiting prepare_recv calls
@@ -239,13 +239,13 @@ class CommSidecarReceiver:
                 self.recv_done_lock.release()
 
         asyncio.create_task(recv_task())
-        return comm_sidecar_pb2.PrepareReceiveResponse(status=common_pb2.Status.STATUS_OK)
+        return sidecar_pb2.PrepareReceiveResponse(status=common_pb2.Status.STATUS_OK)
 
     async def receive(
         self,
-        recv_req: comm_sidecar_pb2.ReceiveRequest,
+        recv_req: sidecar_pb2.ReceiveRequest,
         context: grpc.aio.ServicerContext,
-    ) -> comm_sidecar_pb2.ReceiveResponse:
+    ) -> sidecar_pb2.ReceiveResponse:
         """Receive the tensor of a request from other ranks, returns a slot number in the shared memory.
 
         If all chunks are received, return the slot number imediately.
@@ -265,13 +265,13 @@ class CommSidecarReceiver:
         logger.info("==> All chunks received for request id %s", recv_req.id)
         offset = self.ledger[recv_req.id].buffer.slots[0] * self.shm_manager.slot_size
         size = self.ledger[recv_req.id].buffer.size
-        return comm_sidecar_pb2.ReceiveResponse(offset=offset, size=size)
+        return sidecar_pb2.ReceiveResponse(offset=offset, size=size)
 
     async def mark_done(
         self,
-        mark_done_req: comm_sidecar_pb2.MarkDoneRequest,
+        mark_done_req: sidecar_pb2.MarkDoneRequest,
         context: grpc.aio.ServicerContext,
-    ) -> comm_sidecar_pb2.MarkDoneResponse:
+    ) -> sidecar_pb2.MarkDoneResponse:
         """Mark a tensor as consumed, free up the shared memory used."""
         if mark_done_req.id not in self.ledger:
             await context.abort(grpc.StatusCode.NOT_FOUND, "mark_done_req not found")
@@ -286,10 +286,10 @@ class CommSidecarReceiver:
         del self.ledger[mark_done_req.id]
         if mark_done_req.id in self.req_events:
             del self.req_events[mark_done_req.id]
-        return comm_sidecar_pb2.MarkDoneResponse(status=common_pb2.Status.STATUS_OK)
+        return sidecar_pb2.MarkDoneResponse(status=common_pb2.Status.STATUS_OK)
 
 
-class CommSidecarSender:
+class SidecarSender:
     """Sidecar sender gRPC service backend.
 
     Implements the gRPC service for the sender sidecar.
@@ -339,16 +339,16 @@ class CommSidecarSender:
         )
 
         self.dst_channels: dict[int, grpc.aio.Channel] = {}
-        self.dst_stubs: dict[int, comm_sidecar_pb2_grpc.CommSidecarStub] = {}
+        self.dst_stubs: dict[int, sidecar_pb2_grpc.SidecarStub] = {}
         self.mem_pressure_count = 0
         self.peers = peers
 
     async def report_memory(
-        self, request: comm_sidecar_pb2.ReportMemoryRequest, context: grpc.aio.ServicerContext
-    ) -> comm_sidecar_pb2.ReportMemoryResponse:
+        self, request: sidecar_pb2.ReportMemoryRequest, context: grpc.aio.ServicerContext
+    ) -> sidecar_pb2.ReportMemoryResponse:
         """Updates the memory pressure count."""
         self.mem_pressure_count = request.pressure
-        return comm_sidecar_pb2.ReportMemoryResponse(status=common_pb2.Status.STATUS_OK)
+        return sidecar_pb2.ReportMemoryResponse(status=common_pb2.Status.STATUS_OK)
 
     async def shutdown(self) -> None:
         """Cleanup routines for the sender sidecar."""
@@ -360,9 +360,9 @@ class CommSidecarSender:
 
     async def send(
         self,
-        send_request: comm_sidecar_pb2.SendRequest,
+        send_request: sidecar_pb2.SendRequest,
         context: grpc.aio.ServicerContext,
-    ) -> comm_sidecar_pb2.SendResponse:
+    ) -> sidecar_pb2.SendResponse:
         """Send a tensor to another rank.
 
         First use prepare_receive to send control signals to the destination sidecar,
@@ -389,7 +389,7 @@ class CommSidecarSender:
         # lazily create channel
         if dst_rank not in self.dst_channels:
             self.dst_channels[dst_rank] = grpc.aio.insecure_channel(grpc_channel_from_rank(dst_rank))
-            self.dst_stubs[dst_rank] = comm_sidecar_pb2_grpc.CommSidecarStub(self.dst_channels[dst_rank])
+            self.dst_stubs[dst_rank] = sidecar_pb2_grpc.SidecarStub(self.dst_channels[dst_rank])
             logger.info("Connected to sidecar-%d", dst_rank)
 
         stub = self.dst_stubs[dst_rank]
@@ -400,7 +400,7 @@ class CommSidecarSender:
             send_request.chunk_id,
             send_request.num_chunks,
         )
-        prepare_receive_request = comm_sidecar_pb2.PrepareReceiveRequest(
+        prepare_receive_request = sidecar_pb2.PrepareReceiveRequest(
             id=send_request.id,
             shard_size=send_request.size,
             chunk_size=send_request.chunk_size,
@@ -417,7 +417,7 @@ class CommSidecarSender:
         if response.status != common_pb2.Status.STATUS_OK:
             logger.error("Failed to prepare receive")
             # TODO: clean up by canceling the previous prepare_receive calls
-            return comm_sidecar_pb2.SendResponse(status=common_pb2.Status.STATUS_ERROR)
+            return sidecar_pb2.SendResponse(status=common_pb2.Status.STATUS_ERROR)
 
         ipc_handle = pickle.loads(send_request.ipc_handle)
         cuda_event = torch.cuda.Event.from_ipc_handle(self.device, ipc_handle)
@@ -440,10 +440,10 @@ class CommSidecarSender:
             "SHARD RANK %d: sent chunk %d for request %s", self.shard_rank, send_request.chunk_id, send_request.id
         )
 
-        return comm_sidecar_pb2.SendResponse(status=common_pb2.Status.STATUS_OK)
+        return sidecar_pb2.SendResponse(status=common_pb2.Status.STATUS_OK)
 
 
-class CommSidecarServicer(comm_sidecar_pb2_grpc.CommSidecarServicer):
+class SidecarServicer(sidecar_pb2_grpc.SidecarServicer):
     """A unified wrapper for both sender and receiver sidecar servers. Entry point for the gRPC service."""
 
     def __init__(
@@ -464,7 +464,7 @@ class CommSidecarServicer(comm_sidecar_pb2_grpc.CommSidecarServicer):
             mem_pressure_threshold: The threshold of memory pressure count to trigger the memory pressure status.
         """
         self.sidecar_rank = sidecar_rank
-        self.sidecar: CommSidecarSender | CommSidecarReceiver | None = None
+        self.sidecar: SidecarSender | SidecarReceiver | None = None
         self.live = False
         self.mem_pressure_threshold = mem_pressure_threshold
         self.ucx_port = ucx_port
@@ -526,21 +526,21 @@ class CommSidecarServicer(comm_sidecar_pb2_grpc.CommSidecarServicer):
 
     async def CheckHealth(  # noqa: N802
         self,
-        request: comm_sidecar_pb2.CheckHealthRequest,
+        request: sidecar_pb2.CheckHealthRequest,
         context: grpc.aio.ServicerContext,
-    ) -> comm_sidecar_pb2.CheckHealthResponse:
+    ) -> sidecar_pb2.CheckHealthResponse:
         """Health check for the sidecar."""
         if not self.live or self.sidecar is None:
-            return comm_sidecar_pb2.CheckHealthResponse(status=comm_sidecar_pb2.HealthStatus.HEALTH_OFFLINE)
+            return sidecar_pb2.CheckHealthResponse(status=sidecar_pb2.HealthStatus.HEALTH_OFFLINE)
         if self.sidecar.mem_pressure_count > self.mem_pressure_threshold:
-            return comm_sidecar_pb2.CheckHealthResponse(status=comm_sidecar_pb2.HealthStatus.HEALTH_MEMORY_PRESSURE)
-        return comm_sidecar_pb2.CheckHealthResponse(status=comm_sidecar_pb2.HealthStatus.HEALTH_ALL_GOOD)
+            return sidecar_pb2.CheckHealthResponse(status=sidecar_pb2.HealthStatus.HEALTH_MEMORY_PRESSURE)
+        return sidecar_pb2.CheckHealthResponse(status=sidecar_pb2.HealthStatus.HEALTH_ALL_GOOD)
 
     async def RegisterSender(  # noqa: N802
         self,
-        request: comm_sidecar_pb2.RegisterSenderRequest,
+        request: sidecar_pb2.RegisterSenderRequest,
         context: grpc.aio.ServicerContext,
-    ) -> comm_sidecar_pb2.RegisterResponse:
+    ) -> sidecar_pb2.RegisterResponse:
         """Called by the sender server to register the sidecar."""
         if not self.live:
             logger.error("Sidecar not online")
@@ -553,7 +553,7 @@ class CommSidecarServicer(comm_sidecar_pb2_grpc.CommSidecarServicer):
         # calculate the number of shared elements to return
         shm_size = self.shm_size // dtype.itemsize
 
-        self.sidecar = CommSidecarSender(
+        self.sidecar = SidecarSender(
             sidecar_rank=self.sidecar_rank,
             shm_size=shm_size,
             slot_size=request.slot_size,
@@ -567,7 +567,7 @@ class CommSidecarServicer(comm_sidecar_pb2_grpc.CommSidecarServicer):
 
         logger.info("Registered sender of local_rank %s, sidecar_rank %s", self.device_id, self.sidecar_rank)
 
-        return comm_sidecar_pb2.RegisterResponse(
+        return sidecar_pb2.RegisterResponse(
             shm_size=shm_size,
             local_ranks=[self.device_id],
             num_local_sidecars=self.num_devices,
@@ -575,9 +575,9 @@ class CommSidecarServicer(comm_sidecar_pb2_grpc.CommSidecarServicer):
 
     async def RegisterReceiver(  # noqa: N802
         self,
-        request: comm_sidecar_pb2.RegisterReceiverRequest,
+        request: sidecar_pb2.RegisterReceiverRequest,
         context: grpc.aio.ServicerContext,
-    ) -> comm_sidecar_pb2.RegisterResponse:
+    ) -> sidecar_pb2.RegisterResponse:
         """Called by the receiver server to register the sidecar."""
         if not self.live:
             logger.error("Sidecar not online")
@@ -594,7 +594,7 @@ class CommSidecarServicer(comm_sidecar_pb2_grpc.CommSidecarServicer):
         dtype = getattr(torch, request.dtype)
         shm_size = self.shm_size // dtype.itemsize
 
-        self.sidecar = CommSidecarReceiver(
+        self.sidecar = SidecarReceiver(
             sidecar_rank=self.sidecar_rank,
             group=list(request.group),
             shm_size=shm_size,
@@ -611,7 +611,7 @@ class CommSidecarServicer(comm_sidecar_pb2_grpc.CommSidecarServicer):
             request.dtype,
         )
 
-        return comm_sidecar_pb2.RegisterResponse(
+        return sidecar_pb2.RegisterResponse(
             shm_size=shm_size,
             local_ranks=[self.node_info.get_device_id(i) for i in request.group],
             num_local_sidecars=self.num_devices,
@@ -619,42 +619,42 @@ class CommSidecarServicer(comm_sidecar_pb2_grpc.CommSidecarServicer):
 
     async def RegisterReader(  # noqa: N802
         self,
-        request: comm_sidecar_pb2.RegisterReaderRequest,
+        request: sidecar_pb2.RegisterReaderRequest,
         context: grpc.aio.ServicerContext,
-    ) -> comm_sidecar_pb2.RegisterResponse:
+    ) -> sidecar_pb2.RegisterResponse:
         """Register a read-only sidecar. This is temporary."""
         if not self.live or self.sidecar is None:
             logger.error("Sidecar not online")
             await context.abort(grpc.StatusCode.FAILED_PRECONDITION, "Sidecar not online")
 
-        if not isinstance(self.sidecar, CommSidecarReceiver):
+        if not isinstance(self.sidecar, SidecarReceiver):
             logger.error("Invalid sidecar mode")
             await context.abort(grpc.StatusCode.FAILED_PRECONDITION, "Invalid sidecar mode")
 
         logger.info("Registered reader of sidecar_rank %s", self.sidecar_rank)
-        return comm_sidecar_pb2.RegisterResponse(
+        return sidecar_pb2.RegisterResponse(
             shm_size=self.sidecar.shm_size,
             local_ranks=self.sidecar.local_ranks,
             num_local_sidecars=self.num_devices,
         )
 
     async def Send(  # noqa: N802
-        self, request: comm_sidecar_pb2.SendRequest, context: grpc.aio.ServicerContext
-    ) -> comm_sidecar_pb2.SendResponse:
+        self, request: sidecar_pb2.SendRequest, context: grpc.aio.ServicerContext
+    ) -> sidecar_pb2.SendResponse:
         """Called by the sender server to send a tensor to some other rank."""
         if self.sidecar is None:
             logger.error("Sidecar not registered")
             await context.abort(grpc.StatusCode.FAILED_PRECONDITION, "Sidecar not registered")
-        if not isinstance(self.sidecar, CommSidecarSender):
+        if not isinstance(self.sidecar, SidecarSender):
             logger.error("Invalid sidecar mode")
             await context.abort(grpc.StatusCode.FAILED_PRECONDITION, "Invalid sidecar mode")
         return await self.sidecar.send(request, context)
 
     async def PrepareReceive(  # noqa: N802
         self,
-        request: comm_sidecar_pb2.PrepareReceiveRequest,
+        request: sidecar_pb2.PrepareReceiveRequest,
         context: grpc.aio.ServicerContext,
-    ) -> comm_sidecar_pb2.PrepareReceiveResponse:
+    ) -> sidecar_pb2.PrepareReceiveResponse:
         """Called by the sender sidercar to the receiver sidecar to prepare receiving a tensor."""
         if not self.live:
             logger.error("Sidecar not online")
@@ -662,16 +662,16 @@ class CommSidecarServicer(comm_sidecar_pb2_grpc.CommSidecarServicer):
         if self.sidecar is None:
             logger.error("Sidecar not registered")
             await context.abort(grpc.StatusCode.FAILED_PRECONDITION, "Sidecar not registered")
-        if not isinstance(self.sidecar, CommSidecarReceiver):
+        if not isinstance(self.sidecar, SidecarReceiver):
             logger.error("Invalid sidecar mode")
             await context.abort(grpc.StatusCode.FAILED_PRECONDITION, "Invalid sidecar mode")
         return await self.sidecar.prepare_receive(request, context)
 
     async def Receive(  # noqa: N802
         self,
-        request: comm_sidecar_pb2.ReceiveRequest,
+        request: sidecar_pb2.ReceiveRequest,
         context: grpc.aio.ServicerContext,
-    ) -> comm_sidecar_pb2.ReceiveResponse:
+    ) -> sidecar_pb2.ReceiveResponse:
         """Initiate receiving a tensor from some other rank."""
         if not self.live:
             logger.error("Sidecar not online")
@@ -679,27 +679,27 @@ class CommSidecarServicer(comm_sidecar_pb2_grpc.CommSidecarServicer):
         if self.sidecar is None:
             logger.error("Sidecar not registered")
             await context.abort(grpc.StatusCode.FAILED_PRECONDITION, "Sidecar not registered")
-        if not isinstance(self.sidecar, CommSidecarReceiver):
+        if not isinstance(self.sidecar, SidecarReceiver):
             logger.error("Invalid sidecar mode")
-            return comm_sidecar_pb2.ReceiveResponse(offset=-1, size=-1)
+            return sidecar_pb2.ReceiveResponse(offset=-1, size=-1)
 
         return await self.sidecar.receive(request, context)
 
     async def MarkDone(  # noqa: N802
         self,
-        request: comm_sidecar_pb2.MarkDoneRequest,
+        request: sidecar_pb2.MarkDoneRequest,
         context: grpc.aio.ServicerContext,
-    ) -> comm_sidecar_pb2.MarkDoneResponse:
+    ) -> sidecar_pb2.MarkDoneResponse:
         """Called by the receiver server to mark a request as done."""
         if not self.live:
             logger.error("Sidecar not online")
             await context.abort(grpc.StatusCode.FAILED_PRECONDITION, "Sidecar not online")
         if self.sidecar is None:
             logger.error("Sidecar not registered")
-            return comm_sidecar_pb2.MarkDoneResponse(status=common_pb2.Status.STATUS_ERROR)
-        if not isinstance(self.sidecar, CommSidecarReceiver):
+            return sidecar_pb2.MarkDoneResponse(status=common_pb2.Status.STATUS_ERROR)
+        if not isinstance(self.sidecar, SidecarReceiver):
             logger.error("Invalid sidecar mode")
-            return comm_sidecar_pb2.MarkDoneResponse(status=common_pb2.Status.STATUS_ERROR)
+            return sidecar_pb2.MarkDoneResponse(status=common_pb2.Status.STATUS_ERROR)
 
         return await self.sidecar.mark_done(request, context)
 
@@ -714,9 +714,9 @@ class CommSidecarServicer(comm_sidecar_pb2_grpc.CommSidecarServicer):
 
     async def ReportMemory(
         self,
-        request: comm_sidecar_pb2.ReportMemoryRequest,
+        request: sidecar_pb2.ReportMemoryRequest,
         context: grpc.aio.ServicerContext,
-    ) -> comm_sidecar_pb2.ReportMemoryResponse:
+    ) -> sidecar_pb2.ReportMemoryResponse:
         """Report memory pressure to the sidecar."""
         if not self.live:
             logger.error("Sidecar not online")
@@ -724,7 +724,7 @@ class CommSidecarServicer(comm_sidecar_pb2_grpc.CommSidecarServicer):
         if self.sidecar is None:
             logger.error("Sidecar not registered")
             await context.abort(grpc.StatusCode.FAILED_PRECONDITION, "Sidecar not registered")
-        if not isinstance(self.sidecar, CommSidecarSender):
+        if not isinstance(self.sidecar, SidecarSender):
             logger.error("Invalid sidecar mode")
             await context.abort(grpc.StatusCode.FAILED_PRECONDITION, "Invalid sidecar mode")
         return await self.sidecar.report_memory(request, context)
@@ -822,12 +822,12 @@ async def main(
     # We start the server so the health check gRPC is always available
     server = grpc.aio.server()
     ucx_port = UCX_BASE_PORT + sidecar_rank
-    servicer = CommSidecarServicer(
+    servicer = SidecarServicer(
         sidecar_rank=sidecar_rank,
         ucx_port=ucx_port,
         world_size=world_size,
     )
-    comm_sidecar_pb2_grpc.add_CommSidecarServicer_to_server(servicer, server)
+    sidecar_pb2_grpc.add_SidecarServicer_to_server(servicer, server)
     port = GRPC_BASE_PORT + sidecar_rank
     listen_addr = f"{ip}:{port}"
     server.add_insecure_port(listen_addr)

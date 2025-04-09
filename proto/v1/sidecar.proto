@@ -1,10 +1,10 @@
 syntax = "proto3";
 
-package cornserve.comm_sidecar;
+package cornserve.sidecar;
 
 import "common.proto";
 
-service CommSidecar {
+service Sidecar {
   rpc Send(SendRequest) returns (SendResponse);
   rpc Receive(ReceiveRequest) returns (ReceiveResponse);
   rpc MarkDone(MarkDoneRequest) returns (MarkDoneResponse);

@@ -24,7 +24,7 @@ from opentelemetry.instrumentation.grpc import GrpcAioInstrumentorClient, GrpcIn
 from opentelemetry.instrumentation.threading import ThreadingInstrumentor
 
 from cornserve.logging import get_logger
-from cornserve.services.pb import comm_sidecar_pb2, comm_sidecar_pb2_grpc, common_pb2
+from cornserve.services.pb import sidecar_pb2, sidecar_pb2_grpc, common_pb2
 
 from .shm_manager import SharedMemoryBuffer, SharedMemoryManager
 from .utils import (
@@ -75,10 +75,10 @@ class TensorSidecarReceiverBase:
         # register the to the sidecar server
         # TODO: change to group
         self.channel = grpc.insecure_channel(grpc_channel_from_rank(self.sidecar_rank))
-        self.stub = comm_sidecar_pb2_grpc.CommSidecarStub(self.channel)
+        self.stub = sidecar_pb2_grpc.SidecarStub(self.channel)
 
         slot_size = -1 * reduce(mul, self.tensor_shape)
-        request = comm_sidecar_pb2.RegisterReceiverRequest(
+        request = sidecar_pb2.RegisterReceiverRequest(
             slot_size=slot_size,
             dtype=str(self.dtype).split(".")[-1],
             group=group,
@@ -117,12 +117,12 @@ class TensorSidecarReceiverExecutor:
         """Initialize the sidecar receiver client that only reads the data."""
         self.sidecar_rank = sidecar_rank
         self.channel = grpc.insecure_channel(grpc_channel_from_rank(self.sidecar_rank))
-        self.stub = comm_sidecar_pb2_grpc.CommSidecarStub(self.channel)
+        self.stub = sidecar_pb2_grpc.SidecarStub(self.channel)
         self.dtype = dtype
         self.tensor_shape = shape
         self._finalizer = weakref.finalize(self, self.shutdown)
 
-        request = comm_sidecar_pb2.RegisterReaderRequest()
+        request = sidecar_pb2.RegisterReaderRequest()
         response = self.stub.RegisterReader(request)
 
         self.shared_tensor = init_shmem(
@@ -135,7 +135,7 @@ class TensorSidecarReceiverExecutor:
 
     def recv(self, id: str) -> torch.Tensor:
         """Read the tensor corresponding to the given id from the shared memory buffer."""
-        recv_req = comm_sidecar_pb2.ReceiveRequest(id=id)
+        recv_req = sidecar_pb2.ReceiveRequest(id=id)
         response = self.stub.Receive(recv_req)
         assert response.offset >= 0 and response.size >= 0, "Failed to receive data"
         chunk = self.shared_tensor[response.offset : response.offset + response.size]
@@ -183,7 +183,7 @@ class TensorSidecarAsyncReceiver(TensorSidecarReceiverBase):
         # we always talk to the controller sidecar
         controller_rank = min(group)
         self.channel = grpc.aio.insecure_channel(grpc_channel_from_rank(controller_rank))
-        self.stub = comm_sidecar_pb2_grpc.CommSidecarStub(self.channel)
+        self.stub = sidecar_pb2_grpc.SidecarStub(self.channel)
         self._finalizer = weakref.finalize(self, self.__del__)
 
     def __del__(self) -> None:
@@ -217,7 +217,7 @@ class TensorSidecarAsyncReceiver(TensorSidecarReceiverBase):
         """
         span = trace.get_current_span()
         span.set_attribute("sidecar_receiver_client.recv.id", id)
-        recv_req = comm_sidecar_pb2.ReceiveRequest(id=id)
+        recv_req = sidecar_pb2.ReceiveRequest(id=id)
         response = await self.stub.Receive(recv_req)
         assert response.offset >= 0 and response.size >= 0, "Failed to receive data"
         chunk = self.shared_tensor[response.offset : response.offset + response.size]
@@ -228,7 +228,7 @@ class TensorSidecarAsyncReceiver(TensorSidecarReceiverBase):
         """Mark a tensor as done in the sidecar server, which will free the shared memory buffer."""
         span = trace.get_current_span()
         span.set_attribute("sidecar_receiver_client.mark_done.id", id)
-        request = comm_sidecar_pb2.MarkDoneRequest(id=id)
+        request = sidecar_pb2.MarkDoneRequest(id=id)
         response = await self.stub.MarkDone(request)
         if response.status == common_pb2.Status.STATUS_OK:
             logger.debug("Request %s marked done", id)
@@ -265,8 +265,8 @@ class TensorSidecarSenderBase:
         # Register the sender to the sidecar server
         logger.debug("Registering sidecar to %s", grpc_channel_from_rank(self.sidecar_rank))
         self.channel = grpc.insecure_channel(grpc_channel_from_rank(self.sidecar_rank))
-        self.stub = comm_sidecar_pb2_grpc.CommSidecarStub(self.channel)
-        request = comm_sidecar_pb2.RegisterSenderRequest(
+        self.stub = sidecar_pb2_grpc.SidecarStub(self.channel)
+        request = sidecar_pb2.RegisterSenderRequest(
             slot_size=self.slot_size,
             dtype=str(self.dtype).split(".")[-1],
             shard_rank=self.shard_rank,
@@ -380,7 +380,7 @@ class TensorSidecarSender(TensorSidecarSenderBase):
 
             while not self.shutdown_event.is_set():
                 logger.debug("Sidecar sender %d Memory pressure count %d", self.sidecar_rank, self.mem_pressure_count)
-                request = comm_sidecar_pb2.ReportMemoryRequest(pressure=self.mem_pressure_count)
+                request = sidecar_pb2.ReportMemoryRequest(pressure=self.mem_pressure_count)
                 response = self.stub.ReportMemory(request)
                 if response.status != common_pb2.Status.STATUS_OK:
                     logger.error("Sidecar server is unhealthy")
@@ -544,7 +544,7 @@ class TensorSidecarSender(TensorSidecarSenderBase):
                 cuda_event.record(self.stream)
             ipc_handle = cuda_event.ipc_handle()
             logger.debug("SHARD RANK: %d: Sending send request to sidecar", self.shard_rank)
-            request = comm_sidecar_pb2.SendRequest(
+            request = sidecar_pb2.SendRequest(
                 id=id,
                 size=buffer.size,
                 slot=buffer.slots[0],

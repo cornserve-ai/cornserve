@@ -27,12 +27,12 @@ becomes a Sender Server, and vice versa.
 
 Classes within `python/services/sidecar/server.py` are servers.
 
-#### `CommSidecarSender`
+#### `SidecarSender`
 An intermediate data can be chunked, and each chunk could be further sharded
 when there are multiple senders holding the same chunk. This reduces the
 communication volume when a producer task executor has TP size > 1.
 
-#### `CommSidecarReceiver`
+#### `SidecarReceiver`
 The receiver server manages the shared memory buffer. A `recv` call will only
 return when the all chunks of a data has been received (in near future, this 
 will become an async generator that returns chunks in order). When the consumer
