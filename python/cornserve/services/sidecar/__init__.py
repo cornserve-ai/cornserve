@@ -1,1 +1,1 @@
-"""Sidecar client and server for Cornserve."""
+"""Sidecar servers that forward data between peers."""

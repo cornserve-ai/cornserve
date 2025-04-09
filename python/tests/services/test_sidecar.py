@@ -27,11 +27,11 @@ def mock_grpc_channel() -> None:
     """Mock the grpc_channel_from_rank function."""
     mocker = pytest.MonkeyPatch()
     mocker.setattr(
-        "cornserve.services.sidecar.utils.grpc_channel_from_rank",
+        "cornserve.sidecar.utils.grpc_channel_from_rank",
         mock_grpc_channel_from_rank,
     )
     mocker.setattr(
-        "cornserve.services.sidecar.api.grpc_channel_from_rank",
+        "cornserve.sidecar.api.grpc_channel_from_rank",
         mock_grpc_channel_from_rank,
     )
 
@@ -54,7 +54,7 @@ def mock_ucx_url() -> None:
     """Mock the ucx_url_from_rank function."""
     mocker = pytest.MonkeyPatch()
     mocker.setattr(
-        "cornserve.services.sidecar.utils.ucx_url_from_rank",
+        "cornserve.sidecar.utils.ucx_url_from_rank",
         mock_ucx_url_from_rank,
     )
 
@@ -62,11 +62,11 @@ def mock_ucx_url() -> None:
 def mock_device() -> None:
     mocker = pytest.MonkeyPatch()
     mocker.setattr(
-        "cornserve.services.sidecar.utils.device_from_rank",
+        "cornserve.sidecar.utils.device_from_rank",
         device_from_rank,
     )
     mocker.setattr(
-        "cornserve.services.sidecar.api.device_from_rank",
+        "cornserve.sidecar.api.device_from_rank",
         device_from_rank,
     )
 
@@ -171,7 +171,7 @@ def sidecar_servers(
 @pytest.mark.parametrize("sidecar_servers", [2 << 26], indirect=True)
 async def test_sidecar_liveness(sidecar_servers: list[multiprocessing.Process]):
     """Test n sidecar servers can launch and each can be registered."""
-    from cornserve.services.sidecar.api import (
+    from cornserve.sidecar.api import (
         TensorSidecarAsyncReceiver,
         TensorSidecarSender,
     )
@@ -187,7 +187,7 @@ async def test_sidecar_liveness(sidecar_servers: list[multiprocessing.Process]):
 @pytest.mark.parametrize("sidecar_servers", [2 << 26], indirect=True)
 async def test_group_receiver(sidecar_servers: list[multiprocessing.Process]):
     """Test n sidecar servers can launch and each can be registered."""
-    from cornserve.services.sidecar.api import (
+    from cornserve.sidecar.api import (
         TensorSidecarAsyncReceiver,
     )
 
@@ -251,7 +251,7 @@ async def test_send_recv(
     """
     assert sidecar_servers is not None, "Servers fixture should be available"
     await asyncio.sleep(1)
-    from cornserve.services.sidecar.api import (
+    from cornserve.sidecar.api import (
         TensorSidecarAsyncReceiver,
         TensorSidecarReceiverExecutor,
         TensorSidecarSender,

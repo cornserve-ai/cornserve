@@ -32,11 +32,9 @@ from opentelemetry.instrumentation.grpc import (
 from ucxx._lib_async.endpoint import Endpoint
 
 from cornserve.logging import SidcarAdapter, get_logger
-from cornserve.services.pb import sidecar_pb2, sidecar_pb2_grpc, common_pb2
-from cornserve.tracing import configure_otel
-
-from .shm_manager import SharedMemoryBuffer, SharedMemoryManager
-from .utils import (
+from cornserve.services.pb import common_pb2, sidecar_pb2, sidecar_pb2_grpc
+from cornserve.sidecar.shm_manager import SharedMemoryBuffer, SharedMemoryManager
+from cornserve.sidecar.utils import (
     GRPC_BASE_PORT,
     UCX_BASE_PORT,
     TensorLayout,
@@ -49,6 +47,7 @@ from .utils import (
     ucx_port_from_rank,
     ucx_url_from_rank,
 )
+from cornserve.tracing import configure_otel
 
 logger = get_logger(__name__, [SidcarAdapter])
 tracer = trace.get_tracer(__name__)

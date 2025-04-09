@@ -13,7 +13,7 @@ from opentelemetry import context as context_api
 from opentelemetry import propagate, trace
 
 from cornserve.logging import get_logger
-from cornserve.services.sidecar.api import TensorSidecarSender
+from cornserve.sidecar.api import TensorSidecarSender
 from cornserve.task_executors.eric.distributed.parallel import (
     destroy_distributed,
     init_distributed,

@@ -26,6 +26,7 @@ dynamic = ["version"]
 
 [project.optional-dependencies]
 frontend = []
+sidecar-api = ["torch"]
 sidecar = [
   "torch",
   "ucxx-cu12",
@@ -63,7 +64,7 @@ eric-no-gpu = [
   "decord",
   "einops",
   "xformers",
-  "cornserve[sidecar]",
+  "cornserve[sidecar-api]",
   "opentelemetry-instrumentation-fastapi",
   "opentelemetry-instrumentation-threading",
 ]

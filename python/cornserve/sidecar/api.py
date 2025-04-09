@@ -24,7 +24,7 @@ from opentelemetry.instrumentation.grpc import GrpcAioInstrumentorClient, GrpcIn
 from opentelemetry.instrumentation.threading import ThreadingInstrumentor
 
 from cornserve.logging import get_logger
-from cornserve.services.pb import sidecar_pb2, sidecar_pb2_grpc, common_pb2
+from cornserve.services.pb import common_pb2, sidecar_pb2, sidecar_pb2_grpc
 
 from .shm_manager import SharedMemoryBuffer, SharedMemoryManager
 from .utils import (
