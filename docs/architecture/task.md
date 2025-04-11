@@ -2,6 +2,8 @@
 
 The definition of tasks as a unit of work and how the system executes them.
 
+Task and GiG (Graph in Graph) are alternative term for the same concept.
+
 ## `Task`
 
 A `Task` is a reusable and composable unit of work that is executed within the data plane.
@@ -95,16 +97,18 @@ This context object is then used to dispatch task invocations to the Task Dispat
 The Task Dispatcher is responsible for actually constructing requests, dispatching them to Task Executors, and then waiting for the results to come back.  
 1. For each task invocation:
   - Call `GetRoute` on each Task's Task Manager to get the route to the Task Executor.
-  - Find all `Forward` objects in the Task's input and output, and add them to a dictionary of `Forward` ID → `ForwardInfo` object.
-    - `ForwardInfo` contains the producer sidecar ranks (if `Forward` was the output) and the consumer sidecar ranks (if `Forward` was the input).
+  - Find all `DataForward` objects in the Task's input and output, and add them to a dictionary of `DataForward` ID → `ForwardInfo` object.
+    - `ForwardInfo` contains the producer sidecar ranks (if `DataForward` was the output) and the consumer sidecar ranks (if `DataForward` was the input).
 2. Inspect the `ForwardInfo` objects to see if any of them are without producers or consumers. If any, it's an error.
 3. For each task invocation:
-  - For all `Forward` objects in the Task's input and output, populate their sidecar ranks from `ForwardInfo` objects.
+  - For all `DataForward` objects in the Task's input and output, populate their sidecar ranks from `ForwardInfo` objects.
 4. For each task invocation:
-  - Translate the Task's input and output Pydantic models to the Task Executor's request and response Pydantic models using `TaskExecutionDescriptor`.
+  - Translate the Task's input model to the Task Executor's request using `TaskExecutionDescriptor`.
+    - This requires the Task's input and output objects (`DataForward` objects filled in). The descriptor will fill in the receiver sidecar ranks of the `DataForward` objects in the Task's output.
   - Upon translation, create a new `asyncio.Task` that sends the request to the central task dispatch scheduler.
 5. Wait for the list of `asyncio.Task` objects:
   - For each finished Task, translate the Task Executor's response Pydantic model to the Task's output Pydantic model using `TaskExecutionDescriptor`.
+    - This requires the Task Executor's response object and Task's input and output objects (`DataForward` objects filled in). The descriptor will fill in relevant fields in the Task's output object from the Task Executor's response. At this point, `DataForward` objects are not important; they can actually be anything.
   - Upon translation, add it to the `TaskResponse` object.
 6. Return the `TaskResponse` object to the App Driver.
 
