@@ -35,7 +35,7 @@ class TaskExecutorLaunchInfo(ABC):
         raise ValueError(f"Unknown task manager type: {task_manager_config.type}")
 
     @abstractmethod
-    def get_executor_name(self) -> str:
+    def create_executor_name(self) -> str:
         """Get the executor name for the task manager."""
 
     @abstractmethod
@@ -64,7 +64,7 @@ class EncoderLaunchInfo(TaskExecutorLaunchInfo):
         """Initialize the encoder launch information."""
         self.task_manager_config = task_manager_config
 
-    def get_executor_name(self) -> str:
+    def create_executor_name(self) -> str:
         """Get the executor name for the encoder task manager."""
         name = "-".join(
             [
@@ -99,7 +99,7 @@ class LLMLaunchInfo(TaskExecutorLaunchInfo):
         """Initialize the LLM launch information."""
         self.task_manager_config = task_manager_config
 
-    def get_executor_name(self) -> str:
+    def create_executor_name(self) -> str:
         """Get the executor name for the LLM task manager."""
         return "-".join(["llm", self.task_manager_config.model_id.split("/")[-1]]).lower()
 

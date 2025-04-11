@@ -285,7 +285,7 @@ class TaskManager:
             raise ValueError("All GPUs must be on the same node")
         node_name = node_names.pop()
 
-        executor_id = self.launch_info.get_executor_name().lower()
+        executor_id = self.launch_info.create_executor_name().lower()
         executor_id = "-".join([executor_id, *(f"{gpu.global_rank}" for gpu in gpus)])
         pod_name = f"task-executor-{executor_id}"
         service_name = f"task-executor-{executor_id}"

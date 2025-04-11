@@ -2,28 +2,37 @@
 
 from __future__ import annotations
 
+from typing import Generic, TypeVar
+
 import grpc
 from pydantic import BaseModel, ConfigDict
 
-from cornserve.frontend.tasks import Task
 from cornserve.services.pb import common_pb2, task_dispatcher_pb2, task_manager_pb2_grpc
 from cornserve.services.task_manager.models import TaskManagerType
+from cornserve.task.base import Task, TaskOutput
+from cornserve.task.context import TaskInvocation
 
 
-class TaskDispatchRequest(BaseModel):
-    """Request for invoking a task.
+class TaskGraphDispatch(BaseModel):
+    """Payload used for dispatching recorded task invocations.
 
     Attributes:
-        app_id: The unique identifier for the application.
-        task_id: The unique identifier for the task.
-        request_id: The unique identifier for the request.
-        request_data: Serialized input data for task invocation.
+        task_id: The ID of the top-level task.
+        invocations: The recorded task invocations.
     """
 
-    app_id: str
     task_id: str
-    request_id: str
-    request_data: str
+    invocations: list[TaskInvocation]
+
+
+class TaskGraphResponse(BaseModel):
+    """Outputs of dispatched and completed tasks.
+
+    Attributes:
+        task_outputs: The outputs of the dispatched tasks.
+    """
+
+    task_outputs: list[TaskOutput]
 
 
 class TaskManagerInfo(BaseModel):

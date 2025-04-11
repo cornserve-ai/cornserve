@@ -14,5 +14,6 @@ CONTAINER_IMAGE_SIDECAR = "cornserve/sidecar:latest"
 CONTAINER_IMAGE_ERIC = "cornserve/eric:latest"
 CONTAINER_IMAGE_VLLM = "cornserve/vllm:latest"
 
+# Path on host.
 VOLUME_HF_CACHE = "/data/hfcache"
 VOLUME_SHM = "/dev/shm"
