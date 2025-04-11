@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, override
+from typing import Any
 
 from cornserve.task.base import Task, TaskInput, TaskOutput
 from cornserve.task.builtins.encoder import EncoderInput, EncoderTask, Modality
@@ -51,7 +51,6 @@ class MLLMTask(Task[MLLMInput, MLLMOutput]):
             self.video_encoder = EncoderTask(model_id=self.model_id, modality=Modality.VIDEO)
         self.llm = LLMTask(model_id=self.model_id)
 
-    @override
     def invoke(self, task_input: MLLMInput) -> MLLMOutput:
         """Invoke the task.
 

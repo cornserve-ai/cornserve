@@ -8,8 +8,11 @@ import uuid
 from pydantic import BaseModel
 from typing_extensions import override
 
-from cornserve.frontend.tasks import LLMTask, Task
 from cornserve.services.pb import task_manager_pb2
+
+# from cornserve.frontend.tasks import LLMTask, Task
+from cornserve.task.base import Task
+from cornserve.task.builtins.llm import LLMTask
 
 
 class TaskManagerType(enum.StrEnum):

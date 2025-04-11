@@ -3,11 +3,9 @@
 from __future__ import annotations
 
 import enum
-from typing import override
 
 from cornserve.task.base import TaskInput, TaskOutput, UnitTask
 from cornserve.task.forward import DataForward, Tensor
-from cornserve.task_executors.descriptor.builtins.encoder import EncoderTaskExecutionDescriptor
 
 
 class Modality(enum.StrEnum):
@@ -48,9 +46,6 @@ class EncoderTask(UnitTask[EncoderInput, EncoderOutput]):
     model_id: str
     modality: Modality
 
-    execution_descriptor: EncoderTaskExecutionDescriptor
-
-    @override
     def make_record_output(self, task_input: EncoderInput) -> EncoderOutput:
         """Create a task output for task invocation recording."""
         return EncoderOutput(embeddings=[DataForward[Tensor]() for _ in task_input.data_urls])

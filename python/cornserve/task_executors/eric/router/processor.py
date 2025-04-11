@@ -19,16 +19,13 @@ from PIL import Image
 from transformers.models.auto.configuration_auto import AutoConfig
 
 from cornserve.logging import get_logger
+from cornserve.task_executors.eric.api import EmbeddingData
 from cornserve.task_executors.eric.config import (
     ModalityConfig,
 )
 from cornserve.task_executors.eric.models.base import BaseModalityProcessor
 from cornserve.task_executors.eric.models.registry import MODEL_REGISTRY
-from cornserve.task_executors.eric.schema import (
-    EmbeddingData,
-    Modality,
-    ProcessedEmbeddingData,
-)
+from cornserve.task_executors.eric.schema import Modality, ProcessedEmbeddingData
 
 logger = get_logger(__name__)
 tracer = trace.get_tracer(__name__)

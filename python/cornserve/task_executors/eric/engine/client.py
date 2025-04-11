@@ -10,10 +10,10 @@ import zmq.asyncio
 from opentelemetry import propagate, trace
 
 from cornserve.logging import get_logger
+from cornserve.task_executors.eric.api import EmbeddingResponse
 from cornserve.task_executors.eric.config import EricConfig
 from cornserve.task_executors.eric.engine.core import Engine
 from cornserve.task_executors.eric.schema import (
-    EmbeddingResponse,
     EngineEnqueueMessage,
     EngineOpcode,
     EngineResponse,

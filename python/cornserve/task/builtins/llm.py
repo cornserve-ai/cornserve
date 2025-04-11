@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from typing import override
-
 from cornserve.task.base import TaskInput, TaskOutput, UnitTask
 from cornserve.task.forward import DataForward, Tensor
 
@@ -39,7 +37,6 @@ class LLMTask(UnitTask[LLMInput, LLMOutput]):
 
     model_id: str
 
-    @override
     def make_record_output(self, task_input: LLMInput) -> LLMOutput:
         """Create a task output for task invocation recording."""
         return LLMOutput(response="")
