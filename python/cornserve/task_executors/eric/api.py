@@ -34,13 +34,11 @@ class EmbeddingRequest(BaseModel):
     """Request to embed data.
 
     Attributes:
-        id: Cluster-wide unique request ID.
         data: List of data to be embedded.
         receiver_sidecar_ranks: Sidecar ranks that will receive the embeddings.
             If omitted, tensors will not be sent to any sidecar.
     """
 
-    id: ID
     data: list[EmbeddingData]
     receiver_sidecar_ranks: list[int] | None = None
 

@@ -91,25 +91,25 @@ When an App is registered, the App Manager constructs the task DAG and sends it 
 ### Invocation
 
 When an App Driver receives a request, it invokes the Tasks defined in the app by calling and awaiting on their async `__call__`.
-This internally calls all `invoke` methods of Tasks in the DAG to populate a task-specific `TaskContext` object.
-This context object is then used to dispatch task invocations to the Task Dispatcher.
+This internally calls all `invoke` methods of Tasks in the DAG, where each unit Task constructs a `TaskInvocation` object (task, input, and output) to add to a task-specific `TaskContext` object.
+The list of `TaskInvocation` objects are sent to the Taks Dispatcher.
 
-The Task Dispatcher is responsible for actually constructing requests, dispatching them to Task Executors, and then waiting for the results to come back.  
+The Task Dispatcher is responsible for actually constructing requests, dispatching them to Task Executors, waiting for the results to come back, and then returning task outputs to the App Driver.  
 1. For each task invocation:
-  - Call `GetRoute` on each Task's Task Manager to get the route to the Task Executor.
-  - Find all `DataForward` objects in the Task's input and output, and add them to a dictionary of `DataForward` ID → `ForwardInfo` object.
-    - `ForwardInfo` contains the producer sidecar ranks (if `DataForward` was the output) and the consumer sidecar ranks (if `DataForward` was the input).
+   - Call `GetRoute` on each Task's Task Manager to get the route to the Task Executor.
+   - Find all `DataForward` objects in the Task's input and output, and add them to a dictionary of `DataForward` ID → `ForwardInfo` object.
+      - `ForwardInfo` contains the producer sidecar ranks (if `DataForward` was the output) and the consumer sidecar ranks (if `DataForward` was the input).
 2. Inspect the `ForwardInfo` objects to see if any of them are without producers or consumers. If any, it's an error.
 3. For each task invocation:
-  - For all `DataForward` objects in the Task's input and output, populate their sidecar ranks from `ForwardInfo` objects.
+   - For all `DataForward` objects in the Task's input and output, populate their sidecar ranks from `ForwardInfo` objects.
 4. For each task invocation:
-  - Translate the Task's input model to the Task Executor's request using `TaskExecutionDescriptor`.
-    - This requires the Task's input and output objects (`DataForward` objects filled in). The descriptor will fill in the receiver sidecar ranks of the `DataForward` objects in the Task's output.
-  - Upon translation, create a new `asyncio.Task` that sends the request to the central task dispatch scheduler.
+   - Translate the Task's input model to the Task Executor's request using `TaskExecutionDescriptor`.
+      - This requires the Task's input and output objects (`DataForward` objects filled in). The descriptor will fill in the receiver sidecar ranks of the `DataForward` objects in the Task's output.
+   - Upon translation, create a new `asyncio.Task` that sends the request to the central task dispatch scheduler.
 5. Wait for the list of `asyncio.Task` objects:
-  - For each finished Task, translate the Task Executor's response Pydantic model to the Task's output Pydantic model using `TaskExecutionDescriptor`.
-    - This requires the Task Executor's response object and Task's input and output objects (`DataForward` objects filled in). The descriptor will fill in relevant fields in the Task's output object from the Task Executor's response. At this point, `DataForward` objects are not important; they can actually be anything.
-  - Upon translation, add it to the `TaskResponse` object.
+   - For each finished Task, translate the Task Executor's response Pydantic model to the Task's output Pydantic model using `TaskExecutionDescriptor`.
+      - This requires the Task Executor's response object and Task's input and output objects (`DataForward` objects filled in). The descriptor will fill in relevant fields in the Task's output object from the Task Executor's response. At this point, `DataForward` objects are not important; they can actually be anything.
+   - Upon translation, add it to the `TaskResponse` object.
 6. Return the `TaskResponse` object to the App Driver.
 
 When the App Driver receives the `TaskResponse` object, it will set a flag in the `TaskContext` object to indicate that the Task has finished.

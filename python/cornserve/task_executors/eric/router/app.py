@@ -1,5 +1,9 @@
 """Eric FastAPI app definition."""
 
+from __future__ import annotations
+
+import uuid
+
 from fastapi import APIRouter, FastAPI, Request, Response, status
 from opentelemetry import trace
 
@@ -43,7 +47,6 @@ async def modalities(raw_request: Request) -> list[Modality]:
 async def embeddings(request: EmbeddingRequest, raw_request: Request) -> Response:
     """Handler for embedding requests."""
     span = trace.get_current_span()
-    span.set_attribute("eric.embeddings.req_id", request.id)
     for data_item in request.data:
         span.set_attribute(
             f"eric.embeddings.data.{data_item.id}.url",
@@ -57,7 +60,7 @@ async def embeddings(request: EmbeddingRequest, raw_request: Request) -> Respons
 
     # Send to engine process (embedding + transmission via Tensor Sidecar)
     response = await engine_client.embed(
-        request.id,
+        uuid.uuid4().hex,
         request.receiver_sidecar_ranks,
         processed,
     )

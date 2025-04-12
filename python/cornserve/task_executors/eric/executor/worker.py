@@ -297,7 +297,7 @@ class Worker:
                     token = context_api.attach(context)
                 self.sender_sidecar_client.send(
                     chunk=output[i],
-                    id=request_id + batch.data_ids[i],
+                    id=batch.data_ids[i],
                     chunk_id=batch.chunk_ids[i],
                     num_chunks=batch.num_chunks[i],
                     dst_sidecar_ranks=dst_sidecar_ranks,

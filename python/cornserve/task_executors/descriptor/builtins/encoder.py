@@ -46,14 +46,18 @@ class EricDescriptor(
         # fmt: on
         return cmd
 
-    def to_request(self, task_input: EncoderInput) -> EmbeddingRequest:
+    def to_request(
+        self,
+        task_input: EncoderInput,
+    ) -> EmbeddingRequest:
         """Convert TaskInput to a request object for the task executor."""
-        # Remove the ID from EmbeddingRequest? Since `DataForward` can assign a cluster-wide unique ID to data items, request ID is no longer needed.
+        # This also needs the `DataForward` objects in order to
+        # populate receiver_sidecar_ranks.
 
     def from_response(self, response: EmbeddingResponse) -> EncoderOutput:
         """Convert the task executor response to TaskOutput."""
         if response.status == 0:
-            # How to create `DataForward` objects? The TD has to do it.
+            # This needs the `DataForward` objects as is.
             return EncoderOutput(embeddings=response.embeddings)
         else:
             raise RuntimeError(f"Error in encoder task: {response.error_message}")
