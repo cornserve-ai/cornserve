@@ -11,9 +11,11 @@ to look up the descriptor class for a task when executing it.
 from __future__ import annotations
 
 from collections import defaultdict
+from typing import TYPE_CHECKING
 
-from cornserve.task.base import UnitTask
-from cornserve.task_executors.descriptor.base import TaskExecutionDescriptor
+if TYPE_CHECKING:
+    from cornserve.task.base import UnitTask
+    from cornserve.task_executors.descriptor.base import TaskExecutionDescriptor
 
 DEFAULT = "__default_descriptor__"
 

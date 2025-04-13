@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Generic, TypeVar
+from typing import Any, Generic, TypeVar
 
 from pydantic import BaseModel
 
@@ -14,11 +14,9 @@ from cornserve.task.base import Task, TaskInput, TaskOutput
 TaskT = TypeVar("TaskT", bound=Task)
 InputT = TypeVar("InputT", bound=TaskInput)
 OutputT = TypeVar("OutputT", bound=TaskOutput)
-RequestT = TypeVar("RequestT")
-ResponseT = TypeVar("ResponseT")
 
 
-class TaskExecutionDescriptor(BaseModel, ABC, Generic[TaskT, InputT, OutputT, RequestT, ResponseT]):
+class TaskExecutionDescriptor(BaseModel, ABC, Generic[TaskT, InputT, OutputT]):
     """Base class for task execution descriptors.
 
     Attributes:
@@ -51,9 +49,18 @@ class TaskExecutionDescriptor(BaseModel, ABC, Generic[TaskT, InputT, OutputT, Re
         ]
 
     @abstractmethod
-    def to_request(self, task_input: InputT) -> RequestT:
-        """Convert TaskInput to a request object for the task executor."""
+    def to_request(self, task_input: InputT, task_output: OutputT) -> dict[str, Any]:
+        """Convert TaskInput to a request object for the task executor.
+
+        The task output object is needed because this specific task executor may
+        have to forward data to the next task executor, and for that, we need to
+        know the destination sidecar ranks annotated in the task output.
+        """
 
     @abstractmethod
-    def from_response(self, response: ResponseT) -> OutputT:
-        """Convert the task executor response to TaskOutput."""
+    def from_response(self, task_output: OutputT, response: dict[str, Any]) -> OutputT:
+        """Convert the task executor response to TaskOutput.
+
+        In general, the `task_output` object will be deep-copied and concrete values
+        will be filled in from the response.
+        """

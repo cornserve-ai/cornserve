@@ -95,15 +95,20 @@ This internally calls all `invoke` methods of Tasks in the DAG, where each unit 
 The list of `TaskInvocation` objects are sent to the Taks Dispatcher.
 
 The Task Dispatcher is responsible for actually constructing requests, dispatching them to Task Executors, waiting for the results to come back, and then returning task outputs to the App Driver.  
+
+Two intermediate data structures:
+- `TaskExecution`: `TaskInvocation` plus the routed Task Executor and sidecar ranks.
+- Dictionary of `DataForward` ID → `DataForward`: Used to incrementally fill in source and destination sidecar ranks.
+
 1. For each task invocation:
-   - Call `GetRoute` on each Task's Task Manager to get the route to the Task Executor.
-   - Find all `DataForward` objects in the Task's input and output, and add them to a dictionary of `DataForward` ID → `ForwardInfo` object.
-      - `ForwardInfo` contains the producer sidecar ranks (if `DataForward` was the output) and the consumer sidecar ranks (if `DataForward` was the input).
-2. Inspect the `ForwardInfo` objects to see if any of them are without producers or consumers. If any, it's an error.
-3. For each task invocation:
-   - For all `DataForward` objects in the Task's input and output, populate their sidecar ranks from `ForwardInfo` objects.
-4. For each task invocation:
-   - Translate the Task's input model to the Task Executor's request using `TaskExecutionDescriptor`.
+   - Call `GetRoute` on each Task's Task Manager to get the route to the Task Executor and construct the `TaskExecution` object.
+2. Inspect the `DataForward` objects to see if any of them are without producers or consumers. If any, it's an error.
+3. For each `TaskExecution` object:
+   - Find all `DataForward` objects in the Task's input and output, and add or update the dictionary of `DataForward` ID → `ForwardInfo`.
+      - If the `DataForward` object is part of the Task's input, it's a consumer, so destination sidecar ranks should be filled in.
+      - If the `DataForward` object is part of the Task's output, it's a producer, so source sidecar ranks should be filled in.
+4. For each `TaskExecution` object:
+   - Translate the Task's input to the Task Executor's request using `TaskExecutionDescriptor`.
       - This requires the Task's input and output objects (`DataForward` objects filled in). The descriptor will fill in the receiver sidecar ranks of the `DataForward` objects in the Task's output.
    - Upon translation, create a new `asyncio.Task` that sends the request to the central task dispatch scheduler.
 5. Wait for the list of `asyncio.Task` objects:

@@ -9,15 +9,18 @@ from abc import ABC, abstractmethod
 from collections import defaultdict
 from contextlib import contextmanager
 from contextvars import ContextVar
-from typing import Any, Generator, Generic, TypeVar
+from typing import TYPE_CHECKING, Any, Generator, Generic, Self, TypeVar
 
 import httpx
 from opentelemetry import trace
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, computed_field
 
-# from cornserve.task.context import TaskContext, task_context
 from cornserve.constants import K8S_TASK_DISPATCHER_HTTP_URL
 from cornserve.logging import get_logger
+from cornserve.task_executors.descriptor.registry import DESCRIPTOR_REGISTRY
+
+if TYPE_CHECKING:
+    from cornserve.task_executors.descriptor.base import TaskExecutionDescriptor
 
 logger = get_logger(__name__)
 tracer = trace.get_tracer(__name__)
@@ -132,7 +135,21 @@ class UnitTask(Task, Generic[InputT, OutputT]):
     2. Otherwise, if we're executing in replay mode, it directly returns the task
         output saved within the task context object.
     3. Otherwise, it's an error; it raises an `AssertionError`.
+
+    Attributes:
+        execution_descriptor_name: The name of the task execution descriptor.
+            If `None`, the default descriptor registered for the task will be used.
+        execution_descriptor: The `TaskExecutionDescriptor` instance for this task.
     """
+
+    execution_descriptor_name: str | None = None
+
+    @computed_field
+    @property
+    def execution_descriptor(self) -> TaskExecutionDescriptor[Self, InputT, OutputT]:
+        """Get the task execution descriptor for this task."""
+        descriptor_cls = DESCRIPTOR_REGISTRY.get(self.__class__, self.execution_descriptor_name)
+        return descriptor_cls(task=self)
 
     @abstractmethod
     def make_record_output(self, task_input: InputT) -> OutputT:
