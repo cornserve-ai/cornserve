@@ -11,10 +11,12 @@ class LLMInput(TaskInput):
 
     Attributes:
         prompt: The prompt to send to the LLM.
+        multimodal_data: List of tuples (modality, data URL).
         embeddings: Multimodal embeddings to send to the LLM.
     """
 
     prompt: str
+    multimodal_data: list[tuple[str, str]] = []
     embeddings: list[DataForward[Tensor]] = []
 
 
@@ -25,7 +27,7 @@ class LLMOutput(TaskOutput):
         response: The response from the LLM.
     """
 
-    response: str
+    response: str | DataForward[str]
 
 
 class LLMTask(UnitTask[LLMInput, LLMOutput]):

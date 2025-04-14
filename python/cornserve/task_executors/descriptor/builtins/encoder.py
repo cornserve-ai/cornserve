@@ -2,17 +2,17 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from cornserve import constants
 from cornserve.services.resource_manager.resource import GPU
 from cornserve.task.builtins.encoder import EncoderInput, EncoderOutput, EncoderTask
 from cornserve.task_executors.descriptor.base import TaskExecutionDescriptor
 from cornserve.task_executors.descriptor.registry import DESCRIPTOR_REGISTRY
-from cornserve.task_executors.eric.api import EmbeddingRequest, EmbeddingResponse
+from cornserve.task_executors.eric.api import EmbeddingData, EmbeddingRequest, EmbeddingResponse, Modality, Status
 
 
-class EricDescriptor(
-    TaskExecutionDescriptor[EncoderTask, EncoderInput, EncoderOutput, EmbeddingRequest, EmbeddingResponse]
-):
+class EricDescriptor(TaskExecutionDescriptor[EncoderTask, EncoderInput, EncoderOutput]):
     """Task execution descriptor for Encoder tasks.
 
     This descriptor handles launching Eric (multimodal encoder) tasks and converting between
@@ -46,21 +46,32 @@ class EricDescriptor(
         # fmt: on
         return cmd
 
-    def to_request(
-        self,
-        task_input: EncoderInput,
-    ) -> EmbeddingRequest:
-        """Convert TaskInput to a request object for the task executor."""
-        # This also needs the `DataForward` objects in order to
-        # populate receiver_sidecar_ranks.
+    def get_api_url(self, base: str) -> str:
+        """Get the task executor's base URL for API calls."""
+        return f"{base}/embeddings"
 
-    def from_response(self, response: EmbeddingResponse) -> EncoderOutput:
+    def to_request(self, task_input: EncoderInput, task_output: EncoderOutput) -> dict[str, Any]:
+        """Convert TaskInput to a request object for the task executor."""
+        req = EmbeddingRequest(
+            data=[
+                EmbeddingData(
+                    id=forward.id,
+                    modality=Modality(self.task.modality.value),
+                    url=url,
+                    receiver_sidecar_ranks=forward.dst_sidecar_ranks,
+                )
+                for url, forward in zip(task_input.data_urls, task_output.embeddings, strict=True)
+            ],
+        )
+        return req.model_dump()
+
+    def from_response(self, task_output: EncoderOutput, response: dict[str, Any]) -> EncoderOutput:
         """Convert the task executor response to TaskOutput."""
-        if response.status == 0:
-            # This needs the `DataForward` objects as is.
-            return EncoderOutput(embeddings=response.embeddings)
+        resp = EmbeddingResponse.model_validate(response)
+        if resp.status == Status.SUCCESS:
+            return EncoderOutput(embeddings=task_output.embeddings)
         else:
-            raise RuntimeError(f"Error in encoder task: {response.error_message}")
+            raise RuntimeError(f"Error in encoder task: {resp.error_message}")
 
 
 DESCRIPTOR_REGISTRY.register(EncoderTask, EricDescriptor, default=True)

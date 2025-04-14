@@ -161,7 +161,6 @@ class Scheduler:
                 data=[data],
                 chunk_ids=[0],
                 num_chunks=[1],
-                receiver_ranks=req.receiver_sidecar_ranks,
                 otel_spans=[req.span],
                 otel_carriers=[carrier],
             )

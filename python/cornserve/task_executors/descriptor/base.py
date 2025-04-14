@@ -9,9 +9,9 @@ from pydantic import BaseModel
 
 from cornserve import constants
 from cornserve.services.resource_manager.resource import GPU
-from cornserve.task.base import Task, TaskInput, TaskOutput
+from cornserve.task.base import TaskInput, TaskOutput, UnitTask
 
-TaskT = TypeVar("TaskT", bound=Task)
+TaskT = TypeVar("TaskT", bound=UnitTask)
 InputT = TypeVar("InputT", bound=TaskInput)
 OutputT = TypeVar("OutputT", bound=TaskOutput)
 
@@ -47,6 +47,14 @@ class TaskExecutionDescriptor(BaseModel, ABC, Generic[TaskT, InputT, OutputT]):
             ("hf-cache", constants.VOLUME_HF_CACHE, "/root/.cache/huggingface"),
             ("shm", constants.VOLUME_SHM, "/dev/shm"),
         ]
+
+    @abstractmethod
+    def get_api_url(self, base: str) -> str:
+        """Get the task executor's base URL for API calls.
+
+        Args:
+            base: The base URL of the task executor.
+        """
 
     @abstractmethod
     def to_request(self, task_input: InputT, task_output: OutputT) -> dict[str, Any]:

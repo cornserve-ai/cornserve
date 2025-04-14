@@ -91,7 +91,14 @@ class MLLMTask(Task[MLLMInput, MLLMOutput]):
             elif modality == Modality.VIDEO:
                 embeddings.append(video_embeddings.pop(0))
 
-        llm_input = LLMInput(prompt=task_input.prompt, embeddings=embeddings)
+        llm_input = LLMInput(
+            prompt=task_input.prompt,
+            multimodal_data=task_input.multimodal_data,
+            embeddings=embeddings,
+        )
         llm_output = self.llm.invoke(llm_input)
 
+        # TODO: How should the user express that they want `str`?
+        #       Probably, all intermediate data should be `DataForward`.
+        #       This will prevent intermediate data-dependent control flows too.
         return MLLMOutput(response=llm_output.response)

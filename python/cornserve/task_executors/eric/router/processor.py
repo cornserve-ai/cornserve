@@ -83,7 +83,12 @@ class Processor:
             *(self.loop.run_in_executor(self.pool, self._do_process, item.modality, item.url) for item in data)
         )
         processed = [
-            ProcessedEmbeddingData(id=item.id, modality=item.modality, data=feature)
+            ProcessedEmbeddingData(
+                id=item.id,
+                modality=item.modality,
+                data=feature,
+                receiver_sidecar_ranks=item.receiver_sidecar_ranks,
+            )
             for item, feature in zip(data, features, strict=True)
         ]
         self._check_processed_data(processed)

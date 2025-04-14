@@ -1,5 +1,7 @@
 """Public and private data schema definitions."""
 
+from __future__ import annotations
+
 import enum
 from dataclasses import dataclass, field
 
@@ -23,11 +25,14 @@ class ProcessedEmbeddingData(msgspec.Struct, array_like=True, omit_defaults=True
         id: Modality data ID unique within the request.
         modality: The modality of the data.
         data: List of processed data.
+        receiver_sidecar_ranks: Sidecar ranks that will receive the embeddings.
+            If omitted, tensors will not be sent to any sidecar.
     """
 
     id: ID
     modality: Modality
     data: dict[str, np.ndarray]
+    receiver_sidecar_ranks: list[int] | None = None
 
 
 class EngineOpcode(enum.Enum):
@@ -43,15 +48,12 @@ class EngineEnqueueMessage(msgspec.Struct, array_like=True, omit_defaults=True):
     Attributes:
         request_id: Cluster-wide unique request ID.
         data: List of processed embedding data.
-        receiver_sidecar_ranks: Sidecar ranks that will receive the embeddings.
-            If omitted, tensors will not be sent to any sidecar.
         otel_carrier: OpenTelemetry carrier that holds the context information for
             the request's span. This is used to propagate the context to the engine.
     """
 
     request_id: str
     data: list[ProcessedEmbeddingData]
-    receiver_sidecar_ranks: list[int] | None = None
     otel_carrier: dict[str, str] | None = None
 
 
@@ -62,26 +64,19 @@ class EngineEnqueueRequest:
     Attributes:
         request_id: Cluster-wide unique request ID.
         data: List of processed embedding data.
-        receiver_sidecar_ranks: Sidecar ranks that will receive the embeddings.
-            If omitted, tensors will not be sent to any sidecar.
         context: OpenTelemetry context that holds the request's tracing context.
         span: OpenTelemetry span for the request.
     """
 
     request_id: str
     data: list[ProcessedEmbeddingData]
-    receiver_sidecar_ranks: list[int] | None = None
     context: Context | None = None
     span: Span | None = None
 
     @classmethod
     def from_msgpack(cls, msg: EngineEnqueueMessage) -> "EngineEnqueueRequest":
         """Create an engine enqueue request from a engine enqueue message."""
-        req = cls(
-            request_id=msg.request_id,
-            data=msg.data,
-            receiver_sidecar_ranks=msg.receiver_sidecar_ranks,
-        )
+        req = cls(request_id=msg.request_id, data=msg.data)
         if msg.otel_carrier:
             req.context = propagator.extract(msg.otel_carrier)
             req.span = tracer.start_span("Engine._request_receive_loop", context=req.context)
@@ -150,7 +145,6 @@ class SchedulerBatch:
         num_chunks: list[int],
         otel_spans: list[Span | None],
         otel_carriers: list[dict | None],
-        receiver_ranks: list[int] | None = None,
     ) -> None:
         """Add a request to the batch."""
         # Add all modality data inside a request to the batch.
@@ -166,7 +160,7 @@ class SchedulerBatch:
             self.data_ids.append(item.id)
             self.chunk_ids.append(chunk_id)
             self.num_chunks.append(num_chunk)
-            self.receiver_ranks.append(receiver_ranks)
+            self.receiver_ranks.append(item.receiver_sidecar_ranks)
             self.otel_spans.append(otel_span)
             self.otel_carriers.append(otel_carrier)
             for key, value in item.data.items():
@@ -218,7 +212,7 @@ class WorkerBatch:
         return len(self.data_ids)
 
     @classmethod
-    def from_scheduler_batch(cls, batch: SchedulerBatch) -> "WorkerBatch":
+    def from_scheduler_batch(cls, batch: SchedulerBatch) -> WorkerBatch:
         """Create a worker batch from a scheduler batch."""
         return cls(
             modality=batch.modality,

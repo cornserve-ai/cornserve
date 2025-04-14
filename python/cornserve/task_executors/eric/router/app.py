@@ -59,11 +59,7 @@ async def embeddings(request: EmbeddingRequest, raw_request: Request) -> Respons
     processed = await processor.process(request.data)
 
     # Send to engine process (embedding + transmission via Tensor Sidecar)
-    response = await engine_client.embed(
-        uuid.uuid4().hex,
-        request.receiver_sidecar_ranks,
-        processed,
-    )
+    response = await engine_client.embed(uuid.uuid4().hex, processed)
 
     match response.status:
         case Status.SUCCESS:

@@ -109,12 +109,7 @@ class EngineClient:
                         req_id,
                     )
 
-    async def embed(
-        self,
-        request_id: str,
-        receiver_sidecar_ranks: list[int] | None,
-        processed: list[ProcessedEmbeddingData],
-    ) -> EmbeddingResponse:
+    async def embed(self, request_id: str, processed: list[ProcessedEmbeddingData]) -> EmbeddingResponse:
         """Send the embedding request to the engine and wait for the response."""
         # This future will be resolved by the response listener task
         # when the engine process sends a response back
@@ -125,12 +120,7 @@ class EngineClient:
         propagator.inject(carrier)
 
         # Build and send the request
-        req = EngineEnqueueMessage(
-            request_id=request_id,
-            data=processed,
-            receiver_sidecar_ranks=receiver_sidecar_ranks,
-            otel_carrier=carrier,
-        )
+        req = EngineEnqueueMessage(request_id=request_id, data=processed, otel_carrier=carrier)
 
         msg_bytes = self.encoder.encode(req)
         await self.request_sock.send_multipart(
