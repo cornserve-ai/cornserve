@@ -27,7 +27,7 @@ class LLMOutput(TaskOutput):
         response: The response from the LLM.
     """
 
-    response: str | DataForward[str]
+    response: str
 
 
 class LLMTask(UnitTask[LLMInput, LLMOutput]):

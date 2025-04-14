@@ -64,6 +64,16 @@ class Task(BaseModel, ABC, Generic[InputT, OutputT]):
     # Allow extra fields so that users can set subtasks as instance attributes.
     model_config = ConfigDict(extra="allow")
 
+    def post_init(self) -> None:
+        """This function runs after fields are initialized.
+
+        This is a good place to initialize subtasks called by this task.
+        """
+
+    def model_post_init(self, context: Any, /) -> None:
+        """Called after the model is initialized."""
+        self.post_init()
+
     @abstractmethod
     def invoke(self, task_input: InputT) -> OutputT:
         """Invoke the task."""

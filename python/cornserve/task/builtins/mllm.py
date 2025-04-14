@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from typing import Any
-
 from cornserve.task.base import Task, TaskInput, TaskOutput
 from cornserve.task.builtins.encoder import EncoderInput, EncoderTask, Modality
 from cornserve.task.builtins.llm import LLMInput, LLMTask
@@ -43,7 +41,7 @@ class MLLMTask(Task[MLLMInput, MLLMOutput]):
     model_id: str
     modalities: list[Modality] = []
 
-    def model_post_init(self, context: Any, /) -> None:
+    def post_init(self) -> None:
         """Initialize subtasks."""
         if Modality.IMAGE in self.modalities:
             self.image_encoder = EncoderTask(model_id=self.model_id, modality=Modality.IMAGE)
