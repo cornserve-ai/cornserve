@@ -9,7 +9,7 @@ from abc import ABC, abstractmethod
 from collections import defaultdict
 from contextlib import contextmanager
 from contextvars import ContextVar
-from typing import TYPE_CHECKING, Any, Generator, Generic, Self, TypeVar
+from typing import TYPE_CHECKING, Any, ClassVar, Generator, Generic, Self, TypeVar
 
 import httpx
 from opentelemetry import trace
@@ -136,6 +136,15 @@ class Task(BaseModel, ABC, Generic[InputT, OutputT]):
 class UnitTask(Task, Generic[InputT, OutputT]):
     """A task that does not invoke other tasks.
 
+    The unit task is the unit of Task Manager deployment and scaling.
+    A unit task is associated with one or more compatible task execution descriptors,
+    and one is chosen at init-time based on the `executor_descriptor_name` attribute.
+    The same Task Manager is shared by unit tasks when its `root_unit_task_cls`
+    attributes are the same, all fields defined by `root_unit_task_cls` are the same,
+    and their execution descriptor are the same. Note that child classes of the
+    `root_unit_task_cls` are *upcasted* to the `root_unit_task_cls` type and then
+    checked for equivalence.
+
     This class provides a default implementation of the `invoke` method that
     does the following:
     1. If we're executing in recording mode, it calls `make_record_output` to
@@ -146,19 +155,46 @@ class UnitTask(Task, Generic[InputT, OutputT]):
         output saved within the task context object.
     3. Otherwise, it's an error; it raises an `AssertionError`.
 
+    If you want to create a completely new unit task, you should subclass `UnitTask`
+    directly. On the other hand, if you want to slightly customize the behavior,
+    input/output models, `make_record_output`, etc. of an existing unit task, you
+    should subclass that specific unit task subclass, and your subclass's
+    `root_unit_task_cls` class attribute will be set to the concrete unit task you
+    subclassed.
+
+    For instance, let's say `LLMTask` is a direct subclass of `UnitTask`. `LLMTask`
+    will have `root_unit_task_cls` set to `LLMTask` -- itself. All children classes
+    of `LLMTask` will have `root_unit_task_cls` set to `LLMTask` as well.
+
     Attributes:
+        root_unit_task_cls: The root unit task class for this task used to (1) find
+            task execution descriptors compatible with this task, and (2) determine
+            the equivalence of task objects (only the fields in the root unit task
+            class are used to determine the equivalence).
         execution_descriptor_name: The name of the task execution descriptor.
             If `None`, the default descriptor registered for the task will be used.
         execution_descriptor: The `TaskExecutionDescriptor` instance for this task.
     """
 
+    root_unit_task_cls: ClassVar[type[UnitTask]]
+
     execution_descriptor_name: str | None = None
+
+    def __init_subclass__(cls, **kwargs):
+        """Sets the root unit task class.
+
+        The root unit task is set to the current class if it's not already set.
+        """
+        super().__init_subclass__(**kwargs)
+
+        if not hasattr(cls, "root_unit_task_cls"):
+            cls.root_unit_task_cls = cls
 
     @computed_field
     @property
     def execution_descriptor(self) -> TaskExecutionDescriptor[Self, InputT, OutputT]:
         """Get the task execution descriptor for this task."""
-        descriptor_cls = DESCRIPTOR_REGISTRY.get(self.__class__, self.execution_descriptor_name)
+        descriptor_cls = DESCRIPTOR_REGISTRY.get(self.root_unit_task_cls, self.execution_descriptor_name)
         return descriptor_cls(task=self)
 
     @abstractmethod
