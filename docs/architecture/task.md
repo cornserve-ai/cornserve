@@ -289,3 +289,27 @@ The Task Dispatcher is actually not a normal DAG executor (i.e., child dispatche
 Recall, we dispatch requests to Eric and vLLM at the same time, and waiting for data is done *inside* vLLM and the sidecar!
 When a Task in invoked, the Task Dispatcher dispatches the **whole DAG** to the data plane, and waiting for data to be forwarded is done inside the data plane.
 This asynchronous waiting is actually enabled by the decoupled and non-blocking nature of our sidecar.
+
+
+## Implementation notes
+
+```python
+class LLMOutput(BaseModel):
+    response: str | DataForward[str]
+
+class MLLMOutput(BaseModel):
+    response: str
+
+def invoke(task_input: MLLMInput) -> MLLMOutput:
+    ...
+
+    llm_output: LLMOutput = self.llm.invoke(llm_input)
+
+    return MLLMOutput(response=llm_output.response)  # type error: DataForward[str] cannot be assigned to str
+```
+
+During recording, how would we know whether `LLMOutput.response` should be a `str` or `DataForward[str]`?
+Since we're running the invoke function from top to bottom, we cannot know a priori whether subsequent code expects `LLMOutput.response` to be a `str` or `DataForward[str]`.
+This implies that there would not be a way for us to resolve types with only a single pass.
+
+Note, we cannot create two `LLMTask` variants (one with `str` and the other with `DataForward[str]`) because in the data plane, Task Managers are only shared if the task they run and the task's execution descriptor are identical.

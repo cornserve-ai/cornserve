@@ -59,14 +59,13 @@ eric-no-gpu = [
   "transformers",
   "huggingface_hub",
   "pillow",
-  "decord",
+  "opencv-python-headless",
   "einops",
-  "xformers",
   "cornserve[sidecar]",
   "opentelemetry-instrumentation-fastapi",
   "opentelemetry-instrumentation-threading",
 ]
-eric = ["flash-attn", "cornserve[eric-no-gpu]"]
+eric = ["flash-attn", "xformers", "cornserve[eric-no-gpu]"]
 dev-common = [
   "grpcio-tools",
   "pyright",

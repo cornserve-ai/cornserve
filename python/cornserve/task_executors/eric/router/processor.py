@@ -10,7 +10,6 @@ from concurrent.futures import ThreadPoolExecutor
 from io import BytesIO
 from urllib.parse import urlparse
 
-import decord
 import numpy as np
 import numpy.typing as npt
 import requests
