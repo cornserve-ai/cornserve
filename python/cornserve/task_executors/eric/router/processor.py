@@ -10,6 +10,8 @@ from concurrent.futures import ThreadPoolExecutor
 from io import BytesIO
 from urllib.parse import urlparse
 
+import cv2
+import cv2.videoio_registry as vr
 import numpy as np
 import numpy.typing as npt
 import requests
@@ -172,15 +174,47 @@ class VideoLoader(BaseLoader):
 
     def load_bytes(self, data: bytes) -> npt.NDArray:
         """Load video data from bytes."""
-        vr = decord.VideoReader(BytesIO(data), num_threads=1)
-        num_frames = len(vr)
+        api_preference = None
+        for candidate in vr.getStreamBufferedBackends():
+            if not vr.hasBackend(candidate):
+                continue
+            if not vr.isBackendBuiltIn(candidate):
+                _, abi, api = vr.getStreamBufferedBackendPluginVersion(candidate)
+                if abi < 1 or (abi == 1 and api < 2):
+                    continue
+            api_preference = candidate
+            break
 
-        if num_frames > self.max_num_frames:
-            frame_indices = np.linspace(0, num_frames - 1, self.max_num_frames, dtype=int)
+        cap = cv2.VideoCapture(BytesIO(data), api_preference, [])  # type: ignore
+        if not cap.isOpened():
+            raise ValueError("Failed to open video stream.")
+
+        total_num_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        if self.max_num_frames is not None and total_num_frames > self.max_num_frames:
+            frame_indices = np.linspace(0, total_num_frames - 1, self.max_num_frames, dtype=int)
         else:
-            frame_indices = np.arange(num_frames)
+            frame_indices = np.arange(total_num_frames, dtype=int)
 
-        return vr.get_batch(frame_indices).asnumpy()
+        width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        frames = np.empty((len(frame_indices), height, width, 3), dtype=np.uint8)
+
+        frames_loaded = 0
+        for i in range(total_num_frames):
+            ret = cap.grab()
+            if not ret:
+                break
+            if i in frame_indices:
+                ret, frame = cap.retrieve()
+                if not ret:
+                    break
+                frames[frames_loaded] = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                frames_loaded += 1
+        cap.release()
+
+        assert frames_loaded == len(frame_indices), f"Expected {len(frame_indices)} frames, but got {frames_loaded}."
+
+        return frames
 
     def load_base64(self, media_type: str, data: str) -> npt.NDArray:
         """Load video data from base64 string."""

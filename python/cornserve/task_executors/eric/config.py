@@ -59,8 +59,8 @@ class ImageDataConfig(BaseModel):
 class VideoDataConfig(BaseModel):
     """Configuration related to downloading and processing video data."""
 
-    # Number of frames to sample from the video
-    max_num_frames: PositiveInt = 32
+    # Number of frames to sample from the video (`None` for all frames)
+    max_num_frames: PositiveInt | None = 32
 
 
 class ModalityConfig(BaseModel):
