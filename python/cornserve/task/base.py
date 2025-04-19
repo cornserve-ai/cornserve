@@ -9,7 +9,7 @@ from abc import ABC, abstractmethod
 from collections import defaultdict
 from contextlib import contextmanager
 from contextvars import ContextVar
-from typing import TYPE_CHECKING, Any, ClassVar, Generator, Generic, Self, TypeVar
+from typing import TYPE_CHECKING, Any, ClassVar, Generator, Generic, Self, TypeVar, final
 
 import httpx
 from opentelemetry import trace
@@ -209,6 +209,7 @@ class UnitTask(Task, Generic[InputT, OutputT]):
         Behaviors like this are expected to be implemented by this method.
         """
 
+    @final
     def invoke(self, task_input: InputT) -> OutputT:
         """Invoke the task."""
         ctx = task_context.get()
