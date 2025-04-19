@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, Any, ClassVar, Generator, Generic, Self, TypeV
 
 import httpx
 from opentelemetry import trace
-from pydantic import BaseModel, ConfigDict, Field, computed_field
+from pydantic import BaseModel, ConfigDict, Field
 
 from cornserve.constants import K8S_TASK_DISPATCHER_HTTP_URL
 from cornserve.logging import get_logger
@@ -56,10 +56,10 @@ class Task(BaseModel, ABC, Generic[InputT, OutputT]):
             as an instance attribute of this task (e.g., `self.image_encoder = ...`).
     """
 
-    id: str = Field(default_factory=lambda: uuid.uuid4().hex)
+    id: str = Field(init=False, default_factory=lambda: uuid.uuid4().hex)
 
     # Automatically populated whenever users assign tasks as instance attributes.
-    subtasks: list[Task] = Field(default_factory=list)
+    subtasks_attrs: list[str] = Field(init=False, default_factory=list)
 
     # Allow extra fields so that users can set subtasks as instance attributes.
     model_config = ConfigDict(extra="allow")
@@ -92,7 +92,7 @@ class Task(BaseModel, ABC, Generic[InputT, OutputT]):
     def __setattr__(self, name: str, value: Any, /) -> None:
         """Same old setattr but puts tasks in the subtasks list."""
         if isinstance(value, Task):
-            self.subtasks.append(value)
+            self.subtasks_attrs.append(name)
         return super().__setattr__(name, value)
 
     async def __call__(self, task_input: InputT) -> OutputT:
@@ -183,17 +183,37 @@ class UnitTask(Task, Generic[InputT, OutputT]):
     def __init_subclass__(cls, **kwargs):
         """Sets the root unit task class.
 
-        The root unit task is set to the current class if it's not already set.
+        For instance, for `LLMTask` that inherits from `UnitTask[LLMInput, LLMOutput]`,
+        the inheritence order (`__bases__`) is:
+            `LLMTask` -> `UnitTask[LLMInput, LLMOutput]` -> `UnitTask` -> `Task`
+
+        So, we need to look two hops further to find `UnitTask`.
         """
         super().__init_subclass__(**kwargs)
 
-        if not hasattr(cls, "root_unit_task_cls"):
-            cls.root_unit_task_cls = cls
+        def is_proxy_for_unit(base: type) -> bool:
+            """True if *base* appears to be the auto‑generated proxy."""
+            return UnitTask in getattr(base, "__bases__", ())
 
-    @computed_field
+        # If any immediate base (or proxies) is `UnitTask`, cls is the root.
+        if any(is_proxy_for_unit(b) for b in cls.__bases__):
+            cls.root_unit_task_cls = cls
+            return
+
+        # Otherwise climb the MRO until you meet that condition
+        for anc in cls.mro()[1:]:
+            if any(is_proxy_for_unit(b) for b in anc.__bases__):
+                cls.root_unit_task_cls = anc
+                break
+        # Fallback for the intemediate class `UnitTask[SpecificInput, SpecificOutput]`
+        # that appears due to generic inheritance.
+        else:
+            cls.root_unit_task_cls = UnitTask
+
     @property
     def execution_descriptor(self) -> TaskExecutionDescriptor[Self, InputT, OutputT]:
         """Get the task execution descriptor for this task."""
+        print(f"{self.root_unit_task_cls=}")
         descriptor_cls = DESCRIPTOR_REGISTRY.get(self.root_unit_task_cls, self.execution_descriptor_name)
         return descriptor_cls(task=self)
 

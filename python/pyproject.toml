@@ -17,7 +17,7 @@ dependencies = [
     "tyro",
     "kubernetes_asyncio",
     "httpx",
-    "pydantic",
+    "pydantic>=2.11",
     "opentelemetry-api",
     "opentelemetry-sdk",
     "opentelemetry-exporter-otlp-proto-grpc",

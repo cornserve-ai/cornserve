@@ -67,3 +67,4 @@ class VLLMDescriptor(TaskExecutionDescriptor[LLMTask, LLMInput, LLMOutput]):
 
 
 DESCRIPTOR_REGISTRY.register(LLMTask, VLLMDescriptor, default=True)
+print("Registered LLMTAsk execution descriptor")
