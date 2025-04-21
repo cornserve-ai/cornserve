@@ -2,15 +2,18 @@ syntax = "proto3";
 
 package cornserve.common;
 
+// Whether something was successful or not
 enum Status {
   STATUS_UNSPECIFIED = 0;
   STATUS_OK = 1;
   STATUS_ERROR = 2;
 }
 
-enum TaskType {
-  UNKNOWN = 0;
+// Concrete task instantiated from a unit task class.
+message UnitTask {
+  // UnitTask Python class name.
+  string task_class_name = 1;
 
-  // LLMs and multimodal LLMs
-  LLM = 1;
+  // JSON-serialized task object.
+  string task_config = 2;
 }

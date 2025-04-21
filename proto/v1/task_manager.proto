@@ -25,16 +25,6 @@ service TaskManager {
   rpc Healthcheck(HealthcheckRequest) returns (HealthcheckResponse);
 }
 
-// Type of task manager
-// Keep in sync with `cornserve.services.task_manager.models.TaskManagerType`
-enum TaskManagerType {
-  // Multimodal data embedding
-  ENCODER = 0;
-
-  // LLM text generation
-  LLM = 1;
-}
-
 enum ResourceAction {
   // Give more resources
   ADD = 0;
@@ -61,14 +51,11 @@ message RegisterTaskRequest {
   // ID of the task manager
   string task_manager_id = 1;
 
-  // Type of task
-  TaskManagerType type = 2;
+  // Unit task instance
+  common.UnitTask task = 2;
 
   // Initial set of GPU resources
   repeated GPUResource gpus = 3;
-
-  // JSON-encoded config generated from the Task Pydantic model
-  string config = 4;
 }
 
 message RegisterTaskResponse {
@@ -130,15 +117,12 @@ message GetTaskProfileResponse {
 
 // Request routing
 message GetRouteRequest {
-  // ID of the app that is making the request
-  string app_id = 1;
-
   // ID of the request
-  string request_id = 2;
+  string request_id = 1;
 
   // Optional routing hint
   // e.g., hash of image URL, system prompt
-  optional string routing_hint = 3;
+  optional string routing_hint = 2;
 }
 
 message GetRouteResponse {

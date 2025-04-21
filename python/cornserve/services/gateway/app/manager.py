@@ -9,14 +9,13 @@ from typing import Any, get_type_hints
 
 import grpc
 from opentelemetry import trace
-from opentelemetry.instrumentation.grpc import GrpcAioInstrumentorClient
-from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
 
 from cornserve.frontend.app import AppConfig, AppRequest, AppResponse
 from cornserve.frontend.tasks import LLMTask, Task
 from cornserve.logging import get_logger
 from cornserve.services.gateway.app.models import AppClasses, AppContext, AppDefinition, AppState
 from cornserve.services.gateway.app.task_impl import app_context, patch_task_invoke
+from cornserve.services.gateway.task_manager import TaskManager
 from cornserve.services.pb.common_pb2 import TaskType
 from cornserve.services.pb.resource_manager_pb2 import (
     ReconcileNewAppRequest,
@@ -27,7 +26,6 @@ from cornserve.services.pb.resource_manager_pb2_grpc import ResourceManagerStub
 
 logger = get_logger(__name__)
 tracer = trace.get_tracer(__name__)
-HTTPXClientInstrumentor().instrument()
 
 
 def load_module_from_source(source_code: str, module_name: str) -> ModuleType:
@@ -108,16 +106,13 @@ def validate_app_module(module: ModuleType) -> AppClasses:
 class AppManager:
     """Manages registration and execution of user applications."""
 
-    def __init__(self, resource_manager_grpc_url: str) -> None:
+    def __init__(self, task_manager: TaskManager) -> None:
         """Initialize the AppManager."""
         # One lock protects all app-related state dicts below
         self.app_lock = asyncio.Lock()
         self.apps: dict[str, AppDefinition] = {}
         self.app_states: dict[str, AppState] = {}
         self.app_driver_tasks: dict[str, list[asyncio.Task]] = defaultdict(list)
-
-        # otel gRPC instrumentation
-        GrpcAioInstrumentorClient().instrument()
 
         # gRPC client for resource manager
         self.resource_manager_channel = grpc.aio.insecure_channel(resource_manager_grpc_url)

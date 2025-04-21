@@ -6,6 +6,8 @@ from typing import TYPE_CHECKING
 
 import uvicorn
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+from opentelemetry.instrumentation.grpc import GrpcAioInstrumentorClient
+from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
 
 from cornserve.logging import get_logger
 from cornserve.services.gateway.router import create_app
@@ -25,6 +27,8 @@ async def serve() -> None:
 
     app = create_app()
     FastAPIInstrumentor.instrument_app(app)
+    GrpcAioInstrumentorClient().instrument()
+    HTTPXClientInstrumentor().instrument()
 
     logger.info("Available routes are:")
     for route in app.routes:

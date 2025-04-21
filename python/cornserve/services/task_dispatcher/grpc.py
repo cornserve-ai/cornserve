@@ -47,8 +47,9 @@ class TaskDispatcherServicer(task_dispatcher_pb2_grpc.TaskDispatcherServicer):
 
 def create_server(task_dispatcher: TaskDispatcher) -> grpc.aio.Server:
     """Create the gRPC server for the Task Dispatcher."""
+    servicer = TaskDispatcherServicer(task_dispatcher)
     server = grpc.aio.server()
-    task_dispatcher_pb2_grpc.add_TaskDispatcherServicer_to_server(TaskDispatcherServicer(task_dispatcher), server)
+    task_dispatcher_pb2_grpc.add_TaskDispatcherServicer_to_server(servicer, server)
     server.add_insecure_port("[::]:50051")
     logger.info("gRPC server listening on [::]:50051")
     return server

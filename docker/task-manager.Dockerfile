@@ -5,4 +5,4 @@ ADD . /workspace/cornserve
 WORKDIR /workspace/cornserve/python
 RUN pip install -e .[task-manager]
 
-ENTRYPOINT ["python", "-m", "cornserve.services.task_manager.server"]
+ENTRYPOINT ["python", "-m", "cornserve.services.task_manager.entrypoint"]

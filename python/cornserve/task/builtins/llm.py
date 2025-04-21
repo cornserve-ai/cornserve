@@ -42,3 +42,7 @@ class LLMTask(UnitTask[LLMInput, LLMOutput]):
     def make_record_output(self, task_input: LLMInput) -> LLMOutput:
         """Create a task output for task invocation recording."""
         return LLMOutput(response="")
+
+    def make_name(self) -> str:
+        """Create a concise string representation of the task."""
+        return f"llm-{self.model_id.split('/')[-1].lower()}"

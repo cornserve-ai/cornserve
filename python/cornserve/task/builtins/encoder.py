@@ -49,3 +49,7 @@ class EncoderTask(UnitTask[EncoderInput, EncoderOutput]):
     def make_record_output(self, task_input: EncoderInput) -> EncoderOutput:
         """Create a task output for task invocation recording."""
         return EncoderOutput(embeddings=[DataForward[Tensor]() for _ in task_input.data_urls])
+
+    def make_name(self) -> str:
+        """Create a concise string representation of the task."""
+        return f"encoder-{self.modality.lower()}-{self.model_id.split('/')[-1].lower()}"

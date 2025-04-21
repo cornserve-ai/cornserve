@@ -5,4 +5,4 @@ ADD . /workspace/cornserve
 WORKDIR /workspace/cornserve/python
 RUN pip install -e .[resource-manager]
 
-ENTRYPOINT ["python", "-m", "cornserve.services.resource_manager.server"]
+ENTRYPOINT ["python", "-m", "cornserve.services.resource_manager.entrypoint"]

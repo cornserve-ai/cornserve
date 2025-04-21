@@ -1,51 +1,28 @@
 """Gateway FastAPI app definition."""
 
-from typing import Any
+from __future__ import annotations
 
 from fastapi import APIRouter, FastAPI, Request, Response, status
 from fastapi.exceptions import RequestValidationError
 from opentelemetry import trace
-from pydantic import BaseModel, ValidationError
+from pydantic import ValidationError
 
 from cornserve.constants import K8S_RESOURCE_MANAGER_GRPC_URL
 from cornserve.logging import get_logger
 from cornserve.services.gateway.app.manager import AppManager
+from cornserve.services.gateway.models import (
+    AppRegistrationResponse,
+    AppRequest,
+    RegisterAppRequest,
+    UnitTaskDeploymentRequest,
+    UnitTaskDeploymentResponse,
+)
+from cornserve.services.gateway.task_manager import TaskManager
+from cornserve.task.base import TaskGraphDispatch
 
 router = APIRouter()
 logger = get_logger(__name__)
 tracer = trace.get_tracer(__name__)
-
-
-class RegisterAppRequest(BaseModel):
-    """Request for registering a new application.
-
-    Attributes:
-        app_id: The unique identifier for the application.
-        source_code: The Python source code of the application.
-    """
-
-    source_code: str
-
-
-class AppRegistrationResponse(BaseModel):
-    """Response for registering a new application.
-
-    Attributes:
-        app_id: The unique identifier for the registered application.
-    """
-
-    app_id: str
-
-
-class AppRequest(BaseModel):
-    """Request for invoking a registered application.
-
-    Attributes:
-        request_data: The input data for the application. Should be a valid
-            JSON object that matches the `Request` schema of the application.
-    """
-
-    request_data: dict[str, Any]
 
 
 @router.post("/admin/register_app", response_model=AppRegistrationResponse)
@@ -103,10 +80,10 @@ async def invoke_app(app_id: str, request: AppRequest, raw_request: Request):
     except KeyError as e:
         return Response(status_code=status.HTTP_404_NOT_FOUND, content=str(e))
     except ValueError as e:
-        logger.info("Error while running app {%s}: {%s}", app_id, e)
+        logger.info("Error while running app %s: %s", app_id, e)
         return Response(status_code=status.HTTP_400_BAD_REQUEST, content=str(e))
     except Exception as e:
-        logger.exception("Unexpected error while running app {%s}", app_id)
+        logger.exception("Unexpected error while running app %s", app_id)
         return Response(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             content=str(e),
@@ -128,6 +105,63 @@ async def list_apps(raw_request: Request):
         )
 
 
+@router.post("/task/deploy", response_model=UnitTaskDeploymentResponse)
+async def deploy_tasks(request: UnitTaskDeploymentRequest, raw_request: Request):
+    """Ensure that one or more unit tasks are deployed.
+
+    If a task is already deployed, it will be skipped without error.
+    """
+    task_manager: TaskManager = raw_request.app.state.task_manager
+
+    try:
+        return await task_manager.deploy_tasks(request.tasks)
+    except Exception as e:
+        logger.exception("Unexpected error while deploying tasks")
+        return Response(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content=str(e),
+        )
+
+
+@router.post("/task/teardown")
+async def teardown_tasks(request: UnitTaskDeploymentRequest, raw_request: Request):
+    """Ensure that one or more unit tasks are torn down.
+
+    If a task is not found, it will be skipped without error.
+    """
+    task_manager: TaskManager = raw_request.app.state.task_manager
+
+    try:
+        await task_manager.teardown_tasks(request.tasks)
+        return Response(status_code=status.HTTP_200_OK)
+    except Exception as e:
+        logger.exception("Unexpected error while tearing down tasks")
+        return Response(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content=str(e),
+        )
+
+
+@router.post("/task/invoke")
+async def invoke_tasks(request: TaskGraphDispatch, raw_request: Request):
+    """Invoke a unit task graph."""
+    task_manager: TaskManager = raw_request.app.state.task_manager
+
+    try:
+        return await task_manager.invoke_tasks(request)
+    except KeyError as e:
+        return Response(status_code=status.HTTP_404_NOT_FOUND, content=str(e))
+    except ValueError as e:
+        logger.info("Error while invoking tasks: %s", e)
+        return Response(status_code=status.HTTP_400_BAD_REQUEST, content=str(e))
+    except Exception as e:
+        logger.exception("Unexpected error while invoking tasks")
+        return Response(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content=str(e),
+        )
+
+
 @router.get("/health")
 async def health_check():
     """Health check endpoint."""
@@ -136,7 +170,8 @@ async def health_check():
 
 def init_app_state(app: FastAPI) -> None:
     """Initialize the app state with required components."""
-    app.state.app_manager = AppManager(K8S_RESOURCE_MANAGER_GRPC_URL)
+    app.state.task_manager = TaskManager(K8S_RESOURCE_MANAGER_GRPC_URL)
+    app.state.app_manager = AppManager(app.state.task_manager)
 
 
 def create_app() -> FastAPI:

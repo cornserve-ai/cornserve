@@ -15,8 +15,10 @@ import httpx
 from opentelemetry import trace
 from pydantic import BaseModel, ConfigDict, Field
 
-from cornserve.constants import K8S_TASK_DISPATCHER_HTTP_URL
+from cornserve.constants import K8S_GATEWAY_SERVICE_HTTP_URL
 from cornserve.logging import get_logger
+from cornserve.services.pb.common_pb2 import UnitTask as UnitTaskProto
+from cornserve.task.registry import TASK_REGISTRY
 from cornserve.task_executors.descriptor.registry import DESCRIPTOR_REGISTRY
 
 if TYPE_CHECKING:
@@ -50,8 +52,9 @@ class Task(BaseModel, ABC, Generic[InputT, OutputT]):
 
     Attributes:
         id: The ID of the task.
-        subtasks: A list of subtasks that are assigned as instance attributes
-            to this task (e.g., `self.image_encoder`). This list is automatically
+        subtask_attrs: A list of instance attribute names that hold a `Task`
+            instance (e.g., `self.image_encoder` may be an `EncoderTask` and this
+            list will contain `"image_encoder"`). This list is automatically
             populated whenever users assign anything that is an instance of `Task`
             as an instance attribute of this task (e.g., `self.image_encoder = ...`).
     """
@@ -181,13 +184,15 @@ class UnitTask(Task, Generic[InputT, OutputT]):
     execution_descriptor_name: str | None = None
 
     def __init_subclass__(cls, **kwargs):
-        """Sets the root unit task class.
+        """A hook that runs when a subclass is created.
+
+        This sets the root unit task class for this task.
 
         For instance, for `LLMTask` that inherits from `UnitTask[LLMInput, LLMOutput]`,
         the inheritence order (`__bases__`) is:
             `LLMTask` -> `UnitTask[LLMInput, LLMOutput]` -> `UnitTask` -> `Task`
 
-        So, we need to look two hops further to find `UnitTask`.
+        So, we need to look at least two hops to find `UnitTask`.
         """
         super().__init_subclass__(**kwargs)
 
@@ -198,6 +203,7 @@ class UnitTask(Task, Generic[InputT, OutputT]):
         # If any immediate base (or proxies) is `UnitTask`, cls is the root.
         if any(is_proxy_for_unit(b) for b in cls.__bases__):
             cls.root_unit_task_cls = cls
+            TASK_REGISTRY.register(cls, name=cls.__name__)
             return
 
         # Otherwise climb the MRO until you meet that condition
@@ -213,7 +219,6 @@ class UnitTask(Task, Generic[InputT, OutputT]):
     @property
     def execution_descriptor(self) -> TaskExecutionDescriptor[Self, InputT, OutputT]:
         """Get the task execution descriptor for this task."""
-        print(f"{self.root_unit_task_cls=}")
         descriptor_cls = DESCRIPTOR_REGISTRY.get(self.root_unit_task_cls, self.execution_descriptor_name)
         return descriptor_cls(task=self)
 
@@ -249,6 +254,23 @@ class UnitTask(Task, Generic[InputT, OutputT]):
 
         raise AssertionError("Task context is neither in recording nor replay mode.")
 
+    def to_pb(self) -> UnitTaskProto:
+        """Convert this unit task into the UnitTask protobuf message."""
+        return UnitTaskProto(
+            task_class_name=self.root_unit_task_cls.__name__,
+            task_config=self.model_dump_json(),
+        )
+
+    @classmethod
+    def from_pb(cls, proto: UnitTaskProto) -> UnitTask:
+        """Create a unit task from the UnitTask protobuf message."""
+        task_cls = TASK_REGISTRY.get(proto.task_class_name)
+        return task_cls.model_validate_json(proto.task_config)
+
+    def make_name(self) -> str:
+        """Create a concise string representation of the task."""
+        return f"{self.__class__.__name__.lower()}"
+
 
 class TaskInvocation(BaseModel, Generic[InputT, OutputT]):
     """An invocation of a task.
@@ -274,16 +296,6 @@ class TaskGraphDispatch(BaseModel):
 
     task_id: str
     invocations: list[TaskInvocation]
-
-
-class TaskGraphResponse(BaseModel):
-    """Outputs of dispatched and completed tasks.
-
-    Attributes:
-        task_outputs: The outputs of the dispatched tasks.
-    """
-
-    task_outputs: list[TaskOutput]
 
 
 class TaskContext:
@@ -383,7 +395,7 @@ class TaskContext:
         try:
             async with httpx.AsyncClient(timeout=60.0) as client:
                 response = await client.post(
-                    K8S_TASK_DISPATCHER_HTTP_URL + "/task",
+                    K8S_GATEWAY_SERVICE_HTTP_URL + "/task/invoke",
                     json=request.model_dump(),
                 )
             response.raise_for_status()
@@ -394,10 +406,11 @@ class TaskContext:
             logger.exception("Task Dispatcher returned an error: %s", e)
             raise RuntimeError("Task Dispatcher returned an error") from e
 
-        task_outputs = TaskGraphResponse.model_validate(response.json()).task_outputs
-        for i, (invocation, output) in enumerate(zip(self.invocations, task_outputs, strict=True)):
-            span.set_attribute(f"task_context.task.{i}.output", output.model_dump_json())
-            self.task_outputs[invocation.task.id].append(output)
+        # Parse the response to the right task output type.
+        for i, (invocation, output) in enumerate(zip(self.invocations, response.json(), strict=True)):
+            task_output = invocation.task_output.__class__.model_validate(output)
+            span.set_attribute(f"task_context.task.{i}.output", task_output.model_dump_json())
+            self.task_outputs[invocation.task.id].append(task_output)
 
     def replay_invocation(self, task: Task[InputT, OutputT]) -> OutputT:
         """Replay a task invocation.
