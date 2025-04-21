@@ -210,7 +210,7 @@ class TaskManager:
                 logger.error("Errors occured while tearing down tasks")
                 raise RuntimeError(f"Error while tearing down tasks: {errors}")
 
-    async def invoke_tasks(self, dispatch: TaskGraphDispatch) -> list[dict[str, Any]]:
+    async def invoke_tasks(self, dispatch: TaskGraphDispatch) -> list[Any]:
         """Invoke the given tasks.
 
         Before invocation, this method ensures that all tasks part of the invocation

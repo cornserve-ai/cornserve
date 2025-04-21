@@ -7,21 +7,35 @@ import uuid
 from collections import defaultdict
 from typing import Any
 
+import grpc
 import httpx
 from opentelemetry import trace
-from opentelemetry.instrumentation.grpc import GrpcInstrumentorClient
-from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
 
-from cornserve.frontend.tasks import LLMTask
 from cornserve.logging import get_logger
-from cornserve.services.pb import task_manager_pb2
-from cornserve.services.task_dispatcher.models import TaskInfo
+from cornserve.services.pb import task_manager_pb2, task_manager_pb2_grpc
 from cornserve.services.task_manager.models import TaskManagerType
+from cornserve.task.base import TaskInvocation, UnitTask
 
 logger = get_logger(__name__)
 tracer = trace.get_tracer(__name__)
-HTTPXClientInstrumentor().instrument()
-GrpcInstrumentorClient().instrument()
+
+
+class TaskInfo:
+    """Stores all task-related information.
+
+    Attributes:
+        task: The unit task object.
+        task_manager_url: The URL to the task manager.
+        task_manager_channel: The gRPC channel to the task manager.
+        task_manager_stub: The gRPC stub to the task manager.
+    """
+
+    def __init__(self, task: UnitTask, task_manager_url: str) -> None:
+        """Initialize the TaskInfo object."""
+        self.task = task
+        self.task_manager_url = task_manager_url
+        self.task_manager_channel = grpc.aio.insecure_channel(task_manager_url)
+        self.task_manager_stub = task_manager_pb2_grpc.TaskManagerStub(self.task_manager_channel)
 
 
 class TaskDispatcher:
@@ -29,53 +43,58 @@ class TaskDispatcher:
 
     def __init__(self) -> None:
         """Initialize the Task Dispatcher."""
-        self.app_lock = asyncio.Lock()
-        self.app_task_info: dict[str, dict[str, TaskInfo]] = {}
+        self.task_lock = asyncio.Lock()
+        self.tasks: dict[str, TaskInfo] = {}
 
         self.ongoing_task_lock = asyncio.Lock()
-        self.app_ongoing_invokes: dict[str, list[asyncio.Task]] = defaultdict(list)
+        self.ongoing_invokes: dict[str, list[asyncio.Task]] = defaultdict(list)
 
-    async def notify_app_registration(self, app_id: str, task_info: list[TaskInfo]) -> None:
-        """Register newly spawned task managers to the dispatcher."""
-        async with self.app_lock:
-            if app_id in self.app_task_info:
-                raise ValueError(f"App ID {app_id} already exists in task dispatcher.")
-            self.app_task_info[app_id] = {task.id: task for task in task_info}
+    async def notify_task_deployment(self, task: UnitTask, task_manager_url: str) -> None:
+        """Register a newly deployed task and its task manager with the dispatcher."""
+        async with self.task_lock:
+            self.tasks[task.id] = TaskInfo(task, task_manager_url)
 
-        logger.info("Registered new app %s with tasks %s", app_id, task_info)
+        logger.info("Registered new task %s with task manager URL %s", task, task_manager_url)
 
-    async def notify_app_unregistration(self, app_id: str) -> None:
-        """Remove task managers associated with a task from the dispatcher.
+    async def notify_task_teardown(self, task: UnitTask) -> None:
+        """Remove a task that has been torn down.
 
-        This is called when an app is unregistered from the dispatcher. Each app keeps
-        track of the ongoing invoke tasks. When the app is unregistered, all ongoing invoke
-        tasks are cancelled.
+        This will cancel all ongoing invokes for the task.
         """
-        async with self.app_lock:
-            if app_id not in self.app_task_info:
-                raise ValueError(f"App ID {app_id} not found in task dispatcher.")
+        async with self.task_lock:
+            if task.id not in self.tasks:
+                raise ValueError(f"Task {task} not found in task dispatcher.")
 
-            task_infos = self.app_task_info.pop(app_id)
+            task_info = self.tasks.pop(task.id)
 
-        # Cancel all ongoing invokes for the app.
+        # Cancel all ongoing invokes for the task
         async with self.ongoing_task_lock:
-            for invoke_task in self.app_ongoing_invokes.pop(app_id, []):
+            for invoke_task in self.ongoing_invokes.pop(task.id, []):
                 invoke_task.cancel()
 
-        # Close all channels to the task managers.
-        channel_close_coros = []
-        for task_info in task_infos.values():
-            for task_manager in task_info.task_managers:
-                channel_close_coros.append(task_manager.channel.close(grace=1.0))
-        await asyncio.gather(*channel_close_coros)
+        # Close the gRPC channel to the task manager
+        await task_info.task_manager_channel.close()
 
-        logger.info("Unregistered app %s", app_id)
+        logger.info("Removed task %s from task dispatcher", task)
 
     async def shutdown(self) -> None:
         """Shutdown the Task Dispatcher."""
+        coros = []
+        for task_info in self.tasks.values():
+            coros.append(task_info.task_manager_channel.close())
+
+        results = await asyncio.gather(*coros, return_exceptions=True)
+        for result in results:
+            if isinstance(result, BaseException):
+                logger.error("Error occured while shutting down task dispatcher: %s", result)
+
+        logger.info("Task dispatcher shutdown complete")
 
     @tracer.start_as_current_span("TaskDispatcher.invoke")
-    async def invoke(self, app_id: str, task_id: str, request_id: str, data: str) -> Any:
+    async def invoke(self, invocations: list[TaskInvocation]) -> list[Any]:
+        """Diaptch a graph of task invocations to task managers."""
+
+    async def old_invoke(self, app_id: str, task_id: str, request_id: str, data: str) -> Any:
         """Invoke a task with the given request data."""
         span = trace.get_current_span()
         span.set_attribute("task_dispatcher.invoke.app_id", app_id)
@@ -94,7 +113,7 @@ class TaskDispatcher:
         # Spawn invoke task and add it to the list of ongoing invokes for the app.
         invoke_task = asyncio.create_task(self._do_invoke(app_id, task_info, request_id, data))
         async with self.ongoing_task_lock:
-            self.app_ongoing_invokes[app_id].append(invoke_task)
+            self.ongoing_invokes[app_id].append(invoke_task)
 
         try:
             return await invoke_task
@@ -102,7 +121,7 @@ class TaskDispatcher:
             raise ValueError("Task invoke cancelled. The app is likely shutting down.") from e
         finally:
             async with self.ongoing_task_lock:
-                self.app_ongoing_invokes[app_id].remove(invoke_task)
+                self.ongoing_invokes[app_id].remove(invoke_task)
 
     async def _do_invoke(
         self,

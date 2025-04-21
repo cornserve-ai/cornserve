@@ -8,7 +8,8 @@ from typing import TYPE_CHECKING
 
 import uvicorn
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
-from opentelemetry.instrumentation.grpc import GrpcInstrumentorServer
+from opentelemetry.instrumentation.grpc import GrpcInstrumentorClient, GrpcInstrumentorServer
+from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
 
 from cornserve.logging import get_logger
 from cornserve.services.task_dispatcher.grpc import create_server
@@ -27,12 +28,13 @@ async def serve() -> None:
 
     configure_otel("task_dispatcher")
 
-    GrpcInstrumentorServer().instrument()
-
     # FastAPI server
     app = create_app()
 
     FastAPIInstrumentor.instrument_app(app)
+    HTTPXClientInstrumentor().instrument()
+    GrpcInstrumentorClient().instrument()
+    GrpcInstrumentorServer().instrument()
 
     logger.info("Available HTTP routes are:")
     for route in app.routes:
