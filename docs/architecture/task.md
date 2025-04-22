@@ -122,11 +122,11 @@ Two intermediate data structures:
 
 1. For each task invocation:
    - Call `GetRoute` on each Task's Task Manager to get the route to the Task Executor and construct the `TaskExecution` object.
-2. Inspect the `DataForward` objects to see if any of them are without producers or consumers. If any, it's an error.
-3. For each `TaskExecution` object:
+2. For each `TaskExecution` object:
    - Find all `DataForward` objects in the Task's input and output, and add or update the dictionary of `DataForward` ID → `ForwardInfo`.
       - If the `DataForward` object is part of the Task's input, it's a consumer, so destination sidecar ranks should be filled in.
       - If the `DataForward` object is part of the Task's output, it's a producer, so source sidecar ranks should be filled in.
+3. Inspect all `DataForward` objects to see if any of them are without producers or consumers. If any, it's an error.
 4. For each `TaskExecution` object:
    - Translate the Task's input to the Task Executor's request using `TaskExecutionDescriptor`.
       - This requires the Task's input and output objects (`DataForward` objects filled in). The descriptor will fill in the receiver sidecar ranks of the `DataForward` objects in the Task's output.

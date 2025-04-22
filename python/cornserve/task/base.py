@@ -281,7 +281,7 @@ class TaskInvocation(BaseModel, Generic[InputT, OutputT]):
         task_output: The output of the task.
     """
 
-    task: Task[InputT, OutputT]
+    task: UnitTask[InputT, OutputT]
     task_input: InputT
     task_output: OutputT
 
@@ -354,7 +354,7 @@ class TaskContext:
         finally:
             self.is_replaying = False
 
-    def record_invocation(self, task: Task[InputT, OutputT], task_input: InputT, task_output: OutputT) -> None:
+    def record_invocation(self, task: UnitTask[InputT, OutputT], task_input: InputT, task_output: OutputT) -> None:
         """Record a task invocation."""
         if not self.is_recording:
             raise RuntimeError("Task invocation can only be recorded in recording mode.")
