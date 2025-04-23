@@ -1,6 +1,7 @@
 """Spins up the Gateway service."""
 
 import asyncio
+import os
 import signal
 from typing import TYPE_CHECKING
 
@@ -47,6 +48,9 @@ async def serve() -> None:
     config = uvicorn.Config(app, host="0.0.0.0", port=8000)
     server = uvicorn.Server(config)
     app_manager: AppManager = app.state.app_manager
+
+    # `TaskContext` reads this environment variable to determine the URL of the Gateway.
+    os.environ["CORNSERVE_GATEWAY_URL"] = "http://localhost:8000"
 
     loop = asyncio.get_running_loop()
     server_task = loop.create_task(server.serve())

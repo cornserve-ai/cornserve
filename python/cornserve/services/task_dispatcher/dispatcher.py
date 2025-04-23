@@ -183,6 +183,8 @@ class TaskDispatcher:
                 )
             )
 
+        # TODO: Build an actual graph, submit to scheduling asyncio.Task.
+
         # Dig up `DataForward` objects and connect producers and consumers.
         #
         #                   task_input           task_output
@@ -200,14 +202,14 @@ class TaskDispatcher:
         # routing result, we can figure out its destination sidecar ranks.
         # Note that when we inplace set the sidecar ranks in `DataForward` objects, we are doing so on
         # references to the original `DataForward` objects in the task input and output.
-        data_forwards: dict[str, DataForward] = {}
+        producer_forwards: dict[str, DataForward] = {}
         for execution in task_executions:
             # Iterate recursively over all `DataForward` objects in the task input.
             # Encountered `DataForward` objects are consumers, which should have been encountered
             # previously in earlier task invocations. If not, it's an error.
             for consumer_forward in iter_data_forwards(execution.invocation.task_input):
                 try:
-                    producer_forward = data_forwards[consumer_forward.id]
+                    producer_forward = producer_forwards[consumer_forward.id]
                 except KeyError as e:
                     raise ValueError(
                         f"Consumer `DataForward[{consumer_forward.data_type}](id={consumer_forward.id})` in the "
@@ -223,10 +225,10 @@ class TaskDispatcher:
             # Encountered `DataForward` objects are producers, which we save in `data_forwards`.
             for producer_forward in iter_data_forwards(execution.invocation.task_output):
                 producer_forward.src_sidecar_ranks = execution.executor_sidecar_ranks
-                data_forwards[producer_forward.id] = producer_forward
+                producer_forwards[producer_forward.id] = producer_forward
 
         # Verify whether all `DataForward` objects are properly connected
-        for data_forward in data_forwards.values():
+        for data_forward in producer_forwards.values():
             assert data_forward.src_sidecar_ranks is not None
             assert data_forward.dst_sidecar_ranks is not None
 

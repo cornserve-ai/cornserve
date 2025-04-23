@@ -5,24 +5,16 @@ import importlib.util
 import uuid
 from collections import defaultdict
 from types import ModuleType
-from typing import Any, get_type_hints
+from typing import Any, Iterable, get_type_hints
 
-import grpc
 from opentelemetry import trace
 
-from cornserve.frontend.app import AppConfig, AppRequest, AppResponse
-from cornserve.frontend.tasks import LLMTask, Task
+from cornserve.app.base import AppConfig, AppRequest, AppResponse
 from cornserve.logging import get_logger
-from cornserve.services.gateway.app.models import AppClasses, AppContext, AppDefinition, AppState
-from cornserve.services.gateway.app.task_impl import app_context, patch_task_invoke
+from cornserve.services.gateway.app.models import AppClasses, AppDefinition, AppState
+from cornserve.services.gateway.models import UnitTaskSpec
 from cornserve.services.gateway.task_manager import TaskManager
-from cornserve.services.pb.common_pb2 import TaskType
-from cornserve.services.pb.resource_manager_pb2 import (
-    ReconcileNewAppRequest,
-    ReconcileRemovedAppRequest,
-    TaskConfig,
-)
-from cornserve.services.pb.resource_manager_pb2_grpc import ResourceManagerStub
+from cornserve.task.base import Task, UnitTask
 
 logger = get_logger(__name__)
 tracer = trace.get_tracer(__name__)
@@ -103,24 +95,50 @@ def validate_app_module(module: ModuleType) -> AppClasses:
     )
 
 
+def discover_unit_tasks(tasks: Iterable[Task]) -> list[UnitTaskSpec]:
+    """Discover unit tasks from the app's config.
+
+    XXX: There is no way for a custom-defined app to declare a task that is not
+    already built-in (`cornserve.task.builtins`). There should be a way for
+    users to instantiate any registered task class. Maybe a nicer way to
+    write code to query the task registry. This is a general problem even for
+    human- or AI-generated app code.
+
+    Args:
+        tasks: Task dictionary from the app's config
+    """
+    task_specs = []
+    for task in tasks:
+        if isinstance(task, UnitTask):
+            task_spec = UnitTaskSpec(
+                task_class_name=task.__class__.__name__,
+                task_config=task.model_dump(),
+            )
+            task_specs.append(task_spec)
+        else:
+            task_specs.extend(discover_unit_tasks(getattr(task, attr) for attr in task.subtask_attr_names))
+
+    return task_specs
+
+
 class AppManager:
     """Manages registration and execution of user applications."""
 
     def __init__(self, task_manager: TaskManager) -> None:
         """Initialize the AppManager."""
+        self.task_manager = task_manager
+
         # One lock protects all app-related state dicts below
         self.app_lock = asyncio.Lock()
         self.apps: dict[str, AppDefinition] = {}
         self.app_states: dict[str, AppState] = {}
         self.app_driver_tasks: dict[str, list[asyncio.Task]] = defaultdict(list)
 
-        # gRPC client for resource manager
-        self.resource_manager_channel = grpc.aio.insecure_channel(resource_manager_grpc_url)
-        self.resource_manager = ResourceManagerStub(self.resource_manager_channel)
-
     @tracer.start_as_current_span(name="AppManager.register_app")
     async def register_app(self, source_code: str) -> str:
         """Register a new application with the given ID and source code.
+
+        This will deploy all unit tasks discovered in the app's config.
 
         Args:
             source_code: Python source code of the application
@@ -135,34 +153,21 @@ class AppManager:
         async with self.app_lock:
             # Generate a unique app ID
             while True:
-                app_id = f"app-{uuid.uuid4()}"
+                app_id = f"app-{uuid.uuid4().hex}"
                 if app_id not in self.app_states:
                     break
 
             self.app_states[app_id] = AppState.NOT_READY
         span.set_attribute("app_manager.register_app.app_id", app_id)
 
-        # Load and validate the app
         try:
+            # Load and validate the app
             module = load_module_from_source(source_code, app_id)
             app_classes = validate_app_module(module)
-            patch_task_invoke(app_classes)
+            task_specs = discover_unit_tasks(app_classes.config_cls.tasks.values())
 
-            # Notify resource manager
-            task_configs = []
-            for task in app_classes.config_cls.tasks.values():
-                if not isinstance(task, Task):
-                    raise ValueError(f"Invalid task type: {type(task)}")
-                if isinstance(task, LLMTask):
-                    task_type = TaskType.LLM
-                else:
-                    raise ValueError(f"Unsupported task type: {type(task)}")
-                task_config = TaskConfig(type=task_type, config=task.model_dump_json())
-                task_configs.append(task_config)
-
-            await self.resource_manager.ReconcileNewApp(
-                ReconcileNewAppRequest(app_id=app_id, task_configs=task_configs)
-            )
+            # Deploy all unit tasks discovered
+            await self.task_manager.deploy_tasks(task_specs=task_specs)
 
             # Update app state and store app definition
             async with self.app_lock:
@@ -192,6 +197,9 @@ class AppManager:
     async def unregister_app(self, app_id: str) -> None:
         """Unregister an application.
 
+        TODO now: Add num_users to each unit task in task manager. If it reaches 0,
+        it gets torn down.
+
         Args:
             app_id: ID of the application to unregister
 
@@ -209,11 +217,6 @@ class AppManager:
             # Cancel all running tasks
             for task in self.app_driver_tasks.pop(app_id, []):
                 task.cancel()
-
-        # Notify resource manager
-        await self.resource_manager.ReconcileRemovedApp(
-            ReconcileRemovedAppRequest(app_id=app_id),
-        )
 
         logger.info("Successfully unregistered app '%s'", app_id)
 
@@ -247,7 +250,7 @@ class AppManager:
 
         try:
             # Set app context variable. This will also generate a unique request ID.
-            app_context.set(AppContext(app_id=app_id))
+            # app_context.set(AppContext(app_id=app_id))
 
             # Create a task to run the app
             span.add_event("app_driver.start")
@@ -295,4 +298,4 @@ class AppManager:
 
     async def shutdown(self) -> None:
         """Shut down the server."""
-        await self.resource_manager_channel.close()
+        await self.task_manager.shutdown()

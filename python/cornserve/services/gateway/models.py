@@ -7,11 +7,10 @@ from typing import Any
 from pydantic import BaseModel
 
 
-class RegisterAppRequest(BaseModel):
+class AppRegistrationRequest(BaseModel):
     """Request for registering a new application.
 
     Attributes:
-        app_id: The unique identifier for the application.
         source_code: The Python source code of the application.
     """
 
@@ -28,7 +27,7 @@ class AppRegistrationResponse(BaseModel):
     app_id: str
 
 
-class AppRequest(BaseModel):
+class AppInvocationRequest(BaseModel):
     """Request for invoking a registered application.
 
     Attributes:

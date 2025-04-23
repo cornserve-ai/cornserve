@@ -24,6 +24,9 @@ dependencies = [
 ]
 dynamic = ["version"]
 
+[project.scripts]
+cornserve = "cornserve.cli:main"
+
 [project.optional-dependencies]
 frontend = []
 sidecar = [

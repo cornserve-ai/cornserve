@@ -11,9 +11,9 @@ from cornserve.constants import K8S_RESOURCE_MANAGER_GRPC_URL
 from cornserve.logging import get_logger
 from cornserve.services.gateway.app.manager import AppManager
 from cornserve.services.gateway.models import (
+    AppInvocationRequest,
+    AppRegistrationRequest,
     AppRegistrationResponse,
-    AppRequest,
-    RegisterAppRequest,
     UnitTaskDeploymentRequest,
     UnitTaskDeploymentResponse,
 )
@@ -25,8 +25,8 @@ logger = get_logger(__name__)
 tracer = trace.get_tracer(__name__)
 
 
-@router.post("/admin/register_app", response_model=AppRegistrationResponse)
-async def register_app(request: RegisterAppRequest, raw_request: Request):
+@router.post("/app/register", response_model=AppRegistrationResponse)
+async def register_app(request: AppRegistrationRequest, raw_request: Request):
     """Register a new application with the given ID and source code."""
     app_manager: AppManager = raw_request.app.state.app_manager
 
@@ -44,7 +44,7 @@ async def register_app(request: RegisterAppRequest, raw_request: Request):
         )
 
 
-@router.post("/admin/unregister_app/{app_id}")
+@router.post("/app/unregister/{app_id}")
 async def unregister_app(app_id: str, raw_request: Request):
     """Unregister the application with the given ID."""
     app_manager: AppManager = raw_request.app.state.app_manager
@@ -64,15 +64,16 @@ async def unregister_app(app_id: str, raw_request: Request):
         )
 
 
-@router.post("/v1/apps/{app_id}")
-async def invoke_app(app_id: str, request: AppRequest, raw_request: Request):
+@router.post("/app/invoke/{app_id}")
+async def invoke_app(app_id: str, request: AppInvocationRequest, raw_request: Request):
     """Invoke a registered application."""
     app_manager: AppManager = raw_request.app.state.app_manager
 
     span = trace.get_current_span()
     span.set_attribute("gateway.invoke_app.app_id", app_id)
-    for key, value in request.request_data.items():
-        span.set_attribute(f"gateway.invoke_app.{key}", value)
+    span.set_attributes(
+        {f"gateway.invoke_app.request.{key}": value for key, value in request.request_data.items()},
+    )
     try:
         return await app_manager.invoke_app(app_id, request.request_data)
     except ValidationError as e:
@@ -90,7 +91,7 @@ async def invoke_app(app_id: str, request: AppRequest, raw_request: Request):
         )
 
 
-@router.get("/admin/apps")
+@router.get("/app/list")
 async def list_apps(raw_request: Request):
     """List all registered applications."""
     app_manager: AppManager = raw_request.app.state.app_manager
@@ -103,6 +104,12 @@ async def list_apps(raw_request: Request):
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             content=str(e),
         )
+
+
+@router.get("/task/register")
+async def register_task(raw_request: Request):
+    """Register a new task and its execution descriptor with the given its source code."""
+    raise NotImplementedError("Task registration is not implemented yet.")
 
 
 @router.post("/task/deploy", response_model=UnitTaskDeploymentResponse)

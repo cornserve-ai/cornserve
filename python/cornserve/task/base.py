@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import os
 import uuid
 from abc import ABC, abstractmethod
 from collections import defaultdict
@@ -52,7 +53,7 @@ class Task(BaseModel, ABC, Generic[InputT, OutputT]):
 
     Attributes:
         id: The ID of the task.
-        subtask_attrs: A list of instance attribute names that hold a `Task`
+        subtask_attr_names: A list of instance attribute names that hold a `Task`
             instance (e.g., `self.image_encoder` may be an `EncoderTask` and this
             list will contain `"image_encoder"`). This list is automatically
             populated whenever users assign anything that is an instance of `Task`
@@ -62,7 +63,7 @@ class Task(BaseModel, ABC, Generic[InputT, OutputT]):
     id: str = Field(init=False, default_factory=lambda: uuid.uuid4().hex)
 
     # Automatically populated whenever users assign tasks as instance attributes.
-    subtasks_attrs: list[str] = Field(init=False, default_factory=list)
+    subtask_attr_names: list[str] = Field(init=False, default_factory=list)
 
     # Allow extra fields so that users can set subtasks as instance attributes.
     model_config = ConfigDict(extra="allow")
@@ -95,7 +96,7 @@ class Task(BaseModel, ABC, Generic[InputT, OutputT]):
     def __setattr__(self, name: str, value: Any, /) -> None:
         """Same old setattr but puts tasks in the subtasks list."""
         if isinstance(value, Task):
-            self.subtasks_attrs.append(name)
+            self.subtask_attr_names.append(name)
         return super().__setattr__(name, value)
 
     async def __call__(self, task_input: InputT) -> OutputT:
@@ -390,14 +391,14 @@ class TaskContext:
             }
         )
 
+        # Figure out where to dispatch the tasks.
+        gateway_url = os.getenv("CORNSERVE_GATEWAY_URL", K8S_GATEWAY_SERVICE_HTTP_URL)
+
         # Dispatch the entire task graph to the Task Dispatcher and wait for results.
         request = TaskGraphDispatch(task_id=self.task_id, invocations=self.invocations)
         try:
             async with httpx.AsyncClient(timeout=60.0) as client:
-                response = await client.post(
-                    K8S_GATEWAY_SERVICE_HTTP_URL + "/task/invoke",
-                    json=request.model_dump(),
-                )
+                response = await client.post(gateway_url + "/task/invoke", json=request.model_dump())
             response.raise_for_status()
         except httpx.RequestError as e:
             logger.exception("Failed to send dispatch request to the Task Dispatcher: %s", e)

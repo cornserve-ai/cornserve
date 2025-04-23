@@ -92,7 +92,7 @@ Concretely, `MLLMTask` is composed of modality encoders (`EncoderTask`) and a LL
 Unit Tasks classes (e.g., `LLMTask`) are registered with the whole system.
 Their source code (concrete class definition) should be available to all services in the system.
 At the moment, we create multiple built-in Unit Task classes under `cornserve.task.builtins`.
-Registering new (not built-in) Unit Task classes to the system is not implemented yet.
+Registering new (not built-in) Unit Task classes to the system is not implemented yet, but this is the *unknown unknown* execution model.
 
 ### Deployment
 
@@ -153,10 +153,10 @@ class EncoderInput(BaseModel):
     embedding_data: list[str]
 
 class EncoderOutput(BaseModel):
-    embeddings: list[Forward[Tensor]] | None
+    embeddings: list[DataForward[Tensor]] | None
 
 class LLMInput(BaseModel):
-    embeddings: list[Forward[Tensor]] | None
+    embeddings: list[DataForward[Tensor]] | None
     prompt: str
 
 class LLMOutput(BaseModel):

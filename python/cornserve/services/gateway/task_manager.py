@@ -223,13 +223,17 @@ class TaskManager:
         Returns:
             The outputs of all tasks.
         """
+        logger.info("Invoking tasks: %s", dispatch)
+
         # Check if all tasks are deployed
+        running_task_ids: list[str] = []
         async with self.task_lock:
             for invocation in dispatch.invocations:
                 for task_id, task in self.tasks.items():
                     if task == invocation.task:
                         match self.task_states[task_id]:
                             case TaskState.READY:
+                                running_task_ids.append(task_id)
                                 break
                             case TaskState.DEPLOYING:
                                 raise ValueError(f"Task {invocation.task} is being deployed")
@@ -237,12 +241,26 @@ class TaskManager:
                                 raise ValueError(f"Task {invocation.task} is being torn down")
                 else:
                     raise KeyError(f"Task {invocation.task} is not deployed")
+            assert len(running_task_ids) == len(dispatch.invocations)
 
         # Dispatch to the Task Dispatcher
         async with httpx.AsyncClient(timeout=60.0) as client:
+            invocation_task = asyncio.create_task(
+                client.post(K8S_TASK_DISPATCHER_HTTP_URL + "/task", json=dispatch.model_dump())
+            )
+            # Store the invocation task under the task IDs of all running tasks.
+            # If any of the unit tasks are unregistered, the whole thing will be cancelled.
+            for task_id in running_task_ids:
+                self.task_invocation_tasks[task_id].append(invocation_task)
             try:
-                response = await client.post(K8S_TASK_DISPATCHER_HTTP_URL + "/task", json=dispatch.model_dump())
+                response = await invocation_task
                 response.raise_for_status()
+            except asyncio.CancelledError:
+                logger.info("Invocation task was cancelled: %s", dispatch)
+                raise RuntimeError(
+                    "Invocation task was cancelled. This is likely because one or more "
+                    "constituent unit tasks were unregistered.",
+                ) from None
             except httpx.RequestError as e:
                 logger.error("Error while invoking tasks: %s", e)
                 raise RuntimeError(f"Error while invoking tasks: {e}") from e
@@ -255,3 +273,24 @@ class TaskManager:
                 f"Invalid response from task dispatcher: {output} (expected {len(dispatch.invocations)} outputs)"
             )
         return output
+
+    async def shutdown(self) -> None:
+        """Shutdown the task manager."""
+        logger.info("Shutting down the Gateway task manager")
+
+        # Tear down all tasks
+        logger.info("Tearing down all unit tasks")
+        try:
+            await self.teardown_tasks(
+                [
+                    UnitTaskSpec(task_class_name=task.__class__.__name__, task_config=task.model_dump())
+                    for task in self.tasks.values()
+                ]
+            )
+        except Exception as e:
+            logger.error("Error while tearing down tasks: %s", e)
+
+        # Close the gRPC channel to the resource manager
+        await self.resource_manager_channel.close()
+
+        logger.info("Gateway task manager has been shut down")

@@ -1,4 +1,4 @@
-"""Build-in task for Multimodal LLMs."""
+"""Built-in task for Multimodal LLMs."""
 
 from __future__ import annotations
 
