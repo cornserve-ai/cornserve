@@ -183,14 +183,17 @@ class TaskDispatcher:
                 )
             )
 
-        # TODO: Build an actual graph, submit to scheduling asyncio.Task.
+        # TODO: Build an actual graph, submit to a centralized asyncio.Task that does scheduling.
 
         # Dig up `DataForward` objects and connect producers and consumers.
         #
+        # Example: Two encoders embed two images, and both are sent to two separate LLMs.
+        #
         #                   task_input           task_output
-        #    Encoder                          DataForward(id=1)
-        #    Encoder                          DataForward(id=2)
-        #        LLM   DataForward(id=1,2)
+        #    Encoder1                         DataForward(id=1)
+        #    Encoder2                         DataForward(id=2)
+        #        LLM1  DataForward(id=1,2)
+        #        LLM2  DataForward(id=1,2)
         #
         # We iterate through `DataForward` objects in the order of invocations, and within each invocation,
         # those in the input and then those in the output. Ultimately, the source and destination sidecar
@@ -217,9 +220,10 @@ class TaskDispatcher:
                     ) from e
                 assert producer_forward.src_sidecar_ranks is not None
                 consumer_forward.src_sidecar_ranks = producer_forward.src_sidecar_ranks
-                consumer_forward.dst_sidecar_ranks = producer_forward.dst_sidecar_ranks = (
-                    execution.executor_sidecar_ranks
-                )
+                if producer_forward.dst_sidecar_ranks is None:
+                    producer_forward.dst_sidecar_ranks = []
+                producer_forward.dst_sidecar_ranks.append(execution.executor_sidecar_ranks)
+                consumer_forward.dst_sidecar_ranks = producer_forward.dst_sidecar_ranks
 
             # Iterate recursively over all `DataForward` objects in the task output.
             # Encountered `DataForward` objects are producers, which we save in `data_forwards`.

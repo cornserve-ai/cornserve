@@ -32,7 +32,7 @@ class ProcessedEmbeddingData(msgspec.Struct, array_like=True, omit_defaults=True
     id: ID
     modality: Modality
     data: dict[str, np.ndarray]
-    receiver_sidecar_ranks: list[int] | None = None
+    receiver_sidecar_ranks: list[list[int]] | None = None
 
 
 class EngineOpcode(enum.Enum):
@@ -126,7 +126,7 @@ class SchedulerBatch:
     data_ids: list[ID] = field(default_factory=list)
     chunk_ids: list[int] = field(default_factory=list)
     num_chunks: list[int] = field(default_factory=list)
-    receiver_ranks: list[list[int] | None] = field(default_factory=list)
+    receiver_ranks: list[list[list[int]] | None] = field(default_factory=list)
     data: dict[str, list[torch.Tensor]] = field(default_factory=dict)
     otel_spans: list[Span | None] = field(default_factory=list)
     otel_carriers: list[dict | None] = field(default_factory=list)
@@ -201,7 +201,7 @@ class WorkerBatch:
     data_ids: list[ID] = field(default_factory=list)
     chunk_ids: list[int] = field(default_factory=list)
     num_chunks: list[int] = field(default_factory=list)
-    receiver_ranks: list[list[int] | None] = field(default_factory=list)
+    receiver_ranks: list[list[list[int]] | None] = field(default_factory=list)
     data: dict[str, list[torch.Tensor]] = field(default_factory=dict)
     otel_carriers: list[dict | None] = field(default_factory=list)
 
@@ -235,7 +235,7 @@ class BatchResult:
     data_ids: list[ID]
     chunk_ids: list[int]
     num_chunks: list[int]
-    receiver_ranks: list[list[int] | None]
+    receiver_ranks: list[list[list[int]] | None]
     status: Status
     error_message: str | None = None
 

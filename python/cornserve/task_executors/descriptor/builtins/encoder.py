@@ -52,17 +52,19 @@ class EricDescriptor(TaskExecutionDescriptor[EncoderTask, EncoderInput, EncoderO
 
     def to_request(self, task_input: EncoderInput, task_output: EncoderOutput) -> dict[str, Any]:
         """Convert TaskInput to a request object for the task executor."""
-        req = EmbeddingRequest(
-            data=[
+        data: list[EmbeddingData] = []
+        for url, forward in zip(task_input.data_urls, task_output.embeddings, strict=True):
+            if forward.dst_sidecar_ranks is None:
+                raise ValueError("Destination sidecar ranks must be specified for each forward.")
+            data.append(
                 EmbeddingData(
                     id=forward.id,
                     modality=Modality(self.task.modality.value),
                     url=url,
                     receiver_sidecar_ranks=forward.dst_sidecar_ranks,
                 )
-                for url, forward in zip(task_input.data_urls, task_output.embeddings, strict=True)
-            ],
-        )
+            )
+        req = EmbeddingRequest(data=data)
         return req.model_dump()
 
     def from_response(self, task_output: EncoderOutput, response: dict[str, Any]) -> EncoderOutput:

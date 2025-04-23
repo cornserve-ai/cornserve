@@ -31,12 +31,18 @@ DataT = TypeVar("DataT")
 class DataForward(BaseModel, Generic[DataT]):
     """Represents data that is forwarded between tasks in the data plane."""
 
+    # This ID identifies `DataForward` objects and ties them together in task input/outputs.
     id: str = Field(default_factory=lambda: uuid.uuid4().hex)
 
+    # The data type automatically parsed out of the generic type argument.
     data_type: ForwardableType = Field(init=False, default=ForwardableType.TENSOR)
 
+    # Producer (source) sidecar ranks.
     src_sidecar_ranks: list[int] | None = Field(init=False, default=None)
-    dst_sidecar_ranks: list[int] | None = Field(init=False, default=None)
+
+    # Consumer (destination) sidecar ranks. This is a list of lists because the data
+    # can be forwarded to multiple tasks (i.e., broadcasted) to more than one task executor.
+    dst_sidecar_ranks: list[list[int]] | None = Field(init=False, default=None)
 
     @model_validator(mode="after")
     def _data_type(self) -> Self:
