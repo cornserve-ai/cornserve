@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, Any, ClassVar, Generator, Generic, Self, TypeV
 
 import httpx
 from opentelemetry import trace
-from pydantic import BaseModel, ConfigDict, Field, field_serializer, field_validator
+from pydantic import BaseModel, ConfigDict, Field, model_serializer, model_validator
 
 from cornserve.constants import K8S_GATEWAY_SERVICE_HTTP_URL
 from cornserve.logging import get_logger
@@ -301,47 +301,32 @@ class TaskInvocation(BaseModel, Generic[InputT, OutputT]):
     task_input: InputT
     task_output: OutputT
 
-    @field_serializer("task", when_used="json")
-    def serialize_task(self, task: UnitTask[InputT, OutputT]):
-        """Serialize the unit task so that the task name is included."""
-        return {"class_name": task.__class__.__name__, "body": task.model_dump_json()}
+    @model_serializer()
+    def _serialize(self):
+        """Serialize the task invocation."""
+        return {
+            "class_name": self.task.__class__.__name__,
+            "body": {
+                "task": self.task.model_dump_json(),
+                "task_input": self.task_input.model_dump_json(),
+                "task_output": self.task_output.model_dump_json(),
+            },
+        }
 
-    @field_serializer("task_input", when_used="json")
-    def serialize_task_input(self, task_input: InputT):
-        """Serialize the task input."""
-        return {"class_name": self.task.__class__.__name__, "body": task_input.model_dump_json()}
-
-    @field_serializer("task_output", when_used="json")
-    def serialize_task_output(self, task_output: OutputT):
-        """Serialize the task output."""
-        return {"class_name": self.task.__class__.__name__, "body": task_output.model_dump_json()}
-
-    @field_validator("task", mode="before")
+    @model_validator(mode="before")
     @classmethod
-    def deserialize_task(cls, task: dict[str, Any] | UnitTask) -> UnitTask[InputT, OutputT]:
-        """Deserialize the unit task from the serialized task."""
-        if isinstance(task, UnitTask):
-            return task
-        task_cls, _, _ = TASK_REGISTRY.get(task["class_name"])
-        return task_cls.model_validate_json(task["body"])
+    def _deserialize(cls, data: dict[str, Any]):
+        """Deserialize the task invocation."""
+        # This is likely when we're constructing the object normally by calling the constructor.
+        if "class_name" not in data:
+            return data
 
-    @field_validator("task_input", mode="before")
-    @classmethod
-    def deserialize_task_input(cls, task_input: dict[str, Any] | InputT) -> InputT:
-        """Deserialize the task input from the serialized task input."""
-        if not isinstance(task_input, dict):
-            return task_input
-        _, task_input_cls, _ = TASK_REGISTRY.get(task_input["class_name"])
-        return task_input_cls.model_validate_json(task_input["body"])  # type: ignore
-
-    @field_validator("task_output", mode="before")
-    @classmethod
-    def deserialize_task_output(cls, task_output: dict[str, Any] | OutputT) -> OutputT:
-        """Deserialize the task output from the serialized task output."""
-        if not isinstance(task_output, dict):
-            return task_output
-        _, _, task_output_cls = TASK_REGISTRY.get(task_output["class_name"])
-        return task_output_cls.model_validate_json(task_output["body"])  # type: ignore
+        # Now this is likely when we're deserializing the object from the serialized data.
+        task_cls, task_input_cls, task_output_cls = TASK_REGISTRY.get(data["class_name"])
+        task = task_cls.model_validate_json(data["body"]["task"])
+        task_input = task_input_cls.model_validate_json(data["body"]["task_input"])
+        task_output = task_output_cls.model_validate_json(data["body"]["task_output"])
+        return {"task": task, "task_input": task_input, "task_output": task_output}
 
 
 class TaskGraphDispatch(BaseModel):
