@@ -70,23 +70,12 @@ def unregister(
         f"{GATEWAY_URL}/app/unregister/{app_id}",
     )
     if raw_response.status_code == 404:
-        rich.print(
-            Panel(
-                f"App {app_id} not found.",
-                style="red",
-                expand=False,
-            )
-        )
+        rich.print(Panel(f"App {app_id} not found.", style="red", expand=False))
         return
 
     raw_response.raise_for_status()
 
-    rich.print(
-        Panel(
-            f"App {app_id} unregistered successfully.",
-            expand=False,
-        )
-    )
+    rich.print(Panel(f"App {app_id} unregistered successfully.", expand=False))
 
 
 @app.command(name="list")
@@ -115,13 +104,17 @@ def invoke(
         app_id: ID of the app to invoke.
         data: Input data for the app, formatted as a JSON string.
     """
-    print(data[0])
-    print(data[-1])
     request = AppInvocationRequest(request_data=json.loads(data))
     raw_response = requests.post(
         f"{GATEWAY_URL}/app/invoke/{app_id}",
         json=request.model_dump(),
     )
+
+    if raw_response.status_code == 404:
+        rich.print(Panel(f"App {app_id} not found.", style="red", expand=False))
+        return
+
+    raw_response.raise_for_status()
 
     table = Table(box=box.ROUNDED, show_header=False)
     for key, value in raw_response.json().items():

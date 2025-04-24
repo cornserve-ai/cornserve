@@ -238,6 +238,28 @@ class UnitTask(Task, Generic[InputT, OutputT]):
         descriptor_cls = DESCRIPTOR_REGISTRY.get(self.root_unit_task_cls, self.execution_descriptor_name)
         return descriptor_cls(task=self)
 
+    def __eq__(self, other: object) -> bool:
+        """Check if two unit tasks are equivalent.
+
+        Two unit tasks are equivalent if they have the same root unit task class
+        and for all fields defined by the root unit task class, they have the same values.
+        """
+        if not isinstance(other, UnitTask):
+            return False
+
+        if self.root_unit_task_cls != other.root_unit_task_cls:
+            return False
+
+        # Check if all fields defined by the root unit task class are the same.
+        for field_name in self.root_unit_task_cls.model_fields:
+            try:
+                if getattr(self, field_name) != getattr(other, field_name):
+                    return False
+            except AttributeError:
+                return False
+
+        return True
+
     @abstractmethod
     def make_record_output(self, task_input: InputT) -> OutputT:
         """Construct a task output object for recording task invocations.
@@ -273,7 +295,7 @@ class UnitTask(Task, Generic[InputT, OutputT]):
     def to_pb(self) -> UnitTaskProto:
         """Convert this unit task into the UnitTask protobuf message."""
         return UnitTaskProto(
-            task_class_name=self.root_unit_task_cls.__name__,
+            task_class_name=self.__class__.__name__,
             task_config=self.model_dump_json(),
         )
 
@@ -408,7 +430,11 @@ class TaskContext:
         if self.is_replaying:
             raise RuntimeError("Cannot record task invocation while replaying.")
 
-        invocation = TaskInvocation(task=task, task_input=task_input, task_output=task_output)
+        invocation = TaskInvocation(
+            task=task.model_copy(deep=True),
+            task_input=task_input.model_copy(deep=True),
+            task_output=task_output.model_copy(deep=True),
+        )
         self.invocations.append(invocation)
 
     @tracer.start_as_current_span("TaskContext.dispatch_tasks_and_wait")

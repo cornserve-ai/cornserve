@@ -27,7 +27,6 @@ class TaskInfo:
 
     Attributes:
         task: The unit task object.
-        root_unit_task: The root unit task object upcasted from the unit task.
         task_manager_url: The URL to the task manager.
         task_manager_channel: The gRPC channel to the task manager.
         task_manager_stub: The gRPC stub to the task manager.
@@ -36,7 +35,6 @@ class TaskInfo:
     def __init__(self, task: UnitTask, task_manager_url: str) -> None:
         """Initialize the TaskInfo object."""
         self.task = task
-        self.root_unit_task = task.root_unit_task_cls.model_validate(task.model_dump())
         self.task_manager_url = task_manager_url
         self.task_manager_channel = grpc.aio.insecure_channel(task_manager_url)
         self.task_manager_stub = task_manager_pb2_grpc.TaskManagerStub(self.task_manager_channel)
@@ -77,9 +75,10 @@ def iter_data_forwards(obj: object) -> Iterator[DataForward]:
         for item in obj.values():
             yield from iter_data_forwards(item)
     elif isinstance(obj, BaseModel):
-        # Recursively search through nested BaseModels
-        for value in obj.model_dump().values():
-            yield from iter_data_forwards(value)
+        # Recursively search through nested BaseModels. Make sure references to the original
+        # `DataForward` objects are yielded, so that external mutations are reflected.
+        for name in obj.__class__.model_fields:
+            yield from iter_data_forwards(getattr(obj, name))
 
 
 class TaskDispatcher:
@@ -98,7 +97,12 @@ class TaskDispatcher:
         async with self.task_lock:
             self.task_infos[task.id] = TaskInfo(task, task_manager_url)
 
-        logger.info("Registered new task %s with task manager URL %s", task, task_manager_url)
+        logger.info(
+            "Registered new task %s(%s) with task manager URL %s",
+            task.__class__.__name__,
+            task,
+            task_manager_url,
+        )
 
     async def notify_task_teardown(self, task: UnitTask) -> None:
         """Remove a task that has been torn down.
@@ -156,13 +160,12 @@ class TaskDispatcher:
         task_infos: list[TaskInfo] = []
         async with self.task_lock:
             for invocation in invocations:
-                root_unit_task = invocation.task.root_unit_task_cls.model_validate(invocation.task.model_dump())
                 for task_info in self.task_infos.values():
-                    if task_info.root_unit_task == root_unit_task:
+                    if task_info.task == invocation.task:
                         task_infos.append(task_info)
                         break
                 else:
-                    logger.error("Task not found. invocation: %s, root unit task: %s", invocation, root_unit_task)
+                    logger.error("Task not found for invocation %s", invocation)
                     raise ValueError(f"Task {invocation.task} not found in task dispatcher.")
         assert len(task_infos) == len(invocations), "Task info count mismatch"
 
@@ -230,6 +233,8 @@ class TaskDispatcher:
             for producer_forward in iter_data_forwards(execution.invocation.task_output):
                 producer_forward.src_sidecar_ranks = execution.executor_sidecar_ranks
                 producer_forwards[producer_forward.id] = producer_forward
+
+        logger.info("Connected all DataForward objects in task invocations: %s", invocations)
 
         # Verify whether all `DataForward` objects are properly connected
         for data_forward in producer_forwards.values():
