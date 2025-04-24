@@ -8,7 +8,7 @@ from fastapi import APIRouter, FastAPI, Request, Response, status
 from opentelemetry import trace
 
 from cornserve.logging import get_logger
-from cornserve.task_executors.eric.api import EmbeddingRequest, Modality, Status
+from cornserve.task_executors.eric.api import EmbeddingRequest, EmbeddingResponse, Modality, Status
 from cornserve.task_executors.eric.config import EricConfig
 from cornserve.task_executors.eric.engine.client import EngineClient
 from cornserve.task_executors.eric.models.registry import MODEL_REGISTRY
@@ -44,7 +44,11 @@ async def modalities(raw_request: Request) -> list[Modality]:
 
 
 @router.post("/embeddings")
-async def embeddings(request: EmbeddingRequest, raw_request: Request) -> Response:
+async def embeddings(
+    request: EmbeddingRequest,
+    raw_request: Request,
+    raw_response: Response,
+) -> EmbeddingResponse:
     """Handler for embedding requests."""
     span = trace.get_current_span()
     for data_item in request.data:
@@ -63,12 +67,13 @@ async def embeddings(request: EmbeddingRequest, raw_request: Request) -> Respons
 
     match response.status:
         case Status.SUCCESS:
-            return Response(status_code=status.HTTP_200_OK)
+            raw_response.status_code = status.HTTP_200_OK
         case Status.ERROR:
-            return Response(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                content=response.error_message,
-            )
+            raw_response.status_code = status.HTTP_500_INTERNAL_SERVER_ERROR
+        case _:
+            logger.error("Unexpected status: %s", response.status)
+            raw_response.status_code = status.HTTP_500_INTERNAL_SERVER_ERROR
+    return response
 
 
 def init_app_state(app: FastAPI, config: EricConfig) -> None:

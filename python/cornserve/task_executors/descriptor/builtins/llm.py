@@ -50,7 +50,7 @@ class VLLMDescriptor(TaskExecutionDescriptor[LLMBaseTask, LLMInput, LLMOutputBas
         content: list[dict[str, Any]] = [dict(type="text", text=task_input.prompt)]
         for (modality, data_url), forward in zip(task_input.multimodal_data, task_input.embeddings, strict=True):
             data_uri = f"data:{modality}/uuid;data_id={forward.id};url={data_url},"
-            content.append({"type": modality, f"{modality}_url": {"url": data_uri}})
+            content.append({"type": f"{modality}_url", f"{modality}_url": {"url": data_uri}})
 
         request = dict(
             model=self.task.model_id,

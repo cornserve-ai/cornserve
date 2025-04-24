@@ -243,7 +243,7 @@ class TaskDispatcher:
 
         # Dispatch all task invocations to task executors
         dispatch_coros: list[asyncio.Task[Any]] = []
-        client = httpx.AsyncClient(timeout=60.0)
+        client = httpx.AsyncClient(timeout=180.0)
         try:
             async with asyncio.TaskGroup() as tg:
                 for execution in task_executions:
@@ -267,6 +267,11 @@ class TaskDispatcher:
     ) -> Any:
         """Execute a single task by sending request to executor and processing response."""
         url = execution.invocation.task.execution_descriptor.get_api_url(execution.executor_url)
+        logger.info(
+            "Invoking task %s with request: %s",
+            execution.invocation.task.__class__.__name__,
+            request,
+        )
         try:
             response = await client.post(url=url, json=request)
             response.raise_for_status()
@@ -278,6 +283,12 @@ class TaskDispatcher:
         except Exception as e:
             logger.exception("Error while invoking task")
             raise RuntimeError(f"HTTP request failed: {e}") from e
+
+        logger.info(
+            "Task %s response: %s",
+            execution.invocation.task.__class__.__name__,
+            response.content.decode(),
+        )
 
         # JSON response from task executor -> `TaskOutput` -> dump
         task_output: TaskOutput = execution.invocation.task.execution_descriptor.from_response(

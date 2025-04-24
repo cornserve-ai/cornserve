@@ -9,7 +9,7 @@ from pydantic import BaseModel
 ID = str
 
 
-class Modality(enum.Enum):
+class Modality(enum.StrEnum):
     """Modality of the data to be embedded."""
 
     IMAGE = "image"
