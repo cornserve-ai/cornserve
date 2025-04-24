@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, Any, ClassVar, Generator, Generic, Self, TypeV
 
 import httpx
 from opentelemetry import trace
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_serializer, field_validator
 
 from cornserve.constants import K8S_GATEWAY_SERVICE_HTTP_URL
 from cornserve.logging import get_logger
@@ -197,20 +197,35 @@ class UnitTask(Task, Generic[InputT, OutputT]):
         """
         super().__init_subclass__(**kwargs)
 
+        # When a subclass is created, add it to the task registry.
+
         def is_proxy_for_unit(base: type) -> bool:
             """True if *base* appears to be the auto‑generated proxy."""
             return UnitTask in getattr(base, "__bases__", ())
 
+        def maybe_register_task(cls: type[UnitTask]) -> None:
+            """Register the unit task to the task registry if it is a unit task.
+
+            Basically, the two generic type arguments must be filled with concrete types.
+            """
+            args = cls.__pydantic_generic_metadata__["args"]
+            if len(args) != 2:
+                return
+            input_arg, output_arg = args
+            if issubclass(input_arg, TaskInput) and issubclass(output_arg, TaskOutput):
+                TASK_REGISTRY.register(cls, input_arg, output_arg)
+
         # If any immediate base (or proxies) is `UnitTask`, cls is the root.
         if any(is_proxy_for_unit(b) for b in cls.__bases__):
             cls.root_unit_task_cls = cls
-            TASK_REGISTRY.register(cls, name=cls.__name__)
+            maybe_register_task(cls)
             return
 
         # Otherwise climb the MRO until you meet that condition
         for anc in cls.mro()[1:]:
             if any(is_proxy_for_unit(b) for b in anc.__bases__):
                 cls.root_unit_task_cls = anc
+                maybe_register_task(cls)
                 break
         # Fallback for the intemediate class `UnitTask[SpecificInput, SpecificOutput]`
         # that appears due to generic inheritance.
@@ -265,7 +280,7 @@ class UnitTask(Task, Generic[InputT, OutputT]):
     @classmethod
     def from_pb(cls, proto: UnitTaskProto) -> UnitTask:
         """Create a unit task from the UnitTask protobuf message."""
-        task_cls = TASK_REGISTRY.get(proto.task_class_name)
+        task_cls, _, _ = TASK_REGISTRY.get(proto.task_class_name)
         return task_cls.model_validate_json(proto.task_config)
 
     def make_name(self) -> str:
@@ -285,6 +300,48 @@ class TaskInvocation(BaseModel, Generic[InputT, OutputT]):
     task: UnitTask[InputT, OutputT]
     task_input: InputT
     task_output: OutputT
+
+    @field_serializer("task", when_used="json")
+    def serialize_task(self, task: UnitTask[InputT, OutputT]):
+        """Serialize the unit task so that the task name is included."""
+        return {"class_name": task.__class__.__name__, "body": task.model_dump_json()}
+
+    @field_serializer("task_input", when_used="json")
+    def serialize_task_input(self, task_input: InputT):
+        """Serialize the task input."""
+        return {"class_name": self.task.__class__.__name__, "body": task_input.model_dump_json()}
+
+    @field_serializer("task_output", when_used="json")
+    def serialize_task_output(self, task_output: OutputT):
+        """Serialize the task output."""
+        return {"class_name": self.task.__class__.__name__, "body": task_output.model_dump_json()}
+
+    @field_validator("task", mode="before")
+    @classmethod
+    def deserialize_task(cls, task: dict[str, Any] | UnitTask) -> UnitTask[InputT, OutputT]:
+        """Deserialize the unit task from the serialized task."""
+        if isinstance(task, UnitTask):
+            return task
+        task_cls, _, _ = TASK_REGISTRY.get(task["class_name"])
+        return task_cls.model_validate_json(task["body"])
+
+    @field_validator("task_input", mode="before")
+    @classmethod
+    def deserialize_task_input(cls, task_input: dict[str, Any] | InputT) -> InputT:
+        """Deserialize the task input from the serialized task input."""
+        if not isinstance(task_input, dict):
+            return task_input
+        _, task_input_cls, _ = TASK_REGISTRY.get(task_input["class_name"])
+        return task_input_cls.model_validate_json(task_input["body"])  # type: ignore
+
+    @field_validator("task_output", mode="before")
+    @classmethod
+    def deserialize_task_output(cls, task_output: dict[str, Any] | OutputT) -> OutputT:
+        """Deserialize the task output from the serialized task output."""
+        if not isinstance(task_output, dict):
+            return task_output
+        _, _, task_output_cls = TASK_REGISTRY.get(task_output["class_name"])
+        return task_output_cls.model_validate_json(task_output["body"])  # type: ignore
 
 
 class TaskGraphDispatch(BaseModel):
@@ -322,6 +379,9 @@ class TaskContext:
         # Values are lists because the same task could be invoked multiple times
         # within the same context.
         self.task_outputs: dict[str, list[TaskOutput]] = defaultdict(list)
+
+        self.is_recording = False
+        self.is_replaying = False
 
     @contextmanager
     def record(self) -> Generator[None, None, None]:

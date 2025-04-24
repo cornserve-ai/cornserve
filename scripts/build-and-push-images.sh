@@ -65,7 +65,7 @@ invoke_k3s() {
 if [[ "${REGISTRY}" == "local" ]]; then
     # Ensure k3s is installed and record its binary location
     echo "Exporting image to local k3s containerd. Existing images are:"
-    invoke_k3s ctr images ls | grep -i "${NAMESPACE}"
+    invoke_k3s ctr images ls | grep -i "${NAMESPACE}" || true
 fi
 
 # Run all builds in parallel

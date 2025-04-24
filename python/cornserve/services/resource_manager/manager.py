@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import uuid
 from contextlib import suppress
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import grpc
 import kubernetes_asyncio.client as kclient
@@ -44,6 +44,68 @@ class UnitTaskDeployment:
     url: str
 
 
+@dataclass
+class TaskManagerState:
+    """Encapsulates the state of a single task manager.
+
+    This class manages the lifecycle and resources of a single task manager, including its K8s
+    resources and gRPC connection. When either spawning or shutting down a task manager, the
+    lock object within this class should be acquired.
+    """
+
+    id: str
+    lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+    resources: list[GPU] | None = None
+    pod_name: str | None = None
+    service_name: str | None = None
+    channel: grpc.aio.Channel | None = None
+    stub: task_manager_pb2_grpc.TaskManagerStub | None = None
+    deployment: UnitTaskDeployment | None = None
+
+    async def tear_down(self, kube_client: kclient.CoreV1Api) -> None:
+        """Clean up all resources associated with this task manager.
+
+        This method is aware of partial failures and will skip cleanup for steps
+        that have not been completed due to earlier errors.
+        """
+        try:
+            # Shutdown gRPC
+            if self.stub is not None:
+                shutdown_req = task_manager_pb2.ShutdownRequest()
+                with suppress(grpc.aio.AioRpcError):
+                    await self.stub.Shutdown(shutdown_req)
+            if self.channel is not None:
+                await self.channel.close()
+
+            # Release GPU resources
+            if self.resources is not None:
+                for gpu in self.resources:
+                    gpu.free()
+
+            # Delete K8s pod
+            if self.pod_name is not None:
+                with suppress(kclient.ApiException):
+                    await kube_client.delete_namespaced_pod(
+                        name=self.pod_name,
+                        namespace=constants.K8S_NAMESPACE,
+                    )  # type: ignore
+            # Delete K8s service
+            if self.service_name is not None:
+                with suppress(kclient.ApiException):
+                    await kube_client.delete_namespaced_service(
+                        name=self.service_name,
+                        namespace=constants.K8S_NAMESPACE,
+                    )  # type: ignore
+
+        except Exception as e:
+            logger.exception(
+                "An unexpected exception aborted the cleanup of task manager %s: %s",
+                self.id,
+                e,
+            )
+            raise
+
+
 class ResourceManager:
     """The Resource Manager allocates resources for Task Managers."""
 
@@ -60,15 +122,8 @@ class ResourceManager:
         self.task_dispatcher_stub = task_dispatcher_pb2_grpc.TaskDispatcherStub(self.task_dispatcher_channel)
 
         # Task state
-        self.task_lock = asyncio.Lock()
-        self.task_managers: dict[str, UnitTaskDeployment] = {}
-
-        # Task manager states, kept at this granularity for rollback on failure.
-        self.task_manager_resources: dict[str, list[GPU]] = {}
-        self.task_manager_pods: dict[str, str] = {}
-        self.task_manager_services: dict[str, str] = {}
-        self.task_manager_channels: dict[str, grpc.aio.Channel] = {}
-        self.task_manager_stubs: dict[str, task_manager_pb2_grpc.TaskManagerStub] = {}
+        self.task_states: dict[str, TaskManagerState] = {}
+        self.task_states_lock = asyncio.Lock()
 
     @staticmethod
     async def init() -> ResourceManager:
@@ -148,23 +203,29 @@ class ResourceManager:
         span = trace.get_current_span()
         span.set_attribute("resource_manager.deploy_unit_task.task", str(task))
 
-        async with self.task_lock:
+        async with self.task_states_lock:
             # See if the task is already running
-            for existing_deployment in self.task_managers.values():
-                if existing_deployment.task == task:
+            for state in self.task_states.values():
+                if state.deployment and state.deployment.task == task:
                     logger.info("Task %s is already running, returning immediately", task)
                     return
 
-            # A new task manager should be deployed
+            # Create a new task manager state
+            task_manager_id = f"{task.make_name()}-{uuid.uuid4().hex[:8]}"
+            state = TaskManagerState(id=task_manager_id)
+            self.task_states[task_manager_id] = state
+
+        # Spawn task manager with state-specific lock
+        async with state.lock:
             try:
-                deployment = await self._spawn_task_manager(task)
+                deployment = await self._spawn_task_manager(task, state)
+                state.deployment = deployment
+                logger.info("Successfully deployed unit task %s with task manager %s", task, deployment)
             except Exception as e:
                 logger.error("Failed to spawn task manager for %s: %s", task, e)
+                async with self.task_states_lock:
+                    self.task_states.pop(task_manager_id, None)
                 raise RuntimeError(f"Failed to spawn task manager for {task}") from e
-
-            # Create unit task deployment object
-            self.task_managers[deployment.id] = deployment
-            logger.info("Successfully deployed unit task %s with task manager %s", task, deployment)
 
         # Notify the task dispatcher of the new task and task manager
         task_manager_info = task_dispatcher_pb2.NotifyUnitTaskDeploymentRequest(
@@ -182,6 +243,11 @@ class ResourceManager:
                 deployment,
                 e,
             )
+            # Clean up the task manager since notification failed
+            async with self.task_states_lock:
+                if task_state := self.task_states.pop(task_manager_id, None):
+                    logger.info("Cleaning up task manager %s", task_state.id)
+                    await task_state.tear_down(self.kube_core_client)
             raise RuntimeError(f"Failed to notify task dispatcher of new task {task}") from e
 
     @tracer.start_as_current_span("ResourceManager.teardown_unit_task")
@@ -198,32 +264,34 @@ class ResourceManager:
         span = trace.get_current_span()
         span.set_attribute("resource_manager.teardown_unit_task.task", str(task))
 
-        async with self.task_lock:
-            # Check if the task is running
-            for existing_deployment in self.task_managers.values():
-                if existing_deployment.task == task:
-                    task_manager_id = existing_deployment.id
+        # Find the task manager ID for this task
+        task_manager_id = None
+        async with self.task_states_lock:
+            for state_id, state in self.task_states.items():
+                if state.deployment and state.deployment.task == task:
+                    task_manager_id = state_id
                     break
-            else:
+
+            if task_manager_id is None:
                 logger.info("Task %s is not running, returning immediately", task)
                 return
 
-            # First notify the task dispatcher of the removed task
-            task_info = task_dispatcher_pb2.NotifyUnitTaskTeardownRequest(task=task.to_pb())
-            try:
-                await self.task_dispatcher_stub.NotifyUnitTaskTeardown(task_info)
-            except Exception as e:
-                # Do not re-raise the exception but rather continue with the shutdown
-                logger.exception("Failed to notify task dispatcher of removed task %s: %s", task, e)
+        # First notify the task dispatcher of the removed task
+        task_info = task_dispatcher_pb2.NotifyUnitTaskTeardownRequest(task=task.to_pb())
+        try:
+            await self.task_dispatcher_stub.NotifyUnitTaskTeardown(task_info)
+        except Exception as e:
+            # Do not re-raise the exception but rather continue with the shutdown
+            logger.exception("Failed to notify task dispatcher of removed task %s: %s", task, e)
 
-            # Remove the task manager from the list of running tasks
-            deployment = self.task_managers.pop(task_manager_id)
-
-            try:
-                await self._shutdown_task_manager(deployment.id)
-            except Exception as e:
-                logger.error("Failed to shut down task manager for %s: %s", task, e)
-                raise RuntimeError(f"Failed to shut down task manager for {task}") from e
+        # Remove the task manager state and clean it up
+        async with self.task_states_lock:
+            if task_state := self.task_states.pop(task_manager_id, None):
+                try:
+                    await task_state.tear_down(self.kube_core_client)
+                except Exception as e:
+                    logger.error("Failed to clean up task manager for %s: %s", task, e)
+                    raise RuntimeError(f"Failed to clean up task manager for {task}") from e
 
     async def healthcheck(self) -> tuple[bool, list[tuple[UnitTask, bool]]]:
         """Check the health of all task managers.
@@ -242,18 +310,22 @@ class ResourceManager:
         all_healthy = True
 
         task_manager_ids = []
+        tasks = []
         check_tasks = []
-        for task_manager_id, stub in self.task_manager_stubs.items():
+        for task_manager_id, task_manager in self.task_states.items():
+            if task_manager.stub is None or task_manager.deployment is None:
+                continue
             task_manager_ids.append(task_manager_id)
-            check_tasks.append(stub.Healthcheck(task_manager_pb2.HealthcheckRequest(), timeout=1.0))
+            tasks.append(task_manager.deployment.task)
+            check_tasks.append(task_manager.stub.Healthcheck(task_manager_pb2.HealthcheckRequest(), timeout=1.0))
 
         # Wait for all health checks to complete
         results = await asyncio.gather(*check_tasks, return_exceptions=True)
 
-        for task_manager_id, result in zip(task_manager_ids, results, strict=True):
+        for task_manager_id, task, result in zip(task_manager_ids, tasks, results, strict=True):
             if isinstance(result, BaseException):
                 logger.error("Health check failed for task manager %s: %s", task_manager_id, str(result))
-                task_manager_statuses.append((self.task_managers[task_manager_id].task, False))
+                task_manager_statuses.append((task, False))
                 all_healthy = False
             else:
                 # Check if task manager is healthy (status OK = 0)
@@ -267,60 +339,58 @@ class ResourceManager:
 
     async def shutdown(self) -> None:
         """Shutdown the ResourceManager."""
-        await self.api_client.close()
-        await self.task_dispatcher_channel.close()
-        coros = []
-        for channel in self.task_manager_channels.values():
-            coros.append(channel.close(grace=1.0))
-        for name in self.sidecar_names:
-            coros.append(
-                self.kube_core_client.delete_namespaced_pod(
-                    name=name,
-                    namespace=constants.K8S_NAMESPACE,
+        async with self.task_states_lock:
+            coros = []
+            for task_state in self.task_states.values():
+                coros.append(task_state.tear_down(self.kube_core_client))
+            for name in self.sidecar_names:
+                coros.append(
+                    self.kube_core_client.delete_namespaced_pod(
+                        name=name,
+                        namespace=constants.K8S_NAMESPACE,
+                    )
                 )
-            )
-        results = await asyncio.gather(*coros, return_exceptions=True)
+            results = await asyncio.gather(*coros, return_exceptions=True)
+
         for result in results:
             if isinstance(result, BaseException):
                 logger.error("Error occured during shutdown: %s", result)
 
+        await self.api_client.close()
+        await self.task_dispatcher_channel.close()
+
     @tracer.start_as_current_span("ResourceManager._spawn_task_manager")
-    async def _spawn_task_manager(self, task: UnitTask) -> UnitTaskDeployment:
+    async def _spawn_task_manager(self, task: UnitTask, state: TaskManagerState) -> UnitTaskDeployment:
         """Spawn a new task manager.
 
         If anything goes wrong, side effects are cleaned up and an exception is raised.
-        """
-        logger.info("Spawning task manager for %s", task)
-        span = trace.get_current_span()
 
-        # Create a unique task manager ID
-        while True:
-            task_manager_id = f"{task.make_name()}-{uuid.uuid4().hex[:8]}"
-            if task_manager_id not in self.task_manager_stubs:
-                break
-        span.set_attribute("resource_manager._spawn_task_manager.task_manager_id", task_manager_id)
+        Args:
+            task: The task to be deployed.
+            state: The TaskManagerState object to store the task manager's state.
+        """
+        logger.info("Spawning task manager %s for %s", state.id, task)
+        span = trace.get_current_span()
+        span.set_attribute("resource_manager._spawn_task_manager.task_manager_id", state.id)
 
         try:
             # Allocate resource starter pack for the task manager
-            resource = self.resource.allocate(num_gpus=2, owner=task_manager_id)
-            self.task_manager_resources[task_manager_id] = resource
+            state.resources = self.resource.allocate(num_gpus=2, owner=state.id)
             span.set_attribute(
                 "resource_manager._spawn_task_manager.gpu_global_ranks",
-                [gpu.global_rank for gpu in resource],
+                [gpu.global_rank for gpu in state.resources],
             )
 
             # Create a new task manager pod and service
-            pod_name = service_name = f"tm-{task_manager_id}".lower()
+            state.pod_name = state.service_name = f"tm-{state.id}".lower()
             port = 50051
-            self.task_manager_pods[task_manager_id] = pod_name
-            self.task_manager_services[task_manager_id] = service_name
 
             pod = kclient.V1Pod(
                 metadata=kclient.V1ObjectMeta(
-                    name=pod_name,
+                    name=state.pod_name,
                     labels={
                         "app": "task-manager",
-                        "task-manager-id": task_manager_id,
+                        "task-manager-id": state.id,
                     },
                 ),
                 spec=kclient.V1PodSpec(
@@ -337,16 +407,16 @@ class ResourceManager:
             )
             service = kclient.V1Service(
                 metadata=kclient.V1ObjectMeta(
-                    name=service_name,
+                    name=state.service_name,
                     labels={
                         "app": "task-manager",
-                        "task-manager-id": task_manager_id,
+                        "task-manager-id": state.id,
                     },
                 ),
                 spec=kclient.V1ServiceSpec(
                     selector={
                         "app": "task-manager",
-                        "task-manager-id": task_manager_id,
+                        "task-manager-id": state.id,
                     },
                     ports=[kclient.V1ServicePort(port=port, target_port="grpc")],
                 ),
@@ -364,19 +434,17 @@ class ResourceManager:
                     body=service,
                 )  # type: ignore
 
-            logger.info("Created task manager pod %s and service %s", pod_name, service_name)
+            logger.info("Created task manager pod %s and service %s", state.pod_name, state.service_name)
 
             # Connect to the task manager gRPC server to initialize it
-            channel = grpc.aio.insecure_channel(f"{service_name}:{port}")
-            stub = task_manager_pb2_grpc.TaskManagerStub(channel)
-            self.task_manager_channels[task_manager_id] = channel
-            self.task_manager_stubs[task_manager_id] = stub
+            state.channel = grpc.aio.insecure_channel(f"{state.service_name}:{port}")
+            state.stub = task_manager_pb2_grpc.TaskManagerStub(state.channel)
 
             # Initialize the task manager by providing it with the task it will manage
             # and an initial set of GPU resources to work with.
             with tracer.start_as_current_span("ResourceManager._spawn_task_manager.register_task"):
                 register_task_req = task_manager_pb2.RegisterTaskRequest(
-                    task_manager_id=task_manager_id,
+                    task_manager_id=state.id,
                     task=task.to_pb(),
                     gpus=[
                         task_manager_pb2.GPUResource(
@@ -385,10 +453,10 @@ class ResourceManager:
                             global_rank=gpu.global_rank,
                             local_rank=gpu.local_rank,
                         )
-                        for gpu in resource
+                        for gpu in state.resources
                     ],
                 )
-                response: task_manager_pb2.RegisterTaskResponse = await stub.RegisterTask(
+                response: task_manager_pb2.RegisterTaskResponse = await state.stub.RegisterTask(
                     register_task_req, wait_for_ready=True
                 )
                 if response.status != common_pb2.Status.STATUS_OK:
@@ -396,59 +464,7 @@ class ResourceManager:
 
         except Exception as e:
             logger.exception("Failed to spawn task manager: %s", e)
-            await self._shutdown_task_manager(task_manager_id)
+            await state.tear_down(self.kube_core_client)
             raise
 
-        return UnitTaskDeployment(task=task, id=task_manager_id, url=f"{service_name}:{port}")
-
-    @tracer.start_as_current_span("ResourceManager._shutdown_task_manager")
-    async def _shutdown_task_manager(self, task_manager_id: str) -> None:
-        """Shutdown the task manager and release its resources.
-
-        This method is called in two cases:
-        1. As a cleanup routine when the task manager fails to start.
-        2. When the task manager is no longer needed and should be shut down.
-            This is when the last app that uses the task manager is unregistered.
-
-        In the first case, this method is called with the task manager lock held.
-        In the second case, this method is called without the task manager lock held.
-
-        Args:
-            task_manager_id: The ID of the task manager to shut down.
-        """
-        logger.info("Shutting down task manager %s", task_manager_id)
-
-        try:
-            # Shutdown the task manager gRPC server
-            if stub := self.task_manager_stubs.pop(task_manager_id, None):
-                shutdown_req = task_manager_pb2.ShutdownRequest()
-                with suppress(grpc.aio.AioRpcError):
-                    await stub.Shutdown(shutdown_req)
-            if channel := self.task_manager_channels.pop(task_manager_id, None):
-                await channel.close()
-
-            # Release GPU resources allocated to the task manager
-            if resources := self.task_manager_resources.pop(task_manager_id, None):
-                for gpu in resources:
-                    gpu.free()
-
-            # Delete the task manager pod and service
-            if pod_name := self.task_manager_pods.pop(task_manager_id, None):
-                with suppress(kclient.ApiException):
-                    await self.kube_core_client.delete_namespaced_pod(
-                        name=pod_name,
-                        namespace=constants.K8S_NAMESPACE,
-                    )  # type: ignore
-            if service_name := self.task_manager_services.pop(task_manager_id, None):
-                with suppress(kclient.ApiException):
-                    await self.kube_core_client.delete_namespaced_service(
-                        name=service_name,
-                        namespace=constants.K8S_NAMESPACE,
-                    )  # type: ignore
-        except Exception as e:
-            logger.exception(
-                "An unexpected exception aborted the shutdown of task manager %s: %s",
-                task_manager_id,
-                e,
-            )
-            raise
+        return UnitTaskDeployment(task=task, id=state.id, url=f"{state.service_name}:{port}")

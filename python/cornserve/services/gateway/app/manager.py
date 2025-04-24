@@ -148,6 +148,7 @@ class AppManager:
 
         Raises:
             ValueError: If app validation fails
+            RuntimeError: If errors occur during registration
         """
         span = trace.get_current_span()
         async with self.app_lock:
@@ -192,8 +193,9 @@ class AppManager:
                 self.app_states.pop(app_id, None)
                 self.app_driver_tasks.pop(app_id, None)
 
-            raise ValueError(f"Failed to register app: {e}") from e
+            raise RuntimeError(f"Failed to register app: {e}") from e
 
+    @tracer.start_as_current_span(name="AppManager.unregister_app")
     async def unregister_app(self, app_id: str) -> None:
         """Unregister an application.
 
@@ -205,21 +207,33 @@ class AppManager:
 
         Raises:
             KeyError: If app_id doesn't exist
+            RuntimeError: If errors occur during unregistration
         """
         async with self.app_lock:
             if app_id not in self.apps:
                 raise KeyError(f"App ID '{app_id}' does not exist")
 
             # Clean up app from internal state
-            self.apps.pop(app_id, None)
+            app = self.apps.pop(app_id)
             self.app_states.pop(app_id, None)
 
             # Cancel all running tasks
             for task in self.app_driver_tasks.pop(app_id, []):
                 task.cancel()
 
+        # Let the task manager know that this app no longer needs these tasks
+        tasks = app.classes.config_cls.tasks.values()
+        unit_task_specs = discover_unit_tasks(tasks)
+
+        try:
+            await self.task_manager.teardown_tasks(task_specs=unit_task_specs)
+        except Exception as e:
+            logger.exception("Errors while unregistering app '%s': %s", app_id, e)
+            raise RuntimeError(f"Errors while unregistering app '{app_id}': {e}") from e
+
         logger.info("Successfully unregistered app '%s'", app_id)
 
+    @tracer.start_as_current_span(name="AppManager.invoke_app")
     async def invoke_app(self, app_id: str, request_data: dict[str, Any]) -> Any:
         """Invoke an application with the given request data.
 
@@ -235,7 +249,6 @@ class AppManager:
             ValueError: On app invocation failure
             ValidationError: If request data is invalid
         """
-        span = trace.get_current_span()
         async with self.app_lock:
             if self.app_states[app_id] != AppState.READY:
                 raise ValueError(f"App '{app_id}' is not ready")
@@ -249,18 +262,13 @@ class AppManager:
         app_driver: asyncio.Task | None = None
 
         try:
-            # Set app context variable. This will also generate a unique request ID.
-            # app_context.set(AppContext(app_id=app_id))
-
             # Create a task to run the app
-            span.add_event("app_driver.start")
             app_driver = asyncio.create_task(app_def.classes.serve_fn(request))
 
             async with self.app_lock:
                 self.app_driver_tasks[app_id].append(app_driver)
 
             response = await app_driver
-            span.add_event("app_driver.done")
 
             # Validate response
             if not isinstance(response, app_def.classes.response_cls):
@@ -293,8 +301,7 @@ class AppManager:
         Returns:
             dict[str, AppState]: Mapping of app IDs to their states
         """
-        async with self.app_lock:
-            return dict(self.app_states)
+        return self.app_states
 
     async def shutdown(self) -> None:
         """Shut down the server."""

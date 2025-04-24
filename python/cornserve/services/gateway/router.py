@@ -72,7 +72,7 @@ async def invoke_app(app_id: str, request: AppInvocationRequest, raw_request: Re
     span = trace.get_current_span()
     span.set_attribute("gateway.invoke_app.app_id", app_id)
     span.set_attributes(
-        {f"gateway.invoke_app.request.{key}": value for key, value in request.request_data.items()},
+        {f"gateway.invoke_app.request.{key}": str(value) for key, value in request.request_data.items()},
     )
     try:
         return await app_manager.invoke_app(app_id, request.request_data)

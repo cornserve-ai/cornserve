@@ -6,12 +6,12 @@ from typing import Any
 
 from cornserve import constants
 from cornserve.services.resource_manager.resource import GPU
-from cornserve.task.builtins.llm import LLMInput, LLMOutput, LLMTask
+from cornserve.task.builtins.llm import LLMBaseTask, LLMForwardOutput, LLMInput, LLMOutput, LLMOutputBase
 from cornserve.task_executors.descriptor.base import TaskExecutionDescriptor
 from cornserve.task_executors.descriptor.registry import DESCRIPTOR_REGISTRY
 
 
-class VLLMDescriptor(TaskExecutionDescriptor[LLMTask, LLMInput, LLMOutput]):
+class VLLMDescriptor(TaskExecutionDescriptor[LLMBaseTask, LLMInput, LLMOutputBase]):
     """Task execution descriptor for Encoder tasks.
 
     This descriptor handles launching Eric (multimodal encoder) tasks and converting between
@@ -20,7 +20,7 @@ class VLLMDescriptor(TaskExecutionDescriptor[LLMTask, LLMInput, LLMOutput]):
 
     def create_executor_name(self) -> str:
         """Create a name for the task executor."""
-        return "-".join(["llm", self.task.model_id.split("/")[-1]]).lower()
+        return "-".join(["vllm", self.task.model_id.split("/")[-1]]).lower()
 
     def get_container_image(self) -> str:
         """Get the container image name for the task executor."""
@@ -43,7 +43,7 @@ class VLLMDescriptor(TaskExecutionDescriptor[LLMTask, LLMInput, LLMOutput]):
         """Get the task executor's base URL for API calls."""
         return f"{base}/v1/chat/completions"
 
-    def to_request(self, task_input: LLMInput, task_output: LLMOutput) -> dict[str, Any]:
+    def to_request(self, task_input: LLMInput, task_output: LLMOutputBase) -> dict[str, Any]:
         """Convert TaskInput to a request object for the task executor."""
         # XXX: `DataForward[str]` not supported yet.
         # Compatibility with OpenAI Chat Completion API is kept.
@@ -60,10 +60,15 @@ class VLLMDescriptor(TaskExecutionDescriptor[LLMTask, LLMInput, LLMOutput]):
 
         return request
 
-    def from_response(self, task_output: LLMOutput, response: dict[str, Any]) -> LLMOutput:
+    def from_response(self, task_output: LLMOutputBase, response: dict[str, Any]) -> LLMOutputBase:
         """Convert the task executor response to TaskOutput."""
-        # XXX: `DataForward[str]` not supported yet.
-        return LLMOutput(response=response["choices"][0]["message"]["content"])
+        if isinstance(task_output, LLMOutput):
+            return LLMOutput(response=response["choices"][0]["message"]["content"])
+        if isinstance(task_output, LLMForwardOutput):
+            return LLMForwardOutput(
+                response=task_output.response,
+            )
+        raise ValueError(f"Unexpected task output type: {type(task_output)}")
 
 
-DESCRIPTOR_REGISTRY.register(LLMTask, VLLMDescriptor, default=True)
+DESCRIPTOR_REGISTRY.register(LLMBaseTask, VLLMDescriptor, default=True)

@@ -76,7 +76,7 @@ class TaskManager:
         to_deploy: list[str] = []
         async with self.task_lock:
             for task_spec in task_specs:
-                task_class = TASK_REGISTRY.get(task_spec.task_class_name)
+                task_class, _, _ = TASK_REGISTRY.get(task_spec.task_class_name)
 
                 try:
                     task = task_class.model_validate(task_spec.task_config)
@@ -159,7 +159,7 @@ class TaskManager:
         async with self.task_lock:
             to_teardown: list[str] = []
             for task_spec in task_specs:
-                task_class = TASK_REGISTRY.get(task_spec.task_class_name)
+                task_class, _, _ = TASK_REGISTRY.get(task_spec.task_class_name)
 
                 try:
                     task = task_class.model_validate(task_spec.task_config)
