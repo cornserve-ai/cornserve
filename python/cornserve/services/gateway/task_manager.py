@@ -88,7 +88,7 @@ class TaskManager:
 
                 # Check if the task is already deployed
                 for task_id, existing_task in self.tasks.items():
-                    if existing_task == task:
+                    if existing_task.is_equivalent_with(task):
                         logger.info("Task %s is already deployed, skipping", task_spec)
                         task_ids.append(task_id)
                         break

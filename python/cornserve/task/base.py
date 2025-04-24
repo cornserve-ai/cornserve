@@ -238,11 +238,13 @@ class UnitTask(Task, Generic[InputT, OutputT]):
         descriptor_cls = DESCRIPTOR_REGISTRY.get(self.root_unit_task_cls, self.execution_descriptor_name)
         return descriptor_cls(task=self)
 
-    def __eq__(self, other: object) -> bool:
+    def is_equivalent_with(self, other: object) -> bool:
         """Check if two unit tasks are equivalent.
 
-        Two unit tasks are equivalent if they have the same root unit task class
-        and for all fields defined by the root unit task class, they have the same values.
+        Equivalent unit tasks share the same Task Manager.
+
+        Two unit tasks are equivalent if they have the same root unit task class, same execution descriptor,
+        and for all fields defined by the root unit task class, the same values (except for the ID field).
         """
         if not isinstance(other, UnitTask):
             return False
@@ -250,8 +252,14 @@ class UnitTask(Task, Generic[InputT, OutputT]):
         if self.root_unit_task_cls != other.root_unit_task_cls:
             return False
 
+        if self.execution_descriptor != other.execution_descriptor:
+            return False
+
         # Check if all fields defined by the root unit task class are the same.
         for field_name in self.root_unit_task_cls.model_fields:
+            if field_name == "id":
+                # Skip the ID field; it can be different for different instances.
+                continue
             try:
                 if getattr(self, field_name) != getattr(other, field_name):
                     return False
@@ -508,13 +516,9 @@ class TaskContext:
         try:
             # Ensure output type.
             task_output = task_outputs.pop(0)
-            expected_output_type = task.__pydantic_generic_metadata__["args"][1]
-            if not isinstance(task_output, expected_output_type):
-                raise TypeError(
-                    f"Task output type mismatch: {type(task_output)} != {expected_output_type}",
-                )
-
-            # We just manually checked the type, so we can bypass the type checker here.
-            return task_output  # type: ignore
         except IndexError as e:
             raise RuntimeError(f"Task {task.id} has no more outputs to replay.") from e
+
+        # This should be the right type because it's just being deserialized from the
+        # task's actual output.
+        return task_output  # type: ignore

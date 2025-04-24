@@ -161,7 +161,7 @@ class TaskDispatcher:
         async with self.task_lock:
             for invocation in invocations:
                 for task_info in self.task_infos.values():
-                    if task_info.task == invocation.task:
+                    if task_info.task.is_equivalent_with(invocation.task):
                         task_infos.append(task_info)
                         break
                 else:
