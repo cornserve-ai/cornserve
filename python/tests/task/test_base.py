@@ -46,3 +46,15 @@ def test_serde_graph():
 
     graph_deserialized = TaskGraphDispatch.model_validate_json(graph_json)
     assert graph == graph_deserialized
+
+
+def test_task_equivalence():
+    """Tests whether unit task equivalence is determined correctly."""
+    assert LLMTask(model_id="llama").is_equivalent_to(LLMTask(model_id="llama"))
+    assert not LLMTask(model_id="llama").is_equivalent_to(LLMTask(model_id="mistral"))
+    assert EncoderTask(model_id="clip", modality=Modality.IMAGE).is_equivalent_to(
+        EncoderTask(model_id="clip", modality=Modality.IMAGE)
+    )
+    assert not EncoderTask(model_id="clip", modality=Modality.IMAGE).is_equivalent_to(
+        EncoderTask(model_id="clip", modality=Modality.VIDEO)
+    )

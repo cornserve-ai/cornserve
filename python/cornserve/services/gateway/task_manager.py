@@ -11,15 +11,12 @@ from typing import Any
 import grpc
 import httpx
 from opentelemetry import trace
-from pydantic import ValidationError
 
 from cornserve.constants import K8S_TASK_DISPATCHER_HTTP_URL
 from cornserve.logging import get_logger
-from cornserve.services.gateway.models import UnitTaskSpec
 from cornserve.services.pb.resource_manager_pb2 import DeployUnitTaskRequest, TeardownUnitTaskRequest
 from cornserve.services.pb.resource_manager_pb2_grpc import ResourceManagerStub
 from cornserve.task.base import TaskGraphDispatch, UnitTask
-from cornserve.task.registry import TASK_REGISTRY
 
 logger = get_logger(__name__)
 tracer = trace.get_tracer(__name__)
@@ -54,51 +51,36 @@ class TaskManager:
         self.tasks: dict[str, UnitTask] = {}
         self.task_states: dict[str, TaskState] = {}  # Can be read without holding lock.
         self.task_invocation_tasks: dict[str, list[asyncio.Task]] = defaultdict(list)
+        self.task_usage_counter: dict[str, int] = defaultdict(int)
 
         # gRPC client for resource manager
         self.resource_manager_channel = grpc.aio.insecure_channel(resource_manager_grpc_url)
         self.resource_manager = ResourceManagerStub(self.resource_manager_channel)
 
-    async def deploy_tasks(self, task_specs: list[UnitTaskSpec]) -> list[str]:
+    async def declare_used(self, tasks: list[UnitTask]) -> None:
         """Deploy the given tasks.
 
         If a task is already deployed, it will be skipped.
         An error raised during deployment will roll back the deployment of all tasks deployed.
-
-        Args:
-            task_specs: The list of tasks to deploy.
-
-        Returns:
-            The list of task IDs.
         """
         # Check task state to find out which tasks have to be deployed
         task_ids: list[str] = []
         to_deploy: list[str] = []
         async with self.task_lock:
-            for task_spec in task_specs:
-                task_class, _, _ = TASK_REGISTRY.get(task_spec.task_class_name)
-
-                try:
-                    task = task_class.model_validate(task_spec.task_config)
-                except ValidationError as e:
-                    logger.error("Validation error while constructing unit task instance (%s): %s", task_spec, e)
-                    raise ValueError(
-                        f"Validation error while constructing unit task instance ({task_spec}): {e}"
-                    ) from e
-
+            for task in tasks:
                 # Check if the task is already deployed
                 for task_id, existing_task in self.tasks.items():
-                    if existing_task.is_equivalent_with(task):
-                        logger.info("Task %s is already deployed, skipping", task_spec)
+                    if existing_task.is_equivalent_to(task):
+                        logger.info("Skipping already deployed task: %r", task)
                         task_ids.append(task_id)
                         break
                 else:
                     # If the task is not already deployed, deploy it
-                    logger.info("Task %s should be deployed", task_spec)
+                    logger.info("Should deploy task: %r", task)
 
                     # Generate a unique ID for the task
                     while True:
-                        task_id = f"{task_spec.task_class_name.lower()}-{uuid.uuid4().hex}"
+                        task_id = f"{task.__class__.__name__.lower()}-{uuid.uuid4().hex}"
                         if task_id not in self.tasks:
                             break
 
@@ -106,6 +88,9 @@ class TaskManager:
                     self.task_states[task_id] = TaskState.DEPLOYING
                     task_ids.append(task_id)
                     to_deploy.append(task_id)
+
+                # Whether or not it was already deployed, increment the usage counter
+                self.task_usage_counter[task_id] += 1
 
             # Deploy tasks
             coros = []
@@ -135,6 +120,9 @@ class TaskManager:
                     )
                     del self.tasks[task_id]
                     del self.task_states[task_id]
+                    self.task_usage_counter[task_id] -= 1
+                    if self.task_usage_counter[task_id] == 0:
+                        del self.task_usage_counter[task_id]
                 await asyncio.gather(*cleanup_coros)
                 logger.info("Rolled back deployment of all deployed tasks")
                 raise RuntimeError(f"Error while deploying tasks: {errors}")
@@ -145,48 +133,38 @@ class TaskManager:
                     raise ValueError(f"Task with ID {task_id} does not exist")
                 self.task_states[task_id] = TaskState.READY
 
-        return task_ids
+    async def declare_not_used(self, tasks: list[UnitTask]) -> None:
+        """Declare that the given tasks are not used anymore.
 
-    async def teardown_tasks(self, task_specs: list[UnitTaskSpec]) -> None:
-        """Teardown the given tasks.
-
-        If the specific task is not deployed, it will be skipped.
+        This will decrease the usage counter of the tasks and tear them down if the usage
+        counter reaches 0. If the specific task is not deployed, it will be skipped.
         An error raised during tear down will *not* roll back the tear down of other tasks.
-
-        Args:
-            task_specs: The list of tasks to teardown.
         """
         async with self.task_lock:
             to_teardown: list[str] = []
-            for task_spec in task_specs:
-                task_class, _, _ = TASK_REGISTRY.get(task_spec.task_class_name)
-
-                try:
-                    task = task_class.model_validate(task_spec.task_config)
-                except ValidationError as e:
-                    logger.error("Validation error while constructing unit task instance (%s): %s", task_spec, e)
-                    raise ValueError(
-                        f"Validation error while constructing unit task instance ({task_spec}): {e}"
-                    ) from e
-
+            for task in tasks:
                 # Check if the task is deployed
                 for task_id, existing_task in self.tasks.items():
-                    if existing_task == task:
-                        logger.info("Task %s is deployed, tearing down", task_spec)
-                        to_teardown.append(task_id)
-                        self.task_states[task_id] = TaskState.TEARING_DOWN
+                    if existing_task.is_equivalent_to(task):
+                        usage_counter = self.task_usage_counter[task_id]
+                        assert usage_counter > 0, f"{task!r} has usage counter of 0"
+                        usage_counter -= 1
+                        self.task_usage_counter[task_id] = usage_counter
+                        # This task should be torn down
+                        if usage_counter == 0:
+                            logger.info("Last usage of task was removed, tearing down: %r", task)
+                            to_teardown.append(task_id)
+                            self.task_states[task_id] = TaskState.TEARING_DOWN
+                            # Cancel running invocation of tasks
+                            for invocation_task in self.task_invocation_tasks.pop(task_id, []):
+                                invocation_task.cancel()
+                        else:
+                            logger.info("Usage count is %d, skipping teardown: %r", usage_counter, task)
                         break
+                # Task is not deployed
                 else:
-                    logger.info("Task %s is not deployed, skipping", task_spec)
+                    logger.warning("Cannot find task, skipping teardown: %r", task)
                     continue
-
-            # Cancel running invocation of tasks
-            for task_id in to_teardown:
-                if task_id not in self.task_invocation_tasks:
-                    continue
-                for invocation_task in self.task_invocation_tasks[task_id]:
-                    invocation_task.cancel()
-                del self.task_invocation_tasks[task_id]
 
             # Teardown tasks
             coros = []
@@ -199,16 +177,25 @@ class TaskManager:
             errors: list[BaseException] = []
             for resp, task_id in zip(responses, to_teardown, strict=True):
                 if isinstance(resp, BaseException):
-                    logger.error("Error while tearing down task: %s", resp)
+                    logger.error("Error while tearing down: %r", resp)
                     errors.append(resp)
                 else:
                     del self.tasks[task_id]
                     del self.task_states[task_id]
-                    logger.info("Task %s has been torn down", task_id)
+                    del self.task_usage_counter[task_id]
+                    logger.info("Teardown complete: %r", task_id)
 
             if errors:
                 logger.error("Errors occured while tearing down tasks")
                 raise RuntimeError(f"Error while tearing down tasks: {errors}")
+
+    def list_tasks(self) -> list[tuple[UnitTask, TaskState]]:
+        """List all deployed tasks.
+
+        Returns:
+            A list of tuples containing the task and its state.
+        """
+        return [(task, self.task_states[task_id]) for task_id, task in self.tasks.items()]
 
     async def invoke_tasks(self, dispatch: TaskGraphDispatch) -> list[Any]:
         """Invoke the given tasks.
@@ -230,7 +217,7 @@ class TaskManager:
         async with self.task_lock:
             for invocation in dispatch.invocations:
                 for task_id, task in self.tasks.items():
-                    if task == invocation.task:
+                    if task.is_equivalent_to(invocation.task):
                         match self.task_states[task_id]:
                             case TaskState.READY:
                                 running_task_ids.append(task_id)
@@ -264,6 +251,10 @@ class TaskManager:
             except httpx.RequestError as e:
                 logger.error("Error while invoking tasks: %s", e)
                 raise RuntimeError(f"Error while invoking tasks: {e}") from e
+            finally:
+                # Remove the invocation task from all task IDs
+                for task_id in running_task_ids:
+                    self.task_invocation_tasks[task_id].remove(invocation_task)
 
         output = response.json()
         if not isinstance(output, list):
@@ -277,18 +268,6 @@ class TaskManager:
     async def shutdown(self) -> None:
         """Shutdown the task manager."""
         logger.info("Shutting down the Gateway task manager")
-
-        # Tear down all tasks
-        logger.info("Tearing down all unit tasks")
-        try:
-            await self.teardown_tasks(
-                [
-                    UnitTaskSpec(task_class_name=task.__class__.__name__, task_config=task.model_dump())
-                    for task in self.tasks.values()
-                ]
-            )
-        except Exception as e:
-            logger.error("Error while tearing down tasks: %s", e)
 
         # Close the gRPC channel to the resource manager
         await self.resource_manager_channel.close()

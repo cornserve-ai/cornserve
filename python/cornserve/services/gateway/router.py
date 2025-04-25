@@ -14,11 +14,9 @@ from cornserve.services.gateway.models import (
     AppInvocationRequest,
     AppRegistrationRequest,
     AppRegistrationResponse,
-    UnitTaskDeploymentRequest,
-    UnitTaskDeploymentResponse,
 )
 from cornserve.services.gateway.task_manager import TaskManager
-from cornserve.task.base import TaskGraphDispatch
+from cornserve.task.base import TaskGraphDispatch, UnitTask, task_manager_context
 
 router = APIRouter()
 logger = get_logger(__name__)
@@ -112,8 +110,8 @@ async def register_task(raw_request: Request):
     raise NotImplementedError("Task registration is not implemented yet.")
 
 
-@router.post("/task/deploy", response_model=UnitTaskDeploymentResponse)
-async def deploy_tasks(request: UnitTaskDeploymentRequest, raw_request: Request):
+@router.post("/tasks/usage")
+async def declare_task_usage(request: list[UnitTask], raw_request: Request):
     """Ensure that one or more unit tasks are deployed.
 
     If a task is already deployed, it will be skipped without error.
@@ -121,7 +119,8 @@ async def deploy_tasks(request: UnitTaskDeploymentRequest, raw_request: Request)
     task_manager: TaskManager = raw_request.app.state.task_manager
 
     try:
-        return await task_manager.deploy_tasks(request.tasks)
+        await task_manager.declare_used(request)
+        return Response(status_code=status.HTTP_200_OK)
     except Exception as e:
         logger.exception("Unexpected error while deploying tasks")
         return Response(
@@ -130,16 +129,16 @@ async def deploy_tasks(request: UnitTaskDeploymentRequest, raw_request: Request)
         )
 
 
-@router.post("/task/teardown")
-async def teardown_tasks(request: UnitTaskDeploymentRequest, raw_request: Request):
-    """Ensure that one or more unit tasks are torn down.
+@router.delete("/tasks/usage")
+async def declare_unused_tasks(request: list[UnitTask], raw_request: Request):
+    """Notify the gateway that one or more unit tasks are no longer in use.
 
     If a task is not found, it will be skipped without error.
     """
     task_manager: TaskManager = raw_request.app.state.task_manager
 
     try:
-        await task_manager.teardown_tasks(request.tasks)
+        await task_manager.declare_not_used(request)
         return Response(status_code=status.HTTP_200_OK)
     except Exception as e:
         logger.exception("Unexpected error while tearing down tasks")
@@ -149,7 +148,7 @@ async def teardown_tasks(request: UnitTaskDeploymentRequest, raw_request: Reques
         )
 
 
-@router.post("/task/invoke")
+@router.post("/tasks/invoke")
 async def invoke_tasks(request: TaskGraphDispatch, raw_request: Request):
     """Invoke a unit task graph."""
     task_manager: TaskManager = raw_request.app.state.task_manager
@@ -179,6 +178,9 @@ def init_app_state(app: FastAPI) -> None:
     """Initialize the app state with required components."""
     app.state.task_manager = TaskManager(K8S_RESOURCE_MANAGER_GRPC_URL)
     app.state.app_manager = AppManager(app.state.task_manager)
+
+    # Make the Task Manager available to `cornserve.task.base.TaskContext`
+    task_manager_context.set(app.state.task_manager)
 
 
 def create_app() -> FastAPI:

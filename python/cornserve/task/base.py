@@ -23,6 +23,7 @@ from cornserve.task.registry import TASK_REGISTRY
 from cornserve.task_executors.descriptor.registry import DESCRIPTOR_REGISTRY
 
 if TYPE_CHECKING:
+    from cornserve.services.gateway.task_manager import TaskManager
     from cornserve.task_executors.descriptor.base import TaskExecutionDescriptor
 
 logger = get_logger(__name__)
@@ -34,6 +35,11 @@ tracer = trace.get_tracer(__name__)
 # All internal task invocations done by the top-level task will be recorded
 # in a single task context object.
 task_context: ContextVar[TaskContext] = ContextVar("task_context")
+
+# This context variable is set by the Gateway service when it starts up.
+# `TaskContext` requires a reference to the `TaskManager` instance in order to
+# dispatch task invocations to the Task Dispatcher.
+task_manager_context: ContextVar[TaskManager | None] = ContextVar("task_manager_context", default=None)
 
 
 class TaskInput(BaseModel):
@@ -238,7 +244,7 @@ class UnitTask(Task, Generic[InputT, OutputT]):
         descriptor_cls = DESCRIPTOR_REGISTRY.get(self.root_unit_task_cls, self.execution_descriptor_name)
         return descriptor_cls(task=self)
 
-    def is_equivalent_with(self, other: object) -> bool:
+    def is_equivalent_to(self, other: object) -> bool:
         """Check if two unit tasks are equivalent.
 
         Equivalent unit tasks share the same Task Manager.
@@ -252,7 +258,7 @@ class UnitTask(Task, Generic[InputT, OutputT]):
         if self.root_unit_task_cls != other.root_unit_task_cls:
             return False
 
-        if self.execution_descriptor != other.execution_descriptor:
+        if self.execution_descriptor.__class__ != other.execution_descriptor.__class__:
             return False
 
         # Check if all fields defined by the root unit task class are the same.
@@ -470,24 +476,43 @@ class TaskContext:
             }
         )
 
-        # Figure out where to dispatch the tasks.
-        gateway_url = os.getenv("CORNSERVE_GATEWAY_URL", K8S_GATEWAY_SERVICE_HTTP_URL)
+        # Build the task graph dispatch payload.
+        graph_dispatch = TaskGraphDispatch(task_id=self.task_id, invocations=self.invocations)
 
-        # Dispatch the entire task graph to the Task Dispatcher and wait for results.
-        request = TaskGraphDispatch(task_id=self.task_id, invocations=self.invocations)
-        try:
-            async with httpx.AsyncClient(timeout=60.0) as client:
-                response = await client.post(gateway_url + "/task/invoke", json=request.model_dump())
-            response.raise_for_status()
-        except httpx.RequestError as e:
-            logger.exception("Failed to send dispatch request to the Task Dispatcher: %s", e)
-            raise RuntimeError("Failed to send dispatch request to the Task Dispatcher.") from e
-        except httpx.HTTPStatusError as e:
-            logger.exception("Task Dispatcher returned an error: %s", e)
-            raise RuntimeError("Task Dispatcher returned an error") from e
+        # Get the Task Manager from the context variable.
+        task_manager = task_manager_context.get()
+
+        # This means we're outside ot the Gateway service.
+        if task_manager is None:
+            # Figure out where to dispatch the tasks.
+            gateway_url = os.getenv("CORNSERVE_GATEWAY_URL", K8S_GATEWAY_SERVICE_HTTP_URL)
+
+            logger.info("Dispatching tasks to %s/tasks/invoke", gateway_url)
+
+            try:
+                async with httpx.AsyncClient(timeout=180.0) as client:
+                    response = await client.post(gateway_url + "/tasks/invoke", json=graph_dispatch.model_dump())
+                response.raise_for_status()
+                dispatch_outputs = response.json()
+            except httpx.RequestError as e:
+                logger.exception("Failed to send dispatch request to the Task Dispatcher: %s", e)
+                raise RuntimeError("Failed to send dispatch request to the Task Dispatcher.") from e
+            except httpx.HTTPStatusError as e:
+                logger.exception("Task Dispatcher returned an error: %s", e)
+                raise RuntimeError("Task Dispatcher returned an error") from e
+
+        # We're inside the Gateway service.
+        else:
+            logger.info("Dispatching tasks via the Task Manager")
+
+            try:
+                dispatch_outputs = await task_manager.invoke_tasks(graph_dispatch)
+            except Exception as e:
+                logger.exception("Failed to invoke tasks: %s", e)
+                raise RuntimeError("Failed to invoke tasks.") from e
 
         # Parse the response to the right task output type.
-        for i, (invocation, output) in enumerate(zip(self.invocations, response.json(), strict=True)):
+        for i, (invocation, output) in enumerate(zip(self.invocations, dispatch_outputs, strict=True)):
             task_output = invocation.task_output.__class__.model_validate(output)
             span.set_attribute(f"task_context.task.{i}.output", task_output.model_dump_json())
             self.task_outputs[invocation.task.id].append(task_output)

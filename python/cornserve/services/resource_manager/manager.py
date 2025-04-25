@@ -206,7 +206,7 @@ class ResourceManager:
         async with self.task_states_lock:
             # See if the task is already running
             for state in self.task_states.values():
-                if state.deployment and state.deployment.task.is_equivalent_with(task):
+                if state.deployment and state.deployment.task.is_equivalent_to(task):
                     logger.info("Task %s is already running, returning immediately", task)
                     return
 

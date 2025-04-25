@@ -12,7 +12,6 @@ from opentelemetry import trace
 from cornserve.app.base import AppConfig, AppRequest, AppResponse
 from cornserve.logging import get_logger
 from cornserve.services.gateway.app.models import AppClasses, AppDefinition, AppState
-from cornserve.services.gateway.models import UnitTaskSpec
 from cornserve.services.gateway.task_manager import TaskManager
 from cornserve.task.base import Task, UnitTask
 
@@ -95,30 +94,23 @@ def validate_app_module(module: ModuleType) -> AppClasses:
     )
 
 
-def discover_unit_tasks(tasks: Iterable[Task]) -> list[UnitTaskSpec]:
-    """Discover unit tasks from the app's config.
+def discover_unit_tasks(tasks: Iterable[Task]) -> list[UnitTask]:
+    """Discover unit tasks from an iterable of tasks.
 
-    XXX: There is no way for a custom-defined app to declare a task that is not
-    already built-in (`cornserve.task.builtins`). There should be a way for
-    users to instantiate any registered task class. Maybe a nicer way to
-    write code to query the task registry. This is a general problem even for
-    human- or AI-generated app code.
+    A task may itself be a unit task, or a composite task that contains unit tasks
+    as subtasks inside it.
 
     Args:
-        tasks: Task dictionary from the app's config
+        tasks: An iterable over task objects
     """
-    task_specs = []
+    unit_tasks: list[UnitTask] = []
     for task in tasks:
         if isinstance(task, UnitTask):
-            task_spec = UnitTaskSpec(
-                task_class_name=task.__class__.__name__,
-                task_config=task.model_dump(),
-            )
-            task_specs.append(task_spec)
+            unit_tasks.append(task)
         else:
-            task_specs.extend(discover_unit_tasks(getattr(task, attr) for attr in task.subtask_attr_names))
+            unit_tasks.extend(discover_unit_tasks(getattr(task, attr) for attr in task.subtask_attr_names))
 
-    return task_specs
+    return unit_tasks
 
 
 class AppManager:
@@ -165,10 +157,10 @@ class AppManager:
             # Load and validate the app
             module = load_module_from_source(source_code, app_id)
             app_classes = validate_app_module(module)
-            task_specs = discover_unit_tasks(app_classes.config_cls.tasks.values())
+            tasks = discover_unit_tasks(app_classes.config_cls.tasks.values())
 
             # Deploy all unit tasks discovered
-            await self.task_manager.deploy_tasks(task_specs=task_specs)
+            await self.task_manager.declare_used(tasks)
 
             # Update app state and store app definition
             async with self.app_lock:
@@ -222,11 +214,10 @@ class AppManager:
                 task.cancel()
 
         # Let the task manager know that this app no longer needs these tasks
-        tasks = app.classes.config_cls.tasks.values()
-        unit_task_specs = discover_unit_tasks(tasks)
+        tasks = discover_unit_tasks(app.classes.config_cls.tasks.values())
 
         try:
-            await self.task_manager.teardown_tasks(task_specs=unit_task_specs)
+            await self.task_manager.declare_not_used(tasks)
         except Exception as e:
             logger.exception("Errors while unregistering app '%s': %s", app_id, e)
             raise RuntimeError(f"Errors while unregistering app '{app_id}': {e}") from e
