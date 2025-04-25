@@ -121,7 +121,7 @@ def unregister(
         if not app_id:
             rich.print(Panel(f"Alias {app_id_or_alias} not found.", style="red", expand=False))
             return
-        alias.remove(app_id)
+        alias.remove(app_id_or_alias)
 
     raw_response = requests.post(
         f"{GATEWAY_URL}/app/unregister/{app_id}",
