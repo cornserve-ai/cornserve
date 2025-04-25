@@ -96,7 +96,4 @@ class MLLMTask(Task[MLLMInput, MLLMOutput]):
         )
         llm_output = self.llm.invoke(llm_input)
 
-        # TODO: How should the user express that they want `str`?
-        #       Probably, all intermediate data should be `DataForward`.
-        #       This will prevent intermediate data-dependent control flows too.
         return MLLMOutput(response=llm_output.response)
