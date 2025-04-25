@@ -46,19 +46,19 @@ def validate_app_module(module: ModuleType) -> AppClasses:
     if not hasattr(module, "Request"):
         errors.append("Missing 'Request' class")
     elif not issubclass(module.Request, AppRequest):
-        errors.append("'Request' class must inherit from cornserve.frontend.AppRequest")
+        errors.append("'Request' class must inherit from cornserve.app.base.AppRequest")
 
     # Check Response class
     if not hasattr(module, "Response"):
         errors.append("Missing 'Response' class")
     elif not issubclass(module.Response, AppResponse):
-        errors.append("'Response' class must inherit from cornserve.frontend.AppResponse")
+        errors.append("'Response' class must inherit from cornserve.app.base.AppResponse")
 
     # Check Config class
     if not hasattr(module, "Config"):
         errors.append("Missing 'Config' class")
     elif not issubclass(module.Config, AppConfig):
-        errors.append("'Config' class must inherit from cornserve.frontend.AppConfig")
+        errors.append("'Config' class must inherit from cornserve.app.base.AppConfig")
 
     # Check serve function
     if not hasattr(module, "serve"):
@@ -190,9 +190,6 @@ class AppManager:
     @tracer.start_as_current_span(name="AppManager.unregister_app")
     async def unregister_app(self, app_id: str) -> None:
         """Unregister an application.
-
-        TODO now: Add num_users to each unit task in task manager. If it reaches 0,
-        it gets torn down.
 
         Args:
             app_id: ID of the application to unregister
