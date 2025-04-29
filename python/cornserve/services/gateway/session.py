@@ -56,20 +56,20 @@ class SessionManager:
                 logger.warning("Session ID %s not found", session_id)
                 return TaskResponse(status=404, content="Session invalid")
             task_request = TaskRequest.model_validate(request)
-            if task_request.method == "declare_used":
+            if task_request.verb == "declare_used":
                 await self.task_manager.declare_used(task_request.get_tasks())
                 self.sessions[session_id].tasks.update({task.id: task for task in task_request.get_tasks()})
                 return TaskResponse(status=200, content="Tasks declared used")
-            elif task_request.method == "declare_not_used":
+            elif task_request.verb == "declare_not_used":
                 await self.task_manager.declare_not_used(task_request.get_tasks())
                 for task in task_request.get_tasks():
                     if task.id in self.sessions[session_id].tasks:
                         del self.sessions[session_id].tasks[task.id]
                 return TaskResponse(status=200, content="Tasks declared not used")
-            elif task_request.method == "heartbeat":
+            elif task_request.verb == "heartbeat":
                 return TaskResponse(status=200, content="Session is alive")
             else:
-                logger.warning("Unknown method %s", task_request.method)
+                logger.warning("Unknown method %s", task_request.verb)
                 return TaskResponse(status=400, content="Unknown method")
 
     async def destroy_session(self, session_id: str) -> bool:

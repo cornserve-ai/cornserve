@@ -23,7 +23,7 @@ class TaskRequest(BaseModel):
         task_list: A UnitTaskList of tasks to be registered or unregistered.
     """
 
-    method: str
+    verb: str
     task_list: UnitTaskList | None
 
     def get_tasks(self) -> list[UnitTask]:
@@ -104,7 +104,7 @@ class CornserveClient:
         import time
         while True:
             try:
-                request = TaskRequest(method="heartbeat", task_list=None)
+                request = TaskRequest(verb="heartbeat", task_list=None)
                 with self.message_lock:
                     socket.send(request.model_dump_json())
                     data = socket.recv()
@@ -132,7 +132,7 @@ class CornserveClient:
             raise ConnectionError("Not connected to the Cornserve gateway.")
         task_list = UnitTaskList(tasks=tasks)
         request = TaskRequest(
-            method="declare_used",
+            verb="declare_used",
             task_list=task_list,
         )
         with self.message_lock:
@@ -164,7 +164,7 @@ class CornserveClient:
             raise ConnectionError("Not connected to the Cornserve gateway.")
         task_list = UnitTaskList(tasks=tasks)
         request = TaskRequest(
-            method="declare_not_used",
+            verb="declare_not_used",
             task_list=task_list,
         )
         with self.message_lock:

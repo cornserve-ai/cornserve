@@ -121,7 +121,6 @@ async def session(socket: WebSocket):
     will be removed when the session ends.
     """
     await socket.accept()
-    logger.info("WebSocket connection accepted")
     session_manager: SessionManager = socket.app.state.session_manager
     session_id = await session_manager.create_session()
     try:
