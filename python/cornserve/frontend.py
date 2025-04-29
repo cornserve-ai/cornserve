@@ -111,8 +111,6 @@ class CornserveClient:
                 response = TaskResponse.model_validate_json(data)
                 if response.status != 200:
                     print(f"Failed to send heartbeat: {response.content}")
-                else:
-                    print(response)
                 time.sleep(5)
             except websocket.WebSocketConnectionClosedException:
                 break
