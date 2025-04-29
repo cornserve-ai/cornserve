@@ -4,11 +4,11 @@ Developers can use this client to deploy and remove tasks from the Cornserve gat
 """
 
 import os
-from urllib.parse import urlparse
 import threading
+from urllib.parse import urlparse
 
-from pydantic import BaseModel
 import websocket
+from pydantic import BaseModel
 
 from cornserve.constants import K8S_GATEWAY_SERVICE_HTTP_URL
 from cornserve.services.gateway.app.manager import discover_unit_tasks
@@ -61,7 +61,7 @@ class CornserveClient:
             # avoid port number being interpreted as path
             url_parsed = urlparse("http://" + url)
 
-        if url_parsed.scheme == "" :
+        if url_parsed.scheme == "":
             # if no scheme is provided, assume http
             dispatcher_url = url_parsed._replace(scheme="http")
             session_url = url_parsed._replace(scheme="ws")
@@ -79,7 +79,7 @@ class CornserveClient:
             session_url = url_parsed._replace(scheme="wss")
         else:
             raise ValueError(f"Invalid URL scheme: {url_parsed.scheme}")
-        
+
         # reset env
         os.environ["CORNSERVE_GATEWAY_URL"] = dispatcher_url.geturl()
 
@@ -102,6 +102,7 @@ class CornserveClient:
             socket: The WebSocket connection to keep alive.
         """
         import time
+
         while True:
             try:
                 request = TaskRequest(verb="heartbeat", task_list=None)

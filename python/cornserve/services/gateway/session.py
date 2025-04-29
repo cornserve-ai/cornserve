@@ -55,7 +55,11 @@ class SessionManager:
             if session_id not in self.sessions:
                 logger.warning("Session ID %s not found", session_id)
                 return TaskResponse(status=404, content="Session invalid")
-            task_request = TaskRequest.model_validate(request)
+            try:
+                task_request = TaskRequest.model_validate(request)
+            except Exception:
+                logger.exception("Invalid request")
+                return TaskResponse(status=400, content="Invalid request")
             if task_request.verb == "declare_used":
                 await self.task_manager.declare_used(task_request.get_tasks())
                 self.sessions[session_id].tasks.update({task.id: task for task in task_request.get_tasks()})
