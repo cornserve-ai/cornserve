@@ -66,6 +66,8 @@ class SessionManager:
                     if task.id in self.sessions[session_id].tasks:
                         del self.sessions[session_id].tasks[task.id]
                 return TaskResponse(status=200, content="Tasks declared not used")
+            elif task_request.method == "heartbeat":
+                return TaskResponse(status=200, content="Session is alive")
             else:
                 logger.warning("Unknown method %s", task_request.method)
                 return TaskResponse(status=400, content="Unknown method")
