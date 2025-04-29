@@ -2,7 +2,15 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, FastAPI, Request, Response, status
+from fastapi import (
+    APIRouter,
+    FastAPI,
+    Request,
+    Response,
+    WebSocket,
+    WebSocketDisconnect,
+    status,
+)
 from fastapi.exceptions import RequestValidationError
 from opentelemetry import trace
 from pydantic import ValidationError
@@ -15,8 +23,9 @@ from cornserve.services.gateway.models import (
     AppRegistrationRequest,
     AppRegistrationResponse,
 )
+from cornserve.services.gateway.session import SessionManager
 from cornserve.services.gateway.task_manager import TaskManager
-from cornserve.task.base import TaskGraphDispatch, UnitTask, task_manager_context
+from cornserve.task.base import TaskGraphDispatch, UnitTaskList, task_manager_context
 
 router = APIRouter()
 logger = get_logger(__name__)
@@ -104,14 +113,38 @@ async def list_apps(raw_request: Request):
         )
 
 
-@router.get("/task/register")
+@router.websocket("/session")
+async def session(socket: WebSocket):
+    """WebSocket endpoint for developers to interact with the gateway.
+
+    Within the session, a CornserveClient can deploy tasks, and they
+    will be removed when the session ends.
+    """
+    await socket.accept()
+    logger.info("WebSocket connection accepted")
+    session_manager: SessionManager = socket.app.state.session_manager
+    session_id = await session_manager.create_session()
+    try:
+        while True:
+            request = await socket.receive_json()
+            response = await session_manager.handle_request(session_id, request)
+            await socket.send_text(response.model_dump_json())
+    except WebSocketDisconnect:
+        pass
+    except Exception:
+        logger.exception("Error handling websocket")
+    finally:
+        await session_manager.destroy_session(session_id)
+
+
+@router.post("/task/register")
 async def register_task(raw_request: Request):
     """Register a new task and its execution descriptor with the given its source code."""
     raise NotImplementedError("Task registration is not implemented yet.")
 
 
 @router.post("/tasks/usage")
-async def declare_task_usage(request: list[UnitTask], raw_request: Request):
+async def declare_task_usage(request: UnitTaskList, raw_request: Request):
     """Ensure that one or more unit tasks are deployed.
 
     If a task is already deployed, it will be skipped without error.
@@ -119,7 +152,7 @@ async def declare_task_usage(request: list[UnitTask], raw_request: Request):
     task_manager: TaskManager = raw_request.app.state.task_manager
 
     try:
-        await task_manager.declare_used(request)
+        await task_manager.declare_used(request.tasks)
         return Response(status_code=status.HTTP_200_OK)
     except Exception as e:
         logger.exception("Unexpected error while deploying tasks")
@@ -130,7 +163,7 @@ async def declare_task_usage(request: list[UnitTask], raw_request: Request):
 
 
 @router.delete("/tasks/usage")
-async def declare_unused_tasks(request: list[UnitTask], raw_request: Request):
+async def declare_unused_tasks(request: UnitTaskList, raw_request: Request):
     """Notify the gateway that one or more unit tasks are no longer in use.
 
     If a task is not found, it will be skipped without error.
@@ -138,7 +171,7 @@ async def declare_unused_tasks(request: list[UnitTask], raw_request: Request):
     task_manager: TaskManager = raw_request.app.state.task_manager
 
     try:
-        await task_manager.declare_not_used(request)
+        await task_manager.declare_not_used(request.tasks)
         return Response(status_code=status.HTTP_200_OK)
     except Exception as e:
         logger.exception("Unexpected error while tearing down tasks")
@@ -178,6 +211,7 @@ def init_app_state(app: FastAPI) -> None:
     """Initialize the app state with required components."""
     app.state.task_manager = TaskManager(K8S_RESOURCE_MANAGER_GRPC_URL)
     app.state.app_manager = AppManager(app.state.task_manager)
+    app.state.session_manager = SessionManager(app.state.task_manager)
 
     # Make the Task Manager available to `cornserve.task.base.TaskContext`
     task_manager_context.set(app.state.task_manager)

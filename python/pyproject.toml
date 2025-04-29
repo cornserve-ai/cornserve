@@ -39,6 +39,7 @@ gateway = [
   "opentelemetry-instrumentation-fastapi",
   "opentelemetry-instrumentation-grpc",
   "opentelemetry-instrumentation-httpx",
+  "websocket-client",
 ]
 resource-manager = [
   "opentelemetry-instrumentation-grpc",

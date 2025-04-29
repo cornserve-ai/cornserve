@@ -547,3 +547,39 @@ class TaskContext:
         # This should be the right type because it's just being deserialized from the
         # task's actual output.
         return task_output  # type: ignore
+
+
+class UnitTaskList(BaseModel):
+    """A wrapper class for a list of unit tasks.
+
+    This class is added to avoid self-recursion on serialization the `UnitTask` class.
+    """
+
+    tasks: list[UnitTask]
+
+    @model_serializer()
+    def _serialize(self):
+        """Serialize the unittask list."""
+        return {
+            "_task_list": [
+                {
+                    "class_name": task.__class__.__name__,
+                    "task": task.model_dump_json(),
+                }
+                for task in self.tasks
+            ],
+        }
+
+    @model_validator(mode="before")
+    @classmethod
+    def _deserialize(cls, data: dict[str, Any]):
+        """Deserialize the unittask list."""
+        if "_task_list" not in data:
+            return data
+        tasks = []
+        for item in data["_task_list"]:
+            task_data = item["task"]
+            task_class, _, _ = TASK_REGISTRY.get(item["class_name"])
+            task = task_class.model_validate_json(task_data)
+            tasks.append(task)
+        return {"tasks": tasks}
