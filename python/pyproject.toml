@@ -28,7 +28,7 @@ dynamic = ["version"]
 cornserve = "cornserve.cli:main"
 
 [project.optional-dependencies]
-client = [
+frontend = [
   "websocket-client",
 ]
 sidecar = [
@@ -77,7 +77,7 @@ dev-common = [
   "ruff",
   "pytest",
   "pytest-asyncio",
-  "cornserve[dev-common,sidecar,gateway,resource-manager,task-manager,task-dispatcher]",
+  "cornserve[sidecar,gateway,resource-manager,task-manager,task-dispatcher,frontend]",
 ]
 dev = ["cornserve[dev-common,eric]"]
 dev-no-gpu = ["cornserve[dev-common,eric-no-gpu]"]
