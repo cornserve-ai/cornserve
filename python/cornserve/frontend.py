@@ -56,7 +56,7 @@ class TaskResponse(BaseModel):
 class CornserveClient:
     """The Cornserve client for communicating with the Cornserve gateway."""
 
-    def __init__(self, url: str | None = None):
+    def __init__(self, url: str | None = None) -> None:
         """Initialize the Cornserve client."""
         if url is None:
             url = os.environ.get(
@@ -104,7 +104,7 @@ class CornserveClient:
         )
         self.keep_alive_thread.start()
 
-    def _keep_alive(self, socket: websocket.WebSocket, lock: threading.Lock):
+    def _keep_alive(self, socket: websocket.WebSocket, lock: threading.Lock) -> None:
         """Keep the WebSocket connection alive by sending a ping message.
 
         Args:
@@ -129,11 +129,11 @@ class CornserveClient:
                 print(f"Error in keep_alive: {e}")
                 break
 
-    def is_connected(self):
+    def is_connected(self) -> bool:
         """Check if the client is connected to the Cornserve gateway."""
         return self.socket.connected
 
-    def deploy_unit_tasks(self, tasks: list[UnitTask]):
+    def deploy_unit_tasks(self, tasks: list[UnitTask]) -> TaskResponse:
         """Deploy unit tasks to the Cornserve gateway.
 
         Args:
@@ -154,7 +154,7 @@ class CornserveClient:
             raise Exception(f"Failed to deploy tasks: {response.content}")
         return response
 
-    def deploy(self, task: Task):
+    def deploy(self, task: Task) -> TaskResponse:
         """Deploy a task to the Cornserve gateway.
 
         Args:
@@ -165,7 +165,7 @@ class CornserveClient:
         tasks = discover_unit_tasks([task])
         return self.deploy_unit_tasks(tasks)
 
-    def teardown_unit_tasks(self, tasks: list[UnitTask]):
+    def teardown_unit_tasks(self, tasks: list[UnitTask]) -> TaskResponse:
         """Teardown unit tasks from the Cornserve gateway.
 
         Args:
@@ -186,7 +186,7 @@ class CornserveClient:
             raise Exception(f"Failed to deploy tasks: {response.content}")
         return response
 
-    def teardown(self, task: Task):
+    def teardown(self, task: Task) -> TaskResponse:
         """Teardown a task from the Cornserve gateway.
 
         Args:
@@ -197,7 +197,7 @@ class CornserveClient:
         tasks = discover_unit_tasks([task])
         return self.teardown_unit_tasks(tasks)
 
-    def close(self):
+    def close(self) -> None:
         """Close the connection to the Cornserve gateway."""
         if self.is_connected():
             self.socket.close()
