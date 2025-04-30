@@ -1,5 +1,7 @@
 """Worker processes use the GPUs to run tensor parallel inference."""
 
+from __future__ import annotations
+
 import multiprocessing as mp
 import pickle
 import signal

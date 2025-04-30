@@ -1,5 +1,7 @@
 """The engine client lives in the router process and interacts with the engine process."""
 
+from __future__ import annotations
+
 import asyncio
 import os
 from asyncio.futures import Future

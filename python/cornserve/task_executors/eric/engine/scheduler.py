@@ -1,7 +1,7 @@
 """The scheduler is responsible for batching embedding requests."""
 
 from collections import defaultdict
-from typing import Generator
+from collections.abc import Generator
 
 from opentelemetry import propagate, trace
 

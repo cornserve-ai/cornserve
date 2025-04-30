@@ -44,7 +44,7 @@ class Alias:
         # Alias -> App ID
         self.aliases = {}
         if file_path.exists():
-            with open(file_path, "r") as file:
+            with open(file_path) as file:
                 self.aliases = json.load(file)
 
     def get(self, alias: str) -> str | None:

@@ -1,5 +1,7 @@
 """The model executor manages multiple workers that execute inference."""
 
+from __future__ import annotations
+
 import os
 import signal
 import time

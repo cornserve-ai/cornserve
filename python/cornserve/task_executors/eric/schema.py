@@ -74,7 +74,7 @@ class EngineEnqueueRequest:
     span: Span | None = None
 
     @classmethod
-    def from_msgpack(cls, msg: EngineEnqueueMessage) -> "EngineEnqueueRequest":
+    def from_msgpack(cls, msg: EngineEnqueueMessage) -> EngineEnqueueRequest:
         """Create an engine enqueue request from a engine enqueue message."""
         req = cls(request_id=msg.request_id, data=msg.data)
         if msg.otel_carrier:

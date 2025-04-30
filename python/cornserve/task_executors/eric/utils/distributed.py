@@ -1,6 +1,8 @@
 """Utilities for distributed inference."""
 
-from typing import Sequence
+from __future__ import annotations
+
+from collections.abc import Sequence
 
 import torch
 

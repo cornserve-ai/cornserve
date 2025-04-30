@@ -1,5 +1,7 @@
 """Utilities for networking."""
 
+from __future__ import annotations
+
 import socket
 
 

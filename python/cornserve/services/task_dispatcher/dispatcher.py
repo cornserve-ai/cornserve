@@ -5,8 +5,9 @@ from __future__ import annotations
 import asyncio
 import uuid
 from collections import defaultdict
+from collections.abc import Iterator
 from dataclasses import dataclass
-from typing import Any, Iterator
+from typing import Any
 
 import grpc
 import httpx
@@ -68,7 +69,7 @@ def iter_data_forwards(obj: object) -> Iterator[DataForward]:
     """
     if isinstance(obj, DataForward):
         yield obj
-    elif isinstance(obj, (list, tuple)):
+    elif isinstance(obj, list | tuple):
         for item in obj:
             yield from iter_data_forwards(item)
     elif isinstance(obj, dict):

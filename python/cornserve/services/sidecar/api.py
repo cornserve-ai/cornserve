@@ -15,7 +15,7 @@ import weakref
 from concurrent.futures import ThreadPoolExecutor
 from functools import reduce
 from operator import mul
-from typing import List, Optional, cast
+from typing import cast
 
 import grpc
 import torch
@@ -161,7 +161,7 @@ class TensorSidecarAsyncReceiver(TensorSidecarReceiverBase):
         sidecar_rank: int,
         shape: tuple[int, ...],
         dtype: torch.dtype,
-        peers: Optional[list[int]] = None,
+        peers: list[int] | None = None,
     ) -> None:
         """Constructor for the sidecar receiver.
 
@@ -444,7 +444,7 @@ class TensorSidecarSender(TensorSidecarSenderBase):
         self,
         chunk: torch.Tensor,
         id: str,
-        dst_sidecar_ranks: List[int],
+        dst_sidecar_ranks: list[int],
         chunk_id: int = 0,
         num_chunks: int = 1,
     ) -> None:
@@ -515,7 +515,7 @@ class TensorSidecarSender(TensorSidecarSenderBase):
         shard: torch.Tensor,
         chunk_size: int,
         shard_offset: int,
-        dst_sidecar_ranks: List[int],
+        dst_sidecar_ranks: list[int],
         chunk_id: int,
         num_chunks: int,
     ) -> None:

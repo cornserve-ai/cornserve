@@ -8,9 +8,10 @@ import os
 import uuid
 from abc import ABC, abstractmethod
 from collections import defaultdict
+from collections.abc import Generator, Iterable
 from contextlib import contextmanager
 from contextvars import ContextVar
-from typing import TYPE_CHECKING, Any, ClassVar, Generator, Generic, Iterable, Self, TypeVar, final
+from typing import TYPE_CHECKING, Any, ClassVar, Generic, Self, TypeVar, final
 
 import httpx
 from opentelemetry import trace

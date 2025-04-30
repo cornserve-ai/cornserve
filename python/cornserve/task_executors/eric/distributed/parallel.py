@@ -1,5 +1,7 @@
 """PyTorch Distributed management and collectives for tensor parallelism."""
 
+from __future__ import annotations
+
 import torch
 
 from cornserve.logging import get_logger

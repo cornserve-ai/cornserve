@@ -96,7 +96,7 @@ select = [
   "D",   # pydocstyle
   "PL",  # pylint
   "N",   # pep8-naming
-  # "UP",  # pyupgrade
+  "UP",  # pyupgrade
   "B",   # flake8-bugbear (detects likely bugs)
   "G",   # flake8-logging-format (complains about logging)
   "SIM", # flake8-simplify (suggests code simplifications)

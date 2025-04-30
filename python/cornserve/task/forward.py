@@ -4,10 +4,9 @@ from __future__ import annotations
 
 import enum
 import uuid
-from typing import Generic, TypeVar
+from typing import Generic, Self, TypeVar
 
 from pydantic import BaseModel, Field, model_validator
-from typing_extensions import Self
 
 
 class Tensor:

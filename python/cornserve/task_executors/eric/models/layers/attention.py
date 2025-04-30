@@ -1,5 +1,7 @@
 """Generic attention implementation for ViTs."""
 
+from __future__ import annotations
+
 import torch
 import torch.nn as nn
 from xformers.ops import memory_efficient_attention_forward  # type: ignore

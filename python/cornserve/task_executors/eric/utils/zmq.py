@@ -1,8 +1,11 @@
 """Utilities for creating and managing ZMQ sockets."""
 
+from __future__ import annotations
+
 import contextlib
 import tempfile
-from typing import Iterator, overload
+from collections.abc import Iterator
+from typing import overload
 from uuid import uuid4
 
 import zmq

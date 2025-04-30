@@ -1,3 +1,7 @@
+"""Linear layers with tensor parallelism."""
+
+from __future__ import annotations
+
 from typing import Any, Literal
 
 import torch

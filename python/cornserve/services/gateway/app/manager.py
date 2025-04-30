@@ -1,5 +1,7 @@
 """The App Manager registers, invokes, and unregisters applications."""
 
+from __future__ import annotations
+
 import asyncio
 import importlib.util
 import uuid

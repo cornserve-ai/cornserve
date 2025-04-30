@@ -1,5 +1,7 @@
 """Instantiating the PyTorch model and loading Hugging Face Hub model weights."""
 
+from __future__ import annotations
+
 import contextlib
 import fnmatch
 import hashlib
@@ -7,7 +9,7 @@ import importlib
 import json
 import os
 import tempfile
-from typing import Literal, Type
+from typing import Literal
 
 import filelock
 import huggingface_hub.errors
@@ -74,7 +76,7 @@ def load_model(
 
     # Import the model class
     try:
-        model_class: Type[EricModel] = getattr(
+        model_class: type[EricModel] = getattr(
             importlib.import_module(f"cornserve.task_executors.eric.models.{registry_entry.module}"),
             registry_entry.class_name,
         )

@@ -1,9 +1,11 @@
 """Type definitions for the App Manager."""
 
+from __future__ import annotations
+
 import enum
+from collections.abc import Callable, Coroutine
 from dataclasses import dataclass
 from types import ModuleType
-from typing import Callable, Coroutine, Type
 
 from cornserve.app.base import AppConfig, AppRequest, AppResponse
 
@@ -26,9 +28,9 @@ class AppClasses:
         serve_fn: The function that implements the app's logic.
     """
 
-    request_cls: Type[AppRequest]
-    response_cls: Type[AppResponse]
-    config_cls: Type[AppConfig]
+    request_cls: type[AppRequest]
+    response_cls: type[AppResponse]
+    config_cls: type[AppConfig]
     serve_fn: Callable[[AppRequest], Coroutine[None, None, AppResponse]]
 
 

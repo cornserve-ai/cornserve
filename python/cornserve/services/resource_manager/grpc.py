@@ -1,5 +1,7 @@
 """Resource Manager gRPC server."""
 
+from __future__ import annotations
+
 import grpc
 
 from cornserve.logging import get_logger
