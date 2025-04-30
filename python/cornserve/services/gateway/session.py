@@ -2,7 +2,7 @@
 
 import asyncio
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from cornserve.frontend import TaskRequest, TaskResponse
 from cornserve.logging import get_logger
