@@ -38,9 +38,7 @@ class SessionManager:
         async with self.lock:
             while session_id in self.sessions:
                 session_id = str(uuid.uuid4())
-            self.sessions[session_id] = Session(
-                tasks={},
-            )
+            self.sessions[session_id] = Session()
         logger.info("Created session with ID: %s", session_id)
         return session_id
 
