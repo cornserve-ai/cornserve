@@ -5,7 +5,7 @@ import importlib.util
 import uuid
 from collections import defaultdict
 from types import ModuleType
-from typing import Any, Iterable, get_type_hints
+from typing import Any, get_type_hints
 
 from opentelemetry import trace
 
@@ -13,7 +13,7 @@ from cornserve.app.base import AppConfig, AppRequest, AppResponse
 from cornserve.logging import get_logger
 from cornserve.services.gateway.app.models import AppClasses, AppDefinition, AppState
 from cornserve.services.gateway.task_manager import TaskManager
-from cornserve.task.base import Task, UnitTask
+from cornserve.task.base import discover_unit_tasks
 
 logger = get_logger(__name__)
 tracer = trace.get_tracer(__name__)
@@ -92,25 +92,6 @@ def validate_app_module(module: ModuleType) -> AppClasses:
         config_cls=module.Config,
         serve_fn=module.serve,  # type: ignore
     )
-
-
-def discover_unit_tasks(tasks: Iterable[Task]) -> list[UnitTask]:
-    """Discover unit tasks from an iterable of tasks.
-
-    A task may itself be a unit task, or a composite task that contains unit tasks
-    as subtasks inside it.
-
-    Args:
-        tasks: An iterable over task objects
-    """
-    unit_tasks: list[UnitTask] = []
-    for task in tasks:
-        if isinstance(task, UnitTask):
-            unit_tasks.append(task)
-        else:
-            unit_tasks.extend(discover_unit_tasks(getattr(task, attr) for attr in task.subtask_attr_names))
-
-    return unit_tasks
 
 
 class AppManager:

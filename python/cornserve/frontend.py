@@ -12,8 +12,7 @@ import websocket
 from pydantic import BaseModel
 
 from cornserve.constants import K8S_GATEWAY_SERVICE_HTTP_URL
-from cornserve.services.gateway.app.manager import discover_unit_tasks
-from cornserve.task.base import Task, UnitTask, UnitTaskList
+from cornserve.task.base import Task, UnitTask, UnitTaskList, discover_unit_tasks
 
 
 class TaskRequestVerb(enum.Enum):

@@ -10,7 +10,7 @@ from abc import ABC, abstractmethod
 from collections import defaultdict
 from contextlib import contextmanager
 from contextvars import ContextVar
-from typing import TYPE_CHECKING, Any, ClassVar, Generator, Generic, Self, TypeVar, final
+from typing import TYPE_CHECKING, Any, ClassVar, Generator, Generic, Iterable, Self, TypeVar, final
 
 import httpx
 from opentelemetry import trace
@@ -141,6 +141,25 @@ class Task(BaseModel, ABC, Generic[InputT, OutputT]):
         # The `replay` context manager will have all tasks directly use actual task outputs.
         with ctx.replay():
             return self.invoke(task_input)
+
+
+def discover_unit_tasks(tasks: Iterable[Task]) -> list[UnitTask]:
+    """Discover unit tasks from an iterable of tasks.
+
+    A task may itself be a unit task, or a composite task that contains unit tasks
+    as subtasks inside it.
+
+    Args:
+        tasks: An iterable over task objects
+    """
+    unit_tasks: list[UnitTask] = []
+    for task in tasks:
+        if isinstance(task, UnitTask):
+            unit_tasks.append(task)
+        else:
+            unit_tasks.extend(discover_unit_tasks(getattr(task, attr) for attr in task.subtask_attr_names))
+
+    return unit_tasks
 
 
 class UnitTask(Task, Generic[InputT, OutputT]):
