@@ -28,6 +28,9 @@ dynamic = ["version"]
 cornserve = "cornserve.cli:main"
 
 [project.optional-dependencies]
+client = [
+  "websocket-client",
+]
 sidecar = [
   "torch",
   "opentelemetry-instrumentation-grpc",
@@ -39,7 +42,6 @@ gateway = [
   "opentelemetry-instrumentation-fastapi",
   "opentelemetry-instrumentation-grpc",
   "opentelemetry-instrumentation-httpx",
-  "websocket-client",
 ]
 resource-manager = [
   "opentelemetry-instrumentation-grpc",

@@ -4,7 +4,7 @@ import asyncio
 import uuid
 from dataclasses import dataclass, field
 
-from cornserve.frontend import TaskRequest, TaskResponse
+from cornserve.frontend import TaskRequest, TaskRequestVerb, TaskResponse
 from cornserve.logging import get_logger
 from cornserve.services.gateway.task_manager import TaskManager
 from cornserve.task.base import UnitTask
@@ -58,17 +58,19 @@ class SessionManager:
             except Exception:
                 logger.exception("Invalid request")
                 return TaskResponse(status=400, content="Invalid request")
-            if task_request.verb == "declare_used":
+            if task_request.verb == TaskRequestVerb.DECLARE_USED:
+                logger.info("Declaring tasks as used: %s", task_request.task_list)
                 await self.task_manager.declare_used(task_request.get_tasks())
                 self.sessions[session_id].tasks.update({task.id: task for task in task_request.get_tasks()})
                 return TaskResponse(status=200, content="Tasks declared used")
-            elif task_request.verb == "declare_not_used":
+            elif task_request.verb == TaskRequestVerb.DECLARE_NOT_USED:
+                logger.info("Declaring tasks as not used: %s", task_request.task_list)
                 await self.task_manager.declare_not_used(task_request.get_tasks())
                 for task in task_request.get_tasks():
                     if task.id in self.sessions[session_id].tasks:
                         del self.sessions[session_id].tasks[task.id]
                 return TaskResponse(status=200, content="Tasks declared not used")
-            elif task_request.verb == "heartbeat":
+            elif task_request.verb == TaskRequestVerb.HEARTBEAT:
                 return TaskResponse(status=200, content="Session is alive")
             else:
                 logger.warning("Unknown method %s", task_request.verb)

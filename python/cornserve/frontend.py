@@ -1,8 +1,9 @@
 """The Cornserve client for communicating with the Cornserve gateway.
 
-Developers can use this client to deploy and remove tasks from the Cornserve gateway.
+Developers can use this client to deploy and teardown tasks from the Cornserve gateway.
 """
 
+import enum
 import os
 import threading
 from urllib.parse import urlparse
@@ -15,15 +16,23 @@ from cornserve.services.gateway.app.manager import discover_unit_tasks
 from cornserve.task.base import Task, UnitTask, UnitTaskList
 
 
+class TaskRequestVerb(enum.Enum):
+    """The verb for the task request."""
+
+    HEARTBEAT = "heartbeat"
+    DECLARE_USED = "declare_used"
+    DECLARE_NOT_USED = "declare_not_used"
+
+
 class TaskRequest(BaseModel):
     """Request for (un)registering tasks.
 
     Attributes:
-        method: The task_manager method to call.
+        verb: The verb for the request (heartbeat, declare_used, or declare_not_used).
         task_list: A UnitTaskList of tasks to be registered or unregistered.
     """
 
-    verb: str
+    verb: TaskRequestVerb
     task_list: UnitTaskList | None
 
     def get_tasks(self) -> list[UnitTask]:
@@ -48,7 +57,7 @@ class TaskResponse(BaseModel):
 class CornserveClient:
     """The Cornserve client for communicating with the Cornserve gateway."""
 
-    def __init__(self, url=None):
+    def __init__(self, url: str | None = None):
         """Initialize the Cornserve client."""
         if url is None:
             url = os.environ.get(
@@ -81,6 +90,7 @@ class CornserveClient:
             raise ValueError(f"Invalid URL scheme: {url_parsed.scheme}")
 
         # reset env
+        self.saved_gateway_url = os.environ.get("CORNSERVE_GATEWAY_URL")
         os.environ["CORNSERVE_GATEWAY_URL"] = dispatcher_url.geturl()
 
         self.url = session_url.geturl() + "/session"
@@ -90,23 +100,24 @@ class CornserveClient:
         self.message_lock = threading.Lock()
         self.keep_alive_thread = threading.Thread(
             target=self._keep_alive,
-            args=(self.socket,),
+            args=(self.socket, self.message_lock),
             daemon=True,
         )
         self.keep_alive_thread.start()
 
-    def _keep_alive(self, socket: websocket.WebSocket):
+    def _keep_alive(self, socket: websocket.WebSocket, lock: threading.Lock):
         """Keep the WebSocket connection alive by sending a ping message.
 
         Args:
             socket: The WebSocket connection to keep alive.
+            lock: A threading lock to ensure thread safety for sending messages.
         """
         import time
 
         while True:
             try:
-                request = TaskRequest(verb="heartbeat", task_list=None)
-                with self.message_lock:
+                request = TaskRequest(verb=TaskRequestVerb.HEARTBEAT, task_list=None)
+                with lock:
                     socket.send(request.model_dump_json())
                     data = socket.recv()
                 response = TaskResponse.model_validate_json(data)
@@ -133,7 +144,7 @@ class CornserveClient:
             raise ConnectionError("Not connected to the Cornserve gateway.")
         task_list = UnitTaskList(tasks=tasks)
         request = TaskRequest(
-            verb="declare_used",
+            verb=TaskRequestVerb.DECLARE_USED,
             task_list=task_list,
         )
         with self.message_lock:
@@ -155,17 +166,17 @@ class CornserveClient:
         tasks = discover_unit_tasks([task])
         return self.deploy_unit_tasks(tasks)
 
-    def remove_unit_tasks(self, tasks: list[UnitTask]):
-        """Remove unit tasks from the Cornserve gateway.
+    def teardown_unit_tasks(self, tasks: list[UnitTask]):
+        """Teardown unit tasks from the Cornserve gateway.
 
         Args:
-            tasks: A list of unit tasks to remove.
+            tasks: A list of unit tasks to teardown.
         """
         if not self.is_connected():
             raise ConnectionError("Not connected to the Cornserve gateway.")
         task_list = UnitTaskList(tasks=tasks)
         request = TaskRequest(
-            verb="declare_not_used",
+            verb=TaskRequestVerb.DECLARE_NOT_USED,
             task_list=task_list,
         )
         with self.message_lock:
@@ -176,16 +187,16 @@ class CornserveClient:
             raise Exception(f"Failed to deploy tasks: {response.content}")
         return response
 
-    def remove(self, task: Task):
-        """Remove a task from the Cornserve gateway.
+    def teardown(self, task: Task):
+        """Teardown a task from the Cornserve gateway.
 
         Args:
-            task: The task to remove.
+            task: The task to teardown.
         """
         if not self.is_connected():
             raise ConnectionError("Not connected to the Cornserve gateway.")
         tasks = discover_unit_tasks([task])
-        return self.remove_unit_tasks(tasks)
+        return self.teardown_unit_tasks(tasks)
 
     def close(self):
         """Close the connection to the Cornserve gateway."""
@@ -195,3 +206,5 @@ class CornserveClient:
         if self.keep_alive_thread.is_alive():
             self.keep_alive_thread.join()
             print("Closed keep-alive thread.")
+        if self.saved_gateway_url is not None:
+            os.environ["CORNSERVE_GATEWAY_URL"] = self.saved_gateway_url
