@@ -129,6 +129,7 @@ async def session(socket: WebSocket):
             response = await session_manager.handle_request(session_id, request)
             await socket.send_text(response.model_dump_json())
     except WebSocketDisconnect:
+        logger.info("Websocket disconnected")
         pass
     except Exception:
         logger.exception("Error handling websocket")
