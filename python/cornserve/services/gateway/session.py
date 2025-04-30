@@ -20,7 +20,7 @@ class Session:
         tasks: A dictionary of tasks that are currently in use by this session.
     """
 
-    tasks: dict[str, UnitTask]
+    tasks: dict[str, UnitTask] = field(default_factory=dict)
 
 
 class SessionManager:
