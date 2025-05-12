@@ -113,6 +113,7 @@ def batch_builder(model_id: str, nickname: str, data: list[ModalityData]) -> Wor
         num_chunks=[1 for _ in data],
         receiver_ranks=[None for _ in data],
         data=processed_data,
+        otel_carriers=[None for _ in data],
     )
 
     if DUMP_DIR is not None:

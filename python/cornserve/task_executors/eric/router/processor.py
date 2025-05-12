@@ -212,7 +212,6 @@ class VideoLoader(BaseLoader):
                     break
                 frames[frames_loaded] = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
                 frames_loaded += 1
-        cap.release()
 
         assert frames_loaded == len(frame_indices), f"Expected {len(frame_indices)} frames, but got {frames_loaded}."
 
