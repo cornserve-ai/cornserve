@@ -1,27 +1,32 @@
 """Sidecar utility functions and constants."""
 
 from __future__ import annotations
-
 import ctypes
 from enum import Enum
+import os
 
 import torch
 
 from cornserve import constants
+from cornserve.logging import get_logger
+
+logger = get_logger(__name__)
 
 RANK_OFFSET = 1000000
 CHUNK_OFFSET = 1000
 
 GRPC_BASE_PORT = 10000
-UCX_BASE_PORT = 11000
+UCX_BASE_PORT = 12000
 
 
-def chunk_tag(rank: int, chunk_id: int, shard_rank: int) -> int:
+def chunk_tag(id: str, rank: int, chunk_id: int, shard_rank: int) -> int:
     """Generate a tag for the chunk.
 
     The tag is a unique id for a chunk during transmission.
     """
-    return RANK_OFFSET * (rank) + CHUNK_OFFSET * (chunk_id) + shard_rank
+    # convert the hex uuid to int
+    base = int(id, 16)
+    return base + RANK_OFFSET * (rank) + CHUNK_OFFSET * (chunk_id) + shard_rank
 
 
 def buffer_from_tensor(t: torch.Tensor) -> ctypes.Array:
@@ -32,7 +37,7 @@ def buffer_from_tensor(t: torch.Tensor) -> ctypes.Array:
     return buffer
 
 
-def shm_fn() -> str:
+def shm_filename() -> str:
     """Shared memory filename in each node."""
     return "/dev/shm/sc_shm"
 
@@ -43,8 +48,8 @@ def device_from_rank(rank: int) -> torch.device:
     return torch.device(f"cuda:{rank}")
 
 
-def grpc_channel_from_rank(rank: int) -> str:
-    """GRPC channel from rank."""
+def grpc_url_from_rank(rank: int) -> str:
+    """GRPC channel url from rank."""
     assert rank >= 0, "Rank should be non-negative"
     parts = [
         f"sidecar-{rank}",
@@ -74,12 +79,12 @@ def ucx_port_from_rank(rank: int) -> int:
 
 
 def init_shmem(
-    fn: str,
+    filename: str,
     local_ranks: list[int],
     num_local_sidecars: int,
-    size: int,
+    partition_numel: int,
     dtype: torch.dtype,
-) -> torch.Tensor:
+) -> tuple[torch.Tensor, torch.Tensor]:
     """Initialize a shared memory buffer between the sidecar client and server.
 
     All sidecars within the same node will share the same buffer but at different offsets.
@@ -89,22 +94,22 @@ def init_shmem(
         fn: Shared memory filename.
         local_ranks: The local ranks of the sidecars that will share the buffer, must be consecutive.
         num_local_sidecars: Total number of sidecars within the same node.
-        size: Number of elements of given dtype in the shared memory buffer used by each device/sidecar.
+        partition_numel: Number of elements of given dtype in the shared memory buffer used by each device/sidecar.
         dtype: Data type of the shared memory buffer.
     """
     # sanity check device_ids
     for i in range(len(local_ranks) - 1):
         assert local_ranks[i] + 1 == local_ranks[i + 1], "Device IDs must be consecutive"
-    total_element_count = size * num_local_sidecars
+    total_element_count = partition_numel * num_local_sidecars
     full_tensor = torch.from_file(
-        filename=fn,
+        filename=filename,
         shared=True,
         size=total_element_count,
         dtype=dtype,
     )
-    start = size * local_ranks[0]
-    end = size * (local_ranks[-1] + 1)
-    return full_tensor[start:end]
+    start = partition_numel * local_ranks[0]
+    end = partition_numel * (local_ranks[-1] + 1)
+    return full_tensor, full_tensor[start:end]
 
 
 class TensorLayout(Enum):

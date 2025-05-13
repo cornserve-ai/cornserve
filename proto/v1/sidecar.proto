@@ -5,30 +5,44 @@ package cornserve.sidecar;
 import "common.proto";
 
 service Sidecar {
+  rpc Register(RegisterRequest) returns (RegisterResponse);
   rpc Send(SendRequest) returns (SendResponse);
   rpc Receive(ReceiveRequest) returns (ReceiveResponse);
   rpc MarkDone(MarkDoneRequest) returns (MarkDoneResponse);
-  rpc RegisterSender(RegisterSenderRequest) returns (RegisterResponse);
-  rpc RegisterReceiver(RegisterReceiverRequest) returns (RegisterResponse);
-  rpc RegisterReader(RegisterReaderRequest) returns (RegisterResponse);
-
+  rpc Unlink(UnlinkRequest) returns (UnlinkResponse);
   rpc PrepareReceive(PrepareReceiveRequest) returns (PrepareReceiveResponse);
 
   rpc CheckHealth(CheckHealthRequest) returns (CheckHealthResponse);
-  rpc ReportMemory(ReportMemoryRequest) returns (ReportMemoryResponse);
   // TODO: add unregister
+}
+
+message RegisterRequest {
+  int32 rank = 1;
+  repeated int32 group = 2;
+  string dtype = 3;
+  int32 send_slot_numel = 4;
+  int32 recv_slot_numel = 5;
+  bool concurrent_copy = 6;
+}
+
+message RegisterResponse {
+  common.Status status = 1;
+  int32 shm_size = 2; // numel in the sindle sender/receiver slab
+  int32 local_rank = 3; // the GPU index to use
+  int32 num_local_sidecars = 4; // used for init_shmem
+}
+
+message RankGroup {
+  repeated int32 ranks = 1;
 }
 
 message SendRequest {
   string id = 1;
-  int32 size = 2;
-  int32 slot = 3;
-  bytes ipc_handle = 4;
+  repeated RankGroup dst_ranks = 2;
+  int32 shard_rank = 3; // tp rank
+  bytes data = 4; // serialized obj
   int32 chunk_id = 5;
   int32 num_chunks = 6;
-  repeated int32 dst_ranks = 7;
-  int32 chunk_size = 8;
-  int32 shard_offset = 9;
 }
 
 message SendResponse {
@@ -36,63 +50,39 @@ message SendResponse {
 }
 
 message ReceiveRequest {
-  // -1 or error
   string id = 1;
+  int32 chunk_id = 2;
 }
 
 message ReceiveResponse {
-  // -1 or error
-  int32 offset = 1;
-  int32 size = 2;
+  common.Status status = 1;
+  bytes data = 2;
 }
 
 message MarkDoneRequest {
   string id = 1;
+  int32 chunk_id = 2;
 }
 
 message MarkDoneResponse {
   common.Status status = 1;
 }
 
-message RegisterSenderRequest {
-  int32 slot_size = 1;
-  string dtype = 2;
-  int32 shard_rank = 3;
-  int32 num_shards = 4;
-  int32 layout = 5;
+message UnlinkRequest {
+  string id = 1;
+  int32 chunk_id = 2;
 }
 
-message RegisterReceiverRequest {
-  int32 slot_size = 1;
-  string dtype = 2;
-  int32 layout = 3;
-  // the sidecar ranks of the group
-  repeated int32 group = 4;
+message UnlinkResponse {
+  common.Status status = 1;
 }
 
-message RegisterReaderRequest {
-}
-
-message RegisterResponse {
-  // returns -1 on err
-  // these are needed for init_shmem
-  int32 shm_size = 1;
-  repeated int32 local_ranks = 2;
-  int32 num_local_sidecars = 3;
-}
 
 message PrepareReceiveRequest {
   string id = 1;
-  int32 shard_size = 2;
-  string dtype = 3;
-  int32 shard_rank = 4;
-  int32 num_shards = 5;
-  int32 chunk_size = 6;
-  int32 num_chunks = 7;
-  int32 chunk_id = 9;
-  int32 src_rank = 10;
-  int32 shard_offset = 11;
-  int32 layout = 12;
+  bytes data = 2; // msgpack encoded handle
+  int32 src_rank = 3;
+  int32 chunk_id = 4;
 }
 
 message PrepareReceiveResponse {
