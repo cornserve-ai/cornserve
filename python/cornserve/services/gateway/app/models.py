@@ -1,25 +1,13 @@
 """Type definitions for the App Manager."""
 
+from __future__ import annotations
+
 import enum
-import uuid
-from dataclasses import dataclass, field
+from collections.abc import Callable, Coroutine
+from dataclasses import dataclass
 from types import ModuleType
-from typing import Callable, Coroutine, Type
 
-from cornserve.frontend.app import AppConfig, AppRequest, AppResponse
-
-
-@dataclass
-class AppContext:
-    """Context information for the invocation of an app.
-
-    Attributes:
-        app_id: The ID of the app.
-        request_id: The ID of the request.
-    """
-
-    app_id: str
-    request_id: str = field(default_factory=lambda: uuid.uuid4().hex)
+from cornserve.app.base import AppConfig, AppRequest, AppResponse
 
 
 class AppState(enum.StrEnum):
@@ -40,9 +28,9 @@ class AppClasses:
         serve_fn: The function that implements the app's logic.
     """
 
-    request_cls: Type[AppRequest]
-    response_cls: Type[AppResponse]
-    config_cls: Type[AppConfig]
+    request_cls: type[AppRequest]
+    response_cls: type[AppResponse]
+    config_cls: type[AppConfig]
     serve_fn: Callable[[AppRequest], Coroutine[None, None, AppResponse]]
 
 

@@ -1,15 +1,14 @@
 """Task Manager gRPC server."""
 
-import asyncio
+from __future__ import annotations
 
 import grpc
-import tyro
 
 from cornserve.logging import get_logger
 from cornserve.services.pb import common_pb2, task_manager_pb2, task_manager_pb2_grpc
 from cornserve.services.resource_manager.resource import GPU
 from cornserve.services.task_manager.manager import TaskManager
-from cornserve.services.task_manager.models import TaskManagerType
+from cornserve.task.base import UnitTask
 
 logger = get_logger(__name__)
 cleanup_coroutines = []
@@ -29,10 +28,11 @@ class TaskManagerServicer(task_manager_pb2_grpc.TaskManagerServicer):
     ) -> task_manager_pb2.RegisterTaskResponse:
         """Become a task manager for a new task."""
         logger.info(
-            "Registering task manager %s with task type %s and config %s",
+            "Registering task manager %s with task class %s and config %s with %d GPUs",
             request.task_manager_id,
-            task_manager_pb2.TaskManagerType.Name(request.type),
-            request.config,
+            request.task.task_class_name,
+            request.task.task_config,
+            len(request.gpus),
         )
 
         if not all(gpu.action == task_manager_pb2.ResourceAction.ADD for gpu in request.gpus):
@@ -41,13 +41,10 @@ class TaskManagerServicer(task_manager_pb2_grpc.TaskManagerServicer):
                 "When initializing the task manager, all resources actions must be ADD",
             )
 
+        task = UnitTask.from_pb(request.task)
         gpus = [GPU(node=gpu.node_id, global_rank=gpu.global_rank, local_rank=gpu.local_rank) for gpu in request.gpus]
-        self.manager = await TaskManager.init(
-            id=request.task_manager_id,
-            task_type=TaskManagerType.from_pb(request.type),
-            config_str=request.config,
-            gpus=gpus,
-        )
+
+        self.manager = await TaskManager.init(id=request.task_manager_id, task=task, gpus=gpus)
 
         logger.info("Successfully registered task manager %s", request.task_manager_id)
 
@@ -101,50 +98,19 @@ class TaskManagerServicer(task_manager_pb2_grpc.TaskManagerServicer):
                 grpc.StatusCode.FAILED_PRECONDITION,
                 "Task manager not initialized with a task",
             )
-        url, sidecar_ranks = await self.manager.get_route(request.app_id, request.request_id, request.routing_hint)
+        url, sidecar_ranks = await self.manager.get_route(request.request_id, request.routing_hint)
         return task_manager_pb2.GetRouteResponse(
             task_executor_url=url,
             sidecar_ranks=sidecar_ranks,
         )
 
 
-async def serve(ip: str = "[::]", port: int = 50051) -> None:
-    """Start the Task Manager server."""
+def create_server() -> tuple[grpc.aio.Server, TaskManagerServicer]:
+    """Create the gRPC server for the Task Manager."""
     servicer = TaskManagerServicer()
-
     server = grpc.aio.server()
     task_manager_pb2_grpc.add_TaskManagerServicer_to_server(servicer, server)
-    listen_addr = f"{ip}:{port}"
+    listen_addr = "[::]:50051"
     server.add_insecure_port(listen_addr)
     logger.info("Starting server on %s", listen_addr)
-
-    await server.start()
-
-    logger.info("Server started")
-
-    async def server_graceful_shutdown():
-        logger.info("Starting graceful shutdown...")
-        # Shuts down the server with 5 seconds of grace period. During the
-        # grace period, the server won't accept new connections and allow
-        # existing RPCs to continue within the grace period.
-        await server.stop(5)
-        if servicer.manager is not None:
-            logger.info("Shutting down task manager...")
-            await servicer.manager.shutdown()
-        logger.info("Server stopped")
-
-    cleanup_coroutines.append(server_graceful_shutdown())
-    await server.wait_for_termination()
-
-
-if __name__ == "__main__":
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    try:
-        loop.run_until_complete(tyro.cli(serve))
-    except KeyboardInterrupt:
-        pass
-    finally:
-        loop.run_until_complete(loop.shutdown_asyncgens())
-        loop.run_until_complete(asyncio.gather(*cleanup_coroutines))
-        loop.close()
+    return server, servicer

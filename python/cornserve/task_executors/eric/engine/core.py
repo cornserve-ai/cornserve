@@ -1,5 +1,7 @@
 """Eric engine core."""
 
+from __future__ import annotations
+
 import multiprocessing as mp
 import queue
 import signal

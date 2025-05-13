@@ -10,18 +10,11 @@ from dataclasses import dataclass
 import httpx
 import kubernetes_asyncio.client as kclient
 import kubernetes_asyncio.config as kconfig
-from pydantic import ValidationError
 
 from cornserve import constants
 from cornserve.logging import get_logger
 from cornserve.services.resource_manager.resource import GPU
-from cornserve.services.task_manager.models import (
-    EncoderConfig,
-    LLMConfig,
-    TaskManagerConfig,
-    TaskManagerType,
-)
-from cornserve.task_executors.launch import TaskExecutorLaunchInfo
+from cornserve.task.base import UnitTask
 
 logger = get_logger(__name__)
 
@@ -42,17 +35,16 @@ class TaskExecutorDeployment:
 class TaskManager:
     """Task manager abstract base class."""
 
-    def __init__(self, id: str, config: TaskManagerConfig, launch_info: TaskExecutorLaunchInfo) -> None:
+    def __init__(self, id: str, task: UnitTask) -> None:
         """Initialize the TaskManager."""
         self.id = id
-        self.config = config
-        self.launch_info = launch_info
+        self.task = task
+        self.descriptor = task.execution_descriptor
+
         self.gpus: list[GPU] = []
 
         self.lock = asyncio.Lock()
         self.executor_deployments: dict[str, TaskExecutorDeployment] = {}
-        # self.executor_urls: dict[str, str] = {}
-        # self.executor_gpus: dict[str, list[GPU]] = defaultdict(list)
         self.executor_pod_names: dict[str, str] = {}
         self.executor_service_names: dict[str, str] = {}
 
@@ -65,36 +57,16 @@ class TaskManager:
         # Config variables
         self.task_executor_healthy_timeout = 5 * 60.0
 
-    @staticmethod
-    async def init(
-        id: str,
-        task_type: TaskManagerType,
-        config_str: str,
-        gpus: list[GPU],
-    ) -> TaskManager:
+    @classmethod
+    async def init(cls, id: str, task: UnitTask, gpus: list[GPU]) -> TaskManager:
         """Initialize the designated task manager.
 
         Args:
             id: Unique identifier for the task manager
-            task_type: Type of task manager to create
-            config_str: JSON string containing task configuration
+            task: Unit task object to run
             gpus: List of initial GPU resources allocated to the task manager
         """
-        try:
-            manager_cls: type[TaskManager]
-            if task_type == TaskManagerType.ENCODER:
-                config = EncoderConfig.model_validate_json(config_str)
-                manager_cls = EncoderTaskManager
-            elif task_type == TaskManagerType.LLM:
-                config = LLMConfig.model_validate_json(config_str)
-                manager_cls = LLMTaskManager
-            else:
-                raise ValueError(f"Unknown task type: {task_type}")
-        except ValidationError as e:
-            raise ValueError(f"Invalid config for {task_type}: {e}") from e
-
-        launch_info = TaskExecutorLaunchInfo.from_task_manager_config(config)
-        manager = manager_cls(id, config, launch_info)
+        manager = cls(id, task)
 
         # Add initial set of GPUs
         await manager.update_resources(add_gpus=gpus)
@@ -139,6 +111,7 @@ class TaskManager:
             # First, kill executors that were using the removed GPUs.
             # XXX(J1): Executors should be (1) excluded from routing and then (2)
             # drained (i.e., waiting for all requests to complete) before being killed.
+            # Right now, we're just killing them immediately without draining them.
             to_kill = []
             for executor_id, deployment in self.executor_deployments.items():
                 executor_removed_gpu = []
@@ -188,7 +161,7 @@ class TaskManager:
                 logger.error("Failed to spawn %d task executors.", failed)
                 raise RuntimeError("Failed to spawn task executors")
 
-    async def get_route(self, app_id: str, request_id: str, routing_hint: str) -> tuple[str, list[int]]:
+    async def get_route(self, request_id: str, routing_hint: str) -> tuple[str, list[int]]:
         """Get the URL to the task executor for a request.
 
         The default implementation implemets sticky routing by hashing
@@ -196,7 +169,6 @@ class TaskManager:
         task executor list.
 
         Args:
-            app_id: Unique identifier for the application
             request_id: Unique identifier for the request
             routing_hint: Arbitrary string to hint the routing decision
 
@@ -204,12 +176,10 @@ class TaskManager:
             URL to the task executor to handle the request and a list of
             sidecar ranks.
         """
-        logger.info("Routing request %s for app %s with routing hint %s", request_id, app_id, routing_hint)
+        logger.info("Routing request %s with routing hint %s", request_id, routing_hint)
 
         index = hash(request_id) % len(self.executor_deployments)
         deployment = list(self.executor_deployments.values())[index]
-        # urls = list(self.executor_urls.values())
-        # gpus = list(self.executor_gpus.values())
 
         route = deployment.url
         sidecar_ranks = [gpu.global_rank for gpu in deployment.gpus]
@@ -285,10 +255,10 @@ class TaskManager:
             raise ValueError("All GPUs must be on the same node")
         node_name = node_names.pop()
 
-        executor_id = self.launch_info.get_executor_name().lower()
+        executor_id = self.descriptor.create_executor_name().lower()
         executor_id = "-".join([executor_id, *(f"{gpu.global_rank}" for gpu in gpus)])
-        pod_name = f"task-executor-{executor_id}"
-        service_name = f"task-executor-{executor_id}"
+        pod_name = f"te-{executor_id}"
+        service_name = f"te-{executor_id}"
         port = 8000
 
         # Kubernetes labels cannot be longer than 63 characters, but the generated
@@ -302,16 +272,16 @@ class TaskManager:
                 labels={
                     "app": "task-executor",
                     "executor-id": executor_id_label,
-                    "task-type": self.config.type.lower(),
+                    "root-unit-task-cls": self.task.root_unit_task_cls.__name__,
                 },
             ),
             spec=kclient.V1PodSpec(
                 containers=[
                     kclient.V1Container(
                         name="task-executor",
-                        image=self.launch_info.get_container_image(),
+                        image=self.descriptor.get_container_image(),
                         image_pull_policy="IfNotPresent",
-                        args=self.launch_info.get_container_args(gpus, port),
+                        args=self.descriptor.get_container_args(gpus, port),
                         ports=[kclient.V1ContainerPort(container_port=port, name="http")],
                         resources=kclient.V1ResourceRequirements(
                             limits={
@@ -329,7 +299,7 @@ class TaskManager:
                                 name=name,
                                 mount_path=container_path,
                             )
-                            for name, _, container_path in self.launch_info.get_container_volumes()
+                            for name, _, container_path in self.descriptor.get_container_volumes()
                         ],
                     )
                 ],
@@ -338,7 +308,7 @@ class TaskManager:
                         name=name,
                         host_path=kclient.V1HostPathVolumeSource(path=host_path),
                     )
-                    for name, host_path, _ in self.launch_info.get_container_volumes()
+                    for name, host_path, _ in self.descriptor.get_container_volumes()
                 ],
                 node_name=node_name,
                 host_ipc=True,
@@ -379,12 +349,10 @@ class TaskManager:
 
             executor_url = f"http://{service_name}:{port}"
             self.executor_service_names[executor_id] = service_name
-            # self.executor_urls[executor_id] = executor_url
 
             # Allocate the GPUs to the executor
             for gpu in gpus:
                 gpu.allocate_to(executor_id)
-                # self.executor_gpus[executor_id].append(gpu.allocate_to(executor_id))
 
             self.executor_deployments[executor_id] = TaskExecutorDeployment(url=executor_url, gpus=gpus)
 
@@ -464,11 +432,3 @@ class TaskManager:
         except Exception as e:
             logger.exception("Failed to kill task executor %s: %s", executor_id, e)
             raise
-
-
-class EncoderTaskManager(TaskManager):
-    """Task manager for multimodal data encoder tasks."""
-
-
-class LLMTaskManager(TaskManager):
-    """Task manager for LLM text generation tasks."""

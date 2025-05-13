@@ -1,5 +1,7 @@
 """The App Manager registers, invokes, and unregisters applications."""
 
+from __future__ import annotations
+
 import asyncio
 import importlib.util
 import uuid
@@ -7,27 +9,16 @@ from collections import defaultdict
 from types import ModuleType
 from typing import Any, get_type_hints
 
-import grpc
 from opentelemetry import trace
-from opentelemetry.instrumentation.grpc import GrpcAioInstrumentorClient
-from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
 
-from cornserve.frontend.app import AppConfig, AppRequest, AppResponse
-from cornserve.frontend.tasks import LLMTask, Task
+from cornserve.app.base import AppConfig, AppRequest, AppResponse
 from cornserve.logging import get_logger
-from cornserve.services.gateway.app.models import AppClasses, AppContext, AppDefinition, AppState
-from cornserve.services.gateway.app.task_impl import app_context, patch_task_invoke
-from cornserve.services.pb.common_pb2 import TaskType
-from cornserve.services.pb.resource_manager_pb2 import (
-    ReconcileNewAppRequest,
-    ReconcileRemovedAppRequest,
-    TaskConfig,
-)
-from cornserve.services.pb.resource_manager_pb2_grpc import ResourceManagerStub
+from cornserve.services.gateway.app.models import AppClasses, AppDefinition, AppState
+from cornserve.services.gateway.task_manager import TaskManager
+from cornserve.task.base import discover_unit_tasks
 
 logger = get_logger(__name__)
 tracer = trace.get_tracer(__name__)
-HTTPXClientInstrumentor().instrument()
 
 
 def load_module_from_source(source_code: str, module_name: str) -> ModuleType:
@@ -57,19 +48,19 @@ def validate_app_module(module: ModuleType) -> AppClasses:
     if not hasattr(module, "Request"):
         errors.append("Missing 'Request' class")
     elif not issubclass(module.Request, AppRequest):
-        errors.append("'Request' class must inherit from cornserve.frontend.AppRequest")
+        errors.append("'Request' class must inherit from cornserve.app.base.AppRequest")
 
     # Check Response class
     if not hasattr(module, "Response"):
         errors.append("Missing 'Response' class")
     elif not issubclass(module.Response, AppResponse):
-        errors.append("'Response' class must inherit from cornserve.frontend.AppResponse")
+        errors.append("'Response' class must inherit from cornserve.app.base.AppResponse")
 
     # Check Config class
     if not hasattr(module, "Config"):
         errors.append("Missing 'Config' class")
     elif not issubclass(module.Config, AppConfig):
-        errors.append("'Config' class must inherit from cornserve.frontend.AppConfig")
+        errors.append("'Config' class must inherit from cornserve.app.base.AppConfig")
 
     # Check serve function
     if not hasattr(module, "serve"):
@@ -108,24 +99,21 @@ def validate_app_module(module: ModuleType) -> AppClasses:
 class AppManager:
     """Manages registration and execution of user applications."""
 
-    def __init__(self, resource_manager_grpc_url: str) -> None:
+    def __init__(self, task_manager: TaskManager) -> None:
         """Initialize the AppManager."""
+        self.task_manager = task_manager
+
         # One lock protects all app-related state dicts below
         self.app_lock = asyncio.Lock()
         self.apps: dict[str, AppDefinition] = {}
         self.app_states: dict[str, AppState] = {}
         self.app_driver_tasks: dict[str, list[asyncio.Task]] = defaultdict(list)
 
-        # otel gRPC instrumentation
-        GrpcAioInstrumentorClient().instrument()
-
-        # gRPC client for resource manager
-        self.resource_manager_channel = grpc.aio.insecure_channel(resource_manager_grpc_url)
-        self.resource_manager = ResourceManagerStub(self.resource_manager_channel)
-
     @tracer.start_as_current_span(name="AppManager.register_app")
     async def register_app(self, source_code: str) -> str:
         """Register a new application with the given ID and source code.
+
+        This will deploy all unit tasks discovered in the app's config.
 
         Args:
             source_code: Python source code of the application
@@ -135,39 +123,27 @@ class AppManager:
 
         Raises:
             ValueError: If app validation fails
+            RuntimeError: If errors occur during registration
         """
         span = trace.get_current_span()
         async with self.app_lock:
             # Generate a unique app ID
             while True:
-                app_id = f"app-{uuid.uuid4()}"
+                app_id = f"app-{uuid.uuid4().hex}"
                 if app_id not in self.app_states:
                     break
 
             self.app_states[app_id] = AppState.NOT_READY
         span.set_attribute("app_manager.register_app.app_id", app_id)
 
-        # Load and validate the app
         try:
+            # Load and validate the app
             module = load_module_from_source(source_code, app_id)
             app_classes = validate_app_module(module)
-            patch_task_invoke(app_classes)
+            tasks = discover_unit_tasks(app_classes.config_cls.tasks.values())
 
-            # Notify resource manager
-            task_configs = []
-            for task in app_classes.config_cls.tasks.values():
-                if not isinstance(task, Task):
-                    raise ValueError(f"Invalid task type: {type(task)}")
-                if isinstance(task, LLMTask):
-                    task_type = TaskType.LLM
-                else:
-                    raise ValueError(f"Unsupported task type: {type(task)}")
-                task_config = TaskConfig(type=task_type, config=task.model_dump_json())
-                task_configs.append(task_config)
-
-            await self.resource_manager.ReconcileNewApp(
-                ReconcileNewAppRequest(app_id=app_id, task_configs=task_configs)
-            )
+            # Deploy all unit tasks discovered
+            await self.task_manager.declare_used(tasks)
 
             # Update app state and store app definition
             async with self.app_lock:
@@ -192,8 +168,9 @@ class AppManager:
                 self.app_states.pop(app_id, None)
                 self.app_driver_tasks.pop(app_id, None)
 
-            raise ValueError(f"Failed to register app: {e}") from e
+            raise RuntimeError(f"Failed to register app: {e}") from e
 
+    @tracer.start_as_current_span(name="AppManager.unregister_app")
     async def unregister_app(self, app_id: str) -> None:
         """Unregister an application.
 
@@ -202,26 +179,32 @@ class AppManager:
 
         Raises:
             KeyError: If app_id doesn't exist
+            RuntimeError: If errors occur during unregistration
         """
         async with self.app_lock:
             if app_id not in self.apps:
                 raise KeyError(f"App ID '{app_id}' does not exist")
 
             # Clean up app from internal state
-            self.apps.pop(app_id, None)
+            app = self.apps.pop(app_id)
             self.app_states.pop(app_id, None)
 
             # Cancel all running tasks
             for task in self.app_driver_tasks.pop(app_id, []):
                 task.cancel()
 
-        # Notify resource manager
-        await self.resource_manager.ReconcileRemovedApp(
-            ReconcileRemovedAppRequest(app_id=app_id),
-        )
+        # Let the task manager know that this app no longer needs these tasks
+        tasks = discover_unit_tasks(app.classes.config_cls.tasks.values())
+
+        try:
+            await self.task_manager.declare_not_used(tasks)
+        except Exception as e:
+            logger.exception("Errors while unregistering app '%s': %s", app_id, e)
+            raise RuntimeError(f"Errors while unregistering app '{app_id}': {e}") from e
 
         logger.info("Successfully unregistered app '%s'", app_id)
 
+    @tracer.start_as_current_span(name="AppManager.invoke_app")
     async def invoke_app(self, app_id: str, request_data: dict[str, Any]) -> Any:
         """Invoke an application with the given request data.
 
@@ -237,7 +220,6 @@ class AppManager:
             ValueError: On app invocation failure
             ValidationError: If request data is invalid
         """
-        span = trace.get_current_span()
         async with self.app_lock:
             if self.app_states[app_id] != AppState.READY:
                 raise ValueError(f"App '{app_id}' is not ready")
@@ -251,18 +233,13 @@ class AppManager:
         app_driver: asyncio.Task | None = None
 
         try:
-            # Set app context variable. This will also generate a unique request ID.
-            app_context.set(AppContext(app_id=app_id))
-
             # Create a task to run the app
-            span.add_event("app_driver.start")
             app_driver = asyncio.create_task(app_def.classes.serve_fn(request))
 
             async with self.app_lock:
                 self.app_driver_tasks[app_id].append(app_driver)
 
             response = await app_driver
-            span.add_event("app_driver.done")
 
             # Validate response
             if not isinstance(response, app_def.classes.response_cls):
@@ -295,9 +272,8 @@ class AppManager:
         Returns:
             dict[str, AppState]: Mapping of app IDs to their states
         """
-        async with self.app_lock:
-            return dict(self.app_states)
+        return self.app_states
 
     async def shutdown(self) -> None:
         """Shut down the server."""
-        await self.resource_manager_channel.close()
+        await self.task_manager.shutdown()

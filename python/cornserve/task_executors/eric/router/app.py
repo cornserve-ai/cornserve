@@ -1,14 +1,18 @@
 """Eric FastAPI app definition."""
 
+from __future__ import annotations
+
+import uuid
+
 from fastapi import APIRouter, FastAPI, Request, Response, status
 from opentelemetry import trace
 
 from cornserve.logging import get_logger
+from cornserve.task_executors.eric.api import EmbeddingRequest, EmbeddingResponse, Modality, Status
 from cornserve.task_executors.eric.config import EricConfig
 from cornserve.task_executors.eric.engine.client import EngineClient
 from cornserve.task_executors.eric.models.registry import MODEL_REGISTRY
 from cornserve.task_executors.eric.router.processor import Processor
-from cornserve.task_executors.eric.schema import EmbeddingRequest, Modality, Status
 
 router = APIRouter()
 logger = get_logger(__name__)
@@ -40,10 +44,13 @@ async def modalities(raw_request: Request) -> list[Modality]:
 
 
 @router.post("/embeddings")
-async def embeddings(request: EmbeddingRequest, raw_request: Request) -> Response:
+async def embeddings(
+    request: EmbeddingRequest,
+    raw_request: Request,
+    raw_response: Response,
+) -> EmbeddingResponse:
     """Handler for embedding requests."""
     span = trace.get_current_span()
-    span.set_attribute("eric.embeddings.req_id", request.id)
     for data_item in request.data:
         span.set_attribute(
             f"eric.embeddings.data.{data_item.id}.url",
@@ -56,20 +63,17 @@ async def embeddings(request: EmbeddingRequest, raw_request: Request) -> Respons
     processed = await processor.process(request.data)
 
     # Send to engine process (embedding + transmission via Tensor Sidecar)
-    response = await engine_client.embed(
-        request.id,
-        request.receiver_sidecar_ranks,
-        processed,
-    )
+    response = await engine_client.embed(uuid.uuid4().hex, processed)
 
     match response.status:
         case Status.SUCCESS:
-            return Response(status_code=status.HTTP_200_OK)
+            raw_response.status_code = status.HTTP_200_OK
         case Status.ERROR:
-            return Response(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                content=response.error_message,
-            )
+            raw_response.status_code = status.HTTP_500_INTERNAL_SERVER_ERROR
+        case _:
+            logger.error("Unexpected status: %s", response.status)
+            raw_response.status_code = status.HTTP_500_INTERNAL_SERVER_ERROR
+    return response
 
 
 def init_app_state(app: FastAPI, config: EricConfig) -> None:

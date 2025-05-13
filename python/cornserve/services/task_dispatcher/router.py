@@ -7,7 +7,7 @@ from opentelemetry import trace
 
 from cornserve.logging import get_logger
 from cornserve.services.task_dispatcher.dispatcher import TaskDispatcher
-from cornserve.services.task_dispatcher.models import TaskDispatchRequest
+from cornserve.task.base import TaskGraphDispatch
 
 router = APIRouter()
 logger = get_logger(__name__)
@@ -15,17 +15,13 @@ tracer = trace.get_tracer(__name__)
 
 
 @router.post("/task")
-async def invoke_task(request: TaskDispatchRequest, raw_request: Request):
+async def invoke_task(request: TaskGraphDispatch, raw_request: Request):
     """Invoke a task with the given request data."""
+    logger.info("Task dispatch received: %s", request)
+
     dispatcher: TaskDispatcher = raw_request.app.state.dispatcher
-    logger.info("Received invoke request for app %s: %s", request.app_id, request.request_data)
     try:
-        response = await dispatcher.invoke(
-            request.app_id,
-            request.task_id,
-            request.request_id,
-            request.request_data,
-        )
+        response = await dispatcher.invoke(request.invocations)
         return response
     except Exception as e:
         logger.exception("Error while invoking task")

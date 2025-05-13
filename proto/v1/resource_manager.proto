@@ -5,49 +5,41 @@ package cornserve.resource_manager;
 import "common.proto";
 
 service ResourceManager {
-  // Notify the resource manager of a new app's task requirements
-  rpc ReconcileNewApp(ReconcileNewAppRequest) returns (ReconcileNewAppResponse);
+  // Deploy a new unit task
+  rpc DeployUnitTask(DeployUnitTaskRequest) returns (DeployUnitTaskResponse);
 
-  // Notify the resource manager of an app that has been removed
-  rpc ReconcileRemovedApp(ReconcileRemovedAppRequest) returns (ReconcileRemovedAppResponse);
+  // Tear down a unit task
+  rpc TeardownUnitTask(TeardownUnitTaskRequest) returns (TeardownUnitTaskResponse);
 
   // Health checking
   rpc Healthcheck(HealthcheckRequest) returns (HealthcheckResponse);
 }
 
-message TaskConfig {
-  // Type of task
-  common.TaskType type = 1;
-
-  // JSON-encoded config generated from the Task Pydantic model
-  string config = 2;
+// Deploy a new task
+message DeployUnitTaskRequest {
+  // Task to deploy
+  common.UnitTask task = 1;
 }
 
-// New app registration
-message ReconcileNewAppRequest {
-  // ID of the app that is being registered
-  string app_id = 1;
-
-  // Task configs
-  repeated TaskConfig task_configs = 2;
-}
-
-message ReconcileNewAppResponse {
+message DeployUnitTaskResponse {
+  // Success or failure
   common.Status status = 1;
 }
 
-// App removal
-message ReconcileRemovedAppRequest {
-  string app_id = 1;
+// Tear down a task
+message TeardownUnitTaskRequest {
+  // Task to tear down
+  common.UnitTask task = 1;
 }
 
-message ReconcileRemovedAppResponse {
+message TeardownUnitTaskResponse {
+  // Success or failure
   common.Status status = 1;
 }
 
 // Health checking
 message TaskManagerStatus {
-  string task_manager_id = 1;
+  common.UnitTask task = 1;
   common.Status status = 2;
 }
 

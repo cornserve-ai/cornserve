@@ -17,21 +17,29 @@ dependencies = [
     "tyro",
     "kubernetes_asyncio",
     "httpx",
-    "pydantic",
+    "pydantic>=2.11",
     "opentelemetry-api",
     "opentelemetry-sdk",
     "opentelemetry-exporter-otlp-proto-grpc",
 ]
 dynamic = ["version"]
 
+[project.scripts]
+cornserve = "cornserve.cli:main"
+
 [project.optional-dependencies]
-frontend = []
-sidecar-api = ["torch"]
+frontend = [
+  "websocket-client",
+]
+sidecar-api = [
+  "torch",
+  "opentelemetry-instrumentation-grpc",
+  "opentelemetry-instrumentation-threading",
+]
 sidecar = [
   "torch",
   "ucxx-cu12",
   "opentelemetry-instrumentation-grpc",
-  "opentelemetry-instrumentation-threading",
 ]
 gateway = [
   "fastapi",
@@ -61,21 +69,25 @@ eric-no-gpu = [
   "transformers",
   "huggingface_hub",
   "pillow",
-  "decord",
+  "opencv-python-headless",
   "einops",
+<<<<<<< HEAD
   "xformers",
   "cornserve[sidecar-api]",
+=======
+  "cornserve[sidecar]",
+>>>>>>> origin/master
   "opentelemetry-instrumentation-fastapi",
   "opentelemetry-instrumentation-threading",
 ]
-eric = ["flash-attn", "cornserve[eric-no-gpu]"]
+eric = ["flash-attn", "xformers", "cornserve[eric-no-gpu]"]
 dev-common = [
   "grpcio-tools",
   "pyright",
   "ruff",
   "pytest",
   "pytest-asyncio",
-  "cornserve[dev-common,frontend,sidecar,gateway,resource-manager,task-manager,task-dispatcher]",
+  "cornserve[sidecar,gateway,resource-manager,task-manager,task-dispatcher,frontend]",
 ]
 dev = ["cornserve[dev-common,eric]"]
 dev-no-gpu = ["cornserve[dev-common,eric-no-gpu]"]
@@ -94,6 +106,7 @@ select = [
   "D",   # pydocstyle
   "PL",  # pylint
   "N",   # pep8-naming
+  "UP",  # pyupgrade
   "B",   # flake8-bugbear (detects likely bugs)
   "G",   # flake8-logging-format (complains about logging)
   "SIM", # flake8-simplify (suggests code simplifications)

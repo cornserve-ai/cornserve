@@ -1,7 +1,9 @@
 """Utilities for serializing and deserializing objects."""
 
+from __future__ import annotations
+
 import pickle
-from typing import Any, Type
+from typing import Any
 
 import numpy as np
 import torch
@@ -31,7 +33,7 @@ class MsgpackEncoder:
 class MsgpackDecoder:
     """Msgpack decoder that implements custom deserialization."""
 
-    def __init__(self, ty: Type | None = None) -> None:
+    def __init__(self, ty: type | None = None) -> None:
         """Initialize the decoder."""
         self.decoder = msgpack.Decoder(type=ty, ext_hook=ext_hook)
 

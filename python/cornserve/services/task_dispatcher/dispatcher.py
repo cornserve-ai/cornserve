@@ -5,23 +5,81 @@ from __future__ import annotations
 import asyncio
 import uuid
 from collections import defaultdict
+from collections.abc import Iterator
+from dataclasses import dataclass
 from typing import Any
 
+import grpc
 import httpx
 from opentelemetry import trace
-from opentelemetry.instrumentation.grpc import GrpcInstrumentorClient
-from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
+from pydantic import BaseModel
 
-from cornserve.frontend.tasks import LLMTask
 from cornserve.logging import get_logger
-from cornserve.services.pb import task_manager_pb2
-from cornserve.services.task_dispatcher.models import TaskInfo
-from cornserve.services.task_manager.models import TaskManagerType
+from cornserve.services.pb import task_manager_pb2, task_manager_pb2_grpc
+from cornserve.task.base import TaskInvocation, TaskOutput, UnitTask
+from cornserve.task.forward import DataForward
 
 logger = get_logger(__name__)
 tracer = trace.get_tracer(__name__)
-HTTPXClientInstrumentor().instrument()
-GrpcInstrumentorClient().instrument()
+
+
+class TaskInfo:
+    """Stores all task-related information.
+
+    Attributes:
+        task: The unit task object.
+        task_manager_url: The URL to the task manager.
+        task_manager_channel: The gRPC channel to the task manager.
+        task_manager_stub: The gRPC stub to the task manager.
+    """
+
+    def __init__(self, task: UnitTask, task_manager_url: str) -> None:
+        """Initialize the TaskInfo object."""
+        self.task = task
+        self.task_manager_url = task_manager_url
+        self.task_manager_channel = grpc.aio.insecure_channel(task_manager_url)
+        self.task_manager_stub = task_manager_pb2_grpc.TaskManagerStub(self.task_manager_channel)
+
+
+@dataclass
+class UnitTaskExecution:
+    """Execution information for a single unit task invocation.
+
+    Attributes:
+        invocation: The task invocation object.
+        executor_url: The URL to the task executor.
+        executor_sidecar_ranks: The sidecar ranks for the task executor.
+    """
+
+    invocation: TaskInvocation
+    executor_url: str
+    executor_sidecar_ranks: list[int]
+
+
+def iter_data_forwards(obj: object) -> Iterator[DataForward]:
+    """Recursively find and iterate through all DataForward objects.
+
+    This method knows how to flatten list, tuple, dict, and nested BaseModel objects.
+
+    Args:
+        obj: The object to search for DataForward objects.
+
+    Yields:
+        All DataForward objects found in the model's field values
+    """
+    if isinstance(obj, DataForward):
+        yield obj
+    elif isinstance(obj, list | tuple):
+        for item in obj:
+            yield from iter_data_forwards(item)
+    elif isinstance(obj, dict):
+        for item in obj.values():
+            yield from iter_data_forwards(item)
+    elif isinstance(obj, BaseModel):
+        # Recursively search through nested BaseModels. Make sure references to the original
+        # `DataForward` objects are yielded, so that external mutations are reflected.
+        for name in obj.__class__.model_fields:
+            yield from iter_data_forwards(getattr(obj, name))
 
 
 class TaskDispatcher:
@@ -29,214 +87,213 @@ class TaskDispatcher:
 
     def __init__(self) -> None:
         """Initialize the Task Dispatcher."""
-        self.app_lock = asyncio.Lock()
-        self.app_task_info: dict[str, dict[str, TaskInfo]] = {}
+        self.task_lock = asyncio.Lock()
+        self.task_infos: dict[str, TaskInfo] = {}
 
         self.ongoing_task_lock = asyncio.Lock()
-        self.app_ongoing_invokes: dict[str, list[asyncio.Task]] = defaultdict(list)
+        self.ongoing_invokes: dict[str, list[asyncio.Task]] = defaultdict(list)
 
-    async def notify_app_registration(self, app_id: str, task_info: list[TaskInfo]) -> None:
-        """Register newly spawned task managers to the dispatcher."""
-        async with self.app_lock:
-            if app_id in self.app_task_info:
-                raise ValueError(f"App ID {app_id} already exists in task dispatcher.")
-            self.app_task_info[app_id] = {task.id: task for task in task_info}
+    async def notify_task_deployment(self, task: UnitTask, task_manager_url: str) -> None:
+        """Register a newly deployed task and its task manager with the dispatcher."""
+        async with self.task_lock:
+            self.task_infos[task.id] = TaskInfo(task, task_manager_url)
 
-        logger.info("Registered new app %s with tasks %s", app_id, task_info)
+        logger.info(
+            "Registered new task %s(%s) with task manager URL %s",
+            task.__class__.__name__,
+            task,
+            task_manager_url,
+        )
 
-    async def notify_app_unregistration(self, app_id: str) -> None:
-        """Remove task managers associated with a task from the dispatcher.
+    async def notify_task_teardown(self, task: UnitTask) -> None:
+        """Remove a task that has been torn down.
 
-        This is called when an app is unregistered from the dispatcher. Each app keeps
-        track of the ongoing invoke tasks. When the app is unregistered, all ongoing invoke
-        tasks are cancelled.
+        This will cancel all ongoing invokes for the task.
         """
-        async with self.app_lock:
-            if app_id not in self.app_task_info:
-                raise ValueError(f"App ID {app_id} not found in task dispatcher.")
+        async with self.task_lock:
+            if task.id not in self.task_infos:
+                raise ValueError(f"Task {task} not found in task dispatcher.")
 
-            task_infos = self.app_task_info.pop(app_id)
+            task_info = self.task_infos.pop(task.id)
 
-        # Cancel all ongoing invokes for the app.
+        # Cancel all ongoing invokes for the task
         async with self.ongoing_task_lock:
-            for invoke_task in self.app_ongoing_invokes.pop(app_id, []):
+            for invoke_task in self.ongoing_invokes.pop(task.id, []):
                 invoke_task.cancel()
 
-        # Close all channels to the task managers.
-        channel_close_coros = []
-        for task_info in task_infos.values():
-            for task_manager in task_info.task_managers:
-                channel_close_coros.append(task_manager.channel.close(grace=1.0))
-        await asyncio.gather(*channel_close_coros)
+        # Close the gRPC channel to the task manager
+        await task_info.task_manager_channel.close()
 
-        logger.info("Unregistered app %s", app_id)
+        logger.info("Removed task %s from task dispatcher", task)
 
     async def shutdown(self) -> None:
         """Shutdown the Task Dispatcher."""
+        coros = []
+        for task_info in self.task_infos.values():
+            coros.append(task_info.task_manager_channel.close())
+
+        results = await asyncio.gather(*coros, return_exceptions=True)
+        for result in results:
+            if isinstance(result, BaseException):
+                logger.error("Error occured while shutting down task dispatcher: %s", result)
+
+        logger.info("Task dispatcher shutdown complete")
 
     @tracer.start_as_current_span("TaskDispatcher.invoke")
-    async def invoke(self, app_id: str, task_id: str, request_id: str, data: str) -> Any:
-        """Invoke a task with the given request data."""
+    async def invoke(self, invocations: list[TaskInvocation]) -> list[Any]:
+        """Dispatch a graph of task invocations to task managers.
+
+        This method:
+        1. Gets routes for all tasks from their task managers
+        2. Collects and connects DataForward objects from inputs/outputs
+        3. Executes tasks concurrently and collects responses
+        4. Transforms executor responses back to task outputs
+        """
         span = trace.get_current_span()
-        span.set_attribute("task_dispatcher.invoke.app_id", app_id)
-        span.set_attribute("task_dispatcher.invoke.task_id", task_id)
-        async with self.app_lock:
-            try:
-                task_infos = self.app_task_info[app_id]
-            except KeyError as e:
-                raise ValueError(f"App ID {app_id} not found in task dispatcher.") from e
+        span.set_attributes(
+            {
+                f"task_dispatcher.invoke.invocations.{i}": invocation.model_dump_json()
+                for i, invocation in enumerate(invocations)
+            }
+        )
 
-            try:
-                task_info = task_infos[task_id]
-            except KeyError as e:
-                raise ValueError(f"Task ID {task_id} not found for app {app_id}.") from e
+        # Check if all tasks are registered with the dispatcher
+        task_infos: list[TaskInfo] = []
+        async with self.task_lock:
+            for invocation in invocations:
+                for task_info in self.task_infos.values():
+                    if task_info.task.is_equivalent_to(invocation.task):
+                        task_infos.append(task_info)
+                        break
+                else:
+                    logger.error("Task not found for invocation %s", invocation)
+                    raise ValueError(f"Task {invocation.task} not found in task dispatcher.")
+        assert len(task_infos) == len(invocations), "Task info count mismatch"
 
-        # Spawn invoke task and add it to the list of ongoing invokes for the app.
-        invoke_task = asyncio.create_task(self._do_invoke(app_id, task_info, request_id, data))
-        async with self.ongoing_task_lock:
-            self.app_ongoing_invokes[app_id].append(invoke_task)
-
-        try:
-            return await invoke_task
-        except asyncio.CancelledError as e:
-            raise ValueError("Task invoke cancelled. The app is likely shutting down.") from e
-        finally:
-            async with self.ongoing_task_lock:
-                self.app_ongoing_invokes[app_id].remove(invoke_task)
-
-    async def _do_invoke(
-        self,
-        app_id: str,
-        task_info: TaskInfo,
-        request_id: str,
-        data: str,
-    ) -> Any:
-        """Do the actual invocation of the task."""
-        # Reformat the request data depending on the type of the task.
-        # For the LLM task, if the reqeust has multimodal items in it,
-        # break the reqeust into an Eric request and a vLLM request.
-        # For multimodal data items, a unique data ID is generated.
-        # Data IDs are passed to Eric (as part of the embedding request)
-        # and to vLLM (as a key-value pair in the data URI).
-        span = trace.get_current_span()
-        if isinstance(task_info.task, LLMTask):
-            invoke_input = LLMTask._InvokeInput.model_validate_json(data)
-            if not invoke_input.multimodal_data:
-                invoke_input.multimodal_data = None
-            encoder_request: dict | None = None
-            embedding_data: list[tuple[str, str, str]] = []
-
-            # LLM text generation request.
-            for task_manager in task_info.task_managers:
-                if task_manager.type == TaskManagerType.LLM:
-                    llm_stub = task_manager.stub
-                    break
-            else:
-                raise RuntimeError(
-                    f"LLM task manager not found for app {app_id} and task {task_info.id}.",
-                )
-            span.add_event("llm_get_route.start")
-            llm_route: task_manager_pb2.GetRouteResponse = await llm_stub.GetRoute(
-                task_manager_pb2.GetRouteRequest(
-                    app_id=app_id,
-                    request_id=request_id,
-                    routing_hint=None,
-                ),
+        # Get task executor routes and sidecar ranks
+        task_executions: list[UnitTaskExecution] = []
+        get_route_coros: list[asyncio.Future[task_manager_pb2.GetRouteResponse]] = []
+        request_id = uuid.uuid4().hex
+        for task_info in task_infos:
+            get_route_coros.append(
+                task_info.task_manager_stub.GetRoute(task_manager_pb2.GetRouteRequest(request_id=request_id))
             )
-            span.add_event("llm_get_route.done")
-
-            async with httpx.AsyncClient(timeout=60.0) as http_client:
-                http_tasks: list[asyncio.Task[httpx.Response]] = []
-
-                # Multimodal embedding request, if the task has multimodal data.
-                # Construct and send out.
-                if invoke_input.multimodal_data is not None:
-                    # Send routing request to the encoder task manager.
-                    for task_manager in task_info.task_managers:
-                        if task_manager.type == TaskManagerType.ENCODER:
-                            encoder_stub = task_manager.stub
-                            break
-                    else:
-                        raise RuntimeError(
-                            f"Encoder task manager not found for app {app_id} and task {task_info.id}.",
-                        )
-                    span.add_event("encoder_get_route.start")
-                    encoder_route: task_manager_pb2.GetRouteResponse = await encoder_stub.GetRoute(
-                        task_manager_pb2.GetRouteRequest(
-                            app_id=app_id,
-                            request_id=request_id,
-                            routing_hint=None,
-                        ),
-                    )
-                    span.add_event("encoder_get_route.done")
-
-                    for modality, url in invoke_input.multimodal_data:
-                        embedding_data.append((uuid.uuid4().hex, modality, url))
-
-                    encoder_request = dict(
-                        id=request_id,
-                        receiver_sidecar_ranks=list(llm_route.sidecar_ranks),
-                        data=[
-                            dict(id=data_id, modality=modality, url=url) for data_id, modality, url in embedding_data
-                        ],
-                    )
-
-                    http_tasks.append(
-                        asyncio.create_task(
-                            http_client.post(url=f"{encoder_route.task_executor_url}/embeddings", json=encoder_request),
-                        )
-                    )
-
-                # Construct and send out LLM text generation request.
-                # The LLM request is in the form of OpenAI Chat Completions API.
-                multimodal_messages = []
-                for multimodal_item in embedding_data:
-                    data_id, modality, url = multimodal_item
-                    data_uri = f"data:{modality}/uuid;data_id={data_id};url={url},"
-                    multimodal_messages.append({"type": f"{modality}_url", f"{modality}_url": {"url": data_uri}})
-
-                llm_request = dict(
-                    model=task_info.task.model_id,
-                    messages=[
-                        dict(
-                            role="user",
-                            content=[dict(type="text", text=invoke_input.prompt), *multimodal_messages],
-                        ),
-                    ],
-                    max_completion_tokens=512,
-                    request_id=request_id,
+        for invocation, route_response in zip(invocations, await asyncio.gather(*get_route_coros), strict=True):
+            task_executions.append(
+                UnitTaskExecution(
+                    invocation=invocation,
+                    executor_url=route_response.task_executor_url,
+                    executor_sidecar_ranks=list(route_response.sidecar_ranks),
                 )
+            )
 
-                http_tasks.append(
-                    asyncio.create_task(
-                        http_client.post(url=f"{llm_route.task_executor_url}/v1/chat/completions", json=llm_request),
-                    )
-                )
+        # TODO: Build an actual graph, submit to a centralized asyncio.Task that does scheduling.
 
-                # Wait for all HTTP tasks to complete.
+        # Dig up `DataForward` objects and connect producers and consumers.
+        #
+        # Example: Two encoders embed two images, and both are sent to two separate LLMs.
+        #
+        #                   task_input           task_output
+        #    Encoder1                         DataForward(id=1)
+        #    Encoder2                         DataForward(id=2)
+        #        LLM1  DataForward(id=1,2)
+        #        LLM2  DataForward(id=1,2)
+        #
+        # We iterate through `DataForward` objects in the order of invocations, and within each invocation,
+        # those in the input and then those in the output. Ultimately, the source and destination sidecar
+        # ranks of connected (i.e., same ID) `DataForward` objects should be identical.
+        # When we see a `DataForward` object in the output, it is a producer, and from the invocation's
+        # task executor routing result, we can figure out its source sidecar ranks.
+        # When we see a `DataForward` object in the input, it is a consumer, and it *must* have been
+        # previously encountered in the output of a previous invocation. From the invocation's task executor
+        # routing result, we can figure out its destination sidecar ranks.
+        # Note that when we inplace set the sidecar ranks in `DataForward` objects, we are doing so on
+        # references to the original `DataForward` objects in the task input and output.
+        producer_forwards: dict[str, DataForward] = {}
+        for execution in task_executions:
+            # Iterate recursively over all `DataForward` objects in the task input.
+            # Encountered `DataForward` objects are consumers, which should have been encountered
+            # previously in earlier task invocations. If not, it's an error.
+            for consumer_forward in iter_data_forwards(execution.invocation.task_input):
                 try:
-                    responses = await asyncio.gather(*http_tasks)
-                    for response in responses:
-                        response.raise_for_status()
-                except httpx.HTTPStatusError as e:
-                    logger.exception("Error while invoking task")
-                    raise RuntimeError(
-                        f"HTTP request failed with code {e.response.status_code}: {e.response}",
+                    producer_forward = producer_forwards[consumer_forward.id]
+                except KeyError as e:
+                    raise ValueError(
+                        f"Consumer `DataForward[{consumer_forward.data_type}](id={consumer_forward.id})` in the "
+                        f"input of invocation {execution.invocation} not found in previous task invocations."
                     ) from e
-                except Exception as e:
-                    logger.exception("Error while invoking task")
-                    raise RuntimeError(f"HTTP request failed: {e}") from e
+                assert producer_forward.src_sidecar_ranks is not None
+                consumer_forward.src_sidecar_ranks = producer_forward.src_sidecar_ranks
+                if producer_forward.dst_sidecar_ranks is None:
+                    producer_forward.dst_sidecar_ranks = []
+                producer_forward.dst_sidecar_ranks.append(execution.executor_sidecar_ranks)
+                consumer_forward.dst_sidecar_ranks = producer_forward.dst_sidecar_ranks
 
-                # Last one is the LLM response, which is returned.
-                response = responses[-1].json()
-                logger.info("LLM response: %s", response)
+            # Iterate recursively over all `DataForward` objects in the task output.
+            # Encountered `DataForward` objects are producers, which we save in `data_forwards`.
+            for producer_forward in iter_data_forwards(execution.invocation.task_output):
+                producer_forward.src_sidecar_ranks = execution.executor_sidecar_ranks
+                producer_forwards[producer_forward.id] = producer_forward
 
-                final_response = response["choices"][0]["message"]["content"]
-                if not isinstance(final_response, task_info.task._InvokeOutput):
-                    raise RuntimeError(
-                        f"LLM response is not of type {task_info.task._InvokeOutput}: {final_response}",
+        logger.info("Connected all DataForward objects in task invocations: %s", invocations)
+
+        # Verify whether all `DataForward` objects are properly connected
+        for data_forward in producer_forwards.values():
+            assert data_forward.src_sidecar_ranks is not None
+            assert data_forward.dst_sidecar_ranks is not None
+
+        # Dispatch all task invocations to task executors
+        dispatch_coros: list[asyncio.Task[Any]] = []
+        client = httpx.AsyncClient(timeout=180.0)
+        try:
+            async with asyncio.TaskGroup() as tg:
+                for execution in task_executions:
+                    # `TaskInput` -> JSON request to task executor
+                    request = execution.invocation.task.execution_descriptor.to_request(
+                        task_input=execution.invocation.task_input,
+                        task_output=execution.invocation.task_output,
                     )
-                return final_response
+                    dispatch_coros.append(tg.create_task(self._execute_unit_task(client, execution, request)))
+        except* Exception as e:
+            logger.exception("Error while invoking task: %s", e.exceptions)
+            raise RuntimeError(f"Task invocation failed: {e.exceptions}") from e
+        finally:
+            await client.aclose()
 
-        else:
-            raise ValueError(f"Unknown task type: {type(task_info.task)}")
+        # Collect responses from task executors
+        return [task.result() for task in dispatch_coros]
+
+    async def _execute_unit_task(
+        self, client: httpx.AsyncClient, execution: UnitTaskExecution, request: dict[str, Any]
+    ) -> Any:
+        """Execute a single task by sending request to executor and processing response."""
+        url = execution.invocation.task.execution_descriptor.get_api_url(execution.executor_url)
+        logger.info(
+            "Invoking task %s with request: %s",
+            execution.invocation.task.__class__.__name__,
+            request,
+        )
+        try:
+            response = await client.post(url=url, json=request)
+            response.raise_for_status()
+        except httpx.HTTPStatusError as e:
+            logger.exception("Error while invoking task")
+            raise RuntimeError(
+                f"HTTP request failed with code {e.response.status_code}: {e.response}",
+            ) from e
+        except Exception as e:
+            logger.exception("Error while invoking task")
+            raise RuntimeError(f"HTTP request failed: {e}") from e
+
+        logger.info(
+            "Task %s response: %s",
+            execution.invocation.task.__class__.__name__,
+            response.content.decode(),
+        )
+
+        # JSON response from task executor -> `TaskOutput` -> dump
+        task_output: TaskOutput = execution.invocation.task.execution_descriptor.from_response(
+            task_output=execution.invocation.task_output,
+            response=response.json(),
+        )
+        return task_output.model_dump()

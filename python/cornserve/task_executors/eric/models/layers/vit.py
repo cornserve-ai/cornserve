@@ -1,3 +1,7 @@
+"""Vision Transformer."""
+
+from __future__ import annotations
+
 import torch.nn as nn
 from transformers.models.siglip import SiglipVisionConfig
 

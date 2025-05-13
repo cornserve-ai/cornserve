@@ -5,10 +5,13 @@ Config values will be supplied by the Task Manager when Eric is launched.
 Config values should be kept in sync with `cornserve.task_executors.launch`.
 """
 
+from __future__ import annotations
+
+from typing import Self
+
 from pydantic import BaseModel, ConfigDict, NonNegativeInt, PositiveInt, model_validator
 from transformers.configuration_utils import PretrainedConfig
 from transformers.models.auto.configuration_auto import AutoConfig
-from typing_extensions import Self
 
 
 class ModelConfig(BaseModel):
@@ -59,8 +62,8 @@ class ImageDataConfig(BaseModel):
 class VideoDataConfig(BaseModel):
     """Configuration related to downloading and processing video data."""
 
-    # Number of frames to sample from the video
-    max_num_frames: PositiveInt = 32
+    # Number of frames to sample from the video (`None` for all frames)
+    max_num_frames: PositiveInt | None = 32
 
 
 class ModalityConfig(BaseModel):

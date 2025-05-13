@@ -1,7 +1,7 @@
 """The scheduler is responsible for batching embedding requests."""
 
 from collections import defaultdict
-from typing import Generator
+from collections.abc import Generator
 
 from opentelemetry import propagate, trace
 
@@ -161,7 +161,6 @@ class Scheduler:
                 data=[data],
                 chunk_ids=[0],
                 num_chunks=[1],
-                receiver_ranks=req.receiver_sidecar_ranks,
                 otel_spans=[req.span],
                 otel_carriers=[carrier],
             )

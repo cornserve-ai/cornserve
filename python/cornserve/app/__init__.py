@@ -1,0 +1,1 @@
+"""Cornserve application package."""

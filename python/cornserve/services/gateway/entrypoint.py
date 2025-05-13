@@ -1,11 +1,16 @@
 """Spins up the Gateway service."""
 
+from __future__ import annotations
+
 import asyncio
+import os
 import signal
 from typing import TYPE_CHECKING
 
 import uvicorn
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+from opentelemetry.instrumentation.grpc import GrpcAioInstrumentorClient
+from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
 
 from cornserve.logging import get_logger
 from cornserve.services.gateway.router import create_app
@@ -25,6 +30,8 @@ async def serve() -> None:
 
     app = create_app()
     FastAPIInstrumentor.instrument_app(app)
+    GrpcAioInstrumentorClient().instrument()
+    HTTPXClientInstrumentor().instrument()
 
     logger.info("Available routes are:")
     for route in app.routes:
@@ -43,6 +50,9 @@ async def serve() -> None:
     config = uvicorn.Config(app, host="0.0.0.0", port=8000)
     server = uvicorn.Server(config)
     app_manager: AppManager = app.state.app_manager
+
+    # `TaskContext` reads this environment variable to determine the URL of the Gateway.
+    os.environ["CORNSERVE_GATEWAY_URL"] = "http://localhost:8000"
 
     loop = asyncio.get_running_loop()
     server_task = loop.create_task(server.serve())

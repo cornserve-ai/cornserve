@@ -1,5 +1,7 @@
 """Worker processes use the GPUs to run tensor parallel inference."""
 
+from __future__ import annotations
+
 import multiprocessing as mp
 import pickle
 import signal
@@ -295,13 +297,16 @@ class Worker:
                 if request_id in unique_spans:
                     context = trace.set_span_in_context(unique_spans[request_id])
                     token = context_api.attach(context)
-                self.sender_sidecar_client.send(
-                    chunk=output[i],
-                    id=request_id + batch.data_ids[i],
-                    chunk_id=batch.chunk_ids[i],
-                    num_chunks=batch.num_chunks[i],
-                    dst_sidecar_ranks=dst_sidecar_ranks,
-                )
+                # TODO: When the sidecar supports broadcast, this should be
+                # rewritten to a single send call.
+                for dst_ranks in dst_sidecar_ranks:
+                    self.sender_sidecar_client.send(
+                        chunk=output[i],
+                        id=batch.data_ids[i],
+                        chunk_id=batch.chunk_ids[i],
+                        num_chunks=batch.num_chunks[i],
+                        dst_sidecar_ranks=dst_ranks,
+                    )
                 if token:
                     context_api.detach(token)
                     unique_spans[request_id].end()

@@ -1,62 +1,40 @@
 syntax = "proto3";
 
-package cornserve.task_manager;
+package cornserve.task_dispatcher;
 
 import "common.proto";
-import "task_manager.proto";
 
 service TaskDispatcher {
-  // New task managers spawned
-  rpc NotifyAppRegistration(NotifyAppRegistrationRequest) returns (NotifyAppRegistrationResponse);
+  // New unit task deployed
+  rpc NotifyUnitTaskDeployment(NotifyUnitTaskDeploymentRequest) returns (NotifyUnitTaskDeploymentResponse);
 
-  // Task managers shutting down
-  rpc NotifyAppUnregistration(NotifyAppUnregistrationRequest) returns (NotifyAppUnregistrationResponse);
+  // Existing unit task removed
+  rpc NotifyUnitTaskTeardown(NotifyUnitTaskTeardownRequest) returns (NotifyUnitTaskTeardownResponse);
 }
 
-message TaskManagerInfo {
-  // Task manager ID
-  string task_manager_id = 1;
-
-  // Task manager type
-  task_manager.TaskManagerType type = 2;
-
+// New unit task deployed
+message TaskManagerDeployment {
   // Task manager URL
-  string url = 3;
+  string url = 1;
 }
 
-message TaskInfo {
-  // Task ID
-  string task_id = 1;
+message NotifyUnitTaskDeploymentRequest {
+  // Task that was deployed
+  common.UnitTask task = 1;
 
-  // Task type
-  common.TaskType type = 2;
-
-  // Task config
-  string task_config = 3;
-
-  // Task Manager info
-  repeated TaskManagerInfo task_manager_info = 4;
+  // Task manager deployment info
+  TaskManagerDeployment task_manager = 2;
 }
 
-// New app registered
-message NotifyAppRegistrationRequest {
-  // App ID
-  string app_id = 1;
-
-  // Task info
-  repeated TaskInfo tasks = 2;
-}
-
-message NotifyAppRegistrationResponse {
+message NotifyUnitTaskDeploymentResponse {
   common.Status status = 1;
 }
 
-// App removed
-message NotifyAppUnregistrationRequest {
-  // App ID
-  string app_id = 1;
+// Existing unit task removed
+message NotifyUnitTaskTeardownRequest {
+  common.UnitTask task = 1;
 }
 
-message NotifyAppUnregistrationResponse {
+message NotifyUnitTaskTeardownResponse {
   common.Status status = 1;
 }
