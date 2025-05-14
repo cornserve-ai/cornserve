@@ -71,12 +71,8 @@ eric-no-gpu = [
   "pillow",
   "opencv-python-headless",
   "einops",
-<<<<<<< HEAD
   "xformers",
   "cornserve[sidecar-api]",
-=======
-  "cornserve[sidecar]",
->>>>>>> origin/master
   "opentelemetry-instrumentation-fastapi",
   "opentelemetry-instrumentation-threading",
 ]

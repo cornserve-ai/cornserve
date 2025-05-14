@@ -1,9 +1,14 @@
+"""Template Scheduler for Sidecar."""
+
 from __future__ import annotations
 
 import asyncio
+import contextlib
+from collections.abc import Callable
 from dataclasses import dataclass
 from types import TracebackType
-from typing import Any, Callable, Type
+from typing import Any
+
 
 @dataclass
 class _Job:
@@ -12,53 +17,53 @@ class _Job:
     kwargs: dict
     fut: asyncio.Future
 
+
 # ── async no‑op context manager ─────────────────────────────────────
 class _AsyncNullCM:
     """`async with _ASYNC_NULL:` does nothing (like contextlib.nullcontext)."""
 
-    async def __aenter__(self) -> None:            # noqa: D401
+    async def __aenter__(self) -> None:  # noqa: D401
         return None
 
     async def __aexit__(
         self,
-        exc_type: Type[BaseException] | None,
+        exc_type: type[BaseException] | None,
         exc: BaseException | None,
         tb: TracebackType | None,
     ) -> bool:
-        return False                                # don't swallow exceptions
+        return False
 
-_ASYNC_NULL = _AsyncNullCM()       # singleton instance
+
+_ASYNC_NULL = _AsyncNullCM()
+
 
 class Scheduler:
-    """
-    Central launch‑controller.
-    • Only the *launch order* is serialised.
-    • Each job runs concurrently in its own task.
-    • Optional `max_concurrency` limits jobs in flight.
-    """
+    """Central launch‑controller."""
 
     def __init__(self, max_concurrency: int | None = None) -> None:
+        """Initialize the scheduler."""
         self._q: asyncio.Queue[_Job] = asyncio.Queue()
         self._runner_task: asyncio.Task | None = None
         self._sema = asyncio.Semaphore(max_concurrency) if max_concurrency else None
 
-    # ── public API ──────────────────────────────────────────────────
     async def submit(self, fn: Callable[..., Any], *args, **kwargs) -> Any:
+        """Submit a job to the queue."""
         loop = asyncio.get_running_loop()
         fut: asyncio.Future = loop.create_future()
         await self._q.put(_Job(fn, args, kwargs, fut))
-        return await fut                            # caller waits here
+        return await fut
 
     async def schedule(self) -> _Job:
-        return await self._q.get()                  # FIFO
+        """Schedule the next job in the queue."""
+        return await self._q.get()
 
-    # ── internals ───────────────────────────────────────────────────
     async def _runner(self) -> None:
+        """Infinite loop to process jobs in the queue."""
         while True:
-            job = await self.schedule()             # decide what to launch
+            job = await self.schedule()
 
             async def _execute(j: _Job) -> None:
-                cm = self._sema or _ASYNC_NULL      # semaphore or no‑op ctx
+                cm = self._sema or _ASYNC_NULL
                 async with cm:
                     try:
                         res = j.fn(*j.args, **j.kwargs)
@@ -68,17 +73,16 @@ class Scheduler:
                     except Exception as exc:
                         j.fut.set_exception(exc)
 
-            asyncio.create_task(_execute(job))      # launch & return to queue
+            asyncio.create_task(_execute(job))
 
-    # ── lifecycle helpers ───────────────────────────────────────────
     def start(self) -> None:
+        """Start the scheduler and begin processing jobs."""
         if self._runner_task is None:
             self._runner_task = asyncio.create_task(self._runner())
 
     async def stop(self) -> None:
+        """Stop the scheduler and cancel all jobs in flight."""
         if self._runner_task:
             self._runner_task.cancel()
-            try:
+            with contextlib.suppress(asyncio.CancelledError):
                 await self._runner_task
-            except asyncio.CancelledError:
-                pass

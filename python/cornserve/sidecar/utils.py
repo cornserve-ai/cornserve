@@ -1,9 +1,9 @@
 """Sidecar utility functions and constants."""
 
 from __future__ import annotations
+
 import ctypes
 from enum import Enum
-import os
 
 import torch
 
@@ -91,7 +91,7 @@ def init_shmem(
     Each sidecar will only access its own slice of the buffer, and each slice has the same size.
 
     Args:
-        fn: Shared memory filename.
+        filename: The filename of the shared memory buffer.
         local_ranks: The local ranks of the sidecars that will share the buffer, must be consecutive.
         num_local_sidecars: Total number of sidecars within the same node.
         partition_numel: Number of elements of given dtype in the shared memory buffer used by each device/sidecar.

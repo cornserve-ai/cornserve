@@ -2,8 +2,8 @@ import asyncio
 import multiprocessing
 import os
 import random
-from typing import Any, Generator, Literal
 import uuid
+from typing import Any, Generator, Literal
 
 import pytest
 import torch
@@ -45,15 +45,17 @@ def mock_device_fixture() -> None:
 
 
 @pytest.fixture(scope="module")
-def sidecar_servers(request: pytest.FixtureRequest) -> Generator[tuple[list[multiprocessing.Process], Literal["intranode", "internode"]], None, None]:
+def sidecar_servers(
+    request: pytest.FixtureRequest,
+) -> Generator[tuple[list[multiprocessing.Process], Literal["intranode", "internode"]], None, None]:
     """Parameterized fixture for both intranode and internode server setups.
-    
+
     Returns:
         A tuple of (servers, setup_type) where setup_type is either "intranode" or "internode"
     """
     setup_type = request.param
     shm_size = 2 << 26  # Fixed value from original tests
-    
+
     if setup_type == "internode":
         servers = start_sidecar_servers(MAX_SERVERS, CLUSTER_SIZE, shm_size)
     else:  # intranode
@@ -61,16 +63,16 @@ def sidecar_servers(request: pytest.FixtureRequest) -> Generator[tuple[list[mult
     for rank, server in enumerate(servers):
         assert server.is_alive(), f"Server with rank {rank} is not running"
         wait_for_servers_to_start(rank)
-    
+
     yield (servers, setup_type)
-    
+
     # Cleanup after all tests are done
     terminate_processes(servers)
 
 
 obj_test_params = [
     ([0], [2], ["string", b"bytes", 5, 10.6, False]),
-    ([0,1], [2,3], ["another string", b"different bytes", 100, 5/3, True]),
+    ([0, 1], [2, 3], ["another string", b"different bytes", 100, 5 / 3, True]),
 ]
 
 
@@ -124,7 +126,9 @@ async def test_objs(
             id = uuid.uuid4().hex
             ids.append(id)
             for sender in senders:
-                print(f"--> Sender {sender.sidecar_rank} sending {type(obj)} object {obj} with id {id} to {receiver_ranks}")
+                print(
+                    f"--> Sender {sender.sidecar_rank} sending {type(obj)} object {obj} with id {id} to {receiver_ranks}"
+                )
                 sender.send(id=id, data=obj, dst_sidecar_ranks=[receiver_ranks])
         return ids
 
@@ -158,6 +162,7 @@ async def test_objs(
     for receiver in sidecar_receivers:
         await receiver.shutdown()
 
+
 tensor_test_params = [
     # Single copy
     ([0], [2], 1, (5,), torch.bfloat16, 5, 5, False, 5),
@@ -168,11 +173,13 @@ tensor_test_params = [
     ([0, 1], [2], 2, (20,), torch.bfloat16, 50, 100, True, 9),
     ([0, 1], [2, 3], 1, (100,), torch.float64, 5, 50, True, 10),
 ]
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("sidecar_servers", ["intranode", "internode"], indirect=True)
 @pytest.mark.parametrize(
     "sender_ranks, receiver_ranks, num_chunks, shape, dtype, token_min, token_max, concurrent_copy, count",
-    tensor_test_params
+    tensor_test_params,
 )
 async def test_tensors(
     sidecar_servers: tuple[list[multiprocessing.Process], Literal["intranode", "internode"]],
@@ -225,7 +232,6 @@ async def test_tensors(
         )
         sidecar_receivers.append(Sidecar(config))
 
-
     def send_all(
         senders: list[Sidecar],
         receiver_ranks: list[int],
@@ -252,7 +258,6 @@ async def test_tensors(
                 print("TEST: Sent data id", id, "chunk", i, "of tensor", chunk)
             data.append(chunks)
         return ids, data
-
 
     async def verify(
         id: str,

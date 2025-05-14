@@ -1,12 +1,11 @@
 """Sidecar server implementniation.
 
 The sidecar server is a gRPC service that runs on each node in the cluster. This service
-is the backend for the `SidecarSender` and `SidecarReceiver` classes in the `api` module.
-It has two corresponding components, `SidecarSender` and `SidecarReceiver`, which
-together provide the functionality to send and receive tensors between ranks.
+is a wrapper for the `SidecarSender` and `SidecarReceiver` services.
 """
 
 from __future__ import annotations
+
 import asyncio
 import os
 import time
@@ -16,6 +15,9 @@ import grpc
 import kubernetes_asyncio.client as kclient
 import kubernetes_asyncio.config as kconfig
 import numpy as np
+import torch
+import tyro
+import ucxx
 from opentelemetry import trace
 from opentelemetry.instrumentation.grpc import (
     GrpcAioInstrumentorClient,
@@ -24,9 +26,6 @@ from opentelemetry.instrumentation.grpc import (
     GrpcInstrumentorServer,
 )
 from pydantic import ValidationError
-import torch
-import tyro
-import ucxx
 from ucxx._lib_async.endpoint import Endpoint
 
 from cornserve.constants import K8S_NAMESPACE
@@ -43,13 +42,13 @@ from cornserve.sidecar.utils import (
     ucx_url_from_rank,
 )
 from cornserve.tracing import configure_otel
-from cornserve.services.sidecar.scheduler import Scheduler
 
 logger = get_logger(__name__, [SidcarAdapter])
 tracer = trace.get_tracer(__name__)
 cleanup_coroutines = []
 
 STARTUP_COOLDOWN = 20
+
 
 class SidecarServicer(sidecar_pb2_grpc.SidecarServicer):
     """A unified wrapper for both sender and receiver sidecar servers. Entry point for the gRPC service."""
@@ -80,8 +79,9 @@ class SidecarServicer(sidecar_pb2_grpc.SidecarServicer):
         self.ucx_port = ucx_port
         self.world_size = world_size
         self.peers = dict[int, Endpoint]()
-        self.scheduler = Scheduler()
-        self.scheduler.start()
+        # The scheduler is currently disabled
+        # self.scheduler = Scheduler()
+        # self.scheduler.start()
 
         async def _ucxx_listener_callback(ep: Endpoint) -> None:
             """Callback for the UCX listener."""
@@ -95,7 +95,7 @@ class SidecarServicer(sidecar_pb2_grpc.SidecarServicer):
             try:
                 listener = ucxx.create_listener(callback_func=_ucxx_listener_callback, port=self.ucx_port)
             except ucxx.exceptions.UCXBusyError:
-                logger.warning("UCX listener busy, pause for %d seconds", STARTUP_COOLDOWN)
+                logger.warning("Device busy, pause for %d seconds", STARTUP_COOLDOWN)
                 time.sleep(STARTUP_COOLDOWN)
             else:
                 self.ucx_listener = listener
@@ -119,28 +119,30 @@ class SidecarServicer(sidecar_pb2_grpc.SidecarServicer):
     async def p2p_connect(self) -> None:
         """Connect to other peers using UCX.
 
-        Connects to peers with lower sidecar ranks, and wait to be connected by peers with higher sidecar ranks.
+        Establishes a UCX connection to all other sidecars in the cluster.
+        Proactively connects to peers with lower sidecar ranks,
+        and waits to be connected by peers with higher sidecar ranks.
         """
-        for i in range(self.world_size):
-            if i < self.sidecar_rank:
-                while not await self._reachable(i):
-                    logger.info("Waiting for sidecar-%d to be reachable", i)
-                    await asyncio.sleep(10.1)
-                while i not in self.peers:
-                    try:
-                        # first checkhealth
-                        logger.info(
-                            "Connecting to sidecar-%d - url %s - port %d",
-                            i,
-                            ucx_url_from_rank(i),
-                            ucx_port_from_rank(i),
-                        )
-                        ep = await ucxx.create_endpoint(ucx_url_from_rank(i), ucx_port_from_rank(i))
-                        msg = np.array([self.sidecar_rank], dtype=np.int32)
-                        await ep.send(msg)
-                        self.peers[i] = ep
-                    except Exception:
-                        await asyncio.sleep(0.1)
+        for i in range(self.sidecar_rank):
+            while not await self._reachable(i):
+                logger.info("Waiting for sidecar-%d to be reachable", i)
+                await asyncio.sleep(10.1)
+            while i not in self.peers:
+                try:
+                    logger.info(
+                        "Connecting to sidecar-%d - url %s - port %d",
+                        i,
+                        ucx_url_from_rank(i),
+                        ucx_port_from_rank(i),
+                    )
+                    ep = await ucxx.create_endpoint(ucx_url_from_rank(i), ucx_port_from_rank(i))
+                    msg = np.array([self.sidecar_rank], dtype=np.int32)
+                    await ep.send(msg)
+                    self.peers[i] = ep
+                except Exception:
+                    await asyncio.sleep(0.1)
+
+        # wait for other peers to connect to us
         while len(self.peers) < self.world_size - 1:
             await asyncio.sleep(0.5)
         logger.info("Connected to all peers")
@@ -166,11 +168,12 @@ class SidecarServicer(sidecar_pb2_grpc.SidecarServicer):
     ) -> sidecar_pb2.CheckHealthResponse:
         """Health check for the sidecar."""
         try:
-            # TODO: memory pressure
             if not self.live:
                 return sidecar_pb2.CheckHealthResponse(status=sidecar_pb2.HealthStatus.HEALTH_OFFLINE)
-            # if self.sidecar.mem_pressure_count > self.mem_pressure_threshold:
-            #     return sidecar_pb2.CheckHealthResponse(status=sidecar_pb2.HealthStatus.HEALTH_MEMORY_PRESSURE)
+            if (self.sender is not None and self.sender.mem_pressure_count > self.mem_pressure_threshold) or (
+                self.receiver is not None and self.receiver.mem_pressure_count > self.mem_pressure_threshold
+            ):
+                return sidecar_pb2.CheckHealthResponse(status=sidecar_pb2.HealthStatus.HEALTH_MEMORY_PRESSURE)
             return sidecar_pb2.CheckHealthResponse(status=sidecar_pb2.HealthStatus.HEALTH_ALL_GOOD)
         except Exception as e:
             tb_str = traceback.format_exc()
@@ -178,23 +181,23 @@ class SidecarServicer(sidecar_pb2_grpc.SidecarServicer):
             await context.abort(grpc.StatusCode.INTERNAL, f"Error in CheckHealth: {e} \n {tb_str}")
 
     def _build_config(self, request: sidecar_pb2.RegisterRequest) -> SidecarServerConfig:
+        """Build the sidecar config from the register request."""
+        # currently the shared memory is partitioned equally between the sender and receiver
         # TODO: watermark alloc
         slab_size = self.shm_size // 2
         tensor_dtype = getattr(torch, request.dtype)
         slab_numel = slab_size // tensor_dtype.itemsize
-
-        config = SidecarServerConfig(
-            sidecar_rank = request.rank,
-            node_info = self.node_info,
-            peers = self.peers,
-            group = sorted(list(request.group)),
-            tensor_dtype= tensor_dtype,
-            slab_numel= slab_numel,
-            send_slot_numel= request.send_slot_numel,
-            recv_slot_numel= request.recv_slot_numel,
-            concurrent_copy= request.concurrent_copy,
+        return SidecarServerConfig(
+            sidecar_rank=request.rank,
+            node_info=self.node_info,
+            peers=self.peers,
+            group=sorted(list(request.group)),
+            tensor_dtype=tensor_dtype,
+            slab_numel=slab_numel,
+            send_slot_numel=request.send_slot_numel,
+            recv_slot_numel=request.recv_slot_numel,
+            concurrent_copy=request.concurrent_copy,
         )
-        return config
 
     async def Register(  # noqa: N802
         self,
@@ -245,7 +248,6 @@ class SidecarServicer(sidecar_pb2_grpc.SidecarServicer):
             logger.exception("Error in Register")
             await context.abort(grpc.StatusCode.INTERNAL, f"Error in Register: {e} \n {tb_str}")
 
-
     async def Send(  # noqa: N802
         self,
         request: sidecar_pb2.SendRequest,
@@ -258,8 +260,8 @@ class SidecarServicer(sidecar_pb2_grpc.SidecarServicer):
                 await context.abort(grpc.StatusCode.FAILED_PRECONDITION, "Sidecar not online")
             if self.sender is None:
                 await context.abort(grpc.StatusCode.FAILED_PRECONDITION, "Sidecar not registered")
-            # return await self.sender.send(request, context)
-            return await self.scheduler.submit(self.sender.send, request, context)
+            return await self.sender.send(request, context)
+            # return await self.scheduler.submit(self.sender.send, request, context)
         except Exception as e:
             tb_str = traceback.format_exc()
             logger.exception("Error in Send")
@@ -278,8 +280,8 @@ class SidecarServicer(sidecar_pb2_grpc.SidecarServicer):
             if self.receiver is None:
                 logger.error("Sidecar not registered")
                 await context.abort(grpc.StatusCode.FAILED_PRECONDITION, "Sidecar not registered")
-            # return await self.receiver.prepare_receive(request, context)
-            return await self.scheduler.submit(self.receiver.prepare_receive, request, context)
+            return await self.receiver.prepare_receive(request, context)
+            # return await self.scheduler.submit(self.receiver.prepare_receive, request, context)
         except Exception as e:
             tb_str = traceback.format_exc()
             logger.exception("Error in PrepareReceive")
@@ -298,8 +300,8 @@ class SidecarServicer(sidecar_pb2_grpc.SidecarServicer):
             if self.receiver is None:
                 logger.error("Sidecar not registered")
                 await context.abort(grpc.StatusCode.FAILED_PRECONDITION, "Sidecar not registered")
-            # return await self.receiver.receive(request, context)
-            return await self.scheduler.submit(self.receiver.receive, request, context)
+            return await self.receiver.receive(request, context)
+            # return await self.scheduler.submit(self.receiver.receive, request, context)
         except Exception as e:
             tb_str = traceback.format_exc()
             logger.exception("Error in Receive")
@@ -318,8 +320,8 @@ class SidecarServicer(sidecar_pb2_grpc.SidecarServicer):
             if self.receiver is None:
                 logger.error("Sidecar not registered")
                 await context.abort(grpc.StatusCode.FAILED_PRECONDITION, "Sidecar not registered")
-            # return await self.receiver.mark_done(request, context)
-            return await self.scheduler.submit(self.receiver.mark_done, request, context)
+            return await self.receiver.mark_done(request, context)
+            # return await self.scheduler.submit(self.receiver.mark_done, request, context)
         except Exception as e:
             tb_str = traceback.format_exc()
             logger.exception("Error in MarkDone")
@@ -338,8 +340,8 @@ class SidecarServicer(sidecar_pb2_grpc.SidecarServicer):
             if self.sender is None:
                 logger.error("Sidecar not registered")
                 await context.abort(grpc.StatusCode.FAILED_PRECONDITION, "Sidecar not registered")
-            # return await self.sender.unlink(request, context)
-            return await self.scheduler.submit(self.sender.unlink, request, context)
+            return await self.sender.unlink(request, context)
+            # return await self.scheduler.submit(self.sender.unlink, request, context)
         except Exception as e:
             tb_str = traceback.format_exc()
             logger.exception("Error in Unlink")
@@ -353,11 +355,13 @@ class SidecarServicer(sidecar_pb2_grpc.SidecarServicer):
             await self.receiver.shutdown()
         for peer in self.peers.values():
             await peer.close()
-        await self.scheduler.stop()
+        # await self.scheduler.stop()
         self.ucx_listener.close()
         logger.info("Sidecar shutdown")
 
+
 async def _get_node_info(pod_name: str) -> SidecarNodeInfo | None:
+    """Query the Kubernetes API to get the node information."""
     kconfig.load_incluster_config()
     async with kclient.ApiClient() as api_client:
         v1 = kclient.CoreV1Api(api_client)
@@ -371,6 +375,7 @@ async def _get_node_info(pod_name: str) -> SidecarNodeInfo | None:
             logger.error("Current pod not found in the list of sidecar pods on the node. K8s issue?")
             return None
         return SidecarNodeInfo([int(pod_name.split("-")[-1]) for pod_name in sorted_pod_names])
+
 
 async def main(
     ip: str = "[::]",
@@ -386,15 +391,17 @@ async def main(
     Note this means that outside of k8s, only single node is supported.
 
     Environment variables:
-        - SIDECAR_WORLD_SIZE: The total number of sidecars in the cluster.
-        - SIDECAR_SHM_SIZE: The size of the shared memory buffer in bytes in each sidecar,
+        SIDECAR_WORLD_SIZE: The total number of sidecars in the cluster.
+        SIDECAR_SHM_SIZE: The size of the shared memory buffer in bytes in each sidecar
             this will be divided by the dtype size so it should be a multiple of the dtype size.
+
         K8s only:
-        - SIDECAR_POD_NAME: The name of the pod the sidecar is running in.
+        SIDECAR_POD_NAME: The name of the pod the sidecar is running in.
+
         Outside of k8s:
-        - SIDECAR_RANK: The global rank of the sidecar
-        - SIDECAR_DEVICE_ID: The device id of the GPU used by the sidecar, will use SIDECAR_RANK if not set.
-        - SIDECAR_NUM_DEVICES: Optional. The number of devices on the node, will use SIDECAR_WORLD_SIZE if not set.
+        SIDECAR_RANK: The global rank of the sidecar
+        SIDECAR_DEVICE_ID: The device id of the GPU used by the sidecar, will use SIDECAR_RANK if not set.
+        SIDECAR_NUM_DEVICES: The number of devices on the node, will use SIDECAR_WORLD_SIZE if not set.
     """
     world_size = int(os.environ.get("SIDECAR_WORLD_SIZE", "1"))
     shm_size = int(os.environ.get("SIDECAR_SHM_SIZE", str(2**30)))
@@ -454,9 +461,9 @@ async def main(
         if cluster_ranks_str:
             try:
                 cluster_ranks = list(map(int, cluster_ranks_str.split(",")))
-            except ValueError:
+            except ValueError as err:
                 logger.exception("Invalid SIDECAR_CLUSTER_RANKS")
-                raise ValueError("Invalid SIDECAR_CLUSTER_RANKS")
+                raise ValueError("Invalid SIDECAR_CLUSTER_RANKS") from err
         else:
             cluster_ranks = list(range(world_size))
         node_info = SidecarNodeInfo(cluster_ranks)

@@ -4,20 +4,26 @@ import pickle
 from typing import Any
 
 import torch
-from torch.multiprocessing.reductions import reduce_tensor, rebuild_cuda_tensor
 from msgspec import msgpack
+from torch.multiprocessing.reductions import rebuild_cuda_tensor, reduce_tensor
 
 CUSTOM_TYPE_GPU_TENSOR = 1
 CUSTOM_TYPE_SHARED_TENSOR_HANDLE = 2
 CUSTOM_TYPE_PICKLE = 3
 CUSTOM_TYPE_FORWARD_TENSOR_HANDLE = 4
 
+
 # CANNOT BE @dataclass
 class SharedTensorHandle:
     """Shared memory handle for a tensor used for intra-node DataForward."""
 
     def __init__(self, offset: int, numel: int) -> None:
-        """Initialize the SharedTensorHandle."""
+        """Initialize the SharedTensorHandle.
+
+        Args:
+            offset: Offset of the shared buffer from the full tensor.
+            numel: Number of elements in the tensor.
+        """
         self.offset = offset
         self.numel = numel
 
@@ -28,21 +34,27 @@ class SharedTensorHandle:
 
 # CANNOT BE @dataclass
 class ForwardTensorHandle:
-    """Tensor handle for used for inter-node DataForward.
-
-    Attributes:
-        total_numel: totoal number of elements in the shard
-    """
+    """Tensor handle for used for inter-node DataForward."""
 
     def __init__(self, total_numel: int, shard_rank: int, num_shards: int) -> None:
-        """Initialize the ForwardTensorHandle."""
+        """Initialize the ForwardTensorHandle.
+
+        Args:
+            total_numel: Total number of elements in the tensor.
+            shard_rank: Shard rank of current forward.
+            num_shards: Total number of shards.
+        """
         self.total_numel = total_numel
         self.shard_rank = shard_rank
         self.num_shards = num_shards
 
     def __repr__(self) -> str:
         """Return a string representation of the ForwardTensorHandle."""
-        return f"ForwardTensorHandle(total_numel={self.total_numel}, shard_rank={self.shard_rank}, num_shards={self.num_shards})"
+        return (
+            f"ForwardTensorHandle(total_numel={self.total_numel}, "
+            f"shard_rank={self.shard_rank}, num_shards={self.num_shards})"
+        )
+
 
 class MsgpackEncoder:
     """Msgpack encoder that implements custom serialization."""
@@ -73,7 +85,7 @@ class MsgpackDecoder:
 
 
 def enc_hook(obj: Any) -> Any:
-    """Use pickle to serialize Numpy arrays. """
+    """Use pickle to serialize Numpy arrays."""
     if isinstance(obj, torch.Tensor) and obj.is_cuda:
         # Torch GPU tensors are serialized as IPC handles
         _, rebuild_args = reduce_tensor(obj)

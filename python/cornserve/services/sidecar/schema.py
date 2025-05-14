@@ -1,17 +1,29 @@
+"""Bookkeeping data structures for Sidecar."""
+
 from __future__ import annotations
+
 from dataclasses import dataclass
+
+import torch
+from ucxx._lib_async.endpoint import Endpoint
+
 from cornserve.services.sidecar.shm_manager import SharedMemoryBuffer
 from cornserve.sidecar.utils import init_shmem, shm_filename
-from ucxx._lib_async.endpoint import Endpoint
-import torch
+
 
 # To allow grouping, we need to bookkeep the mapping between global rank and local rank
 @dataclass
 class SidecarNodeInfo:
-    """Local Sidecar status within node."""
+    """Local Sidecar status within node.
+
+    Attributes:
+        sidecar_ranks: The sidecars on the current node.
+    """
+
     sidecar_ranks: list[int]
 
     def __post_init__(self):
+        """Check the sidecar ranks are unique and make sure they are sorted."""
         # check all different
         s = set(self.sidecar_ranks)
         assert len(s) == len(self.sidecar_ranks), "Sidecarranks should be unique"
@@ -33,8 +45,21 @@ class SidecarNodeInfo:
         """Get the local ranks of the sidecars."""
         return [self.sidecar_ranks.index(rank) for rank in sidecar_ranks]
 
+
 @dataclass
 class SidecarReceiverConfig:
+    """Sidecar receiver configuration.
+
+    Attributes:
+        sidecar_rank: The rank of the sidecar in the group.
+        node_info: The node info of the sidecar server.
+        peers: The peers of in the sidecar server.
+        group: The current group of sidecars.
+        base_ptr: The base pointer of the shared memory buffer.
+        shared_tensor: The shared tensor allocated to the receiver.
+        slot_numel: The number of elements in each slot.
+    """
+
     sidecar_rank: int
     node_info: SidecarNodeInfo
     peers: dict[int, Endpoint]
@@ -42,13 +67,24 @@ class SidecarReceiverConfig:
     group: list[int]
     base_ptr: int
     shared_tensor: torch.Tensor
-    shm_numel: int
     slot_numel: int
-    dtype: torch.dtype
-    full_tensor: torch.Tensor
+
 
 @dataclass
 class SidecarSenderConfig:
+    """Sidecar sender configuration.
+
+    Attributes:
+        sidecar_rank: The rank of the sidecar in the group.
+        node_info: The node info of the sidecar server.
+        peers: The peers of in the sidecar server.
+        group: The current group of sidecars.
+        base_ptr: The base pointer of the shared memory buffer.
+        shared_tensor: The shared tensor allocated to the sender.
+        slot_numel: The number of elements in each slot.
+        concurrent_copy: Whether to use concurrent copy when TP is enbaled.
+    """
+
     sidecar_rank: int
     node_info: SidecarNodeInfo
     peers: dict[int, Endpoint]
@@ -57,14 +93,26 @@ class SidecarSenderConfig:
     group: list[int]
     base_ptr: int
     shared_tensor: torch.Tensor
-    shm_numel: int
     slot_numel: int
-    dtype: torch.dtype
-    full_tensor: torch.Tensor
     concurrent_copy: bool = False
+
 
 @dataclass
 class SidecarServerConfig:
+    """Sidecar server configuration.
+
+    Attributes:
+        sidecar_rank: The rank of the sidecar in the group.
+        node_info: The node info of the sidecar server.
+        peers: The peers of in the sidecar server.
+        group: The current group of sidecars.
+        tensor_dtype: The data type of the tensor.
+        slab_numel: The number of elements in each slab.
+        send_slot_numel: The number of elements in each send slot.
+        recv_slot_numel: The number of elements in each recv slot.
+        concurrent_copy: Whether to use concurrent copy when TP is enbaled.
+    """
+
     sidecar_rank: int
     node_info: SidecarNodeInfo
     # TP group, when enabled, only the leader sidecar will perform action
@@ -79,23 +127,33 @@ class SidecarServerConfig:
     recv_slot_numel: int
     concurrent_copy: bool = True
 
+    def __post_init__(self):
+        """Check the group is sorted and unique."""
+        s = set(self.group)
+        assert len(s) == len(self.group), "Sidecar ranks should be unique"
+        self.group.sort()
+
     def __eq__(self, other: object) -> bool:
+        """Check if two SidecarServerConfig are equal."""
         if not isinstance(other, SidecarServerConfig):
             return False
         # ignores sidecar_rank due to grouping
-        return self.group == sorted(other.group) \
-                and self.tensor_dtype == other.tensor_dtype \
-                and self.slab_numel == other.slab_numel \
-                and self.send_slot_numel == other.send_slot_numel \
-                and self.recv_slot_numel == other.recv_slot_numel \
-                and self.concurrent_copy == other.concurrent_copy
+        return (
+            self.group == sorted(other.group)
+            and self.tensor_dtype == other.tensor_dtype
+            and self.slab_numel == other.slab_numel
+            and self.send_slot_numel == other.send_slot_numel
+            and self.recv_slot_numel == other.recv_slot_numel
+            and self.concurrent_copy == other.concurrent_copy
+        )
 
     def sender_config(self) -> SidecarSenderConfig:
+        """Create the sender config."""
         full_tensor, slab = init_shmem(
             filename=shm_filename(),
             local_ranks=list(range(self.node_info.get_sidecar_num())),
             num_local_sidecars=self.node_info.get_sidecar_num(),
-            partition_numel=self.slab_numel*2,
+            partition_numel=self.slab_numel * 2,
             dtype=self.tensor_dtype,
         )
         return SidecarSenderConfig(
@@ -104,20 +162,18 @@ class SidecarServerConfig:
             peers=self.peers,
             group=self.group,
             base_ptr=full_tensor.data_ptr(),
-            shared_tensor=slab[:slab.numel()//2],
-            shm_numel=self.slab_numel,
+            shared_tensor=slab[: slab.numel() // 2],
             slot_numel=self.send_slot_numel,
-            dtype=self.tensor_dtype,
             concurrent_copy=self.concurrent_copy,
-            full_tensor=full_tensor,
         )
 
     def receiver_config(self) -> SidecarReceiverConfig:
+        """Create the receiver config."""
         full_tensor, slab = init_shmem(
             filename=shm_filename(),
             local_ranks=list(range(self.node_info.get_sidecar_num())),
             num_local_sidecars=self.node_info.get_sidecar_num(),
-            partition_numel=self.slab_numel*2,
+            partition_numel=self.slab_numel * 2,
             dtype=self.tensor_dtype,
         )
         return SidecarReceiverConfig(
@@ -126,11 +182,8 @@ class SidecarServerConfig:
             peers=self.peers,
             group=self.group,
             base_ptr=full_tensor.data_ptr(),
-            shared_tensor=slab[slab.numel()//2:],
-            shm_numel=self.slab_numel,
+            shared_tensor=slab[slab.numel() // 2 :],
             slot_numel=self.send_slot_numel,
-            dtype=self.tensor_dtype,
-            full_tensor=full_tensor,
         )
 
 
@@ -139,9 +192,10 @@ class SendTransferRequestState:
     """Internal data structure to keep track of a tansfer request's state.
 
     Attributes:
-        - id: The concatenation of request_id and data_id
-        - buffer: The shared memory buffer used to recv the data
-        - done: A flag to indicate if the transfer is fully sent
+        id: The concatenation of request_id and data_id
+        buffer: The shared memory buffer used to recv the data
+        shards_sent: A list of flags to indicate if each shard is sent
+        done: A flag to indicate if the transfer is fully sent
     """
 
     id: str
@@ -149,14 +203,16 @@ class SendTransferRequestState:
     shards_sent: list[bool]
     done: bool = False
 
+
 @dataclass
 class RecvTransferRequestState:
     """Internal data structure to keep track of a tansfer request's state.
 
     Attributes:
-        - id: The concatenation of request_id and data_id
-        - buffer: The shared memory buffer used to recv the data
-        - done: A flag to indicate if the transfer is done
+        id: The concatenation of request_id and data_id
+        buffer: The shared memory buffer used to recv the data
+        intra_node_rank: The intra node source sidecar rank
+        done: A flag to indicate if the transfer is done
     """
 
     id: str

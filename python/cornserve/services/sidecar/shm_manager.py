@@ -33,8 +33,18 @@ class SharedMemoryChunk:
         """Return a string representation of the shared memory chunk."""
         return f"SharedMemoryChunk(size={self.size}, shard_availability={self.shard_availability}, ready={self.ready})"
 
+
 class SharedMemoryShard:
+    """A shard of a shared memory buffer."""
+
     def __init__(self, offset: int, lenght: int, data: torch.Tensor):
+        """Initialize a shared memory shard.
+
+        Args:
+            offset: the offset of the shard in the shared memory buffer
+            lenght: the length of the shard
+            data: the backing tensor storing the data
+        """
         self.offset = offset
         self.length = lenght
         self.data = data
@@ -43,12 +53,12 @@ class SharedMemoryShard:
         """Return a string representation of the shared memory shard."""
         return f"SharedMemoryShard(offset={self.offset}, length={self.length}, data={self.data})"
 
+
 class SharedMemoryBuffer:
-    """A shared memory buffer that could be sliced into multiple shards. """
+    """A shared memory buffer that could be sliced into multiple shards."""
 
     def __init__(self, size: int, data: torch.Tensor, slots: list[int]):
         """Initialize a shared memory buffer, no sharding by default.
-        
 
         Args:
             size: the real size (numel) of the data
@@ -71,7 +81,7 @@ class SharedMemoryBuffer:
             quotient, remainder = divmod(self.size, num_shards)
             start_pos = shard_rank * quotient + min(shard_rank, remainder)
             end_pos = start_pos + quotient + (1 if shard_rank < remainder else 0)
-            shard_data = self.data[start_pos: end_pos]
+            shard_data = self.data[start_pos:end_pos]
             self.shards.append(
                 SharedMemoryShard(
                     offset=start_pos,
@@ -109,11 +119,11 @@ class SharedMemoryBuffer:
             return f"SharedMemoryBuffer(size={self.size}, slots={len(self.slots)})"
 
     def create_handle(self, base_ptr: int) -> SharedTensorHandle:
+        """Create a handle for the shared memory buffer."""
         return SharedTensorHandle(
             offset=self.data.data_ptr() - base_ptr,
             numel=self.size,
         )
-
 
 
 class SharedMemoryManager:

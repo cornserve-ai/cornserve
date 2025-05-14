@@ -78,6 +78,7 @@ class ModelExecutor:
                 tp_size=tp_size,
                 input_mq_handle=input_mq_handle,
                 sender_sidecar_rank=sender_sidecar_rank,
+                sender_sidecar_ranks=sender_sidecar_ranks,
             )
             logger.info(
                 "Took %.2f seconds to spawn worker %d",

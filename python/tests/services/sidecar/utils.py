@@ -1,13 +1,15 @@
-import time
-import pytest
-import signal
-import torch
-import os
 import asyncio
 import multiprocessing
+import os
+import signal
+import time
 
 import grpc
+import pytest
+import torch
+
 from cornserve.services.pb import sidecar_pb2, sidecar_pb2_grpc
+
 
 def run_server(rank: int, world_size: int, cluster_ranks: list[int], shm_size: int) -> None:
     """Sidecar server entrypoint that will run in a subprocess."""
@@ -77,12 +79,14 @@ def mock_ucx_url() -> None:
         mock_ucx_url_from_rank,
     )
 
+
 def mock_device() -> None:
     mocker = pytest.MonkeyPatch()
     mocker.setattr(
         "cornserve.sidecar.utils.device_from_rank",
         device_from_rank,
     )
+
 
 def start_sidecar_servers(
     n: int = 4,
@@ -104,6 +108,7 @@ def start_sidecar_servers(
         processes.append(process)
     return processes
 
+
 def server_is_online(stub: sidecar_pb2_grpc.SidecarStub) -> bool:
     """Check if the server is running."""
     try:
@@ -113,6 +118,7 @@ def server_is_online(stub: sidecar_pb2_grpc.SidecarStub) -> bool:
     except grpc.RpcError:
         return False
 
+
 def wait_for_servers_to_start(rank: int) -> None:
     while True:
         with grpc.insecure_channel(mock_grpc_url_from_rank(rank)) as channel:
@@ -121,6 +127,7 @@ def wait_for_servers_to_start(rank: int) -> None:
                 break
             else:
                 time.sleep(10.2)
+
 
 def terminate_processes(processes: list[multiprocessing.Process]) -> None:
     """Terminate all processes."""

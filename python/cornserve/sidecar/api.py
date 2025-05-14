@@ -1,25 +1,20 @@
-"""Sidecar api to be usd by the task exucutors: Enc Server, vLLM Server, etc.
-
-TensorSidecarSender is used by the producer task executors to send data to a sidecar
-consumer, all methods are blocking.
-TensorSidecarAsyncReceiver is used by the consumer task executors to receive data from
-a sidecar producer, all methods are async.
-"""
+"""Sidecar api to be usd by the task exucutors: Enc Server, vLLM Server, etc."""
 
 from __future__ import annotations
-from concurrent.futures import ThreadPoolExecutor
+
 import ctypes
-from typing import Any
 import weakref
+from concurrent.futures import ThreadPoolExecutor
+from typing import Any
 
 import grpc
+import torch
 from opentelemetry import trace
 from opentelemetry.instrumentation.grpc import (
     GrpcAioInstrumentorClient,
     GrpcInstrumentorClient,
 )
 from opentelemetry.instrumentation.threading import ThreadingInstrumentor
-import torch
 
 from cornserve.logging import get_logger
 from cornserve.services.pb import common_pb2, sidecar_pb2, sidecar_pb2_grpc
@@ -39,7 +34,9 @@ GrpcInstrumentorClient().instrument()
 GrpcAioInstrumentorClient().instrument()
 ThreadingInstrumentor().instrument()
 
+
 class Sidecar:
+    """The sidecar client to send or receive data to/from other sidecars."""
 
     supported_classes = [str, bytes, int, float, bool, torch.Tensor]
 
@@ -48,12 +45,14 @@ class Sidecar:
         config: SidecarConfig,
     ) -> None:
         """Initialize the sidecar receiver client that receives data from a sender sidecar.
+
+        Args:
+            config: The configuration for the sidecar.
         """
         self.config = config
         self.sidecar_rank = config.sidecar_rank
         self.group = config.group
         self.dtype = config.get_dtype()
-        logger.debug("Using dtype %s", self.dtype)
 
         # register the sidecar to the server, provide hint and grouping
         # note when using TP, only talks to the head sidecar
@@ -107,6 +106,16 @@ class Sidecar:
         chunk_id: int = 0,
         num_chunks: int = 1,
     ):
+        """Send some data to other sidecars.
+
+        Args:
+            data: The data to send. Can be a tensor or any other supported type.
+            id: The id of the data. This is used to identify the data in the sidecar.
+            dst_sidecar_ranks: The ranks of the sidecars to send the data to. This is a list of lists,
+                where each list is a sidecar TP group.
+            chunk_id: The chunk id of the data when only sending a chunk.
+            num_chunks: The number of chunks the entire data is split into.
+        """
         # need to pass a shared pytorch tensor handle
         # assume broadcast
         if any(rank == self.config.sidecar_rank for group in dst_sidecar_ranks for rank in group):
@@ -131,7 +140,6 @@ class Sidecar:
         )
         future.add_done_callback(lambda f: f.result())
 
-    
     @tracer.start_as_current_span(name="Sidecar._send_worker")
     def _send_worker(
         self,
@@ -141,6 +149,15 @@ class Sidecar:
         chunk_id: int,
         num_chunks: int,
     ):
+        """The worker function to send data to other sidecars.
+
+        Args:
+            obj: The data to send. Can be a tensor or any other supported type.
+            id: The id of the data. This is used to identify the data in the sidecar.
+            dst_sidecar_ranks: The ranks of the sidecars to send the data to.
+            chunk_id: The chunk id of the data when only sending a chunk.
+            num_chunks: The number of chunks the entire data is split into.
+        """
         if isinstance(obj, torch.Tensor):
             if not obj.is_cuda:
                 # TODO: support CPU tensors
@@ -153,12 +170,12 @@ class Sidecar:
         data = self.msgpack_encoder.encode(obj)
         dst_ranks = [sidecar_pb2.RankGroup(ranks=group) for group in dst_sidecar_ranks]
         request = sidecar_pb2.SendRequest(
-            id = id,
-            dst_ranks = dst_ranks,
-            data = data,
-            shard_rank= self.shard_rank,
-            chunk_id = chunk_id,
-            num_chunks = num_chunks,
+            id=id,
+            dst_ranks=dst_ranks,
+            data=data,
+            shard_rank=self.shard_rank,
+            chunk_id=chunk_id,
+            num_chunks=num_chunks,
         )
         response = self.stub.Send(request)
         if response.status == common_pb2.Status.STATUS_OK:
@@ -168,6 +185,12 @@ class Sidecar:
 
     @tracer.start_as_current_span(name="Sidecar.recv")
     async def recv(self, id: str, chunk_id: int = 0) -> Any:
+        """Receive data from the sidecar server.
+
+        Args:
+            id: The id of the data.
+            chunk_id: The chunk id of the data to receive.
+        """
         span = trace.get_current_span()
         span.set_attribute("sidecar.recv.id", id)
         span.set_attribute("sidecar.recv.chunk_id", chunk_id)
@@ -175,22 +198,23 @@ class Sidecar:
         response = await self.aio_stub.Receive(request)
         if response.status != common_pb2.Status.STATUS_OK:
             raise ValueError(f"Failed to receive data with id {id}")
-        
+
         obj = self.msgpack_decoder.decode(response.data)
         if isinstance(obj, SharedTensorHandle):
-            logger.debug("Received shared tensor handle %s for req %s", obj, id)
             cbuf = (ctypes.c_byte * obj.numel * self.dtype.itemsize).from_address(self.base_ptr + obj.offset)
             tensor = torch.frombuffer(cbuf, dtype=self.dtype, count=obj.numel)
-            # logger.debug("raw tnesor %s of %s", tensor, id)
-            # index = obj.offset // self.dtype.itemsize
-            # logger.debug("Reference tensor %s of %s", self.full_tensor[index : index + obj.numel], id)
             return tensor.view(self.config.get_recv_tensor_shape())
         else:
             return obj
 
     @tracer.start_as_current_span(name="Sidecar.markdone")
     async def mark_done(self, id: str, chunk_id: int = 0) -> None:
-        """Mark a tensor as done in the sidecar server, which will free the shared memory buffer."""
+        """Mark a tensor as done in the sidecar server, which will free the shared memory buffer.
+
+        Args:
+            id: The id of the data.
+            chunk_id: The chunk id of the data to mark as done.
+        """
         span = trace.get_current_span()
         span.set_attribute("sidecar.mark_done.id", id)
         request = sidecar_pb2.MarkDoneRequest(id=id, chunk_id=chunk_id)
@@ -202,7 +226,6 @@ class Sidecar:
         """Unlink the shared memory buffer."""
         if not hasattr(self, "channel"):
             return
-
         logger.warning("Sidecar not shutdown properly, remember to call shutdown()")
         try:
             del self.channel

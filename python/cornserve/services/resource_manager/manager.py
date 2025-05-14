@@ -43,6 +43,7 @@ class UnitTaskDeployment:
     id: str
     url: str
 
+
 @dataclass
 class TaskManagerState:
     """Encapsulates the state of a single task manager.

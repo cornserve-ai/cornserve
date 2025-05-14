@@ -1,15 +1,17 @@
+"""Sidecar Sender."""
+
 import asyncio
 import contextlib
 import os
 from typing import cast
 
 import grpc
-from opentelemetry import trace
 import torch
+from opentelemetry import trace
 
 from cornserve.logging import SidcarAdapter, get_logger
 from cornserve.services.pb import common_pb2, sidecar_pb2, sidecar_pb2_grpc
-from cornserve.services.sidecar.schema import SidecarSenderConfig, SendTransferRequestState
+from cornserve.services.sidecar.schema import SendTransferRequestState, SidecarSenderConfig
 from cornserve.services.sidecar.shm_manager import (
     SharedMemoryBuffer,
     SharedMemoryManager,
@@ -39,10 +41,12 @@ class SidecarSender:
     """
 
     def __init__(  # noqa: PLR0913
-        self,
-        config: SidecarSenderConfig
+        self, config: SidecarSenderConfig
     ) -> None:
         """Initialize the sender sidecar server.
+
+        Args:
+            config: A SidecarSenderConfig object
         """
         self.config = config
         self.sidecar_rank = config.sidecar_rank
@@ -55,7 +59,9 @@ class SidecarSender:
         if self.concurrent_copy:
             self.streams = {i: cast(torch.cuda.Stream, torch.cuda.Stream(device=self.devices[i])) for i in config.group}
         else:
-            self.streams = {min(config.group): cast(torch.cuda.Stream, torch.cuda.Stream(device=self.devices[min(config.group)]))}
+            self.streams = {
+                min(config.group): cast(torch.cuda.Stream, torch.cuda.Stream(device=self.devices[min(config.group)]))
+            }
 
         self.dst_channels: dict[int, grpc.aio.Channel] = {}
         self.dst_stubs: dict[int, sidecar_pb2_grpc.SidecarStub] = {}
@@ -87,12 +93,14 @@ class SidecarSender:
         # per copy done event for concurrent copy
         self.done_events: dict[str, asyncio.Event] = {}
 
-        # per send 
-
-        self.full_tensor = config.full_tensor
+        self.mem_pressure_count = 0
 
     async def _allocate(self, size: int) -> SharedMemoryBuffer:
-        """Allocate a shared memory buffer of the given size."""
+        """Allocate a shared memory buffer of the given size.
+
+        Args:
+            size: The number of elements to allocate.
+        """
         async with self.memory_freed:
             buffer = self.shm_manager.allocate(size)
             while buffer is None:
@@ -103,7 +111,11 @@ class SidecarSender:
             return buffer
 
     async def _free(self, buffer: SharedMemoryBuffer) -> None:
-        """Free a shared memory buffer."""
+        """Free a shared memory buffer.
+
+        Args:
+            buffer: The buffer to free.
+        """
         async with self.memory_freed:
             self.shm_manager.free(buffer)
             self.memory_freed.notify_all()
@@ -116,12 +128,11 @@ class SidecarSender:
             os.unlink(shm_filename())
 
     def _validate_dst_groups(self, dst_ranks: list[sidecar_pb2.RankGroup]) -> bool:
+        """Validate each destination rank group is valid."""
         dst_groups = [dst_group.ranks for dst_group in dst_ranks]
         ranks = [rank for group in dst_groups for rank in group]
-        if any(r < 0 or r == self.sidecar_rank for r in ranks):
-            return False
-        return True
-    
+        return all(r >= 0 and r != self.sidecar_rank for r in ranks)
+
     def _get_grpc_stub(self, rank: int) -> sidecar_pb2_grpc.SidecarStub:
         """Get the stub for the given rank."""
         if rank not in self.dst_stubs:
@@ -141,7 +152,7 @@ class SidecarSender:
             # silently ignore the request
             return sidecar_pb2.SendResponse(status=common_pb2.Status.STATUS_OK)
         dst_ranks = [dst_group.ranks[0] for dst_group in request.dst_ranks]
-        coros =[]
+        coros = []
         for rank in dst_ranks:
             req = sidecar_pb2.PrepareReceiveRequest(
                 id=request.id,
@@ -225,10 +236,14 @@ class SidecarSender:
     ) -> sidecar_pb2.SendResponse:
         """Send a shared memory buffer to another rank in the same node.
 
-        Copy is done here.
+        Args:
+            request: The original gRPC send request.
+            buffer: The shared memory buffer to send.
+            dst_rank: The destination rank.
+
+        Note Copy is done here.
         """
         id = request.id + f"-{request.chunk_id}"
-        logger.debug(f"Send intra-node buffer: {id}")
         if request.shard_rank != 0:
             # silently skips
             return sidecar_pb2.SendResponse(status=common_pb2.Status.STATUS_OK)
@@ -239,7 +254,6 @@ class SidecarSender:
         offest = buffer.data.data_ptr() - self.config.base_ptr
         numel = buffer.data.numel()
         obj = SharedTensorHandle(offset=offest, numel=numel)
-        logger.debug("Sending tensor handle %s with content %s", obj, buffer.data)
         data = self.encoder.encode(obj)
         req = sidecar_pb2.PrepareReceiveRequest(
             id=request.id,
@@ -253,29 +267,34 @@ class SidecarSender:
             logger.error("Failed to prepare receive")
             return sidecar_pb2.SendResponse(status=common_pb2.Status.STATUS_ERROR)
         return sidecar_pb2.SendResponse(status=common_pb2.Status.STATUS_OK)
-        
+
     async def _send_inter_node_buffer(
         self,
         request: sidecar_pb2.SendRequest,
         buffer: SharedMemoryBuffer,
         dst_rank: int,
     ) -> sidecar_pb2.SendResponse:
-        id = request.id + f"-{request.chunk_id}"
-        logger.debug(f"Send inter-node buffer: {id} shard rank {request.shard_rank} concurrent_copy: {self.concurrent_copy}")
+        """Send a shared memory buffer to another rank in a different node through UCX.
+
+        Args:
+            request: The original gRPC send request.
+            buffer: The shared memory buffer to send.
+            dst_rank: The destination rank.
+        """
         if not self.concurrent_copy and request.shard_rank != 0:
             logger.error("Error: shard_rank should be 0 when concurrent_copy is disabled")
             return sidecar_pb2.SendResponse(status=common_pb2.Status.STATUS_ERROR)
         if self.concurrent_copy:
             if not buffer.is_sharded:
                 raise ValueError("Buffer is not sharded")
-            
+
             shard = buffer.shards[request.shard_rank]
 
             # locate the shard in the buffer
             obj = ForwardTensorHandle(
-                total_numel = buffer.data.numel(),
-                shard_rank = request.shard_rank,
-                num_shards = len(self.config.group),
+                total_numel=buffer.data.numel(),
+                shard_rank=request.shard_rank,
+                num_shards=len(self.config.group),
             )
             data = self.encoder.encode(obj)
             req = sidecar_pb2.PrepareReceiveRequest(
@@ -291,17 +310,14 @@ class SidecarSender:
                 return sidecar_pb2.SendResponse(status=common_pb2.Status.STATUS_ERROR)
             tag = chunk_tag(request.id, self.sidecar_rank, request.chunk_id, obj.shard_rank)
             peer = self.peers[dst_rank]
-            logger.debug("***** Sender sending shard %d in %s:  %s", request.shard_rank, id, shard.data)
             await peer.send(buffer_from_tensor(shard.data), tag=tag)
-            logger.debug("***** Sender view of shard %d in %s after send %s", request.shard_rank, id, shard.data)
-            # logger.debug("***** Sender buffer view %s after send %s", id, buffer)
             return sidecar_pb2.SendResponse(status=common_pb2.Status.STATUS_OK)
         else:
             # when concurrent_copy disabled, ignore sharding
             obj = ForwardTensorHandle(
                 total_numel=buffer.data.numel(),
-                shard_rank = 0,
-                num_shards = 1,
+                shard_rank=0,
+                num_shards=1,
             )
             data = self.encoder.encode(obj)
             req = sidecar_pb2.PrepareReceiveRequest(
@@ -323,20 +339,23 @@ class SidecarSender:
                 obj.shard_rank,
             )
             peer = self.peers[dst_rank]
-            logger.debug("==> Sender view of %s in send %s", request.id, buffer.data)
             await peer.send(buffer_from_tensor(buffer.data), tag=tag)
-            # logger.debug("Sent tensor handle %s with content %s", obj, buffer.data)
             return sidecar_pb2.SendResponse(status=common_pb2.Status.STATUS_OK)
 
     async def _concurrent_copy_send(
-            self,
-            request: sidecar_pb2.SendRequest,
-            data: torch.Tensor,
+        self,
+        request: sidecar_pb2.SendRequest,
+        data: torch.Tensor,
     ) -> sidecar_pb2.SendResponse:
-        # this is similar to prepare_recv, the first call will allocate the buffer and future calls will wait if the first call blocks
-        # if chunking is needed, update the lookup key
+        """Send a slice of the tensor to the destination ranks.
+
+        Args:
+            request: The original gRPC send request.
+            data: The tensor to send.
+        """
+        # this is similar to prepare_recv, the first call will allocate the buffer
+        # and future calls will wait if the first call blocks
         id = request.id + f"-{request.chunk_id}"
-        logger.debug(f"concurrent copy send tensor: {id} shard rank {request.shard_rank}")
         is_first = False
         async with self.event_lock:
             if id not in self.malloc_events:
@@ -347,7 +366,6 @@ class SidecarSender:
 
         if is_first:
             buffer = await self._allocate(data.numel())
-            logger.debug("==> Sender First call to allocate buffer for request id %s with slots %s", id, buffer.slots)
             buffer.create_shards(len(self.config.group))
             self.ledger[id] = SendTransferRequestState(
                 id,
@@ -376,20 +394,12 @@ class SidecarSender:
             return sidecar_pb2.SendResponse(status=common_pb2.Status.STATUS_OK)
 
         with torch.cuda.stream(stream):
-            shard.data.copy_(data[shard.offset:shard.offset + shard.length], non_blocking=True)
+            shard.data.copy_(data[shard.offset : shard.offset + shard.length], non_blocking=True)
         await asyncio.to_thread(stream.synchronize)
         buffer.mark_shard_ready(request.shard_rank)
         if buffer.ready:
             # notify copy done
             self.done_events[id].set()
-
-        logger.debug(
-            "==> Sender copied shard rank %d shard %s in %s from %s",
-            request.shard_rank,
-            shard,
-            id,
-            buffer,
-        )
 
         # now send
         dst_ranks = [dst_group.ranks[0] for dst_group in request.dst_ranks]
@@ -410,8 +420,7 @@ class SidecarSender:
             self.ledger[id].shards_sent[request.shard_rank] = True
             if all(self.ledger[id].shards_sent):
                 del self.ledger[id]
-                if not len(intra_node_indexes):
-                    logger.debug("<<<< All shards are sent, freeing %s buffer cur shard rank %d", id, request.shard_rank)
+                if not intra_node_indexes:
                     await self._free(buffer)
 
         if is_first:
@@ -421,7 +430,7 @@ class SidecarSender:
 
         failed = [res.status != common_pb2.Status.STATUS_OK for res in responses]
         # if all intra node failed, remove the tracker
-        if len(intra_node_indexes) and all([failed[i] for i in intra_node_indexes]) and is_first:
+        if intra_node_indexes and all([failed[i] for i in intra_node_indexes]) and is_first:
             del self.saved_buffers[id]
             del self.ref_counts[id]
         if any(failed):
@@ -429,12 +438,17 @@ class SidecarSender:
         return sidecar_pb2.SendResponse(status=common_pb2.Status.STATUS_OK)
 
     async def _single_copy_send(
-            self,
-            request: sidecar_pb2.SendRequest,
-            data: torch.Tensor,
+        self,
+        request: sidecar_pb2.SendRequest,
+        data: torch.Tensor,
     ) -> sidecar_pb2.SendResponse:
+        """Send a tensor to the destination ranks, but only use one GPU to copy.
+
+        Args:
+            request: The original gRPC send request.
+            data: The tensor to send.
+        """
         id = request.id + f"-{request.chunk_id}"
-        logger.debug(f"Single copy send: {id}")
         if request.shard_rank != 0:
             # silently ignore the request
             return sidecar_pb2.SendResponse(status=common_pb2.Status.STATUS_OK)
@@ -444,14 +458,12 @@ class SidecarSender:
         numel = data.numel()
         # no contention
         buffer = await self._allocate(numel)
-        logger.debug("==> Sender allocate buffer for request id %s with slots %s", id, buffer.slots)
         span.add_event("copy.start")
         # note only the leader sidecar will reach this function
         stream = self.streams[self.sidecar_rank]
         with torch.cuda.stream(stream):
             buffer.data.copy_(data, non_blocking=True)
         await asyncio.to_thread(stream.synchronize)
-        logger.debug("==> Sender view of %s before send %s", id, buffer.data)
         span.add_event("copy.done")
 
         dst_ranks = [dst_group.ranks[0] for dst_group in request.dst_ranks]
@@ -467,18 +479,16 @@ class SidecarSender:
                 coros.append(self._send_inter_node_buffer(request, buffer, rank))
         responses = await asyncio.gather(*coros)
 
-        if not len(intra_node_indexes):
+        if not intra_node_indexes:
             # if no intra-node send, we can safely free the buffer
-            logger.debug("==> no intra-node send, freeing %s buffer", id)
             await self._free(buffer)
         else:
-            logger.debug("==> has intra-node send, saving %s buffer", id)
             self.saved_buffers[id] = buffer
             self.ref_counts[id] = len(intra_node_indexes)
 
         failed = [res.status != common_pb2.Status.STATUS_OK for res in responses]
         # if all intra node failed, remove the tracker
-        if len(intra_node_indexes) and all([failed[i] for i in intra_node_indexes]):
+        if intra_node_indexes and all([failed[i] for i in intra_node_indexes]):
             logger.warning("All intra-node send failed, removing the tracker")
             del self.saved_buffers[id]
             del self.ref_counts[id]
@@ -491,6 +501,12 @@ class SidecarSender:
         request: sidecar_pb2.SendRequest,
         data: torch.Tensor,
     ) -> sidecar_pb2.SendResponse:
+        """Send a tensor to the destination ranks.
+
+        Args:
+            request: The original gRPC send request.
+            data: The tensor to send.
+        """
         if self.concurrent_copy:
             return await self._concurrent_copy_send(request, data)
         return await self._single_copy_send(request, data)

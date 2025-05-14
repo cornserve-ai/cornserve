@@ -1,10 +1,27 @@
+"""The client-side data structures."""
+
 import dataclasses
 from functools import reduce
 from operator import mul
+
 import torch
+
 
 @dataclasses.dataclass
 class SidecarConfig:
+    """The config to initialize the sidecar server.
+
+    Attributes:
+        sidecar_rank: The rank of the sidecar server.
+        group: The sidecar ranks in the TP group.
+        max_workers: The maximum number of workers in the thread pool.
+        send_tensor_dtype: The dtype of the tensor to be sent.
+        send_tensor_shape: The shape of the tensor to be sent.
+        recv_tensor_dtype: The dtype of the tensor to be received.
+        recv_tensor_shape: The shape of the tensor to be received.
+        concurrent_copy: Whether to enable concurrent copy in the sidecar server.
+    """
+
     sidecar_rank: int
     # TP group of all sidecar ranks
     # used to deduct TP rank
@@ -23,7 +40,9 @@ class SidecarConfig:
     concurrent_copy: bool = True
 
     # read_only = False
+
     def __post_init__(self):
+        """Post-initialization checks for the SidecarConfig class."""
         if self.group is None:
             self.group = [self.sidecar_rank]
         self.group.sort()
@@ -41,10 +60,15 @@ class SidecarConfig:
             raise ValueError("Send tensor shape and dtype should be set together")
         if (self.recv_tensor_shape is None) ^ (self.recv_tensor_dtype is None):
             raise ValueError("Recv tensor shape and dtype should be set together")
-        if self.send_tensor_dtype is not None and self.recv_tensor_dtype is not None and self.send_tensor_dtype != self.recv_tensor_dtype:
+        if (
+            self.send_tensor_dtype is not None
+            and self.recv_tensor_dtype is not None
+            and self.send_tensor_dtype != self.recv_tensor_dtype
+        ):
             raise ValueError("Send and recv tensor dtypes should be the same for now")
 
     def get_send_tensor_shape(self) -> tuple[int, ...]:
+        """Return the send tensor shape."""
         if self.send_tensor_shape is not None:
             return self.send_tensor_shape
         if self.recv_tensor_shape is not None:
@@ -52,6 +76,7 @@ class SidecarConfig:
         raise ValueError("Either send tensor shape or recv tensor shape should be set")
 
     def get_send_slot_numel(self) -> int:
+        """Return the slot_numel to use for the sender shared memory manager."""
         if self.send_tensor_shape is not None:
             return reduce(mul, self.send_tensor_shape[1:], 1)
         if self.recv_tensor_shape is not None:
@@ -59,6 +84,7 @@ class SidecarConfig:
         raise ValueError("Either send tensor shape or recv tensor shape should be set")
 
     def get_recv_tensor_shape(self) -> tuple[int, ...]:
+        """Return the recv tensor shape."""
         if self.recv_tensor_shape is not None:
             return self.recv_tensor_shape
         if self.send_tensor_shape is not None:
@@ -66,6 +92,7 @@ class SidecarConfig:
         raise ValueError("Either send tensor shape or recv tensor shape should be set")
 
     def get_recv_slot_numel(self) -> int:
+        """Return the slot_numel to use for the receiver shared memory manager."""
         if self.recv_tensor_shape is not None:
             return reduce(mul, self.recv_tensor_shape[1:], 1)
         if self.send_tensor_shape is not None:
@@ -73,6 +100,7 @@ class SidecarConfig:
         raise ValueError("Either send tensor shape or recv tensor shape should be set")
 
     def get_dtype(self) -> torch.dtype:
+        """Return the dtype to use for the sender and receiver shared memory manager."""
         if self.send_tensor_dtype is not None:
             return self.send_tensor_dtype
         if self.recv_tensor_dtype is not None:

@@ -1,3 +1,5 @@
+"""Sidecar Receiver."""
+
 import asyncio
 import contextlib
 import ctypes
@@ -5,8 +7,8 @@ import os
 from typing import Any
 
 import grpc
-from opentelemetry import trace
 import torch
+from opentelemetry import trace
 
 from cornserve.logging import SidcarAdapter, get_logger
 from cornserve.services.pb import common_pb2, sidecar_pb2, sidecar_pb2_grpc
@@ -37,12 +39,15 @@ tracer = trace.get_tracer(__name__)
 
 class SidecarReceiver:
     """The receiver sidecar server supports receiving tensors from other ranks using ucx-py backend."""
+
     def __init__(
         self,
         config: SidecarReceiverConfig,
     ) -> None:
         """Initialize the receiver sidecar.
 
+        Args:
+            config: The configuration for the receiver sidecar.
         """
         self.config = config
         self.sidecar_rank = config.sidecar_rank
@@ -86,10 +91,11 @@ class SidecarReceiver:
         self.encoder = MsgpackEncoder()
         self.decoder = MsgpackDecoder()
 
-        self.full_tensor = config.full_tensor
-
     async def _allocate(self, size: int) -> SharedMemoryBuffer:
-        """Allocate a shared memory buffer of the given size."""
+        """Allocate a shared memory buffer of the given size.
+
+        size: The number of elements to allocate.
+        """
         async with self.memory_freed:
             buffer = self.shm_manager.allocate(size)
             while buffer is None:
@@ -100,7 +106,11 @@ class SidecarReceiver:
             return buffer
 
     async def _free(self, buffer: SharedMemoryBuffer) -> None:
-        """Free a shared memory buffer."""
+        """Free a shared memory buffer.
+
+        Args:
+            buffer: The shared memory buffer to free.
+        """
         async with self.memory_freed:
             self.shm_manager.free(buffer)
             self.memory_freed.notify_all()
@@ -124,14 +134,12 @@ class SidecarReceiver:
         This function allocates a shared memory buffer if not already allocated,
         and queues up a receive task to receive the tensor.
         """
-
         id = request.id + f"-{request.chunk_id}"
 
         logger.debug("==> Prepare receive request for request id %s", id)
         obj = self.decoder.decode(request.data)
         if isinstance(obj, ForwardTensorHandle):
             # inter-node
-            # logger.debug("Inter node prepare receive request for request id %s", id)
             is_first = False
             async with self.event_lock:
                 if id not in self.malloc_events:
@@ -142,7 +150,6 @@ class SidecarReceiver:
             if is_first:
                 buffer = await self._allocate(obj.total_numel)
                 buffer.create_shards(obj.num_shards)
-                # logger.debug("First call to allocate buffer for request id %s with slots %s", id, buffer.slots)
 
                 self.ledger[id] = RecvTransferRequestState(id, buffer)
                 self.malloc_events[id].set()
@@ -167,22 +174,10 @@ class SidecarReceiver:
                     obj.shard_rank,
                     id,
                 )
-                # print everything before the data in the slab
-                # length = buffer.data.data_ptr() - self.config.shared_tensor.data_ptr()
-                # if length > 0:
-                    # cbuf = (ctypes.c_byte * length).from_address(self.config.shared_tensor.data_ptr())
-                    # prev_tensor = torch.frombuffer(cbuf, dtype=self.dtype, count=length // self.dtype.itemsize)
-                    # logger.debug("MONITOR: shared_slab up to %d is %s before receiving %s", length, prev_tensor, id)
-                # logger.debug("=== Receiver view of req %s before recv shard rank %d %s", id, obj.shard_rank, buffer)
                 await peer.recv(
                     buffer_from_tensor(buffer.shards[obj.shard_rank].data),
                     tag=tag,
                 )
-                # logger.debug("=== Receiver view of req %s after recv %s", id, buffer)
-                # logger.debug("=== Receiver view of %s after receive %s buffer handle %s", id, buffer.data, buffer.create_handle(self.config.base_ptr))
-                # if length > 0:
-                    # logger.debug("MONITOR: shared_slab up to %d is %s after receiving %s", length, prev_tensor, id)
-                # logger.debug("Received shard %d from %s: \n%s", obj.shard_rank, id, buffer.shards[obj.shard_rank])
                 buffer.mark_shard_ready(obj.shard_rank)
                 if buffer.is_ready():
                     async with self.recv_done_lock:
@@ -192,26 +187,14 @@ class SidecarReceiver:
 
             asyncio.create_task(recv_task())
             return sidecar_pb2.PrepareReceiveResponse(status=common_pb2.Status.STATUS_OK)
-            
+
         elif isinstance(obj, SharedTensorHandle):
             # intra-node
             logger.info("Intra node prepare receive request for request id %s", id)
-            # logger.debug("Shared tensor handle: %s", obj)
             cbuf = (ctypes.c_byte * obj.numel * self.dtype.itemsize).from_address(self.config.base_ptr + obj.offset)
             tensor = torch.frombuffer(cbuf, dtype=self.dtype, count=obj.numel)
-            # logger.debug("Reconstructed tensor from shared memory: %s", tensor)
-            # index = obj.offset // self.dtype.itemsize
-            # logger.debug("Reference tensor: %s", self.full_tensor[index:index + obj.numel])
-            dummy_buffer = SharedMemoryBuffer(
-                size=obj.numel,
-                data=tensor,
-                slots=[],
-            )
-            self.ledger[id] = RecvTransferRequestState(
-                id,
-                dummy_buffer,
-                request.src_rank,
-            )
+            dummy_buffer = SharedMemoryBuffer(size=obj.numel, data=tensor, slots=[])
+            self.ledger[id] = RecvTransferRequestState(id, dummy_buffer, request.src_rank)
             async with self.recv_done_lock:
                 self.ledger[id].done = True
                 if id in self.req_events:
@@ -230,10 +213,10 @@ class SidecarReceiver:
         recv_req: sidecar_pb2.ReceiveRequest,
         context: grpc.aio.ServicerContext,
     ) -> sidecar_pb2.ReceiveResponse:
-        """Receive the tensor of a request from other ranks, returns a slot number in the shared memory.
+        """Receive the tensor of a request from other ranks.
 
-        If all chunks are received, return the slot number imediately.
-        Else, queues up an event for the request id and waits for all chunks to be received.
+        If all shards are received, return the slot number imediately.
+        Else, queues up an event for the request id and waits for all shards to be received.
         """
         id = recv_req.id + f"-{recv_req.chunk_id}"
         logger.info("==> Receive request for request id %s", id)
@@ -250,7 +233,7 @@ class SidecarReceiver:
         if id in self.ledger and self.ledger[id].done:
             self.recv_done_lock.release()
         else:
-            # still waiting for chunks/shards/objects
+            # still waiting for shards/objects
             event = asyncio.Event()
             self.req_events[id] = event
             self.recv_done_lock.release()
@@ -267,13 +250,6 @@ class SidecarReceiver:
         logger.info("==> All shards received for request id %s", id)
         state = self.ledger[id]
         obj = state.buffer.create_handle(self.config.base_ptr)
-        logger.debug("==> Returning Shared tensor handle: %s for %s", obj, id)
-        index = obj.offset // self.dtype.itemsize
-        logger.debug(
-            "Serverside Reference tensor before return %s of %s",
-            self.full_tensor[index : index + obj.numel],
-            id,
-        )
 
         return sidecar_pb2.ReceiveResponse(
             status=common_pb2.Status.STATUS_OK,
@@ -281,7 +257,11 @@ class SidecarReceiver:
         )
 
     def _get_grpc_stub(self, rank: int) -> sidecar_pb2_grpc.SidecarStub:
-        """Get the stub for the given rank."""
+        """Get the stub for the given rank.
+
+        Args:
+            rank: The rank of the sidecar server.
+        """
         if rank not in self.dst_stubs:
             self.dst_channels[rank] = grpc.aio.insecure_channel(grpc_url_from_rank(rank))
             self.dst_stubs[rank] = sidecar_pb2_grpc.SidecarStub(self.dst_channels[rank])
@@ -292,8 +272,8 @@ class SidecarReceiver:
         mark_done_req: sidecar_pb2.MarkDoneRequest,
         context: grpc.aio.ServicerContext,
     ) -> sidecar_pb2.MarkDoneResponse:
-        id = mark_done_req.id + f"-{mark_done_req.chunk_id}"
         """Mark a tensor as consumed, free up the shared memory used."""
+        id = mark_done_req.id + f"-{mark_done_req.chunk_id}"
         if id in self.saved_objs:
             del self.saved_objs[id]
             return sidecar_pb2.MarkDoneResponse(status=common_pb2.Status.STATUS_OK)
