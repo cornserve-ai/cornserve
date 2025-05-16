@@ -1,8 +1,10 @@
-"""Tests for the LLaVA-OneVision model's vision encoder."""
+"""Tests for the Gemma3 model's vision encoder."""
+
+import os
 
 import pytest
 import torch
-from transformers.models.llava_onevision.modeling_llava_onevision import LlavaOnevisionForConditionalGeneration
+from transformers.models.gemma3.modeling_gemma3 import Gemma3ForConditionalGeneration
 
 from cornserve.task_executors.eric.distributed.parallel import destroy_distributed, init_distributed
 from cornserve.task_executors.eric.executor.executor import ModelExecutor
@@ -12,13 +14,13 @@ from cornserve.task_executors.eric.schema import Status
 
 from ..utils import ModalityData, assert_same_weights, batch_builder, param_tp_size
 
-model_id = "llava-hf/llava-onevision-qwen2-7b-ov-chat-hf"
+model_id = "google/gemma-3-4b-it"
 
 
 def test_weight_loading() -> None:
     """Check if weights are loaded correctly."""
     # Hugging Face model output
-    hf_model = LlavaOnevisionForConditionalGeneration.from_pretrained(model_id, torch_dtype="auto")
+    hf_model = Gemma3ForConditionalGeneration.from_pretrained(model_id, torch_dtype="auto")
 
     # Load our model
     init_distributed(world_size=1, rank=0)
@@ -54,19 +56,7 @@ def test_image_inference(test_images: list[ModalityData], tp_size: int) -> None:
     """Test if inference works correctly."""
     executor = ModelExecutor(model_id=model_id, tp_size=tp_size, sender_sidecar_ranks=None)
 
-    result = executor.execute_model(batch=batch_builder(model_id, "onevision", test_images))
-
-    assert result.status == Status.SUCCESS
-
-    executor.shutdown()
-
-
-@param_tp_size
-def test_video_inference(test_videos: list[ModalityData], tp_size: int) -> None:
-    """Test if inference works correctly."""
-    executor = ModelExecutor(model_id=model_id, tp_size=tp_size, sender_sidecar_ranks=None)
-
-    result = executor.execute_model(batch=batch_builder(model_id, "onevision", test_videos[:2]))
+    result = executor.execute_model(batch=batch_builder(model_id, "gemma3", test_images))
 
     assert result.status == Status.SUCCESS
 

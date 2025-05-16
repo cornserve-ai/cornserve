@@ -4,7 +4,7 @@ from typing import Callable
 import torch
 import torch.nn as nn
 import numpy.typing as npt
-from transformers import AutoProcessor
+from transformers.models.auto.processing_auto import AutoProcessor
 from transformers.models.llava_onevision.configuration_llava_onevision import LlavaOnevisionConfig
 from transformers.models.llava_onevision.modeling_llava_onevision import (
     get_anyres_image_grid_shape,
@@ -273,7 +273,6 @@ class LlavaOneVisionEncoder(EricModel):
             Each [num_tiles, 3, image_size (384), image_size (384)].
             The number of tiles can be different for each image.
         """
-        # Batch
         match modality:
             case Modality.IMAGE:
                 return self.get_image_embeddings(batch["pixel_values"], batch["image_sizes"])
