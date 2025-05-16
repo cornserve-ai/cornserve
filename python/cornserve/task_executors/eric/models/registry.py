@@ -114,7 +114,6 @@ MODEL_REGISTRY: dict[str, RegistryEntry] = {
         ),
         modality={
             Modality.IMAGE: ModalityEntry(),
-            Modality.VIDEO: ModalityEntry(),
         },
     ),
 }
