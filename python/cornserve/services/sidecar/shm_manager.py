@@ -37,16 +37,16 @@ class SharedMemoryChunk:
 class SharedMemoryShard:
     """A shard of a shared memory buffer."""
 
-    def __init__(self, offset: int, lenght: int, data: torch.Tensor):
+    def __init__(self, offset: int, length: int, data: torch.Tensor):
         """Initialize a shared memory shard.
 
         Args:
             offset: the offset of the shard in the shared memory buffer
-            lenght: the length of the shard
+            length: the length of the shard
             data: the backing tensor storing the data
         """
         self.offset = offset
-        self.length = lenght
+        self.length = length
         self.data = data
 
     def __repr__(self):
@@ -85,7 +85,7 @@ class SharedMemoryBuffer:
             self.shards.append(
                 SharedMemoryShard(
                     offset=start_pos,
-                    lenght=end_pos - start_pos,
+                    length=end_pos - start_pos,
                     data=shard_data,
                 )
             )
