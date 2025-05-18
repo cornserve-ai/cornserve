@@ -27,7 +27,7 @@ message RegisterRequest {
 
 message RegisterResponse {
   common.Status status = 1;
-  int32 shm_size = 2; // numel in the sindle sender/receiver slab
+  int32 shm_size = 2; // numel in the single sender/receiver slab
   int32 local_rank = 3; // the GPU index to use
   int32 num_local_sidecars = 4; // used for init_shmem
 }
