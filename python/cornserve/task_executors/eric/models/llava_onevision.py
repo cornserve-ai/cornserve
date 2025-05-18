@@ -54,11 +54,13 @@ class LlavaOneVisionEncoder(EricModel):
 
     @property
     def chunk_shape(self) -> tuple[int, ...]:
-        """Fixed resolution ViT, so vision tokens worth one tile."""
-        image_size: int = self.config.vision_config.image_size
-        patch_size: int = self.config.vision_config.patch_size
-        num_patches = image_size // patch_size
-        return (1, num_patches**2, self.config.text_config.hidden_size)
+        """Fixed resolution ViT with anyres pooling.
+
+        While for a single tile the shape is [729, hidden_size (3584)], anyres pooling
+        changes the total number of tokens as tiles are merged. So, we just go with
+        [1, hidden_size (3584)] as the chunk shape.
+        """
+        return (1, self.config.text_config.hidden_size)
 
     @property
     def device(self) -> torch.device:

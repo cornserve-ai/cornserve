@@ -67,11 +67,12 @@ class Gemma3VisionEncoder(EricModel):
 
     @property
     def chunk_shape(self) -> tuple[int, ...]:
-        """Fixed resolution ViT, so vision tokens worth one tile."""
-        image_size: int = self.config.vision_config.image_size
-        patch_size: int = self.config.vision_config.patch_size
-        num_patches = image_size // patch_size
-        return (1, num_patches**2, self.config.text_config.hidden_size)
+        """Fixed resolution ViT followed by pooling.
+
+        4096 vision tokens are pooled to 256 tokens. Hidden size is 2560.
+        This is with Pan & Scan disabled, so any image is just resized to 896x896.
+        """
+        return (1, self.config.mm_tokens_per_image, self.config.text_config.hidden_size)
 
     def forward(
         self,
