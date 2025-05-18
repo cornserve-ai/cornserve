@@ -9,7 +9,7 @@ tensors, but it also supports any other types.
 Code lives under `python/services/sidecar`
 
 ## Architecture
-Sidecars arewimplemented with Servers and Clients. Conceptually, sidecar servers
+Sidecars are implemented with Servers and Clients. Conceptually, sidecar servers
 are long running services inside the cluster, and each task executor should
 create sidecar clients that register to servers and request servers to perform
 send or receive operations. All control signals among servers and clients use
