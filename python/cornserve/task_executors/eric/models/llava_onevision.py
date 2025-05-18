@@ -4,7 +4,7 @@ from typing import Callable
 import torch
 import torch.nn as nn
 import numpy.typing as npt
-from transformers import AutoProcessor
+from transformers.models.auto.processing_auto import AutoProcessor
 from transformers.models.llava_onevision.configuration_llava_onevision import LlavaOnevisionConfig
 from transformers.models.llava_onevision.modeling_llava_onevision import (
     get_anyres_image_grid_shape,
@@ -54,11 +54,13 @@ class LlavaOneVisionEncoder(EricModel):
 
     @property
     def chunk_shape(self) -> tuple[int, ...]:
-        """Fixed resolution ViT, so vision tokens worth one tile."""
-        image_size: int = self.config.vision_config.image_size
-        patch_size: int = self.config.vision_config.patch_size
-        num_patches = image_size // patch_size
-        return (1, num_patches**2, self.config.text_config.hidden_size)
+        """Fixed resolution ViT with anyres pooling.
+
+        While for a single tile the shape is [729, hidden_size (3584)], anyres pooling
+        changes the total number of tokens as tiles are merged. So, we just go with
+        [1, hidden_size (3584)] as the chunk shape.
+        """
+        return (1, self.config.text_config.hidden_size)
 
     @property
     def device(self) -> torch.device:
@@ -273,7 +275,6 @@ class LlavaOneVisionEncoder(EricModel):
             Each [num_tiles, 3, image_size (384), image_size (384)].
             The number of tiles can be different for each image.
         """
-        # Batch
         match modality:
             case Modality.IMAGE:
                 return self.get_image_embeddings(batch["pixel_values"], batch["image_sizes"])

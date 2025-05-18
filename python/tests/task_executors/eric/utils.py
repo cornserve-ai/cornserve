@@ -8,6 +8,7 @@ from functools import cache
 from typing import Callable
 
 import numpy.typing as npt
+import pytest
 import torch
 import torch.nn as nn
 
@@ -16,15 +17,22 @@ from cornserve.task_executors.eric.router.processor import Processor
 from cornserve.task_executors.eric.schema import Modality, WorkerBatch
 
 DUMP_DIR = os.getenv("CORNSERVE_TEST_DUMP_TENSOR_DIR", None)
+TEST_NUM_GPUS: list[int] = [1, 2, 4, 8]
 
 try:
-    NUM_GPUS = int(
+    CURR_NUM_GPUS = int(
         subprocess.check_output(["nvidia-smi", "--query-gpu=count", "--format=csv,noheader,nounits", "-i", "0"])
         .strip()
         .decode()
     )
 except subprocess.CalledProcessError:
-    NUM_GPUS = 0
+    CURR_NUM_GPUS = 0
+
+
+def param_tp_size(func):
+    """Parametrize test argument `tp_size` with power-of-two TP degrees."""
+    sizes = [ts for ts in (1, 2, 4, 8) if ts <= CURR_NUM_GPUS]
+    return pytest.mark.parametrize("tp_size", sizes, ids=lambda x: f"TP={x}")(func)
 
 
 class ModalityData:

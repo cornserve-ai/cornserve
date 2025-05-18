@@ -1,6 +1,5 @@
 """Tests for the Qwen2-VL model's vision encoder."""
 
-import pytest
 import torch
 from transformers.models.qwen2_vl.modeling_qwen2_vl import Qwen2VLForConditionalGeneration
 
@@ -9,7 +8,7 @@ from cornserve.task_executors.eric.executor.executor import ModelExecutor
 from cornserve.task_executors.eric.executor.loader import load_model
 from cornserve.task_executors.eric.schema import Status
 
-from ..utils import NUM_GPUS, ModalityData, assert_same_weights, batch_builder
+from ..utils import ModalityData, assert_same_weights, batch_builder, param_tp_size
 
 model_id = "Qwen/Qwen2-VL-7B-Instruct"
 
@@ -28,11 +27,7 @@ def test_weight_loading() -> None:
     assert_same_weights(hf_model, our_model)
 
 
-@pytest.mark.parametrize(
-    "tp_size",
-    list(filter(lambda x: x <= NUM_GPUS, [1, 2, 4, 8])),
-    ids=lambda x: f"TP={x}",
-)
+@param_tp_size
 def test_image_inference(test_images: list[ModalityData], tp_size: int) -> None:
     """Test if inference works correctly."""
     executor = ModelExecutor(model_id=model_id, tp_size=tp_size, sender_sidecar_ranks=None)
@@ -44,11 +39,7 @@ def test_image_inference(test_images: list[ModalityData], tp_size: int) -> None:
     executor.shutdown()
 
 
-@pytest.mark.parametrize(
-    "tp_size",
-    list(filter(lambda x: x <= NUM_GPUS, [1, 2, 4, 8])),
-    ids=lambda x: f"TP={x}",
-)
+@param_tp_size
 def test_video_inference(test_videos: list[ModalityData], tp_size: int) -> None:
     """Test if inference works correctly."""
     executor = ModelExecutor(model_id=model_id, tp_size=tp_size, sender_sidecar_ranks=None)

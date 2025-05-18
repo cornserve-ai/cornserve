@@ -103,4 +103,17 @@ MODEL_REGISTRY: dict[str, RegistryEntry] = {
             Modality.VIDEO: ModalityEntry(),
         },
     ),
+    "gemma3": RegistryEntry(
+        module="gemma3",
+        class_name="Gemma3VisionEncoder",
+        vit_resolution_type=ViTResolutionType.FIXED,
+        weight=WeightInfo(
+            required_prefixes=["vision_tower.", "multi_modal_projector."],
+            ignored_prefixes=["vision_tower.vision_model.post_layernorm"],
+            strip_prefixes=False,
+        ),
+        modality={
+            Modality.IMAGE: ModalityEntry(),
+        },
+    ),
 }

@@ -9,7 +9,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import numpy.typing as npt
 from einops import rearrange, repeat
-from transformers import AutoImageProcessor
+from transformers.models.auto.image_processing_auto import AutoImageProcessor
 from transformers.models.qwen2_vl.configuration_qwen2_vl import Qwen2VLConfig
 from flash_attn import flash_attn_varlen_func
 from flash_attn.layers.rotary import apply_rotary_emb
