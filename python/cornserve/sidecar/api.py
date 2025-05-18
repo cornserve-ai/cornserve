@@ -179,7 +179,7 @@ class Sidecar:
         )
         response = self.stub.Send(request)
         if response.status == common_pb2.Status.STATUS_OK:
-            logger.debug("Sent shard %d of chunk %d in req %s successfully", self.shard_rank, chunk_id, id)
+            logger.info("Sent shard %d of chunk %d in req %s successfully", self.shard_rank, chunk_id, id)
         else:
             logger.error("Failed to send data with id %s", id)
 
@@ -207,7 +207,33 @@ class Sidecar:
         else:
             return obj
 
-    @tracer.start_as_current_span(name="Sidecar.markdone")
+    @tracer.start_as_current_span(name="Sidecar.read")
+    def read(self, id: str, chunk_id: int = 0) -> Any:
+        """Read the data from the sidecar server.
+
+        This is the sync version of recv.
+
+        Args:
+            id: The id of the data.
+            chunk_id: The chunk id of the data to receive.
+        """
+        span = trace.get_current_span()
+        span.set_attribute("sidecar.recv.id", id)
+        span.set_attribute("sidecar.recv.chunk_id", chunk_id)
+        request = sidecar_pb2.ReceiveRequest(id=id, chunk_id=chunk_id)
+        response = self.stub.Receive(request)
+        if response.status != common_pb2.Status.STATUS_OK:
+            raise ValueError(f"Failed to receive data with id {id}")
+
+        obj = self.msgpack_decoder.decode(response.data)
+        if isinstance(obj, SharedTensorHandle):
+            cbuf = (ctypes.c_byte * obj.numel * self.dtype.itemsize).from_address(self.base_ptr + obj.offset)
+            tensor = torch.frombuffer(cbuf, dtype=self.dtype, count=obj.numel)
+            return tensor.view(self.config.get_recv_tensor_shape())
+        else:
+            return obj
+
+    @tracer.start_as_current_span(name="Sidecar.mark_done")
     async def mark_done(self, id: str, chunk_id: int = 0) -> None:
         """Mark a tensor as done in the sidecar server, which will free the shared memory buffer.
 

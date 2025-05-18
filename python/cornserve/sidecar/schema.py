@@ -33,9 +33,9 @@ class SidecarConfig:
     ## Memory management
     # tensor size hint to reduce internal fragmentation
     send_tensor_dtype: torch.dtype | None = None
-    send_tensor_shape: tuple[int, ...] | None = None
+    send_tensor_shape: tuple[int, ...] | int | None = None
     recv_tensor_dtype: torch.dtype | None = None
-    recv_tensor_shape: tuple[int, ...] | None = None
+    recv_tensor_shape: tuple[int, ...] | int | None = None
 
     concurrent_copy: bool = True
 
@@ -48,10 +48,6 @@ class SidecarConfig:
         self.group.sort()
         if self.sidecar_rank not in self.group:
             raise ValueError("Sidecar rank should be in the group")
-        if self.send_tensor_shape is not None and self.send_tensor_shape[0] != -1:
-            raise ValueError("The first dimension of the send tensor shape should be -1")
-        if self.recv_tensor_shape is not None and self.recv_tensor_shape[0] != -1:
-            raise ValueError("The first dimension of the recv tensor shape should be -1")
         if self.max_workers <= 0:
             raise ValueError("Max workers should be positive")
         if self.send_tensor_shape is None and self.recv_tensor_shape is None:
@@ -70,33 +66,49 @@ class SidecarConfig:
     def get_send_tensor_shape(self) -> tuple[int, ...]:
         """Return the send tensor shape."""
         if self.send_tensor_shape is not None:
-            return self.send_tensor_shape
+            return self.send_tensor_shape if isinstance(self.send_tensor_shape, tuple) else (self.send_tensor_shape,)
         if self.recv_tensor_shape is not None:
-            return self.recv_tensor_shape
+            return self.recv_tensor_shape if isinstance(self.recv_tensor_shape, tuple) else (self.recv_tensor_shape,)
         raise ValueError("Either send tensor shape or recv tensor shape should be set")
 
     def get_send_slot_numel(self) -> int:
         """Return the slot_numel to use for the sender shared memory manager."""
         if self.send_tensor_shape is not None:
-            return reduce(mul, self.send_tensor_shape[1:], 1)
+            return (
+                reduce(mul, self.send_tensor_shape[1:], 1)
+                if isinstance(self.send_tensor_shape, tuple)
+                else self.send_tensor_shape
+            )
         if self.recv_tensor_shape is not None:
-            return reduce(mul, self.recv_tensor_shape[1:], 1)
+            return (
+                reduce(mul, self.recv_tensor_shape[1:], 1)
+                if isinstance(self.recv_tensor_shape, tuple)
+                else self.recv_tensor_shape
+            )
         raise ValueError("Either send tensor shape or recv tensor shape should be set")
 
     def get_recv_tensor_shape(self) -> tuple[int, ...]:
         """Return the recv tensor shape."""
         if self.recv_tensor_shape is not None:
-            return self.recv_tensor_shape
+            return self.recv_tensor_shape if isinstance(self.recv_tensor_shape, tuple) else (self.recv_tensor_shape,)
         if self.send_tensor_shape is not None:
-            return self.send_tensor_shape
+            return self.send_tensor_shape if isinstance(self.send_tensor_shape, tuple) else (self.send_tensor_shape,)
         raise ValueError("Either send tensor shape or recv tensor shape should be set")
 
     def get_recv_slot_numel(self) -> int:
         """Return the slot_numel to use for the receiver shared memory manager."""
         if self.recv_tensor_shape is not None:
-            return reduce(mul, self.recv_tensor_shape[1:], 1)
+            return (
+                reduce(mul, self.recv_tensor_shape[1:], 1)
+                if isinstance(self.recv_tensor_shape, tuple)
+                else self.recv_tensor_shape
+            )
         if self.send_tensor_shape is not None:
-            return reduce(mul, self.send_tensor_shape[1:], 1)
+            return (
+                reduce(mul, self.send_tensor_shape[1:], 1)
+                if isinstance(self.send_tensor_shape, tuple)
+                else self.send_tensor_shape
+            )
         raise ValueError("Either send tensor shape or recv tensor shape should be set")
 
     def get_dtype(self) -> torch.dtype:

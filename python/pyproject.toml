@@ -32,13 +32,14 @@ frontend = [
   "websocket-client",
 ]
 sidecar-api = [
-  "torch",
+  "torch>=2.5.0",
   "opentelemetry-instrumentation-grpc",
   "opentelemetry-instrumentation-threading",
 ]
 sidecar = [
-  "torch",
+  "torch>=2.5.0",
   "ucxx-cu12",
+  "msgspec",
   "opentelemetry-instrumentation-grpc",
 ]
 gateway = [
@@ -47,6 +48,7 @@ gateway = [
   "opentelemetry-instrumentation-fastapi",
   "opentelemetry-instrumentation-grpc",
   "opentelemetry-instrumentation-httpx",
+  "websocket-client",
 ]
 resource-manager = [
   "opentelemetry-instrumentation-grpc",

@@ -1,4 +1,4 @@
-FROM pytorch/pytorch:2.6.0-cuda12.4-cudnn9-runtime
+FROM pytorch/pytorch:2.7.0-cuda12.6-cudnn9-runtime
 
 RUN apt-get update && apt-get upgrade -y
 RUN apt-get install wget build-essential librdmacm-dev net-tools -y

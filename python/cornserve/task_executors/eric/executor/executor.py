@@ -71,13 +71,11 @@ class ModelExecutor:
         for tp_rank in range(tp_size):
             start_time = time.monotonic()
             logger.info("Spawning worker %d", tp_rank)
-            sender_sidecar_rank = sender_sidecar_ranks[tp_rank] if sender_sidecar_ranks else None
             worker = Worker.spawn_worker(
                 model_id=model_id,
                 tp_rank=tp_rank,
                 tp_size=tp_size,
                 input_mq_handle=input_mq_handle,
-                sender_sidecar_rank=sender_sidecar_rank,
                 sender_sidecar_ranks=sender_sidecar_ranks,
             )
             logger.info(

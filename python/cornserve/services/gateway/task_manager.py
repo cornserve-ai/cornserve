@@ -113,7 +113,7 @@ class TaskManager:
             # We're treating the whole list of deployments as a single transaction.
             if errors:
                 cleanup_coros = []
-                for task_id in deployed_tasks:
+                for task_id in to_deploy:
                     task = self.tasks[task_id]
                     cleanup_coros.append(
                         self.resource_manager.TeardownUnitTask(TeardownUnitTaskRequest(task=task.to_pb()))

@@ -55,7 +55,7 @@ class TaskManager:
         self.core_client = kclient.CoreV1Api(api_client=self.k8s_client)
 
         # Config variables
-        self.task_executor_healthy_timeout = 5 * 60.0
+        self.task_executor_healthy_timeout = 10 * 60.0
 
     @classmethod
     async def init(cls, id: str, task: UnitTask, gpus: list[GPU]) -> TaskManager:

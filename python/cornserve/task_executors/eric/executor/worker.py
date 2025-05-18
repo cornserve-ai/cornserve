@@ -65,7 +65,6 @@ class Worker:
         tp_size: int,
         input_mq: MessageQueue,
         response_mq: MessageQueue,
-        sender_sidecar_rank: int | None,
         sender_sidecar_ranks: list[int] | None,
     ) -> None:
         """Initialize the worker."""
@@ -74,7 +73,6 @@ class Worker:
         self.tp_size = tp_size
         self.input_mq = input_mq
         self.response_mq = response_mq
-        self.sender_sidecar_rank = sender_sidecar_rank
         self.sender_sidecar_ranks = sender_sidecar_ranks
 
         # Initialize torch.distributed and tensor parallelism
@@ -84,13 +82,13 @@ class Worker:
         self.model = load_model(model_name_or_path=model_id)
 
         # Initialize the sender sidecar client
-        if sender_sidecar_rank is not None:
+        if sender_sidecar_ranks:
             self.sender_sidecar_client = Sidecar(
                 config=SidecarConfig(
-                    sidecar_rank=sender_sidecar_rank,
+                    sidecar_rank=sender_sidecar_ranks[tp_rank],
                     group=sender_sidecar_ranks,
                     send_tensor_dtype=self.model.dtype,
-                    send_tensor_shape=self.model.chunk_shape,
+                    send_tensor_shape=(-1, *self.model.chunk_shape),
                 )
             )
         else:
@@ -102,7 +100,6 @@ class Worker:
         tp_rank: int,
         tp_size: int,
         input_mq_handle: MessageQueueHandle,
-        sender_sidecar_rank: int | None,
         sender_sidecar_ranks: list[int] | None,
     ) -> WorkerHandle:
         """Spawn the worker process.
@@ -126,7 +123,6 @@ class Worker:
                 tp_size=tp_size,
                 input_mq_handle=input_mq_handle,
                 ready_zmq_path=ready_zmq_path,
-                sender_sidecar_rank=sender_sidecar_rank,
                 sender_sidecar_ranks=sender_sidecar_ranks,
             ),
             daemon=True,
@@ -161,7 +157,6 @@ class Worker:
         tp_size: int,
         input_mq_handle: MessageQueueHandle,
         ready_zmq_path: str,
-        sender_sidecar_rank: int | None,
         sender_sidecar_ranks: list[int] | None,
     ) -> None:
         """Entrypoint for the worker process when it's spawned.
@@ -210,7 +205,6 @@ class Worker:
                 tp_size=tp_size,
                 input_mq=input_mq,
                 response_mq=response_mq,
-                sender_sidecar_rank=sender_sidecar_rank,
                 sender_sidecar_ranks=sender_sidecar_ranks,
             )
 

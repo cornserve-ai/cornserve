@@ -91,6 +91,8 @@ class SidecarReceiver:
         self.encoder = MsgpackEncoder()
         self.decoder = MsgpackDecoder()
 
+        logger.info("SidecarReceiver initialized, using slot size %s", config.slot_numel)
+
     async def _allocate(self, size: int) -> SharedMemoryBuffer:
         """Allocate a shared memory buffer of the given size.
 
@@ -134,11 +136,12 @@ class SidecarReceiver:
         This function allocates a shared memory buffer if not already allocated,
         and queues up a receive task to receive the tensor.
         """
+        span = trace.get_current_span()
         id = request.id + f"-{request.chunk_id}"
-
-        logger.debug("==> Prepare receive request for request id %s", id)
+        span.set_attribute("SidecarReceiver.prepare_receive.id", id)
         obj = self.decoder.decode(request.data)
         if isinstance(obj, ForwardTensorHandle):
+            span.set_attribute("SidecarReceiver.prepare_receive.type", "ForwardTensorHandle")
             # inter-node
             is_first = False
             async with self.event_lock:
@@ -148,14 +151,18 @@ class SidecarReceiver:
                     self.malloc_events[id] = asyncio.Event()
 
             if is_first:
+                span.add_event("allocate.start")
                 buffer = await self._allocate(obj.total_numel)
+                span.add_event("allocate.done")
                 buffer.create_shards(obj.num_shards)
 
                 self.ledger[id] = RecvTransferRequestState(id, buffer)
                 self.malloc_events[id].set()
             else:
                 # wait for the first call to finish allocating
+                span.add_event("wait_for_allocate.start")
                 await self.malloc_events[id].wait()
+                span.add_event("wait_for_allocate.done")
                 buffer = self.ledger[id].buffer
 
             tag = chunk_tag(
@@ -174,10 +181,12 @@ class SidecarReceiver:
                     obj.shard_rank,
                     id,
                 )
+                span.add_event("recv.start")
                 await peer.recv(
                     buffer_from_tensor(buffer.shards[obj.shard_rank].data),
                     tag=tag,
                 )
+                span.add_event("recv.done")
                 buffer.mark_shard_ready(obj.shard_rank)
                 if buffer.is_ready():
                     async with self.recv_done_lock:
@@ -189,6 +198,7 @@ class SidecarReceiver:
             return sidecar_pb2.PrepareReceiveResponse(status=common_pb2.Status.STATUS_OK)
 
         elif isinstance(obj, SharedTensorHandle):
+            span.set_attribute("SidecarReceiver.prepare_receive.type", "SharedTensorHandle")
             # intra-node
             logger.info("Intra node prepare receive request for request id %s", id)
             cbuf = (ctypes.c_byte * obj.numel * self.dtype.itemsize).from_address(self.config.base_ptr + obj.offset)
@@ -202,6 +212,7 @@ class SidecarReceiver:
                     self.req_events[id].set()
             return sidecar_pb2.PrepareReceiveResponse(status=common_pb2.Status.STATUS_OK)
         else:
+            span.set_attribute("SidecarReceiver.prepare_receive.type", "Object")
             async with self.recv_done_lock:
                 self.saved_objs[id] = obj
             if id in self.req_events:
@@ -218,8 +229,11 @@ class SidecarReceiver:
         If all shards are received, return the slot number imediately.
         Else, queues up an event for the request id and waits for all shards to be received.
         """
+        span = trace.get_current_span()
         id = recv_req.id + f"-{recv_req.chunk_id}"
         logger.info("==> Receive request for request id %s", id)
+        span.set_attribute("SidecarReceiver.receive.id", id)
+
         await self.recv_done_lock.acquire()
 
         if id in self.saved_objs:
@@ -273,7 +287,9 @@ class SidecarReceiver:
         context: grpc.aio.ServicerContext,
     ) -> sidecar_pb2.MarkDoneResponse:
         """Mark a tensor as consumed, free up the shared memory used."""
+        span = trace.get_current_span()
         id = mark_done_req.id + f"-{mark_done_req.chunk_id}"
+        span.set_attribute("SidecarReceiver.mark_done.id", id)
         if id in self.saved_objs:
             del self.saved_objs[id]
             return sidecar_pb2.MarkDoneResponse(status=common_pb2.Status.STATUS_OK)
