@@ -112,7 +112,7 @@ class SharedMemoryBuffer:
         if self.is_sharded:
             return (
                 f"SharedMemoryBuffer(size={self.size}, slots={len(self.slots)}, "
-                f"is_sharded={self.is_sharded}, ready={self.ready}, shard_availability={self.shard_availability}), "
+                f"is_sharded={self.is_sharded}, ready={self.ready}, shard_availability={self.shard_availability}, "
                 f"shards={self.shards})"
             )
         else:
