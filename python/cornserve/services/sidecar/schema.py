@@ -26,7 +26,7 @@ class SidecarNodeInfo:
         """Check the sidecar ranks are unique and make sure they are sorted."""
         # check all different
         s = set(self.sidecar_ranks)
-        assert len(s) == len(self.sidecar_ranks), "Sidecarranks should be unique"
+        assert len(s) == len(self.sidecar_ranks), "sidecar ranks should be unique"
         self.sidecar_ranks.sort()
 
     def get_device_id(self, sidecar_rank: int) -> int:
