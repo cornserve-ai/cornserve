@@ -1,0 +1,102 @@
+# Project information
+site_name: Cornserve
+site_url: https://cornstarch-org.github.io/cornserve
+site_author: Cornserve team
+site_description: Easy, fast, and scalable multimodal agentic AI
+edit_uri: ""
+
+# Repository
+repo_name: cornstarch-org/cornserve
+repo_url: https://github.com/cornstarch-org/cornserve
+
+# Copyright
+copyright: Copyright &copy; 2025 Cornserve team
+
+# Theme configuration
+theme:
+  name: material
+  # logo: assets/img/logo.svg
+  favicon: assets/img/favicon.svg
+  icon:
+    repo: fontawesome/brands/github
+    logo: material/rocket-launch-outline
+  features:
+    - content.code.copy
+    - search.suggest
+    - navigation.tabs
+    - navigation.tabs.sticky
+    - navigation.top
+    - navigation.indexes
+    - content.tooltips
+    - announce.dismiss
+  palette:
+    - scheme: light
+      primary: black
+      accent: amber
+
+# MkDocs plugins
+plugins:
+  - search
+  - autorefs
+  - social:
+      enabled: !ENV [BUILD_SOCIAL_CARD, false]
+      cards_dir: assets/img/social
+  - mkdocs-video:
+      is_video: True
+      video_autoplay: True
+      css_style:
+        width: 60%
+
+# Extensions
+markdown_extensions:
+  - meta
+  - abbr
+  - admonition
+  - attr_list
+  - footnotes
+  - md_in_html
+  - pymdownx.superfences
+  - pymdownx.snippets
+  - pymdownx.details
+  - pymdownx.critic
+  - pymdownx.arithmatex:
+      generic: true
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+
+# Page tree
+nav:
+  - Cornserve: index.md
+  - Architecture:
+    - architecture/cornserve.md
+    - Task: architecture/task.md
+    - Sidecar: architecture/sidecar.md
+    - Eric: architecture/eric.md
+  # - Getting Started: getting_started/index.md
+  # - Measuring Energy: measure/index.md
+  # - Optimizing Energy:
+  #   - optimize/index.md
+  #   - Power Limit Optimizer: optimize/power_limit_optimizer.md
+  #   - Batch Size Optimizer: optimize/batch_size_optimizer.md
+  #   - Pipeline Frequency Optimizer: optimize/pipeline_frequency_optimizer.md
+  # - Research Overview: 
+  #   - research_overview/index.md
+  #   - Zeus: research_overview/zeus.md
+  #   - Perseus: research_overview/perseus.md
+  # - Source Code Reference: reference/
+
+# Extra stuff
+extra:
+  analytics:
+    provider: !ENV SITE_ANALYTICS
+    property: G-8YY3G9ZZW5
+  social:
+    - name: Cornserve GitHub repository
+      icon: fontawesome/brands/github
+      link: https://github.com/cornstarch-org/cornserve

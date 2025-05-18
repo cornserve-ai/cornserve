@@ -1,0 +1,39 @@
+name: Check homepage build
+
+on:
+  pull_request:
+    paths:
+      - 'examples/**'
+      - 'docs/**'
+      - 'mkdocs.yml'
+      - '.github/workflows/check_homepage_build.yaml'
+
+concurrency:
+  group: ${{ github.ref }}-check-homepage-build
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    if: github.event.repository.fork == false
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: 3.11
+          cache: 'pip'
+      - run: echo "cache_id=$(date --utc '+%V')" >> $GITHUB_ENV
+      - uses: actions/cache@v4
+        with:
+          key: mkdocs-material-${{ env.cache_id }}
+          path: .cache
+          restore-keys: |
+            mkdocs-material-
+      - name: Install homepage build dependencies
+        run: pip install -r docs/requirements.txt
+      - name: Build homepage
+        run: mkdocs build --verbose --strict
+        env:
+          BUILD_SOCIAL_CARD: true

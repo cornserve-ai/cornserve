@@ -1,12 +1,12 @@
-# CornServe Architecture
+# Cornserve Architecture
 
-CornServe is a distributed ML serving platform that allows you to implement and deploy ML apps at scale.
+Cornserve is a distributed ML serving platform that allows you to implement and deploy ML apps at scale.
 
 
 ## App
 
-Applications are written by developers using the CornServe frontend library in `cornserve.frontend`.
-Currently, a CornServe app is a single Python file that implements three classes an a function:
+Applications are written by developers using the Cornserve frontend library in `cornserve.frontend`.
+Currently, a Cornserve app is a single Python file that implements three classes an a function:
 - `Request` (inherits from `cornserve.frontend.app.AppRequest`): A single input request for the app.
 - `Response` (inherits from `cornserve.frontend.app.AppResponse`): A single output response for the app.
 - `Config` (inherits from `cornserve.frontend.app.AppConfig`): Configuration parameters and task definitions for the app.
@@ -67,7 +67,7 @@ On the other hand, application requests and task invocations are sent and receiv
 
 The gateway is the entry point for all apps and incoming requests to each app.
 
-An app is registered with CornServe by the cluster admin by sending a request to the gateway, including the app's Python source code.
+An app is registered with Cornserve by the cluster admin by sending a request to the gateway, including the app's Python source code.
 The gateway then validates the app definition and registers it to with the App Manager.
 
 When a new app is registered, the App Manager will read in the tasks that the app intends to invoke and instruct the Resource Manager to deploy Task Managers in the data plane such that all tasks invoked by the new app is available for execution in the data plane.
