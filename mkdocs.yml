@@ -73,12 +73,20 @@ markdown_extensions:
 # Page tree
 nav:
   - Cornserve: index.md
+  - Getting Started:
+    - getting_started/index.md
+    - Deploying Cornserve: getting_started/cornserve.md
+    - Building and Deploying Apps: getting_started/app.md
   - Architecture:
-    - architecture/cornserve.md
+    - architecture/index.md
     - Task: architecture/task.md
     - Sidecar: architecture/sidecar.md
     - Eric: architecture/eric.md
-  # - Getting Started: getting_started/index.md
+  - Contributor Guide:
+    - contributor_guide/index.md
+    - Eric: contributor_guide/eric.md
+    - Sidecar: contributor_guide/sidecar.md
+    - Tracing: contributor_guide/tracing.md
   # - Measuring Energy: measure/index.md
   # - Optimizing Energy:
   #   - optimize/index.md

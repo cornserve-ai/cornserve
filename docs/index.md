@@ -17,44 +17,44 @@ Cornserve is an execution platform for multimodal AI.
 
 <div class="grid cards" markdown>
 
--   :material-vector-intersection: **Model disaggregation**
+-   :material-vector-intersection:{ .lg .middle } **Model disaggregation**
 
     ---
 
     Disaggregate your complex models into smaller components and
     scale them independently.
 
+-   :material-share-variant:{ .lg .middle }  **Automatic sharing**
+
+    ---
+
+    Common model components are automatically shared across applications.
+
 -   :material-hub:{ .lg .middle } **Multimodal-native**
 
     ---
 
-    Change the colors, fonts, language, icons, logo and more with a few lines
+    Cornserve is built multimodal-native from the ground up. Image, video,
+    audio, and text are all first-class citizens.
 
-    [:octicons-arrow-right-24: Customization](#)
-
--   :material-scale-balance:{ .lg .middle } __Open Source, Apache-2.0__
-
-    ---
-
-    Material for MkDocs is licensed under MIT and available on [GitHub]
-
-    [:octicons-arrow-right-24: License](#)
-
--   :material-kubernetes:{ .lg .middle } __Deploy to K8s with one command__
+-   :material-kubernetes:{ .lg .middle } **Deploy to K8s with one command**
 
     ---
 
-    Install [`mkdocs-material`](#) with [`pip`](#) and get up
-    and running in minutes
+    One-command deployment to Kubernetes with [Kustomize](https://kustomize.io/).
 
-    [:octicons-arrow-right-24: Getting started](#)
-
--   :simple-opentelemetry:{ .lg .middle } __OpenTelemetry support__
+-   :simple-opentelemetry:{ .lg .middle } **Observability**
 
     ---
 
-    Focus on your content and generate a responsive and searchable static site
+    Built-in support for [OpenTelemetry](https://opentelemetry.io/)
+    to monitor your apps and requests.
 
-    [:octicons-arrow-right-24: Reference](#)
+-   :material-scale-balance:{ .lg .middle } **Open Source, Apache-2.0**
+
+    ---
+
+    Cornserve is open-source with the Apache 2.0 license and is available on
+    [GitHub](https://github.com/cornstarch-org/cornserve).
 
 </div>

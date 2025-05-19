@@ -128,7 +128,7 @@ There is one canonical Task Executor for each task type.
 Note that the task type here (`cornserve.services.task_manager.models.TaskManagerType`) is different from the task types available in the app frontend library (`cornserve.frontend.tasks`).
 That is, the former is a more fine-grained task type that maps to specific task executors (e.g., separated multimodal data encoding and LLM text generation), whereas the latter is more coarse-grained and maps the unit of task execution that our developer would be familiar with.
 
-The Task Executor for `TaskManagerType.ENCODER` is [Eric](eric.md), and the Task Executor for `TaskManagerType.LLM` is [vLLM](vllm.md).
+The Task Executor for `TaskManagerType.ENCODER` is [Eric](eric.md), and the Task Executor for `TaskManagerType.LLM` is vLLM.
 All task executors are implemented in `cornserve.task_executors`, and `cornserve.task_executors.launch` provides information on how to launch the task executors.
 
 ### Tensor Sidecar (`cornserve.services.sidecar`)

@@ -17,13 +17,13 @@ pip install -e 'python[dev]'
 
 ## Testing
 
-We use pytest. Tests use GPUs.
+We use `pytest`. Tests use GPUs.
 
 ```bash
 pytest
 ```
 
-Set the `CORNSERVE_TEST_DUMP_TENSOR_DIR` to an existing directory when running pytest.
+Set the `CORNSERVE_TEST_DUMP_TENSOR_DIR` to an existing directory when running `pytest`.
 This will dump output embedding tensors to the specified directory.
 Refer to `build_batch` in `tests/task_executors/eric/utils.py`.
 
