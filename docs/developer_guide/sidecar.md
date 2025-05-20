@@ -2,8 +2,10 @@
 
 ## Docker container
 
-It is recommended to run everything inside docker. That said, sidecar has minimal
-dependencies and _could_ run directly on the host.
+It is recommended to run everything inside docker. Sidecar uses `UCX` as backend,
+so you might find the `docker/dev.Dockerfile` helpful. Additionally, Sidecar has 
+dependency over `ucxx-cu12`, meaning you need to development on an Nvidia
+GPU-enabled machine at the moment.
 
 Specifying `--shm-size` with at least 2 GB and `--ipc host` is required.
 
