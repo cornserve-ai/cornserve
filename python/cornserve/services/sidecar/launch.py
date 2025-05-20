@@ -15,6 +15,7 @@ class SidecarLaunchInfo:
         node: kclient.V1Node,
         sidecar_rank: int,
         world_size: int,
+        peer_ranks: list[int],
     ) -> kclient.V1Pod:
         """Get the pod spec for the sidecar.
 
@@ -22,6 +23,7 @@ class SidecarLaunchInfo:
             node: The Kubernetes node to launch the sidecar on.
             sidecar_rank: The global rank of the sidecar.
             world_size: The total number of sidecars in the cluster.
+            peer_ranks: The sidecar ranks of the peers in the same node.
         """
         if not node.metadata:
             raise ValueError("Node metadata is missing")
@@ -48,6 +50,7 @@ class SidecarLaunchInfo:
                             for name, value in SidecarLaunchInfo.get_envs(
                                 sidecar_rank,
                                 world_size,
+                                peer_ranks,
                             )
                         ],
                         volume_mounts=[
@@ -77,16 +80,18 @@ class SidecarLaunchInfo:
         )
 
     @staticmethod
-    def get_envs(sidecar_rank: int, world_size: int) -> list[tuple[str, str]]:
+    def get_envs(sidecar_rank: int, world_size: int, peer_ranks: list[int]) -> list[tuple[str, str]]:
         """Get the environment variables for the sidecar.
 
         Args:
             sidecar_rank: The global rank of the sidecar.
             world_size: The total number of sidecars in the cluster.
+            peer_ranks: The sidecar ranks of the peers in the same node.
         """
         return [
             ("SIDECAR_WORLD_SIZE", str(world_size)),
-            ("SIDECAR_POD_NAME", str(f"sidecar-{sidecar_rank}")),
+            ("SIDECAR_RANK", str(sidecar_rank)),
+            ("SIDECAR_LOCAL_PEER_RANKS", ",".join(map(str, peer_ranks))),
         ]
 
     @staticmethod

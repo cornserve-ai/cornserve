@@ -4,7 +4,6 @@ import asyncio
 import contextlib
 import ctypes
 import os
-from typing import Any
 
 import grpc
 import torch
@@ -13,7 +12,9 @@ from opentelemetry import trace
 from cornserve.logging import SidcarAdapter, get_logger
 from cornserve.services.pb import common_pb2, sidecar_pb2, sidecar_pb2_grpc
 from cornserve.services.sidecar.schema import (
-    RecvTransferRequestState,
+    RecvObjState,
+    RecvRequestState,
+    RecvTensorState,
     SidecarReceiverConfig,
 )
 from cornserve.services.sidecar.shm_manager import (
@@ -65,17 +66,13 @@ class SidecarReceiver:
 
         self.has_memory = asyncio.Condition()
 
-        self.event_lock = asyncio.Lock()
         self.malloc_events: dict[str, asyncio.Event] = {}
+        # This lock guards access over the self.malloc_events
+        self.malloc_lock = asyncio.Lock()
 
         # a legder to keep the transfer status of each transfer request
-        self.ledger: dict[str, RecvTransferRequestState] = {}
-
-        # per req event, recieve will wait on this event, recv_task will try to set this event
-        self.req_events: dict[str, asyncio.Event] = {}
-
-        # we use a multiprocessing lock to protect the done flag, as this lock is used in the recv_task,
-        # which is running in a separate thread to avoid blocking on recv
+        self.ledger: dict[str, RecvRequestState] = {}
+        # This lock guards access over the self.ledger when necessary
         self.recv_done_lock = asyncio.Lock()
 
         # this is used to keep track of the memory pressure events
@@ -85,8 +82,6 @@ class SidecarReceiver:
 
         self.dst_channels: dict[int, grpc.aio.Channel] = {}
         self.dst_stubs: dict[int, sidecar_pb2_grpc.SidecarStub] = {}
-
-        self.saved_objs: dict[str, Any] = {}
 
         self.encoder = MsgpackEncoder()
         self.decoder = MsgpackDecoder()
@@ -117,7 +112,7 @@ class SidecarReceiver:
             self.shm_manager.free(buffer)
             self.memory_freed.notify_all()
 
-    async def shutdown(self):
+    async def shutdown(self) -> None:
         """Cleanup routines for the receiver."""
         # remove the shared memory file, used async to unify the interface
         del self.shm_manager
@@ -137,18 +132,20 @@ class SidecarReceiver:
         and queues up a receive task to receive the tensor.
         """
         span = trace.get_current_span()
-        id = request.id + f"-{request.chunk_id}"
-        span.set_attribute("SidecarReceiver.prepare_receive.id", id)
+        # malloc is per chunk
+        malloc_id = request.id + f"-{request.chunk_id}"
+        span.set_attribute("SidecarReceiver.prepare_receive.id", request.id)
+        span.set_attribute("SidecarReceiver.prepare_receive.chunk_id", request.chunk_id)
         obj = self.decoder.decode(request.data)
         if isinstance(obj, ForwardTensorHandle):
             span.set_attribute("SidecarReceiver.prepare_receive.type", "ForwardTensorHandle")
             # inter-node
             is_first = False
-            async with self.event_lock:
-                if id not in self.malloc_events:
+            async with self.malloc_lock:
+                if malloc_id not in self.malloc_events:
                     # first call
                     is_first = True
-                    self.malloc_events[id] = asyncio.Event()
+                    self.malloc_events[malloc_id] = asyncio.Event()
 
             if is_first:
                 span.add_event("allocate.start")
@@ -156,14 +153,25 @@ class SidecarReceiver:
                 span.add_event("allocate.done")
                 buffer.create_shards(obj.num_shards)
 
-                self.ledger[id] = RecvTransferRequestState(id, buffer)
-                self.malloc_events[id].set()
+                if request.id in self.ledger:
+                    chunk_state = RecvTensorState(request.chunk_id, buffer)
+                    self.ledger[request.id].chunks[request.chunk_id] = chunk_state
+                    if self.ledger[request.id].num_chunks == -1:
+                        self.ledger[request.id].num_chunks = request.num_chunks
+                else:
+                    req_state = RecvRequestState(request.id, request.num_chunks)
+                    req_state.chunks[request.chunk_id] = RecvTensorState(request.chunk_id, buffer)
+                    self.ledger[request.id] = req_state
+
+                self.malloc_events[malloc_id].set()
             else:
                 # wait for the first call to finish allocating
                 span.add_event("wait_for_allocate.start")
-                await self.malloc_events[id].wait()
+                await self.malloc_events[malloc_id].wait()
                 span.add_event("wait_for_allocate.done")
-                buffer = self.ledger[id].buffer
+                chunk_state = self.ledger[request.id].chunks[request.chunk_id]
+                assert isinstance(chunk_state, RecvTensorState)
+                buffer = chunk_state.buffer
 
             tag = chunk_tag(
                 request.id,
@@ -171,15 +179,14 @@ class SidecarReceiver:
                 request.chunk_id,
                 obj.shard_rank,
             )
-            logger.debug("Tag for request id %s: %s", id, tag)
 
-            async def recv_task():
+            async def recv_task() -> None:
                 peer = self.peers[request.src_rank]
                 logger.debug(
                     "receiving to data_ptr %s for shard %s req id %s",
                     buffer.shards[obj.shard_rank].data.data_ptr(),
                     obj.shard_rank,
-                    id,
+                    request.id,
                 )
                 span.add_event("recv.start")
                 await peer.recv(
@@ -189,10 +196,18 @@ class SidecarReceiver:
                 span.add_event("recv.done")
                 buffer.mark_shard_ready(obj.shard_rank)
                 if buffer.is_ready():
+                    # cleanup the malloc event
+                    async with self.malloc_lock:
+                        if malloc_id in self.malloc_events:
+                            del self.malloc_events[malloc_id]
+
+                    # mark the request as done
                     async with self.recv_done_lock:
-                        self.ledger[id].done = True
-                        if id in self.req_events:
-                            self.req_events[id].set()
+                        req_state = self.ledger[request.id]
+                        chunk_state = req_state.chunks[request.chunk_id]
+                        assert isinstance(chunk_state, RecvTensorState)
+                        chunk_state.done = True
+                        req_state.done_event.set()
 
             asyncio.create_task(recv_task())
             return sidecar_pb2.PrepareReceiveResponse(status=common_pb2.Status.STATUS_OK)
@@ -200,23 +215,40 @@ class SidecarReceiver:
         elif isinstance(obj, SharedTensorHandle):
             span.set_attribute("SidecarReceiver.prepare_receive.type", "SharedTensorHandle")
             # intra-node
-            logger.info("Intra node prepare receive request for request id %s", id)
+            logger.info("Intra node prepare receive request for request id %s", request.id)
             cbuf = (ctypes.c_byte * obj.numel * self.dtype.itemsize).from_address(self.config.base_ptr + obj.offset)
             tensor = torch.frombuffer(cbuf, dtype=self.dtype, count=obj.numel)
             dummy_buffer = SharedMemoryBuffer(size=obj.numel, data=tensor, slots=[])
-            self.ledger[id] = RecvTransferRequestState(id, dummy_buffer, request.src_rank)
+            chunk_state = RecvTensorState(request.chunk_id, dummy_buffer, request.src_rank, True)
+
             async with self.recv_done_lock:
-                self.ledger[id].done = True
-                if id in self.req_events:
-                    logger.info("Setting req done event for request id %s", id)
-                    self.req_events[id].set()
+                if request.id in self.ledger:
+                    # check if first
+                    self.ledger[request.id].chunks[request.chunk_id] = chunk_state
+                    if self.ledger[request.id].num_chunks == -1:
+                        self.ledger[request.id].num_chunks = request.num_chunks
+                else:
+                    req_state = RecvRequestState(request.id, request.num_chunks)
+                    req_state.chunks[request.chunk_id] = chunk_state
+                    self.ledger[request.id] = req_state
+                self.ledger[request.id].done_event.set()
+
             return sidecar_pb2.PrepareReceiveResponse(status=common_pb2.Status.STATUS_OK)
         else:
             span.set_attribute("SidecarReceiver.prepare_receive.type", "Object")
+
+            chunk_state = RecvObjState(request.chunk_id, obj)
             async with self.recv_done_lock:
-                self.saved_objs[id] = obj
-            if id in self.req_events:
-                self.req_events[id].set()
+                if request.id in self.ledger:
+                    # check if first
+                    self.ledger[request.id].chunks[request.chunk_id] = chunk_state
+                    if self.ledger[request.id].num_chunks == -1:
+                        self.ledger[request.id].num_chunks = request.num_chunks
+                else:
+                    req_state = RecvRequestState(request.id, request.num_chunks)
+                    req_state.chunks[request.chunk_id] = chunk_state
+                    self.ledger[request.id] = req_state
+                self.ledger[request.id].done_event.set()
             return sidecar_pb2.PrepareReceiveResponse(status=common_pb2.Status.STATUS_OK)
 
     async def receive(
@@ -226,49 +258,60 @@ class SidecarReceiver:
     ) -> sidecar_pb2.ReceiveResponse:
         """Receive the tensor of a request from other ranks.
 
-        If all shards are received, return the slot number imediately.
+        If all shards are received, return the slot number immediately.
         Else, queues up an event for the request id and waits for all shards to be received.
+
+        Every request may have many chunks, each chunk's recv_done will wake up all recv_done tasks,
+        but only the correct one will return, the rest will continue waiting for the event
+
+        even if say the first set wakes up all awaiting ones, and upon some called clear
+        (some still woken but not run yet), another routine calls set, The sleeping ones will be
+        waken up again, and the already woken ones can still check the chunk_id
         """
         span = trace.get_current_span()
-        id = recv_req.id + f"-{recv_req.chunk_id}"
-        logger.info("==> Receive request for request id %s", id)
-        span.set_attribute("SidecarReceiver.receive.id", id)
+        logger.info("==> Receive request for request id %s", recv_req.id)
+        span.set_attribute("SidecarReceiver.receive.id", recv_req.id)
+        span.set_attribute("SidecarReceiver.receive.chunk_id", recv_req.chunk_id)
 
-        await self.recv_done_lock.acquire()
+        async with self.recv_done_lock:
+            if recv_req.id not in self.ledger:
+                req_state = RecvRequestState(recv_req.id, -1)
+                self.ledger[recv_req.id] = req_state
 
-        if id in self.saved_objs:
-            # objects
-            self.recv_done_lock.release()
-            return sidecar_pb2.ReceiveResponse(
-                status=common_pb2.Status.STATUS_OK,
-                data=self.encoder.encode(self.saved_objs[id]),
-            )
+        req_state = self.ledger[recv_req.id]
+        while True:
+            await req_state.done_event.wait()
+            # some chunk of this request is already received
+            if recv_req.chunk_id > req_state.num_chunks:
+                # check out of bound
+                return sidecar_pb2.ReceiveResponse(
+                    status=common_pb2.Status.STATUS_OK,
+                    data=self.encoder.encode(None),
+                )
 
-        if id in self.ledger and self.ledger[id].done:
-            self.recv_done_lock.release()
-        else:
-            # still waiting for shards/objects
-            event = asyncio.Event()
-            self.req_events[id] = event
-            self.recv_done_lock.release()
-            logger.info("Waiting for all shards to be received for request id %s", id)
-            await event.wait()
+            async with self.recv_done_lock:
+                if recv_req.chunk_id not in req_state.chunks:
+                    # chunk not received yet
+                    req_state.done_event.clear()
+                    continue
 
-        if id in self.saved_objs:
-            # objects
-            return sidecar_pb2.ReceiveResponse(
-                status=common_pb2.Status.STATUS_OK,
-                data=self.encoder.encode(self.saved_objs[id]),
-            )
+                chunk_state = req_state.chunks[recv_req.chunk_id]
+                if isinstance(chunk_state, RecvTensorState) and not chunk_state.done:
+                    # still waiting for shards of the tensor
+                    req_state.done_event.clear()
+                    continue
 
-        logger.info("==> All shards received for request id %s", id)
-        state = self.ledger[id]
-        obj = state.buffer.create_handle(self.config.base_ptr)
+                if isinstance(chunk_state, RecvObjState):
+                    obj = chunk_state.data
+                elif isinstance(chunk_state, RecvTensorState):
+                    obj = chunk_state.buffer.create_handle(self.config.base_ptr)
+                else:
+                    raise ValueError("Unknown chunk state")
 
-        return sidecar_pb2.ReceiveResponse(
-            status=common_pb2.Status.STATUS_OK,
-            data=self.encoder.encode(obj),
-        )
+                return sidecar_pb2.ReceiveResponse(
+                    status=common_pb2.Status.STATUS_OK,
+                    data=self.encoder.encode(obj),
+                )
 
     def _get_grpc_stub(self, rank: int) -> sidecar_pb2_grpc.SidecarStub:
         """Get the stub for the given rank.
@@ -286,23 +329,38 @@ class SidecarReceiver:
         mark_done_req: sidecar_pb2.MarkDoneRequest,
         context: grpc.aio.ServicerContext,
     ) -> sidecar_pb2.MarkDoneResponse:
-        """Mark a tensor as consumed, free up the shared memory used."""
+        """Mark a tensor as consumed, free up the shared memory used.
+
+        If the shared buffer is from a intra-node transfer, this call will invoke the
+        `Unlink` subroutine.
+        """
         span = trace.get_current_span()
-        id = mark_done_req.id + f"-{mark_done_req.chunk_id}"
-        span.set_attribute("SidecarReceiver.mark_done.id", id)
-        if id in self.saved_objs:
-            del self.saved_objs[id]
-            return sidecar_pb2.MarkDoneResponse(status=common_pb2.Status.STATUS_OK)
-        if id not in self.ledger:
+        span.set_attribute("SidecarReceiver.mark_done.id", mark_done_req.id)
+        span.set_attribute("SidecarReceiver.mark_done.chunk_id", mark_done_req.chunk_id)
+        if mark_done_req.id not in self.ledger or mark_done_req.chunk_id not in self.ledger[mark_done_req.id].chunks:
+            logger.error("mark_done: %s not found", mark_done_req.id)
             await context.abort(grpc.StatusCode.NOT_FOUND, "mark_done_req not found")
-        state = self.ledger[id]
-        if state.intra_node_rank >= 0:
+        req_state = self.ledger[mark_done_req.id]
+        chunk_state = req_state.chunks[mark_done_req.chunk_id]
+
+        if isinstance(chunk_state, RecvObjState):
+            span.set_attribute("SidecarReceiver.mark_done.type", "Object")
+            del req_state.chunks[mark_done_req.chunk_id]
+            # TODO: make this counter instead of assuming sequential access
+            if req_state.num_chunks == mark_done_req.chunk_id + 1:
+                # last chunk
+                del self.ledger[mark_done_req.id]
+            return sidecar_pb2.MarkDoneResponse(status=common_pb2.Status.STATUS_OK)
+
+        assert isinstance(chunk_state, RecvTensorState)
+
+        if chunk_state.intra_node_rank >= 0:
             logger.info(
                 "mark_done: unlink refcount for id %s in rank %d",
-                id,
-                state.intra_node_rank,
+                mark_done_req.id,
+                chunk_state.intra_node_rank,
             )
-            stub = self._get_grpc_stub(state.intra_node_rank)
+            stub = self._get_grpc_stub(chunk_state.intra_node_rank)
             unlink_req = sidecar_pb2.UnlinkRequest(id=mark_done_req.id, chunk_id=mark_done_req.chunk_id)
             res = await stub.Unlink(unlink_req)
             if res.status != common_pb2.Status.STATUS_OK:
@@ -310,11 +368,13 @@ class SidecarReceiver:
         else:
             logger.info(
                 "mark_done: Freeing up %d slots from %s",
-                len(self.ledger[id].buffer.slots),
-                id,
+                len(chunk_state.buffer.slots),
+                mark_done_req.id,
             )
-            await self._free(state.buffer)
-        del self.ledger[id]
-        if id in self.req_events:
-            del self.req_events[id]
+            await self._free(chunk_state.buffer)
+
+        # TODO: make this counter instead of assuming sequential access
+        if req_state.num_chunks == mark_done_req.chunk_id + 1:
+            # last chunk
+            del self.ledger[mark_done_req.id]
         return sidecar_pb2.MarkDoneResponse(status=common_pb2.Status.STATUS_OK)

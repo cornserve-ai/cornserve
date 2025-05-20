@@ -41,7 +41,7 @@ class SidecarConfig:
 
     # read_only = False
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         """Post-initialization checks for the SidecarConfig class."""
         if self.group is None:
             self.group = [self.sidecar_rank]

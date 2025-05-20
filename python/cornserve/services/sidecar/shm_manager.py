@@ -10,34 +10,10 @@ from cornserve.sidecar.serde import SharedTensorHandle
 logger = get_logger(__name__)
 
 
-class SharedMemoryChunk:
-    """A tensor could be chunked during processing and transmission."""
-
-    def __init__(self, size: int, data: torch.Tensor, num_shards: int) -> None:
-        """Initialize a shared memory chunk, which will be viewed as a list of shards."""
-        self.size = size
-        self.data = data
-        self.shard_availability = [False for _ in range(num_shards)]
-        self.ready = False
-        self.received_size = 0
-
-    def mark_shard_ready(self, shard_rank: int, shard_size) -> None:
-        """Mark a shard as ready, will set the chunk as ready if all shards are ready."""
-        self.shard_availability[shard_rank] = True
-        self.received_size += shard_size
-        if self.received_size == self.size:
-            logger.info("All shards are ready, marking chunk as ready")
-            self.ready = True
-
-    def __repr__(self):
-        """Return a string representation of the shared memory chunk."""
-        return f"SharedMemoryChunk(size={self.size}, shard_availability={self.shard_availability}, ready={self.ready})"
-
-
 class SharedMemoryShard:
     """A shard of a shared memory buffer."""
 
-    def __init__(self, offset: int, length: int, data: torch.Tensor):
+    def __init__(self, offset: int, length: int, data: torch.Tensor) -> None:
         """Initialize a shared memory shard.
 
         Args:
@@ -49,7 +25,7 @@ class SharedMemoryShard:
         self.length = length
         self.data = data
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         """Return a string representation of the shared memory shard."""
         return f"SharedMemoryShard(offset={self.offset}, length={self.length}, data={self.data})"
 
@@ -57,7 +33,7 @@ class SharedMemoryShard:
 class SharedMemoryBuffer:
     """A shared memory buffer that could be sliced into multiple shards."""
 
-    def __init__(self, size: int, data: torch.Tensor, slots: list[int]):
+    def __init__(self, size: int, data: torch.Tensor, slots: list[int]) -> None:
         """Initialize a shared memory buffer, no sharding by default.
 
         Args:
@@ -72,7 +48,7 @@ class SharedMemoryBuffer:
         self.shards: list[SharedMemoryShard] = []
         self.shard_availability: list[bool] = []
 
-    def create_shards(self, num_shards: int):
+    def create_shards(self, num_shards: int) -> None:
         """Create shards from the buffer."""
         if self.is_sharded:
             raise ValueError("Buffer is already sharded")
@@ -93,7 +69,7 @@ class SharedMemoryBuffer:
         self.is_sharded = True
         self.ready = False
 
-    def mark_shard_ready(self, shard_rank: int):
+    def mark_shard_ready(self, shard_rank: int) -> None:
         """Mark a shard as ready, will set the buffer as ready if all shards are ready."""
         assert self.is_sharded
         self.shard_availability[shard_rank] = True
@@ -107,7 +83,7 @@ class SharedMemoryBuffer:
         else:
             return True
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         """Return a string representation of the shared memory buffer."""
         if self.is_sharded:
             return (
@@ -133,7 +109,7 @@ class SharedMemoryManager:
     Note this class is not thread-safe, so locking and back pressure should be handled by the caller.
     """
 
-    def __init__(self, shm: torch.Tensor, slot_size: int):
+    def __init__(self, shm: torch.Tensor, slot_size: int) -> None:
         """Initialize a shared memory manager with the given shared memory tensor.
 
         Args:
@@ -177,7 +153,7 @@ class SharedMemoryManager:
                 cur_free = 0
         return None
 
-    def free(self, buffer: SharedMemoryBuffer):
+    def free(self, buffer: SharedMemoryBuffer) -> None:
         """Free a shared memory buffer."""
         for slot in buffer.slots:
             self.occupancy[slot] = 0

@@ -7,7 +7,7 @@ so you might find the `docker/dev.Dockerfile` helpful. Additionally, Sidecar has
 dependency over `ucxx-cu12`, meaning you need to development on an Nvidia
 GPU-enabled machine at the moment.
 
-Specifying `--shm-size` with at least 2 GB and `--ipc host` is required.
+Specifying `--shm-size` with at least 4 GB and `--ipc host` is required.
 
 ## Editable installation
 

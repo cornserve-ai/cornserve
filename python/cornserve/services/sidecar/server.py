@@ -12,12 +12,10 @@ import time
 import traceback
 
 import grpc
-import kubernetes_asyncio.client as kclient
-import kubernetes_asyncio.config as kconfig
 import numpy as np
 import torch
 import tyro
-import ucxx
+import ucxx  # type: ignore
 from opentelemetry import trace
 from opentelemetry.instrumentation.grpc import (
     GrpcAioInstrumentorClient,
@@ -26,9 +24,8 @@ from opentelemetry.instrumentation.grpc import (
     GrpcInstrumentorServer,
 )
 from pydantic import ValidationError
-from ucxx._lib_async.endpoint import Endpoint
+from ucxx._lib_async.endpoint import Endpoint  # type: ignore
 
-from cornserve.constants import K8S_NAMESPACE
 from cornserve.logging import SidcarAdapter, get_logger
 from cornserve.services.pb import common_pb2, sidecar_pb2, sidecar_pb2_grpc
 from cornserve.services.sidecar.receiver import SidecarReceiver
@@ -48,6 +45,7 @@ tracer = trace.get_tracer(__name__)
 cleanup_coroutines = []
 
 STARTUP_COOLDOWN = 20
+P2P_TIMEOUT = 5 * 60.0
 
 
 class SidecarServicer(sidecar_pb2_grpc.SidecarServicer):
@@ -123,28 +121,36 @@ class SidecarServicer(sidecar_pb2_grpc.SidecarServicer):
         Proactively connects to peers with lower sidecar ranks,
         and waits to be connected by peers with higher sidecar ranks.
         """
-        for i in range(self.sidecar_rank):
-            while not await self._reachable(i):
-                logger.info("Waiting for sidecar-%d to be reachable", i)
+
+        # TODO (Jeff): lazy connect
+        async def connect_to_peer(peer_rank: int) -> None:
+            """Connect to a peer using UCX."""
+            while not await self._reachable(peer_rank):
+                logger.info("Waiting for sidecar-%d to be reachable", peer_rank)
                 await asyncio.sleep(10.1)
-            while i not in self.peers:
+
+            while peer_rank not in self.peers:
                 try:
                     logger.info(
                         "Connecting to sidecar-%d - url %s - port %d",
-                        i,
-                        ucx_url_from_rank(i),
-                        ucx_port_from_rank(i),
+                        peer_rank,
+                        ucx_url_from_rank(peer_rank),
+                        ucx_port_from_rank(peer_rank),
                     )
-                    ep = await ucxx.create_endpoint(ucx_url_from_rank(i), ucx_port_from_rank(i))
+                    ep = await ucxx.create_endpoint(ucx_url_from_rank(peer_rank), ucx_port_from_rank(peer_rank))
                     msg = np.array([self.sidecar_rank], dtype=np.int32)
                     await ep.send(msg)
-                    self.peers[i] = ep
+                    self.peers[peer_rank] = ep
                 except Exception:
                     await asyncio.sleep(0.1)
 
-        # wait for other peers to connect to us
-        while len(self.peers) < self.world_size - 1:
-            await asyncio.sleep(0.5)
+        coros = [connect_to_peer(i) for i in range(self.sidecar_rank + 1, self.world_size)]
+        async with asyncio.timeout(P2P_TIMEOUT):
+            await asyncio.gather(*coros)
+            # wait for other peers to connect to us
+            while len(self.peers) < self.world_size - 1:
+                await asyncio.sleep(0.5)
+
         logger.info("Connected to all peers")
 
     def online(self, node_info: SidecarNodeInfo, shm_size: int) -> None:
@@ -347,7 +353,7 @@ class SidecarServicer(sidecar_pb2_grpc.SidecarServicer):
             logger.exception("Error in Unlink")
             await context.abort(grpc.StatusCode.INTERNAL, f"Error in Unlink: {e} \n {tb_str}")
 
-    async def shutdown(self):
+    async def shutdown(self) -> None:
         """Shutdown the sidecar."""
         if self.sender is not None:
             await self.sender.shutdown()
@@ -358,23 +364,6 @@ class SidecarServicer(sidecar_pb2_grpc.SidecarServicer):
         # await self.scheduler.stop()
         self.ucx_listener.close()
         logger.info("Sidecar shutdown")
-
-
-async def _get_node_info(pod_name: str) -> SidecarNodeInfo | None:
-    """Query the Kubernetes API to get the node information."""
-    kconfig.load_incluster_config()
-    async with kclient.ApiClient() as api_client:
-        v1 = kclient.CoreV1Api(api_client)
-        pod = await v1.read_namespaced_pod(name=pod_name, namespace=K8S_NAMESPACE)  # pyright: ignore
-        node_name = pod.spec.node_name  # pyright: ignore
-        label_selector = "app=sidecar"
-        pods = await v1.list_namespaced_pod(namespace=K8S_NAMESPACE, label_selector=label_selector)
-        same_node_pod_names = [p.metadata.name for p in pods.items if p.spec.node_name == node_name]
-        sorted_pod_names = sorted(same_node_pod_names)
-        if pod_name not in sorted_pod_names:
-            logger.error("Current pod not found in the list of sidecar pods on the node. K8s issue?")
-            return None
-        return SidecarNodeInfo([int(pod_name.split("-")[-1]) for pod_name in sorted_pod_names])
 
 
 async def main(
@@ -391,33 +380,26 @@ async def main(
     Note this means that outside of k8s, only single node is supported.
 
     Environment variables:
+        SIDECAR_RANK: The global rank of the sidecar
         SIDECAR_WORLD_SIZE: The total number of sidecars in the cluster.
         SIDECAR_SHM_SIZE: The size of the shared memory buffer in bytes in each sidecar
             this will be divided by the dtype size so it should be a multiple of the dtype size.
-
-        K8s only:
-        SIDECAR_POD_NAME: The name of the pod the sidecar is running in.
+        SIDECAR_LOCAL_PEER_RANKS: The sidecar ranks of local peers, comma separated.
 
         Outside of k8s:
-        SIDECAR_RANK: The global rank of the sidecar
-        SIDECAR_DEVICE_ID: The device id of the GPU used by the sidecar, will use SIDECAR_RANK if not set.
-        SIDECAR_NUM_DEVICES: The number of devices on the node, will use SIDECAR_WORLD_SIZE if not set.
+        SIDECAR_DEVICE_ID: The device id of the GPU to use, will use SIDECAR_RANK if not set.
     """
+    sidecar_rank = int(os.environ.get("SIDECAR_RANK", "-1"))
+    assert sidecar_rank >= 0, "Invalid sidecar rank"
     world_size = int(os.environ.get("SIDECAR_WORLD_SIZE", "1"))
     shm_size = int(os.environ.get("SIDECAR_SHM_SIZE", str(2**30)))
-
+    peer_ranks_str = os.environ.get("SIDECAR_LOCAL_PEER_RANKS")
+    if not peer_ranks_str:
+        raise ValueError("SIDECAR_LOCAL_PEER_RANKS not set")
     assert world_size > 0, "Invalid SIDECAR_WORLD_SIZE"
-    pod_name = os.environ.get("SIDECAR_POD_NAME")
-
-    if pod_name:
-        try:
-            sidecar_rank = int(pod_name.split("-")[-1])
-        except ValueError:
-            sidecar_rank = -1
-    else:
-        sidecar_rank = int(os.environ.get("SIDECAR_RANK", "-1"))
-
-    assert sidecar_rank >= 0, "Invalid sidecar rank"
+    peers = list(map(int, peer_ranks_str.split(",")))
+    assert len(peers) > 0, "Invalid SIDECAR_LOCAL_PEER_RANKS"
+    assert sidecar_rank in peers, "Sidecar rank not in local peers"
 
     # OpenTelemetry setup
     configure_otel(name=f"sidecar[{sidecar_rank}]")
@@ -442,7 +424,7 @@ async def main(
     await server.start()
     logger.info("Sidecar server started on %s", listen_addr)
 
-    async def server_graceful_shutdown():
+    async def server_graceful_shutdown() -> None:
         logger.info("Starting graceful shutdown...")
         await servicer.shutdown()
         await server.stop(5)
@@ -451,22 +433,7 @@ async def main(
     logger.info("Starting sidecar server %s", sidecar_rank)
     await servicer.p2p_connect()
 
-    # now that every sidecar server has started, we query the cluster to retrieve
-    # the device_id and num_devices within the node when using k8s
-    if pod_name:
-        node_info = await _get_node_info(pod_name)
-    else:
-        # outside of k8s, currently limited to identity mapping
-        cluster_ranks_str = os.environ.get("SIDECAR_CLUSTER_RANKS")
-        if cluster_ranks_str:
-            try:
-                cluster_ranks = list(map(int, cluster_ranks_str.split(",")))
-            except ValueError as err:
-                logger.exception("Invalid SIDECAR_CLUSTER_RANKS")
-                raise ValueError("Invalid SIDECAR_CLUSTER_RANKS") from err
-        else:
-            cluster_ranks = list(range(world_size))
-        node_info = SidecarNodeInfo(cluster_ranks)
+    node_info = SidecarNodeInfo(peers)
 
     assert node_info is not None, "Failed to get node info"
 

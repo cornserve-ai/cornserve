@@ -10,9 +10,6 @@ import torch
 
 from .utils import (
     device_from_rank,
-    mock_device,
-    mock_grpc_channel,
-    mock_ucx_url,
     start_sidecar_servers,
     terminate_processes,
     wait_for_servers_to_start,
@@ -22,26 +19,10 @@ torch.manual_seed(0)
 random.seed(0)
 uuid.uuid4 = lambda: uuid.UUID(int=random.getrandbits(128))
 
+os.environ["SIDECAR_IS_LOCAL"] = "true"
+
 MAX_SERVERS = int(os.environ.get("MAX_SERVERS", 4))
 CLUSTER_SIZE = int(os.environ.get("CLUSTER_SIZE", 2))
-
-
-@pytest.fixture(scope="module", autouse=True)
-def mock_grpc_channel_fixture() -> None:
-    """Fixture to automatically mock the grpc_channel_from_rank function."""
-    mock_grpc_channel()
-
-
-@pytest.fixture(scope="module", autouse=True)
-def mock_ucx_url_fixture() -> None:
-    """Fixture to automatically mock the ucx_url_from_rank function."""
-    mock_ucx_url()
-
-
-@pytest.fixture(scope="module", autouse=True)
-def mock_device_fixture() -> None:
-    """Fixture to automatically mock the device_from_rank function."""
-    mock_device()
 
 
 @pytest.fixture(scope="module")
@@ -54,7 +35,7 @@ def sidecar_servers(
         A tuple of (servers, setup_type) where setup_type is either "intranode" or "internode"
     """
     setup_type = request.param
-    shm_size = 2 << 26  # Fixed value from original tests
+    shm_size = 2 << 30
 
     if setup_type == "internode":
         servers = start_sidecar_servers(MAX_SERVERS, CLUSTER_SIZE, shm_size)
@@ -164,29 +145,47 @@ async def test_objs(
 
 
 tensor_test_params = [
+    # # Single copy
     # Single copy
-    ([0], [2], 1, (5,), torch.bfloat16, 5, 5, False, 5),
-    ([0, 1], [2], 2, (20,), torch.bfloat16, 5, 10, False, 6),
-    ([0, 1], [2, 3], 4, (100,), torch.float64, 100, 200, False, 7),
+    ([0], [2], 1, (100,), torch.bfloat16, 1, 1, False, 4),
+    ([0], [2], 1, (100,), torch.float64, 5, 10, False, 5),
+    ([0, 1], [2], 2, (1176,), torch.bfloat16, 5, 10, False, 6),
+    ([0, 1], [2, 3], 4, (29, 4096), torch.bfloat16, 100, 200, False, 7),
     # Concurrent copy
-    ([0], [2], 4, (5,), torch.bfloat16, 100, 200, True, 8),
-    ([0, 1], [2], 2, (20,), torch.bfloat16, 50, 100, True, 9),
+    ([0], [2], 4, (13, 4096), torch.bfloat16, 100, 200, True, 8),
+    ([0, 1], [2], 2, (1176,), torch.bfloat16, 50, 100, True, 9),
     ([0, 1], [2, 3], 1, (100,), torch.float64, 5, 50, True, 10),
+    ([0, 1], [2, 3], 1, (100,), torch.bfloat16, 1, 1, True, 3),
 ]
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("sidecar_servers", ["intranode", "internode"], indirect=True)
 @pytest.mark.parametrize(
-    "sender_ranks, receiver_ranks, num_chunks, shape, dtype, token_min, token_max, concurrent_copy, count",
+    "sidecar_servers",
+    ["intranode", "internode"],
+    indirect=True,
+    ids=["intra", "inter"],
+)
+@pytest.mark.parametrize(
+    "sender_ranks, receiver_ranks, num_chunks, chunk_shape, dtype, token_min, token_max, concurrent_copy, count",
     tensor_test_params,
+    ids=[
+        "single_corner",
+        "single_small",
+        "single_medium",
+        "single_large",
+        "concurrent_small",
+        "concurrent_medium",
+        "concurrent_large",
+        "concurrent_corner",
+    ],
 )
 async def test_tensors(
     sidecar_servers: tuple[list[multiprocessing.Process], Literal["intranode", "internode"]],
     sender_ranks: list[int],
     receiver_ranks: list[int],
     num_chunks: int,
-    shape: tuple[int, ...],
+    chunk_shape: tuple[int, ...],
     dtype: torch.dtype,
     token_min: int,
     token_max: int,
@@ -205,8 +204,8 @@ async def test_tensors(
     print("------------------------------------------------------------")
     print(
         f"Testing {setup_type} tensor communication:\n",
-        f"Sender ranks: {sender_ranks} Receiver ranks: {receiver_ranks}\n",
-        f"num_chunks: {num_chunks} shape: {shape} dtype: {dtype} token_min: {token_min} token_max: {token_max}",
+        f"Sender ranks: {sender_ranks} Receiver ranks: {receiver_ranks} concurrent_copy: {concurrent_copy}\n",
+        f"num_chunks: {num_chunks} chunk_shape: {chunk_shape} dtype: {dtype} token_min: {token_min} token_max: {token_max}",
     )
 
     sidecar_senders = []
@@ -216,7 +215,7 @@ async def test_tensors(
         config = SidecarConfig(
             sidecar_rank=r,
             group=sender_ranks,
-            send_tensor_shape=(-1, *shape),
+            send_tensor_shape=(-1, *chunk_shape),
             send_tensor_dtype=dtype,
             concurrent_copy=concurrent_copy,
         )
@@ -226,7 +225,7 @@ async def test_tensors(
         config = SidecarConfig(
             sidecar_rank=r,
             group=receiver_ranks,
-            recv_tensor_shape=(-1, *shape),
+            recv_tensor_shape=(-1, *chunk_shape),
             recv_tensor_dtype=dtype,
             concurrent_copy=concurrent_copy,
         )
@@ -245,7 +244,7 @@ async def test_tensors(
             n = random.randint(token_min, token_max)
             for i in range(num_chunks):
                 print(f"--> Sender {sender_ranks} sending chunk {i} of data_id {id} with {n} tokens")
-                chunk = torch.randn(n, *shape, dtype=dtype)
+                chunk = torch.randn(n, *chunk_shape, dtype=dtype)
                 chunks.append(chunk)
                 for r, sender in enumerate(senders):
                     sender.send(
@@ -255,7 +254,7 @@ async def test_tensors(
                         chunk_id=i,
                         num_chunks=num_chunks,
                     )
-                print("TEST: Sent data id", id, "chunk", i, "of tensor", chunk)
+                print("TEST: Sent data id", id, "chunk", i, "of tensor", chunk.shape)
             data.append(chunks)
         return ids, data
 
@@ -271,8 +270,12 @@ async def test_tensors(
                 sent = data[i].to(device_from_rank(sender_rank))
                 received = received.to(device_from_rank(sender_rank))
                 if i == 0:
-                    print("TEST: Received data id", id, " of tensor", received)
+                    print("TEST: Received data id", id, " of tensor", received.shape)
                 assert torch.allclose(sent, received), f"Data mismatch for id {id}: {sent} vs {received}"
+
+        chunk = await receivers[0].recv(id=id, chunk_id=num_chunks + 1)
+        assert chunk is None
+        for i in range(num_chunks):
             await receivers[0].mark_done(id=id, chunk_id=i)
 
     async def verify_all(

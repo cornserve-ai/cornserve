@@ -161,6 +161,7 @@ class SidecarSender:
                 data=request.data,
                 src_rank=self.sidecar_rank,
                 chunk_id=request.chunk_id,
+                num_chunks=request.num_chunks,
             )
             stub = self._get_grpc_stub(rank)
             coros.append(stub.PrepareReceive(req))
@@ -175,7 +176,12 @@ class SidecarSender:
         request: sidecar_pb2.UnlinkRequest,
         context: grpc.aio.ServicerContext,
     ) -> sidecar_pb2.UnlinkResponse:
-        """Mark a tensor as consumed, free up the shared memory used."""
+        """Mark a tensor as consumed.
+
+        Exclusively from intra-node send. This call will decrement the ref count (initialized as the
+        number of intra-node ranks when send) of the buffer. If the ref count reaches 0, the underlying
+        buffer will be freed.
+        """
         span = trace.get_current_span()
         id = request.id + f"-{request.chunk_id}"
         span.set_attribute("SidecarSender.unlink.id", id)
@@ -227,7 +233,7 @@ class SidecarSender:
         obj = self.decoder.decode(request.data)
         if isinstance(obj, torch.Tensor):
             span.set_attribute("SidecarSender.send.type", "tensor")
-            return await self._send_buffer(request, obj)
+            return await self._send_tensor(request, obj)
         else:
             span.set_attribute("SidecarSender.send.type", "obj")
             return await self._send_small_objects(request)
@@ -269,6 +275,7 @@ class SidecarSender:
             data=data,
             src_rank=self.sidecar_rank,
             chunk_id=request.chunk_id,
+            num_chunks=request.num_chunks,
         )
         stub = self._get_grpc_stub(dst_rank)
         res = await stub.PrepareReceive(req)
@@ -313,6 +320,7 @@ class SidecarSender:
                 src_rank=self.sidecar_rank,
                 data=data,
                 chunk_id=request.chunk_id,
+                num_chunks=request.num_chunks,
             )
             stub = self._get_grpc_stub(dst_rank)
             res = await stub.PrepareReceive(req)
@@ -338,6 +346,7 @@ class SidecarSender:
                 src_rank=self.sidecar_rank,
                 data=data,
                 chunk_id=request.chunk_id,
+                num_chunks=request.num_chunks,
             )
             stub = self._get_grpc_stub(dst_rank)
             res = await stub.PrepareReceive(req)
@@ -437,19 +446,20 @@ class SidecarSender:
                 # inter-node send
                 coros.append(self._send_inter_node_buffer(request, buffer, rank))
 
-        responses = await asyncio.gather(*coros)
-
-        async with self.sent_lock:
-            self.ledger[id].shards_sent[request.shard_rank] = True
-            if all(self.ledger[id].shards_sent):
-                del self.ledger[id]
-                if not intra_node_indexes:
-                    await self._free(buffer)
-
-        if is_first:
-            # only first call needs to update the tracker
+        if is_first and intra_node_indexes:
             self.saved_buffers[id] = buffer
             self.ref_counts[id] = len(intra_node_indexes)
+
+        responses = await asyncio.gather(*coros)
+
+        # for inter-node
+        if not intra_node_indexes:
+            async with self.sent_lock:
+                self.ledger[id].shards_sent[request.shard_rank] = True
+                if all(self.ledger[id].shards_sent):
+                    del self.ledger[id]
+                    if not intra_node_indexes:
+                        await self._free(buffer)
 
         failed = [res.status != common_pb2.Status.STATUS_OK for res in responses]
         # if all intra node failed, remove the tracker
@@ -503,15 +513,18 @@ class SidecarSender:
             else:
                 # inter-node send
                 coros.append(self._send_inter_node_buffer(request, buffer, rank))
+
+        if intra_node_indexes:
+            # save before sending done
+            span.set_attribute("SidecarSender.copy.action", "save")
+            self.saved_buffers[id] = buffer
+            self.ref_counts[id] = len(intra_node_indexes)
+
         responses = await asyncio.gather(*coros)
 
         if not intra_node_indexes:
             # if no intra-node send, we can safely free the buffer
             await self._free(buffer)
-        else:
-            span.set_attribute("SidecarSender.copy.action", "save")
-            self.saved_buffers[id] = buffer
-            self.ref_counts[id] = len(intra_node_indexes)
 
         failed = [res.status != common_pb2.Status.STATUS_OK for res in responses]
         # if all intra node failed, remove the tracker
@@ -523,7 +536,7 @@ class SidecarSender:
             return sidecar_pb2.SendResponse(status=common_pb2.Status.STATUS_ERROR)
         return sidecar_pb2.SendResponse(status=common_pb2.Status.STATUS_OK)
 
-    async def _send_buffer(
+    async def _send_tensor(
         self,
         request: sidecar_pb2.SendRequest,
         data: torch.Tensor,

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import ctypes
-from enum import Enum
+import os
 
 import torch
 
@@ -51,6 +51,9 @@ def device_from_rank(rank: int) -> torch.device:
 def grpc_url_from_rank(rank: int) -> str:
     """GRPC channel url from rank."""
     assert rank >= 0, "Rank should be non-negative"
+    is_local = os.environ.get("SIDECAR_IS_LOCAL", "false").lower() == "true"
+    if is_local:
+        return f"localhost:{GRPC_BASE_PORT + rank}"
     parts = [
         f"sidecar-{rank}",
         constants.K8S_SIDECAR_SERVICE_NAME,
@@ -63,6 +66,9 @@ def grpc_url_from_rank(rank: int) -> str:
 def ucx_url_from_rank(rank: int) -> str:
     """UCX connection host url from rank."""
     assert rank >= 0, "Rank should be non-negative"
+    is_local = os.environ.get("SIDECAR_IS_LOCAL", "false").lower() == "true"
+    if is_local:
+        return "127.0.0.1"
     parts = [
         f"sidecar-{rank}",
         constants.K8S_SIDECAR_SERVICE_NAME,
@@ -110,9 +116,3 @@ def init_shmem(
     start = partition_numel * local_ranks[0]
     end = partition_numel * (local_ranks[-1] + 1)
     return full_tensor, full_tensor[start:end]
-
-
-class TensorLayout(Enum):
-    """Tensor layout/slicing dimention for the data transferred by a sidecar."""
-
-    FULL = 0

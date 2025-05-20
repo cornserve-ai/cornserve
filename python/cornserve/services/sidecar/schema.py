@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import asyncio
+from dataclasses import dataclass, field
+from typing import Any
 
 import torch
-from ucxx._lib_async.endpoint import Endpoint
+from ucxx._lib_async.endpoint import Endpoint  # type: ignore
 
 from cornserve.services.sidecar.shm_manager import SharedMemoryBuffer
 from cornserve.sidecar.utils import init_shmem, shm_filename
@@ -22,7 +24,7 @@ class SidecarNodeInfo:
 
     sidecar_ranks: list[int]
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         """Check the sidecar ranks are unique and make sure they are sorted."""
         # check all different
         s = set(self.sidecar_ranks)
@@ -127,7 +129,7 @@ class SidecarServerConfig:
     recv_slot_numel: int
     concurrent_copy: bool = True
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         """Check the group is sorted and unique."""
         s = set(self.group)
         assert len(s) == len(self.group), "Sidecar ranks should be unique"
@@ -219,3 +221,49 @@ class RecvTransferRequestState:
     buffer: SharedMemoryBuffer
     intra_node_rank: int = -1
     done: bool = False
+
+
+@dataclass
+class RecvTensorState:
+    """Internal data structure to keep track of a chunk of tensor's transfer state.
+
+    Attributes:
+        id: The chunk id
+        buffer: The shared memory buffer used to recv the tensor
+        intra_node_rank: The intra node source sidecar rank
+        done: A flag to indicate if the transfer is done
+    """
+
+    id: int
+    buffer: SharedMemoryBuffer
+    intra_node_rank: int = -1
+    done: bool = False
+
+
+@dataclass
+class RecvObjState:
+    """Internal data structure to keep track of a chunk of obj's transfer state.
+
+    Attributes:
+        id: The chunk id
+        data: Any deserialized data
+    """
+
+    id: int
+    data: Any
+
+
+@dataclass
+class RecvRequestState:
+    """Internal data structure to keep track of a transfer request's state.
+
+    Attributes:
+        id: The request id of the receive request
+        num_chunks: The number of chunks in the request
+        chunks: A dictionary of chunk id to RecvChunkState
+    """
+
+    id: str
+    num_chunks: int = -1
+    chunks: dict[int, RecvTensorState | RecvObjState] = field(default_factory=dict)
+    done_event: asyncio.Event = field(default_factory=asyncio.Event)

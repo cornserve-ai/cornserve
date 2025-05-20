@@ -27,7 +27,7 @@ message RegisterRequest {
 
 message RegisterResponse {
   common.Status status = 1;
-  int32 shm_size = 2; // numel in the single sender/receiver slab
+  int64 shm_size = 2; // numel in the single sender/receiver slab
   int32 local_rank = 3; // the GPU index to use
   int32 num_local_sidecars = 4; // used for init_shmem
 }
@@ -62,6 +62,7 @@ message ReceiveResponse {
 message MarkDoneRequest {
   string id = 1;
   int32 chunk_id = 2;
+  int32 shard_rank = 3; // tp rank
 }
 
 message MarkDoneResponse {
@@ -83,6 +84,7 @@ message PrepareReceiveRequest {
   bytes data = 2; // msgpack encoded handle
   int32 src_rank = 3;
   int32 chunk_id = 4;
+  int32 num_chunks = 5;
 }
 
 message PrepareReceiveResponse {

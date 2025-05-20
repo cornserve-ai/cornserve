@@ -150,8 +150,15 @@ class ResourceManager:
             world_size = sum(gpu_per_node.values())
             sidecar_rank = 0
             for node in nodes.items:
-                for j in range(gpu_per_node[node.metadata.name]):
-                    pod = SidecarLaunchInfo.get_pod(node, sidecar_rank, world_size)
+                min_node_rank = sidecar_rank
+                n_gpu = gpu_per_node[node.metadata.name]
+                for j in range(n_gpu):
+                    pod = SidecarLaunchInfo.get_pod(
+                        node,
+                        sidecar_rank,
+                        world_size,
+                        list(range(min_node_rank, min_node_rank + n_gpu)),
+                    )
                     coros.append(core_api.create_namespaced_pod(namespace=constants.K8S_NAMESPACE, body=pod))
                     gpus.append(GPU(node=node.metadata.name, global_rank=sidecar_rank, local_rank=j))
                     sidecar_rank += 1
@@ -179,6 +186,7 @@ class ResourceManager:
                     await asyncio.gather(*cleanup_coros, return_exceptions=True)
                 raise RuntimeError(f"Failed to spawn {failed} sidecar pods")
 
+            # TODO (Jeff): CheckHealth with Timeout
             resource = Resource(gpus=gpus)
             return ResourceManager(
                 api_client=api_client,

@@ -105,7 +105,7 @@ class Sidecar:
         dst_sidecar_ranks: list[list[int]],
         chunk_id: int = 0,
         num_chunks: int = 1,
-    ):
+    ) -> None:
         """Send some data to other sidecars.
 
         Args:
@@ -148,7 +148,7 @@ class Sidecar:
         dst_sidecar_ranks: list[list[int]],
         chunk_id: int,
         num_chunks: int,
-    ):
+    ) -> None:
         """The worker function to send data to other sidecars.
 
         Args:
@@ -187,10 +187,13 @@ class Sidecar:
     async def recv(self, id: str, chunk_id: int = 0) -> Any:
         """Receive data from the sidecar server.
 
+        Receive (either sync or async) is idompotent.
+
         Args:
             id: The id of the data.
             chunk_id: The chunk id of the data to receive.
         """
+        # TODO (Jeff): Async Generator
         span = trace.get_current_span()
         span.set_attribute("sidecar.recv.id", id)
         span.set_attribute("sidecar.recv.chunk_id", chunk_id)
@@ -208,18 +211,19 @@ class Sidecar:
             return obj
 
     @tracer.start_as_current_span(name="Sidecar.read")
-    def read(self, id: str, chunk_id: int = 0) -> Any:
-        """Read the data from the sidecar server.
+    def recv_sync(self, id: str, chunk_id: int = 0) -> Any:
+        """Receive data from the sidecar server synchronously.
 
-        This is the sync version of recv.
+        Receive (either sync or async) is idompotent.
+        When the data is already `recv`-ed, this function will return immediately.
 
         Args:
             id: The id of the data.
             chunk_id: The chunk id of the data to receive.
         """
         span = trace.get_current_span()
-        span.set_attribute("sidecar.recv.id", id)
-        span.set_attribute("sidecar.recv.chunk_id", chunk_id)
+        span.set_attribute("sidecar.read.id", id)
+        span.set_attribute("sidecar.read.chunk_id", chunk_id)
         request = sidecar_pb2.ReceiveRequest(id=id, chunk_id=chunk_id)
         response = self.stub.Receive(request)
         if response.status != common_pb2.Status.STATUS_OK:

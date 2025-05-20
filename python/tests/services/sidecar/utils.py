@@ -9,19 +9,19 @@ import pytest
 import torch
 
 from cornserve.services.pb import sidecar_pb2, sidecar_pb2_grpc
+from cornserve.sidecar.utils import grpc_url_from_rank
 
 
-def run_server(rank: int, world_size: int, cluster_ranks: list[int], shm_size: int) -> None:
+def run_server(rank: int, world_size: int, local_peer_ranks: list[int], shm_size: int) -> None:
     """Sidecar server entrypoint that will run in a subprocess."""
-    mock_grpc_channel()
-    mock_ucx_url()
     mock_device()
 
     # Set environment variables
     os.environ["SIDECAR_RANK"] = str(rank)
     os.environ["SIDECAR_WORLD_SIZE"] = str(world_size)
-    os.environ["SIDECAR_CLUSTER_RANKS"] = ",".join(map(str, cluster_ranks))
+    os.environ["SIDECAR_LOCAL_PEER_RANKS"] = ",".join(map(str, local_peer_ranks))
     os.environ["SIDECAR_SHM_SIZE"] = str(shm_size)
+    os.environ["SIDECAR_IS_LOCAL"] = "true"
 
     from cornserve.services.sidecar.server import cleanup_coroutines, main
 
@@ -38,46 +38,11 @@ def run_server(rank: int, world_size: int, cluster_ranks: list[int], shm_size: i
         loop.close()
 
 
-def mock_grpc_url_from_rank(rank: int) -> str:
-    """Mock version that maps a local channel to a rank."""
-    assert rank >= 0, "Rank should be non-negative"
-    return f"localhost:{10000 + rank}"
-
-
-def mock_grpc_channel() -> None:
-    """Mock the grpc_channel_from_rank function."""
-    mocker = pytest.MonkeyPatch()
-    mocker.setattr(
-        "cornserve.sidecar.utils.grpc_url_from_rank",
-        mock_grpc_url_from_rank,
-    )
-    mocker.setattr(
-        "cornserve.sidecar.api.grpc_url_from_rank",
-        mock_grpc_url_from_rank,
-    )
-
-
 def device_from_rank(rank: int) -> torch.device:
     """Get the device for a given rank."""
     if torch.cuda.is_available():
         return torch.device(f"cuda:{rank % torch.cuda.device_count()}")
     return torch.device("cpu")
-
-
-def mock_ucx_url_from_rank(rank: int) -> str:
-    """UCX connection host url from rank."""
-    assert rank >= 0, "Rank should be non-negative"
-    # to use IB for unit test, the IB card IP needs to set
-    return "0.0.0.0"
-
-
-def mock_ucx_url() -> None:
-    """Mock the ucx_url_from_rank function."""
-    mocker = pytest.MonkeyPatch()
-    mocker.setattr(
-        "cornserve.sidecar.utils.ucx_url_from_rank",
-        mock_ucx_url_from_rank,
-    )
 
 
 def mock_device() -> None:
@@ -121,7 +86,7 @@ def server_is_online(stub: sidecar_pb2_grpc.SidecarStub) -> bool:
 
 def wait_for_servers_to_start(rank: int) -> None:
     while True:
-        with grpc.insecure_channel(mock_grpc_url_from_rank(rank)) as channel:
+        with grpc.insecure_channel(grpc_url_from_rank(rank)) as channel:
             stub = sidecar_pb2_grpc.SidecarStub(channel)
             if server_is_online(stub):
                 break
