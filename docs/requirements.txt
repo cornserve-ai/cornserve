@@ -2,3 +2,4 @@ mkdocs
 mkdocs-material[imaging]
 mkdocs-video
 mkdocs-autorefs
+mkdocs-jupyter
