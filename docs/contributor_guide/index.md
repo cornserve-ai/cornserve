@@ -26,3 +26,20 @@ If the feature is not small or requires broad changes over the codebase, please 
 1. Implement changes in your branch and add tests as needed.
 1. Ensure `bash python/scripts/lint.sh` and `pytest` passes. Note that many of our tests require GPU.
 1. Submit a PR to the main repository. Please ensure that CI (GitHub Actions) passes.
+
+## Documentation
+
+The documentation is written in Markdown and is located in the `docs` folder.
+We use MkDocs to build the documentation and use the `mkdocs-material` theme.
+
+To install documentation build dependencies:
+
+```bash
+pip install -r docs/requirements.txt
+```
+
+To build and preview the documentation:
+
+```bash
+mkdocs serve
+```

@@ -90,6 +90,10 @@ nav:
     - Sidecar: contributor_guide/sidecar.md
     - Tracing: contributor_guide/tracing.md
 
+# Exclude file list
+exclude_docs: |
+  requirements.txt
+
 # Extra stuff
 extra:
   analytics:
