@@ -1,5 +1,8 @@
 ---
 description: "Easy, fast, and scalable multimodal AI"
+hide:
+  - navigation
+  - toc
 ---
 
 <div align="center">
