@@ -16,15 +16,15 @@ hide:
 </div>
 
 Cornserve is an execution platform for multimodal AI.
-**Disaggregate** your models and **share** common pieces seamlessly across applications on your infrastructure!
+It performs **model fission** and **automatic sharing** of common components across applications on your infrastructure.
 
 <div class="grid cards" markdown>
 
--   :material-vector-intersection:{ .lg .middle } **Model disaggregation**
+-   :material-vector-intersection:{ .lg .middle } **Model fission**
 
     ---
 
-    Disaggregate your complex models into smaller components and
+    Split up your complex models into smaller components and
     scale them independently.
 
 -   :material-share-variant:{ .lg .middle }  **Automatic sharing**
