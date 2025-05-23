@@ -7,7 +7,7 @@
 
 Package: `cornserve.task_executors.eric`
 
-Eric is a multimodal encoder server that takes in a list of multimodal data (e.g., images, videos) and computes the multimodal embedding of the input data.
+Eric is a multimodal data embedding server that takes in a list of multimodal data (e.g., images, videos) and computes the multimodal embedding of the input data.
 
 ## Architecture
 
@@ -37,4 +37,4 @@ The engine currently only batches data of the same modality together. This is be
 
 There is one worker (`eric.executor.worker.Worker`) process per GPU. The number of workers is the tensor parallelism degree.
 When spawned, the workers initialize PyTorch distributed and instantiate the model from weights downloaded from the Hugging Face Hub.
-It then waits for the model executor to dispatch a batch to it, runs tensor parallel inference, and diapatches tensor communication to the designated LLM server via the [tensor sidecar](sidecar.md).
+It then waits for the model executor to dispatch a batch to it, runs tensor parallel inference, and dispatches tensor communication to the destination Task Executor via the [sidecar](sidecar.md).
