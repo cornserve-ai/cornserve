@@ -1,8 +1,13 @@
-# Eric: Multimodal encoder server
+# Eric: Multimodal Data Embedding Server
+
+> **Mosharaf**: Hey, what is this "Eric" thing in the architecture diagram?  
+  **Jae-Won**: Oh, uh no, it says "Enc." For Encoder.  
+  **Mosharaf**: Oh.  
+  **Jae-Won**: Now it's Eric.
+
+Package: `cornserve.task_executors.eric`
 
 Eric is a multimodal encoder server that takes in a list of multimodal data (e.g., images, videos) and computes the multimodal embedding of the input data.
-
-Code lives under `python/cornserve/task_executors/eric`.
 
 ## Architecture
 

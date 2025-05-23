@@ -1,10 +1,22 @@
-# Sidecar: P2P Communication Library
+# Sidecar: P2P Communication Service
 
-Sidecar is the P2P communication library in Cornserve that allows task executors
+Package: `cornserve.services.sidecar` and `cornserve.sidecar.api`.
+
+Sidecar is a P2P communication service in Cornserve that allows task executors
 to send/receive intermediate data to/from each other. It's mainly designed for
-tensor, but it also supports any other types.
+tensor, but it also supports byte-serializable Python objects like strings.
 
-Code lives under `python/services/sidecar`
+## Rationale
+
+One obvious way to do P2P communication of tensors across the cluster is to use NCCL.
+However, there are several problems with this approach:
+
+1. NCCL has a fixed world size that cannot be changed. Faults in one rank will disrupt the whole cluster.
+2. NCCL is bound to the process that creates the communicator. This means that NCCL is not amenable to Cornserve autoscaling Task Manager resources which lead to Task Executors being killed and spawned.
+3. NCCL spawns a high-speed polling CUDA kernel that takes up the GPU's SM, potentially leading to performance degradation for actual computation tasks that should be running on the GPU.
+
+Instead, each Task Executor runs alongside a long-running Sidecar server, and performs P2P communication with other Task Executors via the sidecar servers.
+This liberates the Task Executors from the constraints of NCCL.
 
 ## Architecture
 Sidecars have servers and clients. Servers are long running services in the
@@ -76,5 +88,3 @@ can consume the data concurrently. There is also a synchronous version called `r
 `mark_done` is used to free the backing memory of a received tensor in the Sidecar
 server. As the Sidecar server allows for idempotent receive operations, the data
 is always held within the server until a corresponding `mark_done` called.
-
-See `python/sidecar/api.py` for more details.
