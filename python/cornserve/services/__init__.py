@@ -1,1 +1,1 @@
-"""Services that comprise CornServe."""
+"""Services that comprise Cornserve."""

@@ -1,4 +1,4 @@
-"""Constants used throughout CornServe."""
+"""Constants used throughout Cornserve."""
 
 K8S_NAMESPACE = "cornserve"
 K8S_SIDECAR_SERVICE_NAME = "sidecar"

@@ -219,7 +219,7 @@ def init_app_state(app: FastAPI) -> None:
 
 def create_app() -> FastAPI:
     """Create a FastAPI app for the Gateway service."""
-    app = FastAPI(title="CornServe Gateway")
+    app = FastAPI(title="Cornserve Gateway")
     app.include_router(router)
     init_app_state(app)
     return app

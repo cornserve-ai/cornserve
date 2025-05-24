@@ -41,7 +41,7 @@ def init_app_state(app: FastAPI) -> None:
 
 def create_app() -> FastAPI:
     """Build the FastAPI app for the Task Dispatcher."""
-    app = FastAPI(title="CornServe Task Dispatcher")
+    app = FastAPI(title="Cornserve Task Dispatcher")
     app.include_router(router)
     init_app_state(app)
     return app

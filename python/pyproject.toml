@@ -80,7 +80,7 @@ eric-no-gpu = [
 eric = ["flash-attn", "xformers", "cornserve[eric-no-gpu]"]
 dev-common = [
   "grpcio-tools",
-  "pyright",
+  "pyright!=1.1.401",
   "ruff",
   "pytest",
   "pytest-asyncio",
