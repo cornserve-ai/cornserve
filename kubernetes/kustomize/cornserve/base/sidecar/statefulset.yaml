@@ -1,3 +1,5 @@
+# This file is not used by Kustomize; sidecars are deployed by the Resource Manager.
+# We keep it here for reference. We might want to deploy only the sidecars, for instance.
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:

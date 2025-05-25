@@ -8,19 +8,7 @@ spec:
     spec:
       containers:
       - name: gateway
-        imagePullPolicy: IfNotPresent
----
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: task-dispatcher
-  namespace: cornserve
-spec:
-  template:
-    spec:
-      containers:
-      - name: task-dispatcher
-        imagePullPolicy: IfNotPresent
+        imagePullPolicy: Always
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -32,4 +20,16 @@ spec:
     spec:
       containers:
       - name: resource-manager
-        imagePullPolicy: IfNotPresent
+        imagePullPolicy: Always
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: task-dispatcher
+  namespace: cornserve
+spec:
+  template:
+    spec:
+      containers:
+      - name: task-dispatcher
+        imagePullPolicy: Always

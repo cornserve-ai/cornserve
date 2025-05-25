@@ -20,7 +20,7 @@ spec:
       containers:
       - name: gateway
         image: cornserve/gateway:latest
-        imagePullPolicy: Always
+        imagePullPolicy: IfNotPresent
         ports:
         - containerPort: 8000
           name: http

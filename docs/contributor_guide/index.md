@@ -27,6 +27,11 @@ If the feature is not small or requires broad changes over the codebase, please 
 1. Ensure `bash python/scripts/lint.sh` and `pytest` passes. Note that many of our tests require GPU.
 1. Submit a PR to the main repository. Please ensure that CI (GitHub Actions) passes.
 
+## Developing on Kubernetes
+
+Cornserve runs on top of Kubernetes, which introduces some complexity in development.
+Please refer to the guide on [Local and Distributed Development on Kubernetes](kubernetes.md) for more details.
+
 ## Documentation
 
 The documentation is written in Markdown and is located in the `docs` folder.

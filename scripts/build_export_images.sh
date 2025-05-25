@@ -45,7 +45,7 @@ build_and_push() {
     docker build --progress=plain -f "${DOCKERFILE}" -t "${IMAGE}" .
 
     if [[ "${REGISTRY}" == "local" ]]; then
-        echo "Exporting image to local k3s containerd..."
+        echo "Building image directly within local k3s containerd..."
         docker save "${IMAGE}" | invoke_k3s ctr images import -
     else
         echo "Pushing to ${REGISTRY}..."
@@ -64,7 +64,7 @@ invoke_k3s() {
 # Get the user to type their password if they want local k3s containerd export
 if [[ "${REGISTRY}" == "local" ]]; then
     # Ensure k3s is installed and record its binary location
-    echo "Exporting image to local k3s containerd. Existing images are:"
+    echo "Building iamge directly within local k3s containerd. Existing images are:"
     invoke_k3s ctr images ls | grep -i "${NAMESPACE}" || true
 fi
 
