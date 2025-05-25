@@ -21,6 +21,6 @@ images:
 configMapGenerator:
 - name: cornserve-config
   literals:
-  - IMAGE_PREFIX=docker.io/cornserve
-  - IMAGE_TAG=latest
-  - IMAGE_PULL_POLICY=IfNotPresent
+  - CORNSERVE_IMAGE_PREFIX=docker.io/cornserve
+  - CORNSERVE_IMAGE_TAG=latest
+  - CORNSERVE_IMAGE_PULL_POLICY=IfNotPresent

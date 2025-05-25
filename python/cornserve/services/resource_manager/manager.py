@@ -408,6 +408,11 @@ class ResourceManager:
                             image=constants.CONTAINER_IMAGE_TASK_MANAGER,
                             image_pull_policy="Always",
                             ports=[kclient.V1ContainerPort(container_port=port, name="grpc")],
+                            env_from=kclient.V1EnvFromSource(
+                                config_map_ref=kclient.V1ConfigMapEnvSource(
+                                    name=constants.K8S_CORNSERVE_CONFIG_MAP_NAME
+                                )
+                            ),
                         )
                     ],
                     service_account_name="task-manager",

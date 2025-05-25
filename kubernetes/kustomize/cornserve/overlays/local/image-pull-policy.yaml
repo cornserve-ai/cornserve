@@ -1,0 +1,35 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gateway
+  namespace: cornserve
+spec:
+  template:
+    spec:
+      containers:
+      - name: gateway
+        imagePullPolicy: Never
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: resource-manager
+  namespace: cornserve
+spec:
+  template:
+    spec:
+      containers:
+      - name: resource-manager
+        imagePullPolicy: Never
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: task-dispatcher
+  namespace: cornserve
+spec:
+  template:
+    spec:
+      containers:
+      - name: task-dispatcher
+        imagePullPolicy: Never

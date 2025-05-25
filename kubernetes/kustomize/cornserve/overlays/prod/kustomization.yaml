@@ -10,17 +10,22 @@ resources:
 images:
 - name: cornserve/gateway
   newName: cornserve/gateway
+  newTag: v0.0.1
 - name: cornserve/resource-manager
   newName: cornserve/resource-manager
+  newTag: v0.0.1
 - name: cornserve/sidecar
   newName: cornserve/sidecar
+  newTag: v0.0.1
 - name: cornserve/task-dispatcher
   newName: cornserve/task-dispatcher
+  newTag: v0.0.1
 - name: cornserve/task-manager
   newName: cornserve/task-manager
+  newTag: v0.0.1
 configMapGenerator:
 - name: cornserve-config
   literals:
-  - IMAGE_PREFIX=docker.io/cornserve
-  - IMAGE_TAG=v0.0.1
-  - IMAGE_PULL_POLICY=IfNotPresent
+  - CORNSERVE_IMAGE_PREFIX=docker.io/cornserve
+  - CORNSERVE_IMAGE_PULL_POLICY=IfNotPresent
+  - CORNSERVE_IMAGE_TAG=v0.0.1

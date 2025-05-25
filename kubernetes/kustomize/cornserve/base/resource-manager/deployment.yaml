@@ -25,3 +25,6 @@ spec:
         ports:
         - containerPort: 50051
           name: grpc
+        envFrom:
+        - configMapRef:
+            name: cornserve-config

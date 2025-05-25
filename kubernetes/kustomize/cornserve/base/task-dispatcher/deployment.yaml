@@ -26,3 +26,6 @@ spec:
           name: grpc
         - containerPort: 8000
           name: http
+        envFrom:
+        - configMapRef:
+            name: cornserve-config
