@@ -1,6 +1,4 @@
 mirrors:
-  docker.io:
+  "registry.cornserve-system.svc.cluster.local:5000":
     endpoint:
-      - "http://private.registry.example.com:5000"  # Replace with your private registry endpoint
-    rewrite:
-      "^cornserve/(.*)$": "cornserve/$1"
+      - "http://registry.cornserve-system.svc.cluster.local:5000"

@@ -2,9 +2,6 @@
 
 ### Local development
 
-> [!NOTE]  
-> You can use the `local` overlay for the quick Minikube demo as well.
-
 You are developing on a single node.
 In this case, we don't need a registry.
 Instead, we build containers directly within the containerd runtime of K3s.
@@ -25,6 +22,9 @@ kubectl apply -k kustomize/cornserve/overlays/local kustomize/cornserve-system/o
 ```
 
 The `local` overlay specifies `imagePullPolicy: Never`, meaning that if the image was not found locally, it means that it was not built yet, correctly raising an error.
+
+!!! NOTE  
+    You can use the `local` overlay for the quick Minikube demo as well.
 
 ### Distributed development
 

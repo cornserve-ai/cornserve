@@ -58,6 +58,6 @@ It performs **model fission** and **automatic sharing** of common components acr
     ---
 
     Cornserve is open-source with the Apache 2.0 license and is available on
-    [GitHub](https://github.com/cornstarch-org/cornserve).
+    [GitHub](https://github.com/cornserve-ai/cornserve).
 
 </div>

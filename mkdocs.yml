@@ -1,13 +1,13 @@
 # Project information
 site_name: Cornserve
-site_url: https://cornstarch-org.github.io/cornserve
+site_url: https://docs.cornserve.ai
 site_author: Cornserve team
 site_description: Easy, fast, and scalable multimodal agentic AI
 edit_uri: ""
 
 # Repository
-repo_name: cornstarch-org/cornserve
-repo_url: https://github.com/cornstarch-org/cornserve
+repo_name: cornserve-ai/cornserve
+repo_url: https://github.com/cornserve-ai/cornserve
 
 # Copyright
 copyright: Copyright &copy; 2025 Cornserve team
@@ -88,6 +88,7 @@ nav:
     - Eric: architecture/eric.md
   - Contributor Guide:
     - contributor_guide/index.md
+    - Developing on Kubernetes: contributor_guide/kubernetes.md
     - Eric: contributor_guide/eric.md
     - Sidecar: contributor_guide/sidecar.md
     - Tracing: contributor_guide/tracing.md
@@ -110,4 +111,4 @@ extra:
   social:
     - name: Cornserve GitHub repository
       icon: fontawesome/brands/github
-      link: https://github.com/cornstarch-org/cornserve
+      link: https://github.com/cornserve-ai/cornserve
