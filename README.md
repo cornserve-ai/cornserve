@@ -8,4 +8,4 @@
 Cornserve is an execution platform for multimodal AI.
 **Disaggregate** your models and **share** common pieces seamlessly across applications on your infrastructure.
 
-Learn more about Cornserve in our [documentation](https://docs.cornserve.ai/).
+Learn more about Cornserve in our [documentation](https://cornserve.ai/).

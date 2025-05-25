@@ -280,7 +280,7 @@ class TaskManager:
                     kclient.V1Container(
                         name="task-executor",
                         image=self.descriptor.get_container_image(),
-                        image_pull_policy="IfNotPresent",
+                        image_pull_policy=constants.CONTAINER_IMAGE_PULL_POLICY,
                         args=self.descriptor.get_container_args(gpus, port),
                         ports=[kclient.V1ContainerPort(container_port=port, name="http")],
                         resources=kclient.V1ResourceRequirements(

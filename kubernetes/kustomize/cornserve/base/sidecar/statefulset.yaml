@@ -32,7 +32,7 @@ spec:
       containers:
       - name: sidecar
         image: cornserve/sidecar:latest
-        imagePullPolicy: Always
+        imagePullPolicy: IfNotPresent
         securityContext:
           privileged: true
         env:

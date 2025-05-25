@@ -23,6 +23,7 @@ images:
   newTag: latest
 configMapGenerator:
 - name: cornserve-config
+  namespace: cornserve
   behavior: merge
   literals:
   - CORNSERVE_IMAGE_PREFIX=registry.cornserve-system.svc.cluster.local:5000/cornserve

@@ -41,7 +41,7 @@ class SidecarLaunchInfo:
                     kclient.V1Container(
                         name="sidecar",
                         image=constants.CONTAINER_IMAGE_SIDECAR,
-                        image_pull_policy="Always",
+                        image_pull_policy=constants.CONTAINER_IMAGE_PULL_POLICY,
                         security_context=kclient.V1SecurityContext(
                             privileged=True,
                         ),

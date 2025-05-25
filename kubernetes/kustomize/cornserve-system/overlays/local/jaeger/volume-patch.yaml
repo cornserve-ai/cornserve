@@ -1,0 +1,18 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: jaeger
+  namespace: cornserve-system
+spec:
+  template:
+    spec:
+      containers:
+      - name: jaeger
+        volumeMounts:
+        - name: host-storage
+          mountPath: /badger
+      volumes:
+      - name: host-storage
+        hostPath:
+          path: /data/cornserve/jaeger-badger
+          type: DirectoryOrCreate

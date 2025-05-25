@@ -406,7 +406,7 @@ class ResourceManager:
                         kclient.V1Container(
                             name="task-manager",
                             image=constants.CONTAINER_IMAGE_TASK_MANAGER,
-                            image_pull_policy="Always",
+                            image_pull_policy=constants.CONTAINER_IMAGE_PULL_POLICY,
                             ports=[kclient.V1ContainerPort(container_port=port, name="grpc")],
                             env_from=kclient.V1EnvFromSource(
                                 config_map_ref=kclient.V1ConfigMapEnvSource(
