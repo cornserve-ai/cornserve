@@ -1,11 +1,18 @@
 #!/usr/bin/env bash
 
+# Usage: REGISTRY="..." bash scripts/build_export_images.sh [service1 service2 ...]
+# If no services are specified, it builds all services found in the docker/ directory.
+# REGISTRY should be either 'local' for local development or the URL of the registry for distributed development.
+
 set -euo pipefail
 
 # Ensure the REGISTRY environment variable is set.
 if [ -z "${REGISTRY:-}" ]; then
-    REGISTRY="$(hostname -f):5000"
-    echo "Warning: The REGISTRY environment variable is not set. Defaulting to ${REGISTRY}."
+    echo "The REGISTRY environment variable is not set."
+    echo "If you're doing local development with the local overlay, set it to 'local'."
+    echo "If you're doing distributed development with the dev overlay, set it to the the URL the registry is exposed to (e.g., 'localhost:30070')."
+    echo "See also: https://cornserve.ai/contributor_guide/kubernetes/"
+    exit 1
 fi
 
 # Generate protocol buffers
@@ -14,11 +21,11 @@ bash scripts/generate_pb.sh
 NAMESPACE="cornserve"
 
 # If service names are provided as arguments, use them.
-# Otherwise, recursively find all Dockerfiles in the "docker" directory.
+# Otherwise, find all Dockerfiles in the "docker" directory.
 if [ "$#" -ge 1 ]; then
     BUILD_LIST=("$@")
 else
-    echo "Building all services found recursively in the docker directory."
+    echo "Building all services found in the docker directory."
     BUILD_LIST=()
     while IFS= read -r file; do
         if [[ -f "$file" ]]; then
@@ -28,10 +35,10 @@ else
     done < <(find docker -type f -name '*.Dockerfile')
 fi
 
-# Function to build and push a service
-build_and_push() {
+# Function to build and export the image for a single service
+build_and_export() {
     local SERVICE="$1"
-    echo "Building Docker image for: ${SERVICE}"
+    echo "Building and exporting image for: ${SERVICE}"
 
     DOCKERFILE=$(find docker -type f -name "${SERVICE}.Dockerfile" | head -n 1)
     if [[ -z "${DOCKERFILE}" ]]; then
@@ -42,13 +49,11 @@ build_and_push() {
     IMAGE="${NAMESPACE}/${SERVICE}:latest"
     PUSH_IMAGE="${REGISTRY}/${NAMESPACE}/${SERVICE}:latest"
     
-    docker build --progress=plain -f "${DOCKERFILE}" -t "${IMAGE}" .
-
     if [[ "${REGISTRY}" == "local" ]]; then
         echo "Building image directly within local k3s containerd..."
-        docker save "${IMAGE}" | invoke_k3s ctr images import -
+        sudo nerdctl build --progress=plain -f "${DOCKERFILE}" -t "${IMAGE}" .
     else
-        echo "Pushing to ${REGISTRY}..."
+        docker build --progress=plain -f "${DOCKERFILE}" -t "${IMAGE}" .
         docker tag "${IMAGE}" "${PUSH_IMAGE}"
         docker push "${PUSH_IMAGE}"
     fi
@@ -56,22 +61,33 @@ build_and_push() {
     echo "Successfully built and exported ${IMAGE}"
 }
 
-invoke_k3s() {
-    k3s_bin="$(which k3s)"
-    sudo "${k3s_bin}" "$@"
-}
-
 # Get the user to type their password if they want local k3s containerd export
 if [[ "${REGISTRY}" == "local" ]]; then
-    # Ensure k3s is installed and record its binary location
-    echo "Building iamge directly within local k3s containerd. Existing images are:"
-    invoke_k3s ctr images ls | grep -i "${NAMESPACE}" || true
+    # Ensure k3s is installed and list existing images
+    echo "Building iamge directly within local k3s containerd"
+    k3s_bin="$(which k3s)"
+    sudo "${k3s_bin}" ctr images ls | grep -i "${NAMESPACE}" || true
+
+    # Ensure nerdctl is installed
+    if ! command -v nerdctl &> /dev/null; then
+        echo "nerdctl is not installed. Please install it to build images for local k3s containerd."
+        exit 1
+    fi
+
+    # Ensure buildkit is configured
+    nerdctl_output=$(sudo nerdctl build 2>&1 || true)
+    if echo "${nerdctl_output}" | grep -q "buildkit"; then
+        echo "It seems like buildkit is not configured. Please configure it to build images for local k3s containerd."
+        echo "Nerdctl output:"
+        echo "${nerdctl_output}"
+        exit 1
+    fi
 fi
 
 # Run all builds in parallel
 for SERVICE in "${BUILD_LIST[@]}"; do
-    build_and_push "${SERVICE}" &
+    build_and_export "${SERVICE}" &
 done
 
 wait
-echo "All builds and pushes completed."
+echo "All builds completed."
