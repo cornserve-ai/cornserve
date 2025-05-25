@@ -15,8 +15,7 @@ copyright: Copyright &copy; 2025 Cornserve team
 # Theme configuration
 theme:
   name: material
-  # logo: assets/img/logo.svg
-  favicon: assets/img/favicon.svg
+  favicon: assets/img/favicon.png
   icon:
     repo: fontawesome/brands/github
     logo: material/rocket-launch-outline
