@@ -272,15 +272,17 @@ class ResourceManager:
         span = trace.get_current_span()
         span.set_attribute("resource_manager.teardown_unit_task.task", str(task))
 
-        # Find the task manager ID for this task
-        task_manager_id = None
+        # Find the task manager state for this task
+        task_state = None
         async with self.task_states_lock:
             for state_id, state in self.task_states.items():
                 if state.deployment and state.deployment.task == task:
-                    task_manager_id = state_id
+                    task_state = state
+                    # Remove from task_states dict but don't cleanup yet
+                    self.task_states.pop(state_id)
                     break
 
-            if task_manager_id is None:
+            if task_state is None:
                 logger.info("Task %s is not running, returning immediately", task)
                 return
 
@@ -292,14 +294,13 @@ class ResourceManager:
             # Do not re-raise the exception but rather continue with the shutdown
             logger.exception("Failed to notify task dispatcher of removed task %s: %s", task, e)
 
-        # Remove the task manager state and clean it up
-        async with self.task_states_lock:
-            if task_state := self.task_states.pop(task_manager_id, None):
-                try:
-                    await task_state.tear_down(self.kube_core_client)
-                except Exception as e:
-                    logger.error("Failed to clean up task manager for %s: %s", task, e)
-                    raise RuntimeError(f"Failed to clean up task manager for {task}") from e
+        # Clean up the task manager state with its individual lock
+        async with task_state.lock:
+            try:
+                await task_state.tear_down(self.kube_core_client)
+            except Exception as e:
+                logger.error("Failed to clean up task manager for %s: %s", task, e)
+                raise RuntimeError(f"Failed to clean up task manager for {task}") from e
 
     async def healthcheck(self) -> tuple[bool, list[tuple[UnitTask, bool]]]:
         """Check the health of all task managers.
