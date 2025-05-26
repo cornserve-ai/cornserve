@@ -29,6 +29,7 @@ The `local` overlay specifies `imagePullPolicy: Never`, meaning that if the imag
 ### Distributed development
 
 You are developing on a multi-node cluster.
+
 (1) Now, you do need a registry to push images to, so that remote nodes can pull them:
 
 ```bash
@@ -37,6 +38,7 @@ REGISTRY=myregisty.com:5000 bash kubernetes/set_registry.sh  # (1)!
 ```
 
 1. Modifies `kustomization.yaml` and `k3s/registries.yaml`
+   If you're on this dev workflow with a *single* node cluster, you can skip `kubernetes/set_registry.sh` because things default to `localhost:5000`.
 
 (2) For K3s to work with insecure (i.e., HTTP) registries, you need to set up the `registries.yaml` file in `/etc/rancher/k3s/` on **all** nodes (master and worker) before starting K3s:
 
