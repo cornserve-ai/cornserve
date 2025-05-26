@@ -18,7 +18,8 @@ REGISTRY=local bash scripts/build_export_images.sh
 Use the `local` overlay to deploy Cornserve:
 
 ```bash
-kubectl apply -k kustomize/cornserve/overlays/local kustomize/cornserve-system/overlays/local
+kubectl apply -k kustomize/cornserve-system/overlays/local
+kubectl apply -k kustomize/cornserve/overlays/local
 ```
 
 The `local` overlay specifies `imagePullPolicy: Never`, meaning that if the image was not found locally, it means that it was not built yet, correctly raising an error.
@@ -56,5 +57,6 @@ REGISTRY=myregistry.com:5000 bash scripts/build_export_images.sh
 (4) Use the `dev` overlay (which specifies `imagePullPolicy: Always`) to deploy Cornserve:
 
 ```bash
-kubectl apply -k kustomize/cornserve/overlays/dev kustomize/cornserve-system/overlays/dev
+kubectl apply -k kustomize/cornserve-system/overlays/dev
+kubectl apply -k kustomize/cornserve/overlays/dev
 ```

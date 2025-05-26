@@ -77,7 +77,7 @@ class SidecarLaunchInfo:
                     for name, host_path, _ in SidecarLaunchInfo.get_container_volumes()
                 ],
                 service_account_name="sidecar",
-                runtime_class_name="nvidia",
+                # runtime_class_name="nvidia",
                 node_name=node.metadata.name,
                 host_ipc=True,
                 host_pid=True,
@@ -99,6 +99,7 @@ class SidecarLaunchInfo:
             ("SIDECAR_WORLD_SIZE", str(world_size)),
             ("SIDECAR_RANK", str(sidecar_rank)),
             ("SIDECAR_LOCAL_PEER_RANKS", ",".join(map(str, peer_ranks))),
+            ("NVIDIA_VISIBLE_DEVICES", "all"),
         ]
 
     @staticmethod

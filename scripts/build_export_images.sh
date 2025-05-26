@@ -6,10 +6,13 @@
 #     bash scripts/build_export_images.sh [service1 service2 ...]
 #
 # If no services are specified, it builds all services found in the docker/ directory except for `dev`.
-# REGISTRY should be either 'local' for local development (single node) or
-# the URL the registry is exposed to (e.g., 'localhost:30070') for distributed development (multi-node).
-# Finally, if you just want to build the images without pushing them to a registry, set REGISTRY to 'none'.
-# More information on developing on Kubernetes: https://cornserve.ai/contributor_guide/kubernetes/
+#
+# The `REGISTRY` environment variable:
+# - If set to `local`, it builds the images directly within the local k3s containerd.
+# - If set to `none`, it just builds the images with Docker without exporting them to anywhere.
+# - If set to `minikube`, it builds the images with Docker and loads them into Minikube.
+# - If set to a URL (e.g., `localhost:30070`), it builds the images with Docker and pushes them to that registry.
+# More details: https://cornserve.ai/contributor_guide/kubernetes/
 
 set -euo pipefail
 
@@ -18,9 +21,12 @@ NAMESPACE="cornserve"
 # Ensure the REGISTRY environment variable is set.
 if [ -z "${REGISTRY:-}" ]; then
   echo "The REGISTRY environment variable is not set."
-  echo "If you're doing local development with the local overlay, set it to 'local'."
-  echo "If you're doing distributed development with the dev overlay, set it to the the URL the registry is exposed to (e.g., 'localhost:30070')."
-  echo "See also: https://cornserve.ai/contributor_guide/kubernetes/"
+  echo "The REGISTRY environment variable:"
+  echo "- If set to 'local', it builds the images directly within the local k3s containerd."
+  echo "- If set to 'none', it just builds the images with Docker without exporting them to anywhere."
+  echo "- If set to 'minikube', it builds the images with Docker and loads them into Minikube."
+  echo "- If set to a URL (e.g., 'localhost:30070'), it builds the images with Docker and pushes them to that registry."
+  echo "More details: https://cornserve.ai/contributor_guide/kubernetes/"
   exit 1
 fi
 
@@ -89,6 +95,10 @@ build_and_export() {
     sudo nerdctl build --progress=plain -f "${DOCKERFILE}" -t "${IMAGE}" .
   elif [[ "${REGISTRY}" == "none" ]]; then
     docker build --progress=plain -f "${DOCKERFILE}" -t "${IMAGE}" .
+  elif [[ "${REGISTRY}" == "minikube" ]]; then
+    docker build --progress=plain -f "${DOCKERFILE}" -t "${IMAGE}" .
+    echo "Loading ${IMAGE} into Minikube..."
+    minikube image load "${IMAGE}"
   else
     docker build --progress=plain -f "${DOCKERFILE}" -t "${PUSH_IMAGE}" .
     docker push "${PUSH_IMAGE}"

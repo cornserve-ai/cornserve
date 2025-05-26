@@ -70,23 +70,16 @@ If you haven't already, clone the Cornserve repository:
 
 ```bash
 git clone git@github.com:cornserve-ai/cornserve.git
-cd cornserve/kubernetes
+cd cornserve
 ```
 
 On top of a Kubernetes cluster, you can deploy Cornserve with a single command:
 
 ```bash
-kubectl apply -k kustomize/cornserve/base kustomize/cornserve-system/base
+kubectl apply -k kubernetes/kustomize/cornserve-system/base
+kubectl apply -k kubernetes/kustomize/cornserve/overlays/prod
 ```
 
 !!! Note
     The `cornserve` namespace is used for most of our control plane and data plane objects.
     On the other hand, the `cornserve-system` namespace is used for components that look over and manage the Cornserve system itself (under `cornserve`), like Jaeger and Prometheus.
-
-We also have an overlay for development (`dev`), which, for instance, adds a `NodePort` service for the Cornserve Gateway and Jaeger for local testing.
-
-```bash
-kubectl apply -k kustomize/cornserve/overlays/dev kustomize/cornserve-system/overlays/dev
-```
-
-We suggest that you tweak the manifest files to suit your needs.
