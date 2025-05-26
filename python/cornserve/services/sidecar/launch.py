@@ -53,9 +53,13 @@ class SidecarLaunchInfo:
                                 peer_ranks,
                             )
                         ],
-                        env_from=kclient.V1EnvFromSource(
-                            config_map_ref=kclient.V1ConfigMapEnvSource(name=constants.K8S_CORNSERVE_CONFIG_MAP_NAME)
-                        ),
+                        env_from=[
+                            kclient.V1EnvFromSource(
+                                config_map_ref=kclient.V1ConfigMapEnvSource(
+                                    name=constants.K8S_CORNSERVE_CONFIG_MAP_NAME
+                                )
+                            ),
+                        ],
                         volume_mounts=[
                             kclient.V1VolumeMount(
                                 name=name,

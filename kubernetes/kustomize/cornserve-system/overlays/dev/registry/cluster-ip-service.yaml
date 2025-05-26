@@ -2,7 +2,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: registry
-  namespace: cornserve
+  namespace: cornserve-system
 spec:
   selector:
     app: registry

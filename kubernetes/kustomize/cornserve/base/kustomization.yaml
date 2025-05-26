@@ -25,3 +25,5 @@ configMapGenerator:
   - CORNSERVE_IMAGE_PREFIX=docker.io/cornserve
   - CORNSERVE_IMAGE_TAG=latest
   - CORNSERVE_IMAGE_PULL_POLICY=IfNotPresent
+generatorOptions:
+  disableNameSuffixHash: true
