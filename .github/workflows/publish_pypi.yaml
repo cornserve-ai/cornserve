@@ -1,0 +1,31 @@
+name: Publish Python package to TestPyPI
+
+on:
+  push:
+    branches:
+      - master
+      - jm-workflow
+    tags:
+      - v*
+
+jobs:
+  test-pypi-publish:
+    runs-on: ubuntu-latest
+    if: github.repository_owner == 'cornserve-ai'
+    permissions:
+      id-token: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: 3.11
+          cache: 'pip'
+      - name: Build source distribution
+        run: pip install build && python -m build
+      - name: Publish to TestPyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://test.pypi.org/legacy/
+
