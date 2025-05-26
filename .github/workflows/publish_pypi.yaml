@@ -3,7 +3,6 @@ name: Publish Python package to TestPyPI
 on:
   push:
     branches:
-      - master
       - jm-workflow
     tags:
       - v*
@@ -17,6 +16,9 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          token: ${{ secrets.SUBMODULE_TOKEN }}
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
