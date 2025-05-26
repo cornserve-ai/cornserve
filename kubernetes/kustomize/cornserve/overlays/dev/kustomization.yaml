@@ -7,25 +7,25 @@ patches:
 - path: image-pull-policy.yaml
 images:
 - name: cornserve/gateway
-  newName: registry.cornserve-system.svc.cluster.local:5000/cornserve/gateway
+  newName: localhost:5000/cornserve/gateway
   newTag: latest
 - name: cornserve/resource-manager
-  newName: registry.cornserve-system.svc.cluster.local:5000/cornserve/resource-manager
+  newName: localhost:5000/cornserve/resource-manager
   newTag: latest
 - name: cornserve/sidecar
-  newName: registry.cornserve-system.svc.cluster.local:5000/cornserve/sidecar
+  newName: localhost:5000/cornserve/sidecar
   newTag: latest
 - name: cornserve/task-dispatcher
-  newName: registry.cornserve-system.svc.cluster.local:5000/cornserve/task-dispatcher
+  newName: localhost:5000/cornserve/task-dispatcher
   newTag: latest
 - name: cornserve/task-manager
-  newName: registry.cornserve-system.svc.cluster.local:5000/cornserve/task-manager
+  newName: localhost:5000/cornserve/task-manager
   newTag: latest
 configMapGenerator:
 - name: cornserve-config
   namespace: cornserve
   behavior: merge
   literals:
-  - CORNSERVE_IMAGE_PREFIX=registry.cornserve-system.svc.cluster.local:5000/cornserve
+  - CORNSERVE_IMAGE_PREFIX=localhost:5000/cornserve
   - CORNSERVE_IMAGE_PULL_POLICY=Always
   - CORNSERVE_IMAGE_TAG=latest

@@ -32,6 +32,12 @@ You are developing on a multi-node cluster.
 Now, you do need a registry to push images to, so that remote nodes can pull them.
 
 The `dev` overlay includes a private registry and exposes the registry to (1) the master node's `localhost:30070` and (2) the rest of the nodes as `registry.cornserve-system.svc.cluster.local:5000`.
+For K3s to work with the insecure (i.e., HTTP) registry, you need to set up the `registries.yaml` file in `/etc/rancher/k3s/` on **all** nodes (master and worker) before starting K3s:
+
+```bash
+sudo cp kubernetes/k3s/registries.yaml /etc/rancher/k3s/registries.yaml
+sudo systemctl start k3s  # or k3s-agent
+```
 
 You can build and push images to the registry using the `build_export_images.sh` script with the `REGISTRY` environment variable set to the registry address:
 
