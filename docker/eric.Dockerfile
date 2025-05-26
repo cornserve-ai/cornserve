@@ -1,6 +1,16 @@
-# TODO: Use multi-stage build to reduce image size.
-#       The `devel` image was used because we need `nvcc` to install flash-attn.
-FROM pytorch/pytorch:2.7.0-cuda12.6-cudnn9-devel
+# Build flash-attn wheel inside the `devel` image which has `nvcc`.
+FROM pytorch/pytorch:2.7.0-cuda12.6-cudnn9-devel AS builder
+
+ARG max_jobs=64
+ENV MAX_JOBS=${max_jobs}
+ENV NVCC_THREADS=8
+RUN pip wheel -w /tmp/wheels --no-build-isolation --no-deps --verbose flash-attn
+
+# Actual Eric runs inside the `runtime` image. Just copy over the flash-attn wheel.
+FROM pytorch/pytorch:2.7.0-cuda12.6-cudnn9-runtime AS runtime
+
+COPY --from=builder /tmp/wheels/*.whl /tmp/wheels/
+RUN pip install --no-cache-dir /tmp/wheels/*.whl && rm -rf /tmp/wheels
 
 ADD . /workspace/cornserve
 
