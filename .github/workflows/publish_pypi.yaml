@@ -24,8 +24,10 @@ jobs:
         with:
           python-version: 3.11
           cache: 'pip'
+      - name: Generate protobuf files
+        run: scripts/generate_pb.sh
       - name: Build source distribution
-        run: pip install build && python -m build
+        run: cd python && pip install build && python -m build
       - name: Publish to TestPyPI
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
