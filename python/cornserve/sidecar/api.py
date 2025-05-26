@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import ctypes
 import weakref
 from concurrent.futures import ThreadPoolExecutor
@@ -90,10 +92,7 @@ class Sidecar:
         self.msgpack_encoder = MsgpackEncoder()
         self.msgpack_decoder = MsgpackDecoder()
 
-        # sender specific attributes
-        self.worker_pool = ThreadPoolExecutor(
-            max_workers=self.config.max_workers, thread_name_prefix="sidecar-send-worker"
-        )
+        self.worker_pool = ThreadPoolExecutor(max_workers=self.config.max_workers, thread_name_prefix="sidecar-worker")
 
         self._finalizer = weakref.finalize(self, self.__del__)
 
@@ -210,7 +209,7 @@ class Sidecar:
         else:
             return obj
 
-    @tracer.start_as_current_span(name="Sidecar.read")
+    @tracer.start_as_current_span(name="Sidecar.recv_sync")
     def recv_sync(self, id: str, chunk_id: int = 0) -> Any:
         """Receive data from the sidecar server synchronously.
 
@@ -252,6 +251,37 @@ class Sidecar:
         if response.status == common_pb2.Status.STATUS_OK:
             logger.debug("Request %s marked done", id)
 
+    def _mark_done_worker(self, id: str, chunk_id: int = 0) -> None:
+        """Mark a tensor as done in the sidecar server to free the shared memory buffer.
+
+        Args:
+            id: The id of the data.
+            chunk_id: The chunk id of the data to mark as done.
+        """
+        span = trace.get_current_span()
+        span.set_attribute("sidecar.mark_done.id", id)
+        request = sidecar_pb2.MarkDoneRequest(id=id, chunk_id=chunk_id)
+        response = self.stub.MarkDone(request)
+        if response.status == common_pb2.Status.STATUS_OK:
+            logger.debug("Request %s marked done", id)
+        else:
+            logger.error("Failed to mark request %s done", id)
+
+    @tracer.start_as_current_span(name="Sidecar.mark_done_sync")
+    def mark_done_sync(self, id: str, chunk_id: int = 0) -> None:
+        """Synchronously mark a tensor as done in the sidecar server to free the shared memory buffer.
+
+        Args:
+            id: The id of the data.
+            chunk_id: The chunk id of the data to mark as done.
+        """
+        future = self.worker_pool.submit(
+            self._mark_done_worker,
+            id,
+            chunk_id,
+        )
+        future.add_done_callback(lambda f: f.result())
+
     def __del__(self) -> None:
         """Unlink the shared memory buffer."""
         if not hasattr(self, "channel"):
@@ -264,11 +294,17 @@ class Sidecar:
             pass
 
     async def shutdown(self) -> None:
-        """Unlink the shared memory buffer."""
+        """Shutdown the sidecar client."""
         try:
             self.channel.close()
             await self.aio_channel.close()
             del self.channel
             del self.aio_channel
+            self.worker_pool.shutdown(wait=True)
         except Exception:
             pass
+
+    def shutdown_sync(self) -> None:
+        """Synchronously shutdown the sidecar client."""
+        with contextlib.suppress(Exception):
+            asyncio.run(self.shutdown())
