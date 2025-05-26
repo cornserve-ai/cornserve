@@ -24,6 +24,8 @@ jobs:
         with:
           python-version: 3.11
           cache: 'pip'
+      - name: Install protobuf dependencies
+        run: pip install grpcio-tools
       - name: Generate protobuf files
         run: bash scripts/generate_pb.sh
       - name: Build source distribution
