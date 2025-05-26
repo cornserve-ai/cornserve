@@ -9,11 +9,11 @@ on:
       - v*
     paths:
       - '.github/workflows/push_docker.yaml'
+      - '.gitmodules'
       - 'docker/**'
       - 'python/**'
       - 'proto/**'
       - 'third-party/**'
-      - 'zeus_monitor/**'
       - '.dockerignore'
       - 'LICENSE'
       - 'setup.py'
