@@ -29,23 +29,29 @@ The `local` overlay specifies `imagePullPolicy: Never`, meaning that if the imag
 ### Distributed development
 
 You are developing on a multi-node cluster.
-Now, you do need a registry to push images to, so that remote nodes can pull them.
+(1) Now, you do need a registry to push images to, so that remote nodes can pull them:
 
-The `dev` overlay includes a private registry and exposes the registry to (1) the master node's `localhost:30070` and (2) the rest of the nodes as `registry.cornserve-system.svc.cluster.local:5000`.
-For K3s to work with the insecure (i.e., HTTP) registry, you need to set up the `registries.yaml` file in `/etc/rancher/k3s/` on **all** nodes (master and worker) before starting K3s:
+```bash
+bash kubernetes/registry.sh
+REGISTRY=myregisty.com:5000 bash kubernetes/set_registry.sh  # (1)!
+```
+
+1. Modifies `kustomization.yaml` and `k3s/registries.yaml`
+
+(2) For K3s to work with insecure (i.e., HTTP) registries, you need to set up the `registries.yaml` file in `/etc/rancher/k3s/` on **all** nodes (master and worker) before starting K3s:
 
 ```bash
 sudo cp kubernetes/k3s/registries.yaml /etc/rancher/k3s/registries.yaml
 sudo systemctl start k3s  # or k3s-agent
 ```
 
-You can build and push images to the registry using the `build_export_images.sh` script with the `REGISTRY` environment variable set to the registry address:
+(3) Build and push images to the registry using the `build_export_images.sh` script with the `REGISTRY` environment variable set to the registry address:
 
 ```bash
-REGISTRY=localhost:30070 bash scripts/build_export_images.sh
+REGISTRY=myregistry.com:5000 bash scripts/build_export_images.sh
 ```
 
-Use the `dev` overlay (which specifies `imagePullPolicy: Always`) to deploy Cornserve:
+(4) Use the `dev` overlay (which specifies `imagePullPolicy: Always`) to deploy Cornserve:
 
 ```bash
 kubectl apply -k kustomize/cornserve/overlays/dev kustomize/cornserve-system/overlays/dev

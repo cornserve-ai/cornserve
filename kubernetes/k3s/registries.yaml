@@ -1,4 +1,4 @@
 mirrors:
-  "registry.cornserve-system.svc.cluster.local:5000":
+  "localhost:5000":
     endpoint:
-      - "http://registry.cornserve-system.svc.cluster.local:5000"
+      - "http://localhost:5000"

@@ -21,6 +21,7 @@ theme:
     logo: material/rocket-launch-outline
   features:
     - content.code.copy
+    - content.code.annotate
     - search.suggest
     - navigation.tabs
     - navigation.tabs.sticky
