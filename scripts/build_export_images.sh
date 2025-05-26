@@ -8,6 +8,7 @@
 # If no services are specified, it builds all services found in the docker/ directory except for `dev`.
 # REGISTRY should be either 'local' for local development (single node) or
 # the URL the registry is exposed to (e.g., 'localhost:30070') for distributed development (multi-node).
+# Finally, if you just want to build the images without pushing them to a registry, set REGISTRY to 'none'.
 # More information on developing on Kubernetes: https://cornserve.ai/contributor_guide/kubernetes/
 
 set -euo pipefail
@@ -86,12 +87,14 @@ build_and_export() {
   if [[ "${REGISTRY}" == "local" ]]; then
     echo "Building image directly within local k3s containerd..."
     sudo nerdctl build --progress=plain -f "${DOCKERFILE}" -t "${IMAGE}" .
+  elif [[ "${REGISTRY}" == "none" ]]; then
+    docker build --progress=plain -f "${DOCKERFILE}" -t "${IMAGE}" .
   else
     docker build --progress=plain -f "${DOCKERFILE}" -t "${PUSH_IMAGE}" .
     docker push "${PUSH_IMAGE}"
   fi
 
-  echo "Successfully built and exported ${IMAGE}"
+  echo "Successfully built ${IMAGE}"
 }
 
 # Run all builds in parallel
