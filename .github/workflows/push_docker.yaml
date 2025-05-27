@@ -25,7 +25,7 @@ env:
 jobs:
   build_and_push:
     if: github.repository_owner == 'cornserve-ai'
-    runs-on: ${{ (matrix.component == 'vllm' || matrix.component == 'eric') && matrix.platform == 'linux/amd64' && 'blacksmith-16vcpu-ubuntu-2404' || (matrix.component == 'vllm' || matrix.component == 'eric') && matrix.platform == 'linux/arm64' && 'blacksmith-4vcpu-ubuntu-2404-arm' || 'ubuntu-latest' }}
+    runs-on: ${{ (matrix.component == 'vllm' || matrix.component == 'eric') && matrix.platform == 'linux/amd64' && 'blacksmith-8vcpu-ubuntu-2404' || (matrix.component == 'vllm' || matrix.component == 'eric') && matrix.platform == 'linux/arm64' && 'blacksmith-4vcpu-ubuntu-2404-arm' || 'ubuntu-latest' }}
     strategy:
       matrix:
         component:
@@ -39,6 +39,10 @@ jobs:
         platform:
           - linux/amd64
           # - linux/arm64
+        include:
+          - component: eric
+            build_args: |
+              max_jobs=4
 
     steps:
       - name: Remove unnecessary files
@@ -94,6 +98,7 @@ jobs:
           cache-to: type=registry,ref=${{ env.REGISTRY_NAME }}:buildcache,mode=max
           platforms: ${{ matrix.platform }}
           outputs: type=image,name=${{ env.REGISTRY_NAME }},push-by-digest=true,name-canonical=true,push=true
+          build-args: ${{ matrix.build_args }}
       - name: Export digest
         run: |
           mkdir -p /tmp/digests
