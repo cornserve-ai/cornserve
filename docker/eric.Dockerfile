@@ -1,8 +1,8 @@
 # Build flash-attn wheel inside the `devel` image which has `nvcc`.
 FROM pytorch/pytorch:2.7.0-cuda12.6-cudnn9-devel AS builder
 
-ARG max_jobs=64
-ENV MAX_JOBS=${max_jobs}
+ARG max_jobs
+ENV MAX_JOBS=${max_jobs:-$(nproc)}
 ENV NVCC_THREADS=8
 RUN pip wheel -w /tmp/wheels --no-build-isolation --no-deps --verbose flash-attn
 
