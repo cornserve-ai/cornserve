@@ -220,7 +220,7 @@ def invoke(
             rich.print(Panel(f"Alias {app_id_or_alias} not found.", style="red", expand=False))
             return
 
-    request = AppInvocationRequest(request_data=json.loads(data))
+    request = AppInvocationRequest(request_data=data)
     raw_response = requests.post(
         f"{GATEWAY_URL}/app/invoke/{app_id}",
         json=request.model_dump(),
