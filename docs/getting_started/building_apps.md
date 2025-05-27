@@ -17,9 +17,9 @@ Let's build a simple example app that takes an image and a text prompt, and gene
 First, let's see how to build a composite task out of built-in unit tasks for this: `#!python ImageChatTask`.
 
 ```python
-from cornserve.task import Task, TaskInput, TaskOutput
+from cornserve.task.base import Task, TaskInput, TaskOutput
 from cornserve.task.builtins.encoder import EncoderTask, Modality, EncoderInput
-from cornserve.task.buildins.llm import LLMTask, LLMInput
+from cornserve.task.builtins.llm import LLMTask, LLMInput
 from cornserve.app.base import AppRequest, AppResponse, AppConfig
 
 
@@ -50,7 +50,7 @@ class ImageChatTask(Task[ImageChatInput, ImageChatOutput]):
         llm_input = LLMInput(
             prompt=task_input.prompt,
             multimodal_data=[("image", task_input.image_url)],
-            embeddings=[image_embedding],
+            embeddings=[embedding for embedding in image_embeddings.embeddings],
         )
         llm_output = self.llm.invoke(llm_input)
         return ImageChatOutput(response=llm_output.response)

@@ -10,7 +10,7 @@ hide:
 </div>
 
 <div align="center" class="video-container">
-  <video autoplay muted alt="type:video">
+  <video autoplay muted playsinline alt="type:video">
     <source src="assets/video/cornserve.mp4" type="video/mp4">
   </video>
 </div>
