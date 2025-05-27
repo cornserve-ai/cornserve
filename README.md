@@ -1,6 +1,5 @@
 <div align="center">
-<h1 style="font-size: 120px">Cornserve</h1>
-<i style="font-size: 50px">Easy, Fast, and Scalable Multimodal AI</i>
+<h1>Cornserve: Easy, Fast, and Scalable Multimodal AI</h1>
 
 [![Docker Hub](https://badgen.net/docker/pulls/cornserve/gateway?icon=docker&label=Docker%20pulls)](https://hub.docker.com/r/cornserve/gateway)
 [![Homepage](https://custom-icon-badges.demolab.com/badge/Docs-cornserve.ai-ffffff.svg?logo=home&logoColor=white&logoSource=feather)](https://cornserve.ai/)
