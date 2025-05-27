@@ -1,7 +1,7 @@
 <div align="center">
 <h1>Cornserve: <i>Easy, Fast, and Scalable Multimodal AI</i></h1>
 
-[![Docker Hub](https://custom-icon-badges.demolab.com/badge/Docker-cornserve-578ec8.svg?logo=docker&logoColor=white)](https://hub.docker.com/r/cornserve/gateway)
+[![Docker Hub](https://custom-icon-badges.demolab.com/badge/Docker-cornserve-1D63ED.svg?logo=docker&logoColor=white)](https://hub.docker.com/r/cornserve/gateway)
 [![Homepage](https://custom-icon-badges.demolab.com/badge/Docs-cornserve.ai-dddddd.svg?logo=home&logoColor=white&logoSource=feather)](https://cornserve.ai/)
 [![Apache-2.0 License](https://custom-icon-badges.herokuapp.com/github/license/cornserve-ai/cornserve?logo=law)](/LICENSE)
 </div>
