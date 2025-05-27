@@ -6,7 +6,7 @@ description: Getting started with Cornserve
 
 ## Try it out in Minikube!
 
-You can quickly try out Cornserve on your local machine (with Docker + NVIDIA GPUs) using [Minikube](https://minikube.sigs.k8s.io).
+You can try out Cornserve on your local machine (with Docker and at least two NVIDIA GPUs) using [Minikube](https://minikube.sigs.k8s.io).
 
 First, install Minikube following their [guide](https://minikube.sigs.k8s.io/docs/start/).
 
@@ -108,6 +108,14 @@ EOF
 
 The invocation payload and response schema are defined by [the app itself](https://github.com/cornserve-ai/cornserve/blob/3fbf3c62dc7bd8019af29d1ae260b2cafc071ad8/examples/mllm/app.py) as a `AppRequest` and `AppResponse` subclass.
 You can learn more about defining apps (and tasks) [in our guide](building_apps.md).
+
+Here's how to clean up:
+
+```bash
+minikube kubectl -- delete -k kubernetes/kustomize/cornserve/overlays/minikube
+minikube kubectl -- delete -k kubernetes/kustomize/cornserve-system/overlays/minikube
+minikube stop  # or minikube delete
+```
 
 ## Getting started (seriously)
 
