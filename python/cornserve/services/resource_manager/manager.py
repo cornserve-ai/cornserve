@@ -384,7 +384,7 @@ class ResourceManager:
 
         try:
             # Allocate resource starter pack for the task manager
-            state.resources = self.resource.allocate(num_gpus=2, owner=state.id)
+            state.resources = self.resource.allocate(num_gpus=1, owner=state.id)
             span.set_attribute(
                 "resource_manager._spawn_task_manager.gpu_global_ranks",
                 [gpu.global_rank for gpu in state.resources],

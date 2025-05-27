@@ -25,17 +25,17 @@ env:
 jobs:
   build_and_push:
     if: github.repository_owner == 'cornserve-ai'
-    runs-on: ${{ (matrix.component == 'vllm' || matrix.component == 'eric') && matrix.platform == 'linux/amd64' && 'blacksmith-8vcpu-ubuntu-2404' || (matrix.component == 'vllm' || matrix.component == 'eric') && matrix.platform == 'linux/arm64' && 'blacksmith-4vcpu-ubuntu-2404-arm' || 'ubuntu-latest' }}
+    runs-on: ${{ (matrix.component == 'vllm' || matrix.component == 'eric') && matrix.platform == 'linux/amd64' && 'blacksmith-4vcpu-ubuntu-2404' || (matrix.component == 'vllm' || matrix.component == 'eric') && matrix.platform == 'linux/arm64' && 'blacksmith-4vcpu-ubuntu-2404-arm' || 'ubuntu-latest' }}
     strategy:
       matrix:
         component:
-          # - sidecar
+          - sidecar
+          - task-dispatcher
+          - task-manager
+          - resource-manager
+          - gateway
           - eric
-          # - task-dispatcher
-          # - task-manager
-          # - resource-manager
-          # - gateway
-          # - vllm
+          - vllm
         platform:
           - linux/amd64
           # - linux/arm64
@@ -119,11 +119,11 @@ jobs:
       matrix:
         component:
           - sidecar
-          - eric
           - task-dispatcher
           - task-manager
           - resource-manager
           - gateway
+          - eric
           - vllm
     steps:
       - name: Prepare
