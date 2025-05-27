@@ -58,6 +58,7 @@ pip install cornserve
 Try registering a simple example app that defines a Vision-Language Model:
 
 ```bash
+export CORNSERVE_GATEWAY_URL=$(minikube service -n cornserve gateway-node-port --url)
 cornserve register examples/mllm/app.py --alias mllm
 ```
 
@@ -77,7 +78,7 @@ $ cornserve register examples/mllm/app.py --alias mllm
 Now, you can invoke the app using the CLI:
 
 ```bash
-cornserve invoke mllm - <<EOF                                                                                                                                             cornserve  16:32:54
+cornserve invoke mllm - <<EOF
 prompt: "Describe what you see in the two images, in detail."
 multimodal_items:
 - ["image", "https://picsum.photos/id/12/480/560"]
@@ -86,13 +87,6 @@ EOF
 ```
 
 The invocation payload schema is defined by [the app itself](https://github.com/cornserve-ai/cornserve/blob/3fbf3c62dc7bd8019af29d1ae260b2cafc071ad8/examples/mllm/app.py#L9-L19) as a `AppRequest` class.
-
-Expect something like:
-
-```console
-$ cornserve invoke mllm ...
-
-```
 
 ## Getting started (seriously)
 

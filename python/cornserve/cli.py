@@ -211,8 +211,6 @@ def invoke(
         data: Input data for the app. This can be a literal JSON string,
             a path to either a JSON or YAML file, or a hyphen to read in from stdin.
     """
-    print(data)
-    return
     if app_id_or_alias.startswith("app-"):
         app_id = app_id_or_alias
     else:

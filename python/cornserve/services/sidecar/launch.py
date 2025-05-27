@@ -77,7 +77,6 @@ class SidecarLaunchInfo:
                     for name, host_path, _ in SidecarLaunchInfo.get_container_volumes()
                 ],
                 service_account_name="sidecar",
-                # runtime_class_name="nvidia",
                 node_name=node.metadata.name,
                 host_ipc=True,
                 host_pid=True,
