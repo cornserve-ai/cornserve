@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - master
+      - jm-workflow-update
     tags:
       - v*
     paths:
@@ -82,7 +83,7 @@ jobs:
             ${{ env.NAMESPACE }}/${{ matrix.component }}
           tags: |
             type=raw,value=latest,enable={{is_default_branch}}
-            type=match,pattern=v.*
+            type=match,pattern=(v.*?)(?:\.post\d+)?$,group=1
 
       - name: Build and push Docker image
         uses: docker/build-push-action@v6
