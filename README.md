@@ -1,23 +1,23 @@
 <div align="center">
 <h1>Cornserve</h1>
 <h2><i>Easy, Fast, and Scalable Multimodal AI</i></h2>
-</div>
 
 [![Docker Hub](https://badgen.net/docker/pulls/cornserve/gateway?icon=docker&label=Docker%20pulls)](https://hub.docker.com/r/cornserve/gateway)
-[![Homepage](https://custom-icon-badges.demolab.com/badge/Homepage-cornserve.ai-ffffff.svg?logo=home&logoColor=white&logoSource=feather)](https://ml.energy/zeus)
+[![Homepage](https://custom-icon-badges.demolab.com/badge/Docs-cornserve.ai-000000.svg?logo=home&logoColor=white&logoSource=feather)](https://cornserve.ai/)
 [![Apache-2.0 License](https://custom-icon-badges.herokuapp.com/github/license/cornserve-ai/cornserve?logo=law)](/LICENSE)
+</div>
 
 Cornserve is an execution platform for multimodal AI.
 Split complex models into smaller separately scalable components (**model fission**) and share common components across multiple applications (**sharing**), all on your own infrastructure.
 
-<video src="https://github.com/cornserve-ai/cornserve/raw/refs/heads/master/docs/assets/video/cornserve.mp4" autoplay muted></video>
+<video src="https://github.com/cornserve-ai/cornserve/raw/refs/heads/master/docs/assets/video/cornserve.mp4"></video>
 
 
 ## Getting Started
 
 You can quickly try out Cornserve on top of Minikube. Check out our [getting started guide](https://cornserve.ai/getting_started/)!
 
-Cornserve can be deployed on Kubernetes with a single command. More on our [getting started guide](https://cornserve.ai/getting_started/).
+Cornserve can be deployed on Kubernetes with a single command. More on our [docs](https://cornserve.ai/getting_started/).
 
 
 ## Contributing
