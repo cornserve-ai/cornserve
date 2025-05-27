@@ -4,7 +4,6 @@ on:
   push:
     branches:
       - master
-      - jm-workflow-patch
     tags:
       - v*
     paths:
