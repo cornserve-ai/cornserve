@@ -113,3 +113,6 @@ extra:
     - name: Cornserve GitHub repository
       icon: fontawesome/brands/github
       link: https://github.com/cornserve-ai/cornserve
+
+extra_css:
+  - assets/css/extra.css
