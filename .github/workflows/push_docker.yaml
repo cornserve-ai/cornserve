@@ -3,7 +3,7 @@ name: Push Docker image
 on:
   push:
     branches:
-      - master
+      # - master
       - jm-workflow-update
     tags:
       - v*
