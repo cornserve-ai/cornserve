@@ -22,7 +22,13 @@ minikube start \
 
 1. Give it enough disk space to download model weights and stuff. You can also give more CPU (e.g., `--cpus 8`) and memory (`--memory 16g`).
 
-Next, clone Cornserve and deploy Cornserve on your Minikube cluster:
+Next, and this is important, we want to increase the shared memory (`/dev/shm`) size of the Minikube container.
+
+```console
+$ minikube ssh -- sudo mount -o remount,size=16G /dev/shm
+```
+
+Next, clone the Cornserve GitHub repository and deploy Cornserve on your Minikube cluster:
 
 ```bash
 git clone git@github.com:cornserve-ai/cornserve.git
@@ -78,15 +84,30 @@ $ cornserve register examples/mllm/app.py --alias mllm
 Now, you can invoke the app using the CLI:
 
 ```bash
-cornserve invoke mllm - <<EOF
+$ cornserve invoke mllm - <<EOF
 prompt: "Describe what you see in the two images, in detail."
-multimodal_items:
+multimodal_data:
 - ["image", "https://picsum.photos/id/12/480/560"]
 - ["image", "https://picsum.photos/id/234/960/960"]
 EOF
+╭──────────┬───────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+│ response │ The first image depicts a serene beach scene with a rocky foreground and a sandy beach extending into the │
+│          │ distance. The rocks are dark and jagged, contrasting with the smooth, golden sand. The ocean is calm,     │
+│          │ with gentle waves lapping against the shore. In the background, there is a line of trees or a forested    │
+│          │ area, adding depth to the scene. The sky is clear, suggesting a bright and sunny day.                     │
+│          │                                                                                                           │
+│          │ The second image shows a bustling city street with the Eiffel Tower prominently visible in the            │
+│          │ background. The tower is tall and slender, with a metal lattice structure. The street is lined with       │
+│          │ trees, some of which have bare branches, indicating a winter or early spring setting. There are several   │
+│          │ buildings along the street, including a large, ornate building with multiple stories and balconies. The   │
+│          │ street is filled with cars and pedestrians, giving the scene a lively and dynamic atmosphere. The overall │
+│          │ color tone of the image is muted, with a sepia-like effect, adding a vintage or nostalgic feel to the     │
+│          │ photograph.                                                                                               │
+╰──────────┴───────────────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
-The invocation payload schema is defined by [the app itself](https://github.com/cornserve-ai/cornserve/blob/3fbf3c62dc7bd8019af29d1ae260b2cafc071ad8/examples/mllm/app.py#L9-L19) as a `AppRequest` class.
+The invocation payload and response schema are defined by [the app itself](https://github.com/cornserve-ai/cornserve/blob/3fbf3c62dc7bd8019af29d1ae260b2cafc071ad8/examples/mllm/app.py) as a `AppRequest` and `AppResponse` subclass.
+You can learn more about defining apps (and tasks) [in our guide](building_apps.md).
 
 ## Getting started (seriously)
 
