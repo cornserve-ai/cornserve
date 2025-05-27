@@ -81,8 +81,8 @@ jobs:
           images: |
             ${{ env.NAMESPACE }}/${{ matrix.component }}
           tags: |
-            type=ref,event=branch
-            type=match,pattern=v(.*),group=1
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=match,pattern=v(.*)
 
       - name: Build and push Docker image
         uses: docker/build-push-action@v6
