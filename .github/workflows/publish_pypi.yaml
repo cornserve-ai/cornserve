@@ -1,14 +1,12 @@
-name: Publish Python package to TestPyPI
+name: Publish Python package to PyPI
 
 on:
   push:
-    branches:
-      - jm-workflow
     tags:
       - v*
 
 jobs:
-  test-pypi-publish:
+  pypi-publish:
     runs-on: ubuntu-latest
     if: github.repository_owner == 'cornserve-ai'
     permissions:
@@ -30,9 +28,8 @@ jobs:
         run: bash scripts/generate_pb.sh
       - name: Build source distribution
         run: cd python && pip install build && python -m build
-      - name: Publish to TestPyPI
+      - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
-          repository-url: https://test.pypi.org/legacy/
           packages-dir: python/dist/
 

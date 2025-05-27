@@ -56,6 +56,14 @@ jobs:
         with:
           submodules: recursive
           token: ${{ secrets.SUBMODULE_TOKEN }}
+      - name: Setup Python for protobuf generation
+        uses: actions/setup-python@v5
+        with:
+          python-version: 3.11
+      - name: Install protobuf dependencies
+        run: pip install grpcio-tools
+      - name: Generate protobuf files
+        run: bash scripts/generate_pb.sh
       - name: Docker Hub login
         uses: docker/login-action@v3
         with:
