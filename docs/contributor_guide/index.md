@@ -19,7 +19,7 @@ We have a few principles for developing Cornserve:
 
 If the feature is not small or requires broad changes over the codebase, please **open an issue** at our GitHub repository to discuss with us.
 
-1. Fork our GitHub repository.
+1. Fork our GitHub repository. Make sure you clone with `--recurse-submodules` to get the submodules.
 1. Create a new Conda environment with something along the lines of `conda create -n cornserve python=3.11` and activate it with something like `conda activate cornserve`.
 1. Install Cornserve in editable mode with `pip install -e 'python[dev]'`. If your environment does not have GPUs, you can use `pip install -e 'python[dev-no-gpu]'`.
 1. Generate Python bindings for Protobuf files with `bash scripts/generate_pb.sh`.
