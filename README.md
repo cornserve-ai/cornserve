@@ -6,10 +6,10 @@
 [![Apache-2.0 License](https://custom-icon-badges.herokuapp.com/github/license/cornserve-ai/cornserve?logo=law)](/LICENSE)
 </div>
 
+https://github.com/user-attachments/assets/6dd12ad6-2307-4457-ae70-96e1cecc5ece
+
 Cornserve is an execution platform for multimodal AI.
 Split complex models into smaller separately scalable components (**model fission**) and share common components across multiple applications (**sharing**), all on your own infrastructure.
-
-<video src="docs/assets/video/cornserve.mp4" width="320" height="240" controls></video>
 
 
 ## Getting Started
