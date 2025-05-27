@@ -22,10 +22,11 @@ on:
 
 env:
   NAMESPACE: cornserve
+
 jobs:
   build_and_push:
     if: github.repository_owner == 'cornserve-ai'
-    runs-on: ${{ (matrix.component == 'vllm' || matrix.component == 'eric') && matrix.platform == 'linux/amd64' && 'blacksmith-4vcpu-ubuntu-2404' || (matrix.component == 'vllm' || matrix.component == 'eric') && matrix.platform == 'linux/arm64' && 'blacksmith-4vcpu-ubuntu-2404-arm' || 'ubuntu-latest' }}
+    runs-on: ${{ (matrix.component == 'vllm' || matrix.component == 'eric') && 'blacksmith-4vcpu-ubuntu-2404' || 'ubuntu-latest' }}
     strategy:
       matrix:
         component:
@@ -36,9 +37,6 @@ jobs:
           - gateway
           - eric
           - vllm
-        platform:
-          - linux/amd64
-          # - linux/arm64
         include:
           - component: eric
             build_args: |
@@ -51,123 +49,51 @@ jobs:
           sudo rm -rf /opt/ghc
           sudo rm -rf "/usr/local/share/boost"
           sudo rm -rf "$AGENT_TOOLSDIRECTORY"
-      - name: Prepare
-        run: |
-          platform=${{ matrix.platform }}
-          echo "PLATFORM_PAIR=${platform//\//-}" >> $GITHUB_ENV
-          echo "REGISTRY_NAME=${{ env.NAMESPACE }}/${{ matrix.component }}" >> $GITHUB_ENV
+
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           submodules: recursive
-          token: ${{ secrets.SUBMODULE_TOKEN }}
+
       - name: Setup Python for protobuf generation
         uses: actions/setup-python@v5
         with:
           python-version: 3.11
+
       - name: Install protobuf dependencies
         run: pip install grpcio-tools
+
       - name: Generate protobuf files
         run: bash scripts/generate_pb.sh
+
       - name: Docker Hub login
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKER_HUB_USERNAME }}
           password: ${{ secrets.DOCKER_HUB_TOKEN }}
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
-      - name: Setup Docker Buildx
+
+      - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
+
       - name: Generate image metadata
         id: meta
         uses: docker/metadata-action@v5
         with:
           images: |
-            ${{ env.REGISTRY_NAME }}
+            ${{ env.NAMESPACE }}/${{ matrix.component }}
           tags: |
             type=ref,event=branch
             type=match,pattern=v(.*),group=1
-      - name: Build and push by digest
-        id: build
+
+      - name: Build and push Docker image
         uses: docker/build-push-action@v6
         with:
           context: .
           file: docker/${{ matrix.component }}.Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=registry,ref=${{ env.REGISTRY_NAME }}:buildcache
-          cache-to: type=registry,ref=${{ env.REGISTRY_NAME }}:buildcache,mode=max
-          platforms: ${{ matrix.platform }}
-          outputs: type=image,name=${{ env.REGISTRY_NAME }},push-by-digest=true,name-canonical=true,push=true
+          cache-from: type=registry,ref=${{ env.NAMESPACE }}/${{ matrix.component }}:buildcache
+          cache-to: type=registry,ref=${{ env.NAMESPACE }}/${{ matrix.component }}:buildcache,mode=max
+          platforms: linux/amd64
           build-args: ${{ matrix.build_args }}
-      - name: Export digest
-        run: |
-          mkdir -p /tmp/digests
-          digest="${{ steps.build.outputs.digest }}"
-          echo "$digest" > "/tmp/digests/${digest#sha256:}.digest"
-      - name: Upload digest
-        uses: actions/upload-artifact@v4
-        with:
-          name: digests-${{ matrix.component }}-${{ env.PLATFORM_PAIR }}
-          path: /tmp/digests/*
-          if-no-files-found: error
-          retention-days: 1
-
-  merge:
-    runs-on: ubuntu-latest
-    needs: build_and_push
-    strategy:
-      matrix:
-        component:
-          - sidecar
-          - task-dispatcher
-          - task-manager
-          - resource-manager
-          - gateway
-          - eric
-          - vllm
-    steps:
-      - name: Prepare
-        run: |
-          echo "REGISTRY_NAME=${{ env.NAMESPACE }}/${{ matrix.component }}" >> $GITHUB_ENV
-      - name: Create directory
-        run: |
-          mkdir -p /tmp/digests
-      - name: Download digests for linux/amd64
-        uses: actions/download-artifact@v4
-        with:
-          name: digests-${{ matrix.component }}-linux-amd64
-          path: /tmp/digests/linux-amd64
-      - name: Download digests for linux/arm64
-        uses: actions/download-artifact@v4
-        with:
-          name: digests-${{ matrix.component }}-linux-arm64
-          path: /tmp/digests/linux-arm64
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-      - name: Docker meta
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: |
-            ${{ env.REGISTRY_NAME }}
-          tags: |
-            type=ref,event=branch
-            type=match,pattern=v(.*),group=1
-      - name: Login to Docker Hub
-        uses: docker/login-action@v3
-        with:
-          username: ${{ secrets.DOCKER_HUB_USERNAME }}
-          password: ${{ secrets.DOCKER_HUB_TOKEN }}
-      - name: Create manifest list and push
-        working-directory: /tmp/digests
-        run: |
-          tags=$(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON")
-          digests=$(find /tmp/digests -type f -name '*.digest' | xargs cat)
-          cmd="docker buildx imagetools create $tags"
-          for digest in $digests; do
-            cmd="$cmd $REGISTRY_NAME@sha256:${digest#sha256:}"
-          done
-          eval $cmd
-      - name: Inspect image
-        run: |
-          docker buildx imagetools inspect ${{ env.REGISTRY_NAME }}:${{ steps.meta.outputs.version }}
