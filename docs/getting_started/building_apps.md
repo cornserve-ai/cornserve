@@ -50,7 +50,7 @@ class ImageChatTask(Task[ImageChatInput, ImageChatOutput]):
         llm_input = LLMInput(
             prompt=task_input.prompt,
             multimodal_data=[("image", task_input.image_url)],
-            embeddings=[image_embedding],
+            embeddings=[embedding for embedding in image_embeddings.embeddings],
         )
         llm_output = self.llm.invoke(llm_input)
         return ImageChatOutput(response=llm_output.response)
