@@ -83,7 +83,7 @@ $ cornserve register examples/mllm/app.py --alias mllm
 
 Now, you can invoke the app using the CLI:
 
-```bash
+```console
 $ cornserve invoke mllm - <<EOF
 prompt: "Describe what you see in the two images, in detail."
 multimodal_data:
