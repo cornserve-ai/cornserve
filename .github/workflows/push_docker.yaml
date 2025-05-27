@@ -12,7 +12,7 @@ on:
       - 'docker/**'
       - 'python/**'
       - 'proto/**'
-      - 'third-party/**'
+      - 'third_party/**'
       - 'scripts/generate_pb.sh'
       - '.dockerignore'
       - 'LICENSE'
