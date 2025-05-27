@@ -9,7 +9,7 @@ hide:
   <h1 style="font-size: 2rem; margin-bottom: 0px">Cornserve: Easy, Fast, and Scalable Multimodal AI</h1>
 </div>
 
-<div align="center" class="video-container" id="animation">
+<div align="center" class="video-container">
   <video src="assets/video/cornserve.mp4" id="video" 
      muted
      autoplay
@@ -22,12 +22,13 @@ hide:
 </div>
 
 <script>
-// for IOS WeChat
+// snippets to fix video in WeChat Browsers
+// for IOS
 document.addEventListener('WeixinJSBridgeReady', function() {
   const video = document.getElementById('video');
   video.play();
 });
-// for Andriod WeChat
+// for Andriod
 document.addEventListener('DOMContentLoaded', function() {
   const userAgent = navigator.userAgent;
   if (userAgent.includes('WeChat') && /Android/.test(userAgent)) {
