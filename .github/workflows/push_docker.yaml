@@ -25,7 +25,7 @@ env:
 jobs:
   build_and_push:
     if: github.repository_owner == 'cornserve-ai'
-    runs-on: ${{ (matrix.component == 'vllm' || matrix.component == 'eric') && 'blacksmith-4vcpu-ubuntu-2404' || 'ubuntu-latest' }}
+    runs-on: ${{ (matrix.component == 'vllm' || matrix.component == 'eric') && 'blacksmith-2vcpu-ubuntu-2404' || 'ubuntu-latest' }}
     strategy:
       matrix:
         component:
