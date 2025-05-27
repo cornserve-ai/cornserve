@@ -82,7 +82,7 @@ jobs:
             ${{ env.NAMESPACE }}/${{ matrix.component }}
           tags: |
             type=raw,value=latest,enable={{is_default_branch}}
-            type=match,pattern=v(.*)
+            type=match,pattern=v.*
 
       - name: Build and push Docker image
         uses: docker/build-push-action@v6
