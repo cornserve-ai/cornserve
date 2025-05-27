@@ -4,16 +4,19 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Any
 
 import requests
 import rich
 import tyro
+import yaml
 from rich import box
 from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
+from tyro.constructors import PrimitiveConstructorSpec
 
 from cornserve.services.gateway.models import (
     AppInvocationRequest,
@@ -33,6 +36,37 @@ STATE_DIR = Path.home() / ".local/state/cornserve"
 STATE_DIR.mkdir(parents=True, exist_ok=True)
 
 app = tyro.extras.SubcommandApp()
+
+
+def _load_payload(args: list[str]) -> dict[str, Any]:
+    """Load a literal JSON or a JSON/YAML file."""
+    payload = args[0]
+
+    # A hyphen indicates stdin
+    if payload == "-":
+        payload = str(sys.stdin.read().strip())
+    # An actual file path
+    elif Path(payload).exists():
+        payload = Path(payload).read_text().strip()
+
+    # Now, payload should be either a literal JSON or YAML string
+    json_error = None
+    yaml_error = None
+
+    try:
+        return json.loads(payload)
+    except json.JSONDecodeError as e:
+        json_error = e
+
+    try:
+        return yaml.safe_load(payload)
+    except yaml.YAMLError as e:
+        yaml_error = e
+
+    # Nothing worked, raise an error
+    raise ValueError(
+        f"Invalid payload format. JSON failed with: '{json_error}'. YAML failed with: '{yaml_error}'",
+    )
 
 
 class Alias:
@@ -158,14 +192,27 @@ def list_apps() -> None:
 @app.command(name="invoke")
 def invoke(
     app_id_or_alias: Annotated[str, tyro.conf.Positional],
-    data: Annotated[str, tyro.conf.Positional],
+    data: Annotated[
+        dict[str, Any],
+        PrimitiveConstructorSpec(
+            nargs=1,
+            metavar="JSON|YAML",
+            instance_from_str=_load_payload,
+            is_instance=lambda x: isinstance(x, dict),
+            str_from_instance=lambda d: [json.dumps(d)],
+        ),
+        tyro.conf.Positional,
+    ],
 ) -> None:
     """Invoke an app with the given data.
 
     Args:
         app_id_or_alias: ID of the app to invoke or its alias.
-        data: Input data for the app, formatted as a JSON string.
+        data: Input data for the app. This can be a literal JSON string,
+            a path to either a JSON or YAML file, or a hyphen to read in from stdin.
     """
+    print(data)
+    return
     if app_id_or_alias.startswith("app-"):
         app_id = app_id_or_alias
     else:

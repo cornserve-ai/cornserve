@@ -5,22 +5,31 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "cornserve"
 description = "Easy, fast, and scalable multimodal agentic AI"
+authors = [
+  { name = "Cornserve Team" },
+]
 readme = "README.md"
 license = { file = "LICENSE" }
 classifiers = [
-    "Programming Language :: Python :: 3",
-    "License :: OSI Approved :: Apache Software License",
+  "Environment :: GPU :: NVIDIA CUDA",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
 ]
 requires-python = ">=3.11"
 dependencies = [
-    "grpcio-tools",
-    "tyro",
-    "kubernetes_asyncio",
-    "httpx",
-    "pydantic>=2.11",
-    "opentelemetry-api",
-    "opentelemetry-sdk",
-    "opentelemetry-exporter-otlp-proto-grpc",
+  "grpcio-tools",
+  "rich",
+  "requests",
+  "tyro",
+  "kubernetes_asyncio",
+  "httpx",
+  "pydantic>=2.11",
+  "opentelemetry-api",
+  "opentelemetry-sdk",
+  "opentelemetry-exporter-otlp-proto-grpc",
+  "websocket-client",
 ]
 dynamic = ["version"]
 
@@ -28,9 +37,6 @@ dynamic = ["version"]
 cornserve = "cornserve.cli:main"
 
 [project.optional-dependencies]
-frontend = [
-  "websocket-client",
-]
 sidecar-api = [
   "torch>=2.5.0",
   "opentelemetry-instrumentation-grpc",
@@ -84,7 +90,7 @@ dev-common = [
   "ruff",
   "pytest",
   "pytest-asyncio",
-  "cornserve[frontend,sidecar-api,gateway,resource-manager,task-manager,task-dispatcher]",
+  "cornserve[sidecar-api,gateway,resource-manager,task-manager,task-dispatcher]",
 ]
 dev = ["cornserve[dev-common,sidecar,eric]"]
 dev-no-gpu = ["cornserve[dev-common,eric-no-gpu]"]
