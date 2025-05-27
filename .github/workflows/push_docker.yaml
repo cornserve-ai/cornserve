@@ -4,7 +4,6 @@ on:
   push:
     branches:
       - master
-      - jm-workflow
     tags:
       - v*
     paths:
@@ -29,12 +28,12 @@ jobs:
       matrix:
         component:
           - sidecar
-          # - eric
-          # - task-dispatcher
-          # - task-manager
-          # - resource-manager
-          # - gateway
-          # - vllm
+          - eric
+          - task-dispatcher
+          - task-manager
+          - resource-manager
+          - gateway
+          - vllm
         platform:
           - linux/amd64
           - linux/arm64
@@ -113,12 +112,12 @@ jobs:
       matrix:
         component:
           - sidecar
-          # - eric
-          # - task-dispatcher
-          # - task-manager
-          # - resource-manager
-          # - gateway
-          # - vllm
+          - eric
+          - task-dispatcher
+          - task-manager
+          - resource-manager
+          - gateway
+          - vllm
     steps:
       - name: Prepare
         run: |
