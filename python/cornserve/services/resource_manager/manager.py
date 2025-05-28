@@ -184,7 +184,7 @@ class ResourceManager:
                             )
                         )
                     await asyncio.gather(*cleanup_coros, return_exceptions=True)
-                raise RuntimeError(f"Failed to spawn {failed} sidecar pods")
+                raise RuntimeError(f"Failed to spawn {failed} sidecar pods: {spawn_results}")
 
             # TODO (Jeff): CheckHealth with Timeout
             resource = Resource(gpus=gpus)
@@ -300,7 +300,7 @@ class ResourceManager:
                 await task_state.tear_down(self.kube_core_client)
             except Exception as e:
                 logger.error("Failed to clean up task manager for %s: %s", task, e)
-                raise RuntimeError(f"Failed to clean up task manager for {task}") from e
+                raise RuntimeError(f"Failed to clean up task manager for {task}: {e}") from e
 
     async def healthcheck(self) -> tuple[bool, list[tuple[UnitTask, bool]]]:
         """Check the health of all task managers.
@@ -481,6 +481,6 @@ class ResourceManager:
         except Exception as e:
             logger.exception("Failed to spawn task manager: %s", e)
             await state.tear_down(self.kube_core_client)
-            raise
+            raise RuntimeError(f"Failed to initialize spawned task manager for {task}: {e}") from e
 
         return UnitTaskDeployment(task=task, id=state.id, url=f"{state.service_name}:{port}")
