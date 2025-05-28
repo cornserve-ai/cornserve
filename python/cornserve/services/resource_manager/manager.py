@@ -233,7 +233,7 @@ class ResourceManager:
                 logger.error("Failed to spawn task manager for %s: %s", task, e)
                 async with self.task_states_lock:
                     self.task_states.pop(task_manager_id, None)
-                raise RuntimeError(f"Failed to spawn task manager for {task}") from e
+                raise RuntimeError(f"Failed to spawn task manager for {task}: {e}") from e
 
         # Notify the task dispatcher of the new task and task manager
         task_manager_info = task_dispatcher_pb2.NotifyUnitTaskDeploymentRequest(
@@ -256,7 +256,7 @@ class ResourceManager:
                 if task_state := self.task_states.pop(task_manager_id, None):
                     logger.info("Cleaning up task manager %s", task_state.id)
                     await task_state.tear_down(self.kube_core_client)
-            raise RuntimeError(f"Failed to notify task dispatcher of new task {task}") from e
+            raise RuntimeError(f"Failed to notify task dispatcher of new task {task}: {e}") from e
 
     @tracer.start_as_current_span("ResourceManager.teardown_unit_task")
     async def teardown_unit_task(self, task: UnitTask) -> None:
