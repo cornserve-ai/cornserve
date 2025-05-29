@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 
+set -ev
 
 echo ${BASH_SOURCE[0]}
 
