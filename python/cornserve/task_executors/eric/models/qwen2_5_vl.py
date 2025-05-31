@@ -289,6 +289,7 @@ class Qwen2_5_VisionTransformer(EricModel):
         depth = vision_config.depth
 
         self.hidden_size = vision_config.hidden_size
+        self.out_hidden_size = vision_config.out_hidden_size
         self.num_heads = vision_config.num_heads
 
         # args for get_window_index
@@ -339,7 +340,7 @@ class Qwen2_5_VisionTransformer(EricModel):
 
     @property
     def chunk_shape(self) -> tuple[int, ...]:
-        return (1, self.hidden_size)
+        return (1, self.out_hidden_size)
 
     def rot_pos_emb(self, grid_thw: torch.Tensor) -> torch.Tensor:
         pos_ids = []

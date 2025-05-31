@@ -122,7 +122,7 @@ class SharedMemoryManager:
         self.slot_size = slot_size
         self.num_slots = self.shm_size // self.slot_size
         self.occupancy = [0 for _ in range(self.num_slots)]
-        logger.info("Shared memory manager initialized with %d slots", self.num_slots)
+        logger.info("Shared memory manager initialized with %d slots of slot size%d", self.num_slots, self.slot_size)
 
     def allocate(self, size: int) -> SharedMemoryBuffer | None:
         """Allocate a shared memory buffer of the given size.
@@ -134,7 +134,7 @@ class SharedMemoryManager:
         if size < self.slot_size:
             raise ValueError("Requested size is smaller than slot size")
         if size % self.slot_size != 0:
-            raise ValueError("Requested size is not a multiple of slot size")
+            raise ValueError(f"Requested size {size} is not a multiple of slot size {self.slot_size}")
 
         slots_needed = size // self.slot_size
         cur_free = 0
