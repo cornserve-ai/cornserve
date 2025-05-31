@@ -153,7 +153,7 @@ Package: `cornserve.task_executors`
 
 As detailed in the [Task](task.md) page, a single unit task class is associated with a Task execution descriptor, which provides information about how to spin up the Task Executor and how to execute the task, among other things.
 
-Refer to [Eric](eric.md) and [vLLM](https://github.com/cornserve-ai/vllm) for more information about built-in Task Executors. Cornserve currently uses vLLM v0.9.0.
+Refer to [Eric](eric.md) and [vLLM](https://github.com/cornserve-ai/vllm) for more information about built-in Task Executors. Cornserve currently uses vLLM v0.9.0.1.
 
 ### Sidecar
 
