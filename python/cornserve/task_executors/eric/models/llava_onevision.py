@@ -299,9 +299,9 @@ class ModalityProcessor(BaseModalityProcessor):
 
         def processor(image: npt.NDArray) -> dict[str, npt.NDArray]:
             """Invoke the HF processor and convert to dict."""
-            out = self.image_processor.preprocess(images=[image], return_tensors="np")
+            out = self.image_processor.preprocess(images=[image], return_tensors="pt")
             # Batch size is going to be 1, so squeeze it out
-            return {k: v.squeeze(0) for k, v in out.data.items()}
+            return {k: v.numpy().squeeze(0) for k, v in out.data.items()}
 
         return processor
 
@@ -310,8 +310,8 @@ class ModalityProcessor(BaseModalityProcessor):
 
         def processor(video: npt.NDArray) -> dict[str, npt.NDArray]:
             """Invoke the HF processor and convert to dict."""
-            out = self.video_processor.preprocess(videos=[video], return_tensors="np")
+            out = self.video_processor.preprocess(videos=[video], return_tensors="pt")
             # Batch size is going to be 1, so squeeze it out
-            return {k: v.squeeze(0) for k, v in out.data.items()}
+            return {k: v.numpy().squeeze(0) for k, v in out.data.items()}
 
         return processor

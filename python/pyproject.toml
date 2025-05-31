@@ -90,6 +90,7 @@ dev-common = [
   "ruff",
   "pytest",
   "pytest-asyncio",
+  "pytest-dependency",
   "cornserve[sidecar-api,gateway,resource-manager,task-manager,task-dispatcher]",
 ]
 dev = ["cornserve[dev-common,sidecar,eric]"]

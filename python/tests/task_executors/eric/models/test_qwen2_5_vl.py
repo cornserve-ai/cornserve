@@ -11,9 +11,18 @@ from cornserve.task_executors.eric.executor.executor import ModelExecutor
 from cornserve.task_executors.eric.executor.loader import load_model
 from cornserve.task_executors.eric.schema import Status
 
-from ..utils import ModalityData, assert_same_weights, batch_builder, param_tp_size
+from ..utils import (
+    TP_SIZES,
+    ModalityData,
+    assert_same_weights,
+    assert_similar,
+    batch_builder,
+    depends_on,
+    param_tp_size,
+)
 
 model_id = "Qwen/Qwen2.5-VL-7B-Instruct"
+model_shorthand = "qwen2_5"
 
 
 def test_weight_loading() -> None:
@@ -31,11 +40,11 @@ def test_weight_loading() -> None:
 
 
 @param_tp_size
-def test_image_inference(test_images: list[ModalityData], tp_size: int) -> None:
+def test_image_inference(test_images: list[ModalityData], tp_size: int, dump_tensors: str) -> None:
     """Test if inference works correctly."""
     executor = ModelExecutor(model_id=model_id, tp_size=tp_size, sender_sidecar_ranks=None)
 
-    result = executor.execute_model(batch=batch_builder(model_id, "qwen2_5", test_images))
+    result = executor.execute_model(batch=batch_builder(model_id, model_shorthand, test_images))
 
     assert result.status == Status.SUCCESS
 
@@ -43,19 +52,19 @@ def test_image_inference(test_images: list[ModalityData], tp_size: int) -> None:
 
 
 @param_tp_size
-def test_video_inference(test_videos: list[ModalityData], tp_size: int) -> None:
+def test_video_inference(test_videos: list[ModalityData], tp_size: int, dump_tensors: str) -> None:
     """Test if inference works correctly."""
     executor = ModelExecutor(model_id=model_id, tp_size=tp_size, sender_sidecar_ranks=None)
 
-    result = executor.execute_model(batch=batch_builder(model_id, "qwen2_5", test_videos[:2]))
+    result = executor.execute_model(batch=batch_builder(model_id, model_shorthand, test_videos[:2]))
 
     assert result.status == Status.SUCCESS
 
     executor.shutdown()
 
 
-@pytest.mark.skipif(os.getenv("CORNSERVE_TEST_DUMP_TENSOR_DIR") is None, reason="Dump directory not set")
-def test_hf_reference(test_images: list[ModalityData], test_videos: list[ModalityData]) -> None:
+@depends_on("test_image_inference", "test_video_inference")
+def test_hf_reference(test_images: list[ModalityData], test_videos: list[ModalityData], dump_tensors: str) -> None:
     """Generate reference outputs from the Hugging Face model."""
     torch.set_grad_enabled(False)
 
@@ -69,27 +78,31 @@ def test_hf_reference(test_images: list[ModalityData], test_videos: list[Modalit
     image1 = test_images[0].processed(model_id)
     pixel_values = torch.asarray(image1["pixel_values"]).cuda()
     image_grid_thw = torch.asarray(image1["image_grid_thw"]).cuda()
-    output1 = model.get_image_features(pixel_values=pixel_values, image_grid_thw=image_grid_thw)
+    output1 = model.get_image_features(pixel_values=pixel_values, image_grid_thw=image_grid_thw).cpu()
 
     image2 = test_images[1].processed(model_id)
     pixel_values = torch.asarray(image2["pixel_values"]).cuda()
     image_grid_thw = torch.asarray(image2["image_grid_thw"]).cuda()
-    output2 = model.get_image_features(pixel_values=pixel_values, image_grid_thw=image_grid_thw)
+    output2 = model.get_image_features(pixel_values=pixel_values, image_grid_thw=image_grid_thw).cpu()
 
-    torch.save(
-        [output1.cpu(), output2.cpu()], os.path.join(os.getenv("CORNSERVE_TEST_DUMP_TENSOR_DIR"), "qwen2_5-hf_image.pt")
-    )
+    for tp_degree in TP_SIZES:
+        output = torch.load(f"{dump_tensors}/{model_shorthand}-image-tp{tp_degree}.pt")
+        assert_similar([output1, output2], output)
+
+    del output1, output2
 
     video1 = test_videos[0].processed(model_id)
     pixel_values_video = torch.asarray(video1["pixel_values_videos"]).cuda()
     video_grid_thw = torch.asarray(video1["video_grid_thw"]).cuda()
-    output1 = model.get_video_features(pixel_values_videos=pixel_values_video, video_grid_thw=video_grid_thw)
+    output1 = model.get_video_features(pixel_values_videos=pixel_values_video, video_grid_thw=video_grid_thw).cpu()
 
     video2 = test_videos[1].processed(model_id)
     pixel_values_video2 = torch.asarray(video2["pixel_values_videos"]).cuda()
     video_grid_thw2 = torch.asarray(video2["video_grid_thw"]).cuda()
-    output2 = model.get_video_features(pixel_values_videos=pixel_values_video2, video_grid_thw=video_grid_thw2)
+    output2 = model.get_video_features(pixel_values_videos=pixel_values_video2, video_grid_thw=video_grid_thw2).cpu()
 
-    torch.save(
-        [output1.cpu(), output2.cpu()], os.path.join(os.getenv("CORNSERVE_TEST_DUMP_TENSOR_DIR"), "qwen2_5-hf_video.pt")
-    )
+    for tp_degree in TP_SIZES:
+        output = torch.load(f"{dump_tensors}/{model_shorthand}-video-tp{tp_degree}.pt")
+        assert_similar([output1, output2], output)
+
+    del output1, output2
