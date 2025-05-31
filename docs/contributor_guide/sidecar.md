@@ -22,3 +22,11 @@ We use pytest.
 ```bash
 pytest python/tests/services/sidecar/test_sidecar.py
 ```
+
+When testing locally with task executors, you can `export SIDECAR_IS_LOCAL=true` to
+route all communications through `localhost` instead of k8s network.
+
+
+## Debugging
+
+To debug UCX related error, you can set `UCX_LOG_LEVEL=trace` and `UCXPY_LOG_LEVEL=DEBUG`

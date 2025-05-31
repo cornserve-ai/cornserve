@@ -41,7 +41,7 @@ minikube kubectl -- apply -k kubernetes/kustomize/cornserve-system/overlays/mini
 minikube kubectl -- apply -k kubernetes/kustomize/cornserve/overlays/minikube
 ```
 
-We'll be using [Gemma 3 4B](https://huggingface.co/google/gemma-3-4b-it/tree/main) for this demo, so you need to have access (requests are processed immediately with an account).
+We'll be using [Gemma 3 4B](https://huggingface.co/google/gemma-3-4b-it) for this demo, so you need to have access (requests are processed immediately with an account).
 While we wait for the containers to spin up, add your HuggingFace access token to Cornserve, which can be created [here](https://huggingface.co/settings/tokens) if you don't have one already.
 ```
 minikube kubectl -- create -n cornserve secret generic cornserve-env --from-literal=hf-token='YOUR_HUGGINGFACE_TOKEN'

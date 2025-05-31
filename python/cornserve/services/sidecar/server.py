@@ -194,7 +194,7 @@ class SidecarServicer(sidecar_pb2_grpc.SidecarServicer):
         tensor_dtype = getattr(torch, request.dtype)
         slab_numel = slab_size // tensor_dtype.itemsize
         return SidecarServerConfig(
-            sidecar_rank=request.rank,
+            sidecar_rank=self.sidecar_rank,
             node_info=self.node_info,
             peers=self.peers,
             group=sorted(list(request.group)),
