@@ -1,7 +1,10 @@
 """Tests for the Qwen2-VL model's vision encoder."""
 
+import os
+
+import pytest
 import torch
-from transformers.models.qwen2_vl.modeling_qwen2_vl import Qwen2VLForConditionalGeneration
+from transformers.models.qwen2_5_vl.modeling_qwen2_5_vl import Qwen2_5_VLForConditionalGeneration
 
 from cornserve.task_executors.eric.distributed.parallel import destroy_distributed, init_distributed
 from cornserve.task_executors.eric.executor.executor import ModelExecutor
@@ -18,14 +21,14 @@ from ..utils import (
     param_tp_size,
 )
 
-model_id = "Qwen/Qwen2-VL-7B-Instruct"
-model_shorthand = "qwen2"
+model_id = "Qwen/Qwen2.5-VL-7B-Instruct"
+model_shorthand = "qwen2_5"
 
 
 def test_weight_loading() -> None:
     """Check if weights are loaded correctly."""
     # Hugging Face model output
-    hf_model = Qwen2VLForConditionalGeneration.from_pretrained(model_id, torch_dtype="auto").visual
+    hf_model = Qwen2_5_VLForConditionalGeneration.from_pretrained(model_id, torch_dtype="auto").visual
 
     # Load our model
     init_distributed(world_size=1, rank=0)
@@ -65,7 +68,7 @@ def test_hf_reference(test_images: list[ModalityData], test_videos: list[Modalit
     """Generate reference outputs from the Hugging Face model."""
     torch.set_grad_enabled(False)
 
-    hf_model = Qwen2VLForConditionalGeneration.from_pretrained(
+    hf_model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
         model_id,
         torch_dtype="auto",
         attn_implementation="flash_attention_2",

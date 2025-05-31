@@ -16,7 +16,6 @@ from cornserve.task_executors.eric.config import ImageDataConfig, ModalityConfig
 from cornserve.task_executors.eric.router.processor import Processor
 from cornserve.task_executors.eric.schema import Modality, WorkerBatch
 
-DUMP_DIR = os.getenv("CORNSERVE_TEST_DUMP_TENSOR_DIR", None)
 TEST_NUM_GPUS: list[int] = [1, 2, 4, 8]
 
 try:
@@ -29,10 +28,30 @@ except subprocess.CalledProcessError:
     CURR_NUM_GPUS = 0
 
 
+TP_SIZES = [tp for tp in [1, 2, 4, 8] if tp <= CURR_NUM_GPUS]
+
+
 def param_tp_size(func):
     """Parametrize test argument `tp_size` with power-of-two TP degrees."""
-    sizes = [ts for ts in (1, 2, 4, 8) if ts <= CURR_NUM_GPUS]
-    return pytest.mark.parametrize("tp_size", sizes, ids=lambda x: f"TP={x}")(func)
+    func = pytest.mark.parametrize(
+        "tp_size",
+        TP_SIZES,
+        ids=lambda x: f"TP={x}",
+    )(func)
+    return pytest.mark.dependency()(func)
+
+
+def depends_on(*names: str):
+    """Decorator that marks a test to depend on TP-parameterized tests."""
+
+    def wrapper(func):
+        depends = []
+        for name in names:
+            for tp in TP_SIZES:
+                depends.append(f"{name}[TP={tp}]")
+        return pytest.mark.dependency(depends=depends)(func)
+
+    return wrapper
 
 
 class ModalityData:
@@ -104,6 +123,28 @@ def assert_same_weights(
         check_param(name, param, hf_params)
 
 
+def assert_similar(*args: list[torch.Tensor]) -> None:
+    """Asserts that all tensors in the same position across the lists are similar.
+
+    Similar is defined as having a cosine similarity greater than 0.98.
+    """
+    # Make sure all lists are of the same length
+    assert all(len(arg) == len(args[0]) for arg in args), "All input lists must have the same length."
+    n = len(args[0])
+
+    for i in range(n):
+        # Get the tensors at position i from all lists
+        tensors = [arg[i] for arg in args]
+
+        for j in range(len(tensors)):
+            for k in range(j + 1, len(tensors)):
+                # Calculate cosine similarity
+                cos_sim = torch.cosine_similarity(tensors[j], tensors[k]).mean().item()
+                assert cos_sim > 0.98, (
+                    f"Cosine similarity between tensors {j} and {k} at index {i} is too low: {cos_sim}"
+                )
+
+
 def batch_builder(model_id: str, nickname: str, data: list[ModalityData]) -> WorkerBatch:
     """Builds a Batch object to pass to ModelExecutor.execute_model."""
     modality = data[0].modality
@@ -124,7 +165,8 @@ def batch_builder(model_id: str, nickname: str, data: list[ModalityData]) -> Wor
         otel_carriers=[None for _ in data],
     )
 
-    if DUMP_DIR is not None:
-        batch._dump_prefix = f"{DUMP_DIR}/{nickname}-{modality.value}"
+    if (dump_dir := os.getenv("CORNSERVE_TEST_DUMP_TENSOR_DIR")) is not None:
+        # If the environment variable is set, use it to set the dump prefix
+        batch._dump_prefix = f"{dump_dir}/{nickname}-{modality.value}"
 
     return batch

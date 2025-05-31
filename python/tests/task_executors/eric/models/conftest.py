@@ -1,3 +1,8 @@
+import os
+import shutil
+import tempfile
+from collections.abc import Generator
+
 import pytest
 
 from cornserve.task_executors.eric.schema import Modality
@@ -28,3 +33,20 @@ TEST_VIDEO_URLS = [
 def test_videos() -> list[ModalityData]:
     """Fixture to provide test videos."""
     return [ModalityData(url=url, modality=Modality.VIDEO) for url in TEST_VIDEO_URLS]
+
+
+@pytest.fixture(scope="session")
+def dump_tensors() -> Generator[str, None, None]:
+    """Fixture to set `CORNSERVE_TEST_DUMP_TENSOR_DIR` environment variable."""
+    dir = os.getenv("CORNSERVE_TEST_DUMP_TENSOR_DIR")
+
+    # If unset, do it in a tempdir and clean up after the test session.
+    if dir is None:
+        tmp = os.environ["CORNSERVE_TEST_DUMP_TENSOR_DIR"] = tempfile.mkdtemp()
+        yield tmp
+        del os.environ["CORNSERVE_TEST_DUMP_TENSOR_DIR"]
+        shutil.rmtree(tmp)
+
+    # If explicitly set, use it and leave the stuff because the user would have intended to keep it.
+    else:
+        yield dir

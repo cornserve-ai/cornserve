@@ -3,7 +3,6 @@
 from functools import partial
 from typing import Callable, Type
 
-from cornserve.task_executors.eric.schema import Modality
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -17,6 +16,7 @@ from flash_attn.layers.rotary import apply_rotary_emb
 from .base import EricModel
 from .layers.activations import QuickGELU
 from .layers.linear import ColumnParallelLinear, RowParallelLinear
+from cornserve.task_executors.eric.schema import Modality
 from cornserve.task_executors.eric.distributed import parallel
 from cornserve.task_executors.eric.router.processor import BaseModalityProcessor
 from cornserve.task_executors.eric.utils import distributed as dist_utils
@@ -292,10 +292,7 @@ class Qwen2VisionBlock(nn.Module):
 
 
 class Qwen2VisionTransformer(EricModel):
-    def __init__(
-        self,
-        config: Qwen2VLConfig,
-    ) -> None:
+    def __init__(self, config: Qwen2VLConfig) -> None:
         super().__init__()
         vision_config = config.vision_config
         patch_size = vision_config.patch_size

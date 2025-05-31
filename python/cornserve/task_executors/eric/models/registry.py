@@ -89,6 +89,19 @@ MODEL_REGISTRY: dict[str, RegistryEntry] = {
             Modality.VIDEO: ModalityEntry(),
         },
     ),
+    "qwen2_5_vl": RegistryEntry(
+        module="qwen2_5_vl",
+        class_name="Qwen2_5_VisionTransformer",
+        vit_resolution_type=ViTResolutionType.DYNAMIC,
+        weight=WeightInfo(
+            required_prefixes=["visual."],
+            strip_prefixes=True,
+        ),
+        modality={
+            Modality.IMAGE: ModalityEntry(),
+            Modality.VIDEO: ModalityEntry(),
+        },
+    ),
     "llava_onevision": RegistryEntry(
         module="llava_onevision",
         class_name="LlavaOneVisionEncoder",
