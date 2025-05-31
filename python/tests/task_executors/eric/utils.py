@@ -114,14 +114,11 @@ def assert_same_weights(
         assert param.shape == hf_param.shape, name
         assert torch.allclose(param, hf_param), name
 
-    print(f"{dict(hf_model.named_parameters()).keys()=}")
     hf_params = filter_weight_dict(dict(hf_model.named_parameters()))
     our_params = filter_weight_dict(dict(our_model.named_parameters()))
     if not transformed_weights:
         assert len(hf_params) == len(our_params)
 
-    print(f"{hf_params.keys()=}")
-    print(f"{our_params.keys()=}")
     for name, param in our_params.items():
         check_param(name, param, hf_params)
 
