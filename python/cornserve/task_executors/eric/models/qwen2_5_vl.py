@@ -1,12 +1,282 @@
 """Qwen2.5-VL Vision Transformer."""
 
 from functools import partial
+from collections.abc import Callable
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
+import numpy.typing as npt
+from einops import rearrange
+from transformers.models.auto.image_processing_auto import AutoImageProcessor
 from transformers.models.qwen2_5_vl.configuration_qwen2_5_vl import Qwen2_5_VLConfig
+from flash_attn import flash_attn_varlen_func
+from flash_attn.layers.rotary import apply_rotary_emb
 
 from .base import EricModel
+from .layers.norm import RMSNorm
+from .layers.activations import get_act_fn
+from .layers.linear import ColumnParallelLinear, RowParallelLinear, QKVParallelLinear
+from cornserve.task_executors.eric.api import Modality
+from cornserve.task_executors.eric.distributed import parallel
+from cornserve.task_executors.eric.router.processor import BaseModalityProcessor
+from cornserve.task_executors.eric.utils import distributed as dist_utils
+
+
+def apply_rotary_pos_emb_vision(t: torch.Tensor, freqs: torch.Tensor) -> torch.Tensor:
+    t_ = t.float()
+    cos = freqs.cos()
+    sin = freqs.sin()
+
+    output = apply_rotary_emb(t_, cos, sin).type_as(t)
+
+    return output
+
+
+def all_gather_interleave(local_tensor, hidden_size: int, tp_size: int):
+    """All-gather the input tensor interleavely across model parallel group."""
+    import torch.distributed as dist
+
+    gathered_tensors = [torch.zeros_like(local_tensor) for _ in range(tp_size)]
+    dist.all_gather(gathered_tensors, local_tensor, group=parallel.get_tensor_parallel_group().process_group)
+
+    gathered_tensors_split = [torch.split(tensor, hidden_size // tp_size, -1) for tensor in gathered_tensors]
+    ordered_tensors = [tensor for pair in zip(*gathered_tensors_split) for tensor in pair]
+    result_tensor = torch.cat(ordered_tensors, dim=-1)
+    return result_tensor
+
+
+def cast_overflow_tensors(
+    tensors: torch.Tensor,
+    offset: float = 1000,
+) -> torch.Tensor:
+    if tensors.isinf().any() or tensors.isnan().any():
+        clamp_value = torch.finfo(tensors.dtype).max - offset
+        tensors = torch.clamp(tensors, min=-clamp_value, max=clamp_value)
+    return tensors
+
+
+class Qwen2_5_VisionAttention(nn.Module):
+    def __init__(
+        self,
+        embed_dim: int,
+        num_heads: int,
+        projection_size: int,
+    ) -> None:
+        super().__init__()
+        # Per attention head and per partition values.
+        self.tp_group = parallel.get_tensor_parallel_group()
+        self.tp_size = self.tp_group.world_size
+        self.tp_rank = self.tp_group.rank
+        self.hidden_size_per_attention_head = dist_utils.divide(projection_size, num_heads)
+        self.num_attention_heads_per_partition = dist_utils.divide(num_heads, self.tp_size)
+        self.embed_dim = embed_dim
+
+        self.qkv = ColumnParallelLinear(input_size=embed_dim, output_size=3 * projection_size)
+        # self.qkv = QKVParallelLinear(
+        #     hidden_size=embed_dim,
+        #     head_size=self.hidden_size_per_attention_head,
+        #     total_num_heads=num_heads,
+        #     total_num_kv_heads=num_heads,
+        #     bias=True)
+        self.proj = RowParallelLinear(input_size=projection_size, output_size=embed_dim)
+
+    def split_qkv(self, qkv: torch.Tensor) -> tuple[torch.Tensor, ...]:
+        # [s, b, 3 * head * head_dim]
+        seq_len, bs, _ = qkv.shape
+        if self.tp_size > 1:
+            # qkv = all_gather_interleave(qkv, self.embed_dim, self.tp_size)
+            qkv = self.tp_group.all_gather(qkv)
+
+        # [s, b, 3 * head * head_dim] -> 3 * [s, b, head * head_dim]
+        q, k, v = qkv.chunk(3, dim=2)
+
+        # 3 * [s, b, head * head_dim]
+        if self.tp_size > 1:
+            splitter = partial(dist_utils.split_tensor_along_last_dim, num_partitions=self.tp_size)
+            q = splitter(q)[self.tp_rank]
+            k = splitter(k)[self.tp_rank]
+            v = splitter(v)[self.tp_rank]
+
+        # 3 * [s, b, head * head_dim] -> 3 * [s, b, head, head_dim]
+        new_shape = (seq_len, bs, self.num_attention_heads_per_partition, self.hidden_size_per_attention_head)
+        q, k, v = (x.view(*new_shape) for x in (q, k, v))
+        return q, k, v
+
+    def forward(
+        self,
+        x: torch.Tensor,
+        cu_seqlens: torch.Tensor,
+        rotary_pos_emb: torch.Tensor,
+        max_seqlen: int | None = None,  # Only used for Flash Attention
+    ) -> torch.Tensor:
+        # [s, b, c] --> [s, b, head * 3 * head_dim]
+        x, _ = self.qkv(x)
+
+        # [s, b, 3 * head * head_dim] -> 3 * [s, b, head, head_dim]
+        q, k, v = self.split_qkv(x)
+        batch_size = q.shape[1]
+
+        q, k, v = (rearrange(x, "s b ... -> b s ...").contiguous() for x in (q, k, v))
+        if rotary_pos_emb is not None:
+            q = apply_rotary_pos_emb_vision(q, rotary_pos_emb)
+            k = apply_rotary_pos_emb_vision(k, rotary_pos_emb)
+
+        # from vllm_flash_attn.flash_attn_interface import (
+        #   flash_attn_varlen_func)
+
+        q, k, v = (rearrange(x, "b s ... -> (b s) ...") for x in [q, k, v])
+
+        output = flash_attn_varlen_func(
+            q,
+            k,
+            v,
+            cu_seqlens_q=cu_seqlens,
+            cu_seqlens_k=cu_seqlens,
+            max_seqlen_q=max_seqlen,
+            max_seqlen_k=max_seqlen,
+            dropout_p=0,
+            causal=False,
+        )
+
+        context_layer = rearrange(output, "(b s) ... -> b s ...", b=batch_size)
+        context_layer = rearrange(context_layer, "b s h d -> s b (h d)").contiguous()
+
+        output, _ = self.proj(context_layer)
+        return output
+
+
+class Qwen2_5_VisionMLP(nn.Module):
+    def __init__(
+        self,
+        in_features: int,
+        hidden_features: int,
+        bias: bool = False,
+        act_fn: Callable[[torch.Tensor], torch.Tensor] = F.silu,
+    ) -> None:
+        super().__init__()
+        self.gate_proj = ColumnParallelLinear(in_features, hidden_features, bias=bias)
+        self.up_proj = ColumnParallelLinear(in_features, hidden_features, bias=bias)
+        self.down_proj = RowParallelLinear(hidden_features, in_features, bias=bias)
+        self.act_fn = act_fn
+
+    def forward(self, x: torch.Tensor):
+        x_gate, _ = self.gate_proj(x)
+        x_gate = self.act_fn(x_gate)
+        x_up, _ = self.up_proj(x)
+        x_down, _ = self.down_proj(x_gate * x_up)
+        return x_down
+
+
+class Qwen2_5_VisionBlock(nn.Module):
+    def __init__(
+        self,
+        dim: int,
+        num_heads: int,
+        mlp_hidden_dim: int,
+        act_fn: Callable[[torch.Tensor], torch.Tensor] = F.silu,
+        norm_layer: Callable[[int], nn.Module] | None = None,
+    ) -> None:
+        super().__init__()
+        if norm_layer is None:
+            norm_layer = partial(nn.LayerNorm, eps=1e-6)
+        self.norm1 = norm_layer(dim)
+        self.norm2 = norm_layer(dim)
+        self.attn = Qwen2_5_VisionAttention(embed_dim=dim, num_heads=num_heads, projection_size=dim)
+        self.mlp = Qwen2_5_VisionMLP(dim, mlp_hidden_dim, act_fn=act_fn, bias=True)
+
+    def forward(
+        self,
+        x: torch.Tensor,
+        cu_seqlens: torch.Tensor,
+        rotary_pos_emb: torch.Tensor,
+        max_seqlen: int | None = None,
+    ) -> torch.Tensor:
+        x = x + self.attn(self.norm1(x), cu_seqlens=cu_seqlens, rotary_pos_emb=rotary_pos_emb, max_seqlen=max_seqlen)
+
+        x = x + self.mlp(self.norm2(x))
+        return x
+
+
+class Qwen2_5_VisionPatchEmbed(nn.Module):
+    def __init__(
+        self,
+        patch_size: int = 14,
+        temporal_patch_size: int = 2,
+        in_channels: int = 3,
+        hidden_size: int = 1152,
+    ) -> None:
+        super().__init__()
+        self.patch_size = patch_size
+        self.temporal_patch_size = temporal_patch_size
+        self.hidden_size = hidden_size
+
+        kernel_size = (temporal_patch_size, patch_size, patch_size)
+        self.proj = nn.Conv3d(in_channels, hidden_size, kernel_size=kernel_size, stride=kernel_size, bias=False)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        L, C = x.shape
+        x = x.view(L, -1, self.temporal_patch_size, self.patch_size, self.patch_size)
+        x = self.proj(x).view(L, self.hidden_size)
+        return x
+
+
+class Qwen2_5_VisionPatchMerger(nn.Module):
+    def __init__(
+        self,
+        d_model: int,
+        context_dim: int,
+        norm_layer: Callable[[int], nn.Module] | None = None,
+        spatial_merge_size: int = 2,
+    ) -> None:
+        super().__init__()
+        self.hidden_size = context_dim * (spatial_merge_size**2)
+        if norm_layer is None:
+            norm_layer = partial(nn.LayerNorm, eps=1e-6)
+        self.ln_q = norm_layer(context_dim)
+        self.mlp = nn.ModuleList(
+            [
+                ColumnParallelLinear(self.hidden_size, self.hidden_size, bias=True),
+                nn.GELU(),
+                RowParallelLinear(self.hidden_size, d_model, bias=True),
+            ]
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x = self.ln_q(x)
+        x = x.view(-1, self.hidden_size)
+
+        mlp_fc1, mlp_act, mlp_fc2 = self.mlp
+        x_parallel, _ = mlp_fc1(x)
+        x_parallel = mlp_act(x_parallel)
+        out, _ = mlp_fc2(x_parallel)
+        return out
+
+
+class Qwen2_5_VisionRotaryEmbedding(nn.Module):
+    def __init__(self, dim: int, theta: float = 10000.0) -> None:
+        super().__init__()
+        self.dim = dim
+        self.theta = theta
+        inv_freq = 1.0 / (theta ** (torch.arange(0, dim, 2, dtype=torch.float) / dim))
+        self.register_buffer("inv_freq", inv_freq, persistent=False)
+        self._seq_len_cached = 0
+        self._freqs_cached: torch.Tensor = None  # type: ignore
+
+    def update_freqs_cache(self, seqlen: int) -> None:
+        if seqlen > self._seq_len_cached:
+            seqlen *= 2
+            self._seq_len_cached = seqlen
+            self.inv_freq = 1.0 / (
+                self.theta ** (torch.arange(0, self.dim, 2, dtype=torch.float, device=self.inv_freq.device) / self.dim)
+            )
+            seq = torch.arange(seqlen, device=self.inv_freq.device, dtype=self.inv_freq.dtype)
+            freqs = torch.outer(seq, self.inv_freq)
+            self._freqs_cached = freqs
+
+    def forward(self, seqlen: int) -> torch.Tensor:
+        self.update_freqs_cache(seqlen)
+        return self._freqs_cached[:seqlen]
 
 
 class Qwen2_5_VisionTransformer(EricModel):
@@ -46,7 +316,7 @@ class Qwen2_5_VisionTransformer(EricModel):
                     dim=self.hidden_size,
                     num_heads=self.num_heads,
                     mlp_hidden_dim=vision_config.intermediate_size,
-                    act_fn=_ACTIVATION_REGISTRY[vision_config.hidden_act],
+                    act_fn=get_act_fn(vision_config.hidden_act),
                     norm_layer=norm_layer,
                 )
                 for layer_idx in range(depth)
@@ -58,7 +328,6 @@ class Qwen2_5_VisionTransformer(EricModel):
             norm_layer=norm_layer,
             spatial_merge_size=self.spatial_merge_size,
         )
-        self.attn_backend: _Backend = get_vit_attn_backend(support_fa=True)
 
     @property
     def dtype(self) -> torch.dtype:
@@ -138,22 +407,41 @@ class Qwen2_5_VisionTransformer(EricModel):
     def compute_attn_mask_seqlen(
         self,
         cu_seqlens: torch.Tensor,
-    ) -> tuple[Optional[int], Optional[list[int]]]:
+    ) -> tuple[int | None, list[int] | None]:
         max_seqlen, seqlens = None, None
-        if self.attn_backend == _Backend.FLASH_ATTN:
-            max_seqlen = (cu_seqlens[1:] - cu_seqlens[:-1]).max().item()
-        elif self.attn_backend == _Backend.XFORMERS:
-            seqlens = (cu_seqlens[1:] - cu_seqlens[:-1]).tolist()
+        max_seqlen = (cu_seqlens[1:] - cu_seqlens[:-1]).max().item()
         return max_seqlen, seqlens
 
     def forward(
         self,
-        x: torch.Tensor,
-        grid_thw: torch.Tensor,
-    ) -> torch.Tensor:
+        # x: torch.Tensor,
+        # grid_thw: torch.Tensor,
+        modality: Modality,
+        batch: dict[str, list[torch.Tensor]],
+    ) -> list[torch.Tensor]:
+        """Forward pass of the model.
+
+        For images, `batch` is expected to have the following keys:
+        - `pixel_values`: The pixel values of the images. Each [seq_len, 6 * patch_size (14) * patch_size (14)].
+        - `image_grid_thw`: The grid size of the images. Each [1, 3].
+
+        For videos, `batch` is expected to have the following keys:
+        - `pixel_values_videos`: The pixel values of the videos. Each [seq_len, 6 * patch_size (14) * patch_size (14)].
+        - `video_grid_thw`: The grid size of the videos. Each [1, 3].
+        """
+        # Batch
+        match modality:
+            case Modality.IMAGE:
+                pixel_values = torch.cat(batch["pixel_values"], dim=0).to(device=self.device, dtype=self.dtype)
+                grid_thw = torch.cat(batch["image_grid_thw"], dim=0).to(device=self.device)
+            case Modality.VIDEO:
+                pixel_values = torch.cat(batch["pixel_values_videos"], dim=0).to(device=self.device, dtype=self.dtype)
+                grid_thw = torch.cat(batch["video_grid_thw"], dim=0).to(device=self.device)
+            case _:
+                raise ValueError(f"Unsupported modality: {modality}")
+
         # patchify
-        hidden_states = x.to(device=self.device, dtype=self.dtype)
-        hidden_states = self.patch_embed(hidden_states)
+        hidden_states = self.patch_embed(pixel_values)
 
         # compute position embedding
         rotary_pos_emb = self.rot_pos_emb(grid_thw)
@@ -189,18 +477,15 @@ class Qwen2_5_VisionTransformer(EricModel):
             if layer_num in self.fullatt_block_indexes:
                 cu_seqlens_now = cu_seqlens
                 max_seqlen_now = max_seqlen_full
-                seqlens_now = seqlens_full
             else:
                 cu_seqlens_now = cu_window_seqlens
                 max_seqlen_now = max_seqlen_window
-                seqlens_now = seqlens_window
 
             hidden_states = blk(
                 hidden_states,
                 cu_seqlens=cu_seqlens_now,
                 rotary_pos_emb=rotary_pos_emb,
                 max_seqlen=max_seqlen_now,
-                seqlens=seqlens_now,
             )
 
         # For Qwen2.5-VL-3B, float16 will overflow at last block
@@ -212,4 +497,36 @@ class Qwen2_5_VisionTransformer(EricModel):
         hidden_states = self.merger(hidden_states)
         reverse_indices = torch.argsort(window_index)
         hidden_states = hidden_states[reverse_indices, :]
-        return hidden_states
+
+        # Unbatch
+        seqlens = (grid_thw[:, 0] * grid_thw[:, 1] * grid_thw[:, 2]).squeeze(0) // self.spatial_merge_unit
+        result = hidden_states.squeeze(0).split(seqlens.tolist(), dim=0)
+
+        return result
+
+
+class ModalityProcessor(BaseModalityProcessor):
+    """Qwen2.5-VL modality processor."""
+
+    def __init__(self, model_id: str) -> None:
+        """Initialize the processor."""
+        super().__init__(model_id=model_id)
+        self.hf_processor = AutoImageProcessor.from_pretrained(model_id)
+
+    def get_image_processor(self) -> Callable | None:
+        """Return the image processor."""
+
+        def processor(image: npt.NDArray) -> dict[str, npt.NDArray]:
+            """Invoke the HF processor and convert to dict."""
+            return self.hf_processor(images=[image], return_tensors="np").data
+
+        return processor
+
+    def get_video_processor(self) -> Callable | None:
+        """Return the video processor."""
+
+        def processor(video: npt.NDArray) -> dict[str, npt.NDArray]:
+            """Invoke the HF processor and convert to dict."""
+            return self.hf_processor(images=None, videos=[video], return_tensors="np").data
+
+        return processor

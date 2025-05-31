@@ -90,7 +90,7 @@ MODEL_REGISTRY: dict[str, RegistryEntry] = {
         },
     ),
     "qwen2_5_vl": RegistryEntry(
-        module="qwen2_t_vl",
+        module="qwen2_5_vl",
         class_name="Qwen2_5_VisionTransformer",
         vit_resolution_type=ViTResolutionType.DYNAMIC,
         weight=WeightInfo(
