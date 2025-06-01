@@ -11,6 +11,7 @@ the deployment context (e.g., local, dev, prod).
 
 import os
 import warnings
+from typing import TYPE_CHECKING, Any
 
 
 def _get_env_warn_default(var_name: str, default: str) -> str:
@@ -27,12 +28,31 @@ def _get_env_warn_default(var_name: str, default: str) -> str:
 
 def _build_image_name(name: str) -> str:
     """Builds a full image name with prefix, tag, and pull policy."""
-    return f"{_image_prefix}/{name}:{_image_tag}"
+    image_prefix = _get_env_warn_default("CORNSERVE_IMAGE_PREFIX", "docker.io/cornserve").strip("/")
+    image_tag = _get_env_warn_default("CORNSERVE_IMAGE_TAG", "latest")
+    return f"{image_prefix}/{name}:{image_tag}"
 
 
-_image_prefix = _get_env_warn_default("CORNSERVE_IMAGE_PREFIX", "docker.io/cornserve").strip("/")
-_image_pull_policy = _get_env_warn_default("CORNSERVE_IMAGE_PULL_POLICY", "IfNotPresent")
-_image_tag = _get_env_warn_default("CORNSERVE_IMAGE_TAG", "latest")
+# Cache for lazy-loaded constants
+_lazy_cache = {}
+
+# Define which constants should be lazily loaded
+_LAZY_CONSTANTS = {
+    "CONTAINER_IMAGE_TASK_MANAGER": lambda: _build_image_name("task-manager"),
+    "CONTAINER_IMAGE_SIDECAR": lambda: _build_image_name("sidecar"),
+    "CONTAINER_IMAGE_ERIC": lambda: _build_image_name("eric"),
+    "CONTAINER_IMAGE_VLLM": lambda: _build_image_name("vllm"),
+    "CONTAINER_IMAGE_PULL_POLICY": lambda: _get_env_warn_default("CORNSERVE_IMAGE_PULL_POLICY", "IfNotPresent"),
+}
+
+
+def __getattr__(name: str) -> Any:
+    """Module-level __getattr__ for lazy loading of image-related constants."""
+    if name in _LAZY_CONSTANTS:
+        if name not in _lazy_cache:
+            _lazy_cache[name] = _LAZY_CONSTANTS[name]()
+        return _lazy_cache[name]
+    raise AttributeError(f"module '{__name__}' has no attribute '{name}'")
 
 
 # Kubernetes resources.
@@ -48,13 +68,14 @@ K8S_TASK_EXECUTOR_SECRET_NAME = "cornserve-env"
 K8S_TASK_EXECUTOR_HF_TOKEN_KEY = "hf-token"
 K8S_TASK_EXECUTOR_HEALTHY_TIMEOUT = 20 * 60.0
 
-# Container images.
-CONTAINER_IMAGE_TASK_MANAGER = _build_image_name("task-manager")
-CONTAINER_IMAGE_SIDECAR = _build_image_name("sidecar")
-CONTAINER_IMAGE_ERIC = _build_image_name("eric")
-CONTAINER_IMAGE_VLLM = _build_image_name("vllm")
-CONTAINER_IMAGE_PULL_POLICY = _image_pull_policy
-
-# Path on host.
+# Volume host paths.
 VOLUME_HF_CACHE = "/data/hfcache"
 VOLUME_SHM = "/dev/shm"
+
+# Container images name construction.
+if TYPE_CHECKING:
+    CONTAINER_IMAGE_TASK_MANAGER: str
+    CONTAINER_IMAGE_SIDECAR: str
+    CONTAINER_IMAGE_ERIC: str
+    CONTAINER_IMAGE_VLLM: str
+    CONTAINER_IMAGE_PULL_POLICY: str
