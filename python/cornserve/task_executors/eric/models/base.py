@@ -61,6 +61,10 @@ class BaseModalityProcessor:
         """Get the image processor for this modality."""
         return None
 
+    def get_audio_processor(self) -> Callable | None:
+        """Get the audio processor for this modality."""
+        return None
+
     def get_video_processor(self) -> Callable | None:
         """Get the video processor for this modality."""
         return None
@@ -73,6 +77,11 @@ class BaseModalityProcessor:
                 if image_processor is None:
                     raise ValueError("Image processor not available.")
                 return image_processor(data)
+            case Modality.AUDIO:
+                audio_processor = self.get_audio_processor()
+                if audio_processor is None:
+                    raise ValueError("Audio processor not available.")
+                return audio_processor(data)
             case Modality.VIDEO:
                 video_processor = self.get_video_processor()
                 if video_processor is None:

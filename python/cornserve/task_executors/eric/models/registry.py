@@ -20,6 +20,8 @@ class WeightInfo:
     # List of model weight name prefixes to ignore from the state dict.
     # Generally, you will add short prefixes to `required_prefixes` and
     # explicitly ignore specific longer submodules that we do not use.
+    # Note that these prefixes are *after* prefix stripiing if you have
+    # `strip_prefixes` set to `True`.
     ignored_prefixes: list[str] = field(default_factory=list)
 
     # Whether or not to strip the prefixes from weight names before
@@ -100,6 +102,21 @@ MODEL_REGISTRY: dict[str, RegistryEntry] = {
         modality={
             Modality.IMAGE: ModalityEntry(),
             Modality.VIDEO: ModalityEntry(),
+        },
+    ),
+    "qwen2_5_omni": RegistryEntry(
+        module="qwen2_5_omni",
+        class_name="Qwen2_5OmniEncoder",
+        vit_resolution_type=ViTResolutionType.DYNAMIC,
+        weight=WeightInfo(
+            required_prefixes=["thinker."],
+            ignored_prefixes=["model.", "lm_head."],
+            strip_prefixes=True,
+        ),
+        modality={
+            Modality.IMAGE: ModalityEntry(),
+            Modality.VIDEO: ModalityEntry(),
+            Modality.AUDIO: ModalityEntry(),
         },
     ),
     "llava_onevision": RegistryEntry(

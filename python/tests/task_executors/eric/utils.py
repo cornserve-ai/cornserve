@@ -12,7 +12,7 @@ import pytest
 import torch
 import torch.nn as nn
 
-from cornserve.task_executors.eric.config import ImageDataConfig, ModalityConfig, VideoDataConfig
+from cornserve.task_executors.eric.config import AudioDataConfig, ImageDataConfig, ModalityConfig, VideoDataConfig
 from cornserve.task_executors.eric.router.processor import Processor
 from cornserve.task_executors.eric.schema import Modality, WorkerBatch
 
@@ -64,6 +64,7 @@ class ModalityData:
             num_workers=1,
             image_config=ImageDataConfig(),
             video_config=VideoDataConfig(max_num_frames=32),
+            audio_config=AudioDataConfig(),
         )
 
     @cache

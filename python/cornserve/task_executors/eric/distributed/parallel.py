@@ -13,6 +13,13 @@ class DeviceGroup:
     """A group of devices bound by a common process group.
 
     `torch.distributed` should be initialized before creating a device group.
+
+    Attributes:
+        rank (int): The rank of the current process in the device group.
+        world_size (int): The number of ranks in the device group.
+        process_group (ProcessGroup | None): The PyTorch distributed
+            process group associated with this device group.
+        device_mesh (DeviceMesh | None): The device mesh for this group.
     """
 
     def __init__(self, ranks: list[int], name: str) -> None:
@@ -27,6 +34,7 @@ class DeviceGroup:
         self.world_size = len(ranks)
 
         if self.world_size == 1:
+            self.device_mesh = None
             self.process_group = None
             self.rank = 0
             return
@@ -34,8 +42,13 @@ class DeviceGroup:
         if not torch.distributed.is_initialized():
             raise RuntimeError(f"Distributed process group is not initialized. Cannot create device group {name}.")
 
-        self.process_group = torch.distributed.new_group(ranks=ranks)
-        self.rank = torch.distributed.get_rank(self.process_group)
+        self.device_mesh = torch.distributed.device_mesh.init_device_mesh(
+            device_type="cuda",
+            mesh_shape=(self.world_size,),
+            mesh_dim_names=("tp",),
+        )
+        self.process_group = self.device_mesh.get_group("tp")
+        self.rank = self.device_mesh.get_local_rank("tp")
 
         logger.info(
             "Device group %s initialized with ranks %s and world size %d.",

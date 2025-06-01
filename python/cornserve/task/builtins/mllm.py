@@ -14,7 +14,7 @@ class MLLMInput(TaskInput):
     Attributes:
         prompt: The prompt to send to the LLM.
         multimodal_data: List of tuples (modality, data URL).
-            "image", "video", etc. for modality.
+            "image", "audio", "video", etc. for modality.
     """
 
     prompt: str

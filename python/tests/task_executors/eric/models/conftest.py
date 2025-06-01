@@ -35,6 +35,19 @@ def test_videos() -> list[ModalityData]:
     return [ModalityData(url=url, modality=Modality.VIDEO) for url in TEST_VIDEO_URLS]
 
 
+TEST_AUDIO_URLS = [
+    "https://s3.amazonaws.com/citizen-dj-assets.labs.loc.gov/audio/samplepacks/loc-fma/The-Call-of-the-Polar-Star_fma-115766_001_00-00-01.wav",
+    "https://s3.amazonaws.com/citizen-dj-assets.labs.loc.gov/audio/samplepacks/loc-fma/Frog-In-The-Well_fma-39182_001_00-00-06.wav",
+    "https://s3.amazonaws.com/citizen-dj-assets.labs.loc.gov/audio/samplepacks/loc-fma/Free-To-Use-13_fma-152622_004_00-02-55.wav",
+]
+
+
+@pytest.fixture(scope="session")
+def test_audios() -> list[ModalityData]:
+    """Fixture to provide test audios."""
+    return [ModalityData(url=url, modality=Modality.AUDIO) for url in TEST_AUDIO_URLS]
+
+
 @pytest.fixture(scope="session")
 def dump_tensors() -> Generator[str, None, None]:
     """Fixture to set `CORNSERVE_TEST_DUMP_TENSOR_DIR` environment variable."""

@@ -14,6 +14,7 @@ class Modality(enum.StrEnum):
 
     IMAGE = "image"
     VIDEO = "video"
+    AUDIO = "audio"
 
 
 class EmbeddingData(BaseModel):

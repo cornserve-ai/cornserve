@@ -16,7 +16,7 @@ from flash_attn.layers.rotary import apply_rotary_emb
 from .base import EricModel
 from .layers.norm import RMSNorm
 from .layers.activations import get_act_fn
-from .layers.linear import ColumnParallelLinear, RowParallelLinear, QKVParallelLinear
+from .layers.linear import ColumnParallelLinear, RowParallelLinear
 from cornserve.task_executors.eric.api import Modality
 from cornserve.task_executors.eric.distributed import parallel
 from cornserve.task_executors.eric.router.processor import BaseModalityProcessor

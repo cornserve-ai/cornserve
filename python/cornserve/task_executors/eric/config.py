@@ -66,6 +66,10 @@ class VideoDataConfig(BaseModel):
     max_num_frames: PositiveInt | None = 32
 
 
+class AudioDataConfig(BaseModel):
+    """Configuration related to downloading and processing audio data."""
+
+
 class ModalityConfig(BaseModel):
     """Modality processing config."""
 
@@ -77,6 +81,9 @@ class ModalityConfig(BaseModel):
 
     # Video-specific processor config
     video_config: VideoDataConfig = VideoDataConfig()
+
+    # Audio-specific processor config
+    audio_config: AudioDataConfig = AudioDataConfig()
 
     @model_validator(mode="after")
     def validator(self) -> Self:
