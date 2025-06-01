@@ -6,7 +6,10 @@ description: Getting started with Cornserve
 
 ## Try it out in Minikube!
 
-You can try out Cornserve on your local machine (with Docker and at least two NVIDIA V100 GPUs) using [Minikube](https://minikube.sigs.k8s.io).
+You can try out Cornserve on your local machine (with Docker and at least two NVIDIA GPUs(1)) using [Minikube](https://minikube.sigs.k8s.io).
+{ .annotate }
+
+1. [Compute Capability](https://developer.nvidia.com/cuda-gpus) >= 8.0
 
 First, install Minikube following their [guide](https://minikube.sigs.k8s.io/docs/start/).
 

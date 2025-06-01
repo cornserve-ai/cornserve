@@ -32,7 +32,7 @@ kubectl create -f https://raw.githubusercontent.com/NVIDIA/k8s-device-plugin/v0.
 ### Clone the Repository
 
 ```bash
-git clone git@github.com:cornserve-ai/cornserve.git
+git clone https://github.com/cornserve-ai/cornserve.git
 cd cornserve/kubernetes
 ```
 
