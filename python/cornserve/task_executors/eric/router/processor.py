@@ -10,6 +10,7 @@ import time
 from abc import ABC, abstractmethod
 from concurrent.futures import ThreadPoolExecutor
 from io import BytesIO
+from typing import Generic, TypeVar
 from urllib.parse import urlparse
 
 import cv2
@@ -20,6 +21,13 @@ import requests
 from opentelemetry import trace
 from PIL import Image
 from transformers.models.auto.configuration_auto import AutoConfig
+
+try:
+    import librosa
+except ImportError:
+    from cornserve.task_executors.eric.utils.package import PlaceholderModule
+
+    librosa = PlaceholderModule("librosa", "eric-audio")
 
 from cornserve.logging import get_logger
 from cornserve.task_executors.eric.api import EmbeddingData
@@ -122,23 +130,26 @@ class Processor:
                 raise ValueError(f"All processed data should be numpy arrays; got {item.data}")
 
 
-class BaseLoader(ABC):
+OutputT = TypeVar("OutputT")
+
+
+class BaseLoader(ABC, Generic[OutputT]):
     """Base class for downloading data from various sources."""
 
     @abstractmethod
-    def load_bytes(self, data: bytes) -> npt.NDArray:
+    def load_bytes(self, data: bytes) -> OutputT:
         """Load data from bytes."""
 
     @abstractmethod
-    def load_base64(self, media_type: str, data: str) -> npt.NDArray:
+    def load_base64(self, media_type: str, data: str) -> OutputT:
         """Load data from base64 string."""
 
     @abstractmethod
-    def load_file(self, filepath: str) -> npt.NDArray:
+    def load_file(self, filepath: str) -> OutputT:
         """Load data from file path."""
 
 
-class ImageLoader(BaseLoader):
+class ImageLoader(BaseLoader[tuple[npt.NDArray]]):
     """Handles loading images from various sources."""
 
     def __init__(self, config: ModalityConfig) -> None:
@@ -148,20 +159,50 @@ class ImageLoader(BaseLoader):
 
         self.config = config
 
-    def load_bytes(self, data: bytes) -> npt.NDArray:
+    def load_bytes(self, data: bytes) -> tuple[npt.NDArray]:
         """Load image data from bytes."""
-        return np.asarray(Image.open(BytesIO(data)).convert("RGB"))
+        return (np.asarray(Image.open(BytesIO(data)).convert("RGB")),)
 
-    def load_base64(self, media_type: str, data: str) -> npt.NDArray:
+    def load_base64(self, media_type: str, data: str) -> tuple[npt.NDArray]:
         """Load image data from base64 string."""
         return self.load_bytes(base64.b64decode(data))
 
-    def load_file(self, filepath: str) -> npt.NDArray:
+    def load_file(self, filepath: str) -> tuple[npt.NDArray]:
         """Load image data from file path."""
-        return np.asarray(Image.open(filepath).convert("RGB"))
+        return (np.asarray(Image.open(filepath).convert("RGB")),)
 
 
-class VideoLoader(BaseLoader):
+class AudioLoader(BaseLoader[tuple[npt.NDArray, float]]):
+    """Handles loading audio data from various sources.
+
+    Uses librosa to load from an audio file. Sampling rate is preserved.
+    All audio is converted to mono, even if it were originally stereo.
+
+    Returns a tuple of (audio data, sample rate).
+    """
+
+    def __init__(self, config: ModalityConfig) -> None:
+        """Initialize the loader."""
+        if config.audio_config is None:
+            raise ValueError("Audio config must be set.")
+
+        self.config = config
+        self.sampling_rate = config.audio_config.sampling_rate
+
+    def load_bytes(self, data: bytes) -> tuple[npt.NDArray, float]:
+        """Load video data from bytes."""
+        return librosa.load(BytesIO(data), sr=None)
+
+    def load_base64(self, media_type: str, data: str) -> tuple[npt.NDArray, float]:
+        """Load audio data from base64 string."""
+        return self.load_bytes(base64.b64decode(data))
+
+    def load_file(self, filepath: str) -> tuple[npt.NDArray, float]:
+        """Load audio data from file path."""
+        return librosa.load(filepath, sr=None)
+
+
+class VideoLoader(BaseLoader[tuple[npt.NDArray]]):
     """Handles loading videos from various sources."""
 
     def __init__(self, config: ModalityConfig) -> None:
@@ -174,7 +215,7 @@ class VideoLoader(BaseLoader):
 
         self.image_loader = ImageLoader(config)
 
-    def load_bytes(self, data: bytes) -> npt.NDArray:
+    def load_bytes(self, data: bytes) -> tuple[npt.NDArray]:
         """Load video data from bytes."""
         api_preference = None
         for candidate in vr.getStreamBufferedBackends():
@@ -215,17 +256,17 @@ class VideoLoader(BaseLoader):
 
         assert frames_loaded == len(frame_indices), f"Expected {len(frame_indices)} frames, but got {frames_loaded}."
 
-        return frames
+        return (frames,)
 
-    def load_base64(self, media_type: str, data: str) -> npt.NDArray:
+    def load_base64(self, media_type: str, data: str) -> tuple[npt.NDArray]:
         """Load video data from base64 string."""
         # Video as a sequence of JPEG frames
         if media_type.lower() == "video/jpeg":
-            return np.stack([self.image_loader.load_base64("image/jpeg", frame) for frame in data.split(",")])
+            return (np.stack([self.image_loader.load_base64("image/jpeg", frame) for frame in data.split(",")]),)
 
         return self.load_bytes(base64.b64decode(data))
 
-    def load_file(self, filepath: str) -> npt.NDArray:
+    def load_file(self, filepath: str) -> tuple[npt.NDArray]:
         """Load video data from file path."""
         with open(filepath, "rb") as f:
             data = f.read()
@@ -245,14 +286,21 @@ class ModalityDataLoader:
         self.session = requests.Session()
 
         self.image_loader = ImageLoader(config)
+        self.audio_loader = AudioLoader(config)
         self.video_loader = VideoLoader(config)
 
     @tracer.start_as_current_span(name="ModalityDataLoader.load_from_url")
-    def load_from_url(self, modality: Modality, url: str) -> npt.NDArray:
-        """Load an image from a web, data, or file URL."""
+    def load_from_url(self, modality: Modality, url: str) -> tuple:
+        """Load an image from a web, data, or file URL.
+
+        For images and videso, it returns a tuple with a single numpy array.
+        For audio, it returns a tuple with audio data numpy array and sample rate.
+        """
         match modality:
             case Modality.IMAGE:
                 loader = self.image_loader
+            case Modality.AUDIO:
+                loader = self.audio_loader
             case Modality.VIDEO:
                 loader = self.video_loader
             case _:
@@ -300,6 +348,10 @@ class ModalityDataLoader:
         else:
             raise ValueError("The URL must be either a HTTP, data or file URL.")
 
-        span.set_attribute("data.shape", data.shape)
+        for i, item in enumerate(data):
+            if isinstance(item, np.ndarray):
+                span.set_attribute(f"data.{i}.shape", item.shape)
+            else:
+                span.set_attribute(f"data.{i}", str(item))
 
         return data

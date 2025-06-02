@@ -2,7 +2,7 @@
 
 Config values will be supplied by the Task Manager when Eric is launched.
 
-Config values should be kept in sync with `cornserve.task_executors.launch`.
+Config values should be kept in sync with the built-in `EricDescriptor`.
 """
 
 from __future__ import annotations
@@ -12,6 +12,9 @@ from typing import Self
 from pydantic import BaseModel, ConfigDict, NonNegativeInt, PositiveInt, model_validator
 from transformers.configuration_utils import PretrainedConfig
 from transformers.models.auto.configuration_auto import AutoConfig
+from transformers.models.auto.processing_auto import AutoProcessor
+
+from cornserve.task_executors.eric.api import Modality
 
 
 class ModelConfig(BaseModel):
@@ -22,6 +25,9 @@ class ModelConfig(BaseModel):
 
     # Tensor parallel degree
     tp_size: PositiveInt = 1
+
+    # Modality type
+    modality: Modality
 
     # HF config
     # This will be replaced with the real HF config of the model ID
@@ -69,6 +75,12 @@ class VideoDataConfig(BaseModel):
 class AudioDataConfig(BaseModel):
     """Configuration related to downloading and processing audio data."""
 
+    # Sampling rate to use when loading audio data.
+    # When the server is configured to embed audio data, this will be
+    # populated from the HF AutoProcessor's attribute so match the model's
+    # expected sampling rate.
+    sampling_rate: PositiveInt | None = None
+
 
 class ModalityConfig(BaseModel):
     """Modality processing config."""
@@ -111,11 +123,28 @@ class EricConfig(BaseModel):
 
     @model_validator(mode="after")
     def validator(self) -> Self:
-        """Audit the config for correctness."""
+        """Audit the config for correctness and apply any transformations."""
         if self.model.tp_size != len(self.sidecar.ranks):
             raise ValueError(
                 f"Tensor parallel rank ({self.model.tp_size}) "
                 f"must match number of sender sidecar ranks ({self.sidecar.ranks})"
             )
+
+        if self.model.modality == Modality.AUDIO and self.modality.audio_config.sampling_rate is None:
+            processor = AutoProcessor.from_pretrained(self.model.id)
+            feature_extractor = getattr(processor, "feature_extractor", None)
+            if feature_extractor is None:
+                raise ValueError(
+                    "In order to determine the audio sampling rate, we attempted to "
+                    "access the HF AutoProcessor's `feature_extractor`, but it didn't exist."
+                )
+            sampling_rate = getattr(feature_extractor, "sampling_rate", None)
+            if sampling_rate is None:
+                raise ValueError(
+                    "In order to determine the audio sampling rate, we attempted to "
+                    "access the HF AutoProcessor's `feature_extractor.sampling_rate`, "
+                    "but it didn't exist."
+                )
+            self.modality.audio_config.sampling_rate = sampling_rate
 
         return self

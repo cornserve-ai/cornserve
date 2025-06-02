@@ -72,7 +72,7 @@ def test_audio_inference(test_audios: list[ModalityData], tp_size: int, dump_ten
     executor.shutdown()
 
 
-# @depends_on("test_image_inference", "test_video_inference", "test_audio_inference")
+@depends_on("test_image_inference", "test_video_inference", "test_audio_inference")
 def test_hf_reference(
     test_audios: list[ModalityData],
     test_images: list[ModalityData],
@@ -91,7 +91,24 @@ def test_hf_reference(
     del model.model
 
     audio1 = test_audios[0].processed(model_id)
-    model.get_audio_features
+    input_features = torch.asarray(audio1["input_features"]).cuda()
+    feature_attention_mask = torch.asarray(audio1["attention_mask"]).cuda()
+    output1 = model.get_audio_features(
+        input_features=input_features, feature_attention_mask=feature_attention_mask
+    ).cpu()
+
+    audio2 = test_audios[1].processed(model_id)
+    input_features = torch.asarray(audio2["input_features"]).cuda()
+    feature_attention_mask = torch.asarray(audio2["attention_mask"]).cuda()
+    output2 = model.get_audio_features(
+        input_features=input_features, feature_attention_mask=feature_attention_mask
+    ).cpu()
+
+    for tp_degree in TP_SIZES:
+        output = torch.load(f"{dump_tensors}/{model_shorthand}-audio-tp{tp_degree}.pt")
+        assert_similar([output1, output2], output)
+
+    del output1, output2
 
     image1 = test_images[0].processed(model_id)
     pixel_values = torch.asarray(image1["pixel_values"]).cuda()

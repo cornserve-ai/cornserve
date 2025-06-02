@@ -18,14 +18,18 @@ from cornserve.task_executors.eric.schema import Modality, WorkerBatch
 
 TEST_NUM_GPUS: list[int] = [1, 2, 4, 8]
 
-try:
-    CURR_NUM_GPUS = int(
-        subprocess.check_output(["nvidia-smi", "--query-gpu=count", "--format=csv,noheader,nounits", "-i", "0"])
-        .strip()
-        .decode()
-    )
-except subprocess.CalledProcessError:
-    CURR_NUM_GPUS = 0
+if (visible_devices := os.getenv("CUDA_VISIBLE_DEVICES")) is not None:
+    # If CUDA_VISIBLE_DEVICES is set, use it to determine the number of GPUs
+    CURR_NUM_GPUS = len(visible_devices.split(","))
+else:
+    try:
+        CURR_NUM_GPUS = int(
+            subprocess.check_output(["nvidia-smi", "--query-gpu=count", "--format=csv,noheader,nounits", "-i", "0"])
+            .strip()
+            .decode()
+        )
+    except subprocess.CalledProcessError:
+        CURR_NUM_GPUS = 0
 
 
 TP_SIZES = [tp for tp in [1, 2, 4, 8] if tp <= CURR_NUM_GPUS]

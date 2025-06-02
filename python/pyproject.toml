@@ -67,6 +67,7 @@ task-dispatcher = [
   "opentelemetry-instrumentation-httpx",
   "opentelemetry-instrumentation-grpc",
 ]
+audio = ["librosa"]
 eric-no-gpu = [
   "fastapi",
   "uvicorn[standard]",
@@ -79,11 +80,12 @@ eric-no-gpu = [
   "pillow",
   "opencv-python-headless",
   "einops",
-  "cornserve[sidecar-api]",
+  "cornserve[sidecar-api,audio]",
   "opentelemetry-instrumentation-fastapi",
   "opentelemetry-instrumentation-threading",
 ]
 eric = ["flash-attn", "xformers", "cornserve[eric-no-gpu]"]
+eric-audio = ["cornserve[eric,audio]"]
 dev-common = [
   "grpcio-tools",
   "pyright!=1.1.401",

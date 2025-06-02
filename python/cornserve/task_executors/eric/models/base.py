@@ -58,34 +58,46 @@ class BaseModalityProcessor:
         self.model_id = model_id
 
     def get_image_processor(self) -> Callable | None:
-        """Get the image processor for this modality."""
+        """Get the image processor for this modality.
+
+        The callable sould take a single image numpy array.
+        """
         return None
 
     def get_audio_processor(self) -> Callable | None:
-        """Get the audio processor for this modality."""
+        """Get the audio processor for this modality.
+
+        The callable should take a tuple of (audio data numpy array, sample rate).
+        """
         return None
 
     def get_video_processor(self) -> Callable | None:
-        """Get the video processor for this modality."""
+        """Get the video processor for this modality.
+
+        The callable should take a single video numpy array.
+        """
         return None
 
-    def process(self, modality: Modality, data: npt.NDArray) -> dict[str, npt.NDArray]:
+    def process(self, modality: Modality, data: tuple) -> dict[str, npt.NDArray]:
         """Process the input data for the given modality."""
         match modality:
             case Modality.IMAGE:
                 image_processor = self.get_image_processor()
                 if image_processor is None:
                     raise ValueError("Image processor not available.")
-                return image_processor(data)
+                assert len(data) == 1, "Expected a tuple with a single image numpy array."
+                return image_processor(*data)
             case Modality.AUDIO:
                 audio_processor = self.get_audio_processor()
                 if audio_processor is None:
                     raise ValueError("Audio processor not available.")
-                return audio_processor(data)
+                assert len(data) == 2, "Expected a tuple with audio data numpy array and sample rate."
+                return audio_processor(*data)
             case Modality.VIDEO:
                 video_processor = self.get_video_processor()
                 if video_processor is None:
                     raise ValueError("Video processor not available.")
-                return video_processor(data)
+                assert len(data) == 1, "Expected a tuple with a single video numpy array."
+                return video_processor(*data)
             case _:
                 raise ValueError(f"Unsupported modality: {modality}")

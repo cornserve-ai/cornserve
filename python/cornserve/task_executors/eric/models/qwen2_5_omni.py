@@ -165,6 +165,7 @@ class Qwen2_5OmniEncoder(EricModel):
         modality: Modality,
         batch: dict[str, list[torch.Tensor]],
     ) -> list[torch.Tensor]:
+        # TODO(J1): Implement forward. Then, try to tensor-parallelize the audio tower.
         raise NotImplementedError(f"Modality {modality} is not supported by {self.__class__.__name__}.")
 
 
@@ -178,63 +179,44 @@ class ModalityProcessor(BaseModalityProcessor):
 
     def get_image_processor(self) -> Callable | None:
         """Return the image processor."""
-        # TODO(J1): Time to do the processing part. Look at vLLM.
-
-        if images is not None:
-            images_inputs = self.image_processor(images=images, videos=None, **output_kwargs["images_kwargs"])
-            image_grid_thw = iter(images_inputs["image_grid_thw"])
-        else:
-            images_inputs = {}
-            image_grid_thw = iter([])
 
         def processor(image: npt.NDArray) -> dict[str, npt.NDArray]:
             """Invoke the HF processor and convert to dict."""
-            return self.hf_processor(images=[image], return_tensors="np").data
+            return self.hf_processor.image_processor(images=[image], videos=None, return_tensors="np").data
 
         return processor
 
     def get_audio_processor(self) -> Callable | None:
         """Return the audio processor."""
-        if audio is not None:
-            output_kwargs["audio_kwargs"]["padding"] = "max_length"  # Support "max_length" padding only here
-            audio_inputs = self.feature_extractor(audio, **output_kwargs["audio_kwargs"])
-            audio_inputs["feature_attention_mask"] = audio_inputs.pop(
-                "attention_mask"
-            )  # rename feature_attention_mask to prevent conflicts later on
-            audio_inputs["input_features"] = audio_inputs.pop(
-                "input_features"
-            )  # rename input_features to prevent conflicts later on
-            input_lengths = (audio_inputs["feature_attention_mask"].sum(-1) - 1) // 2 + 1
-            audio_lengths = iter((input_lengths - 2) // 2 + 1)
-        else:
-            audio_inputs = {}
-            audio_lengths = iter([])
 
-        def processor(audio: npt.NDArray) -> dict[str, npt.NDArray]:
+        def processor(audio: npt.NDArray, samplerate: int) -> dict[str, npt.NDArray]:
             """Invoke the HF processor and convert to dict."""
-            return self.hf_processor(audio=[audio], return_tensors="np").data
+            return self.hf_processor.feature_extractor(
+                [audio],
+                padding="max_length",
+                sampling_rate=self.hf_processor.feature_extractor.sampling_rate,
+                return_attention_mask=True,
+                return_tensors="np",
+            ).data
 
         return processor
 
     def get_video_processor(self) -> Callable | None:
         """Return the video processor."""
 
-        if videos is not None:
-            videos = make_batched_videos(videos)
-            videos_inputs = self.video_processor(images=None, videos=videos, **output_kwargs["videos_kwargs"])
-            fps = [fps] * len(videos)
-            videos_inputs["video_second_per_grid"] = [
-                self.video_processor.temporal_patch_size / fps[i] for i in range(len(fps))
-            ]
-            video_grid_thw = iter(videos_inputs["video_grid_thw"])
-            video_second_per_grid = iter(videos_inputs["video_second_per_grid"])
-        else:
-            videos_inputs = {}
-            video_grid_thw = iter([])
-            video_second_per_grid = iter([])
-
         def processor(video: npt.NDArray) -> dict[str, npt.NDArray]:
             """Invoke the HF processor and convert to dict."""
-            return self.hf_processor(videos=[video], return_tensors="np").data
+            # TODO: Some models (e.g., Qwen 2 VL, QWen 2.5 VL, Qwen 2.5 Omni) support passing `min_pixels` and
+            #       `max_pixel` to the imgae and video processors. See vLLM's VLM offline inference example.
+            #       In general, we should be able to pass in arbitrary processor-specific kwargs via requests
+            #       and fallback to model-specific defaults if not provided.
+            #       The defaults below were taken from HF Transformers `Qwen2_5OmniProcessorKwargs_defaults`.
+            return self.hf_processor.video_processor(
+                images=None,
+                videos=[video],
+                min_pixels=128 * 28 * 28,
+                max_pixels=768 * 28 * 28,
+                return_tensors="np",
+            ).data
 
         return processor
