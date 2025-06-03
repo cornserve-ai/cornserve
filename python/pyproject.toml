@@ -26,9 +26,9 @@ dependencies = [
   "kubernetes_asyncio",
   "httpx",
   "pydantic>=2.11",
-  "opentelemetry-api",
-  "opentelemetry-sdk",
-  "opentelemetry-exporter-otlp-proto-grpc",
+  "opentelemetry-api>=1.33.1",
+  "opentelemetry-sdk>=1.33.1",
+  "opentelemetry-exporter-otlp-proto-grpc>=1.33.1",
   "websocket-client",
 ]
 dynamic = ["version"]
