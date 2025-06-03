@@ -50,7 +50,8 @@ class BaseModalityProcessor:
     inherits from this class. It should override `get_image_processor`,
     `get_video_processor`, etc. to return the appropriate processor for the
     given modality. The processor should be a callable that takes the input
-    modality data as a Numpy array and returns the processed data as
+    modality data as a Numpy array and returns the processed data as a
+    dictionary of Numpy arrays.
     """
 
     def __init__(self, model_id: str) -> None:
@@ -78,26 +79,23 @@ class BaseModalityProcessor:
         """
         return None
 
-    def process(self, modality: Modality, data: tuple) -> dict[str, npt.NDArray]:
+    def process(self, modality: Modality, data: npt.NDArray) -> dict[str, npt.NDArray]:
         """Process the input data for the given modality."""
         match modality:
             case Modality.IMAGE:
                 image_processor = self.get_image_processor()
                 if image_processor is None:
                     raise ValueError("Image processor not available.")
-                assert len(data) == 1, "Expected a tuple with a single image numpy array."
-                return image_processor(*data)
+                return image_processor(data)
             case Modality.AUDIO:
                 audio_processor = self.get_audio_processor()
                 if audio_processor is None:
                     raise ValueError("Audio processor not available.")
-                assert len(data) == 2, "Expected a tuple with audio data numpy array and sample rate."
-                return audio_processor(*data)
+                return audio_processor(data)
             case Modality.VIDEO:
                 video_processor = self.get_video_processor()
                 if video_processor is None:
                     raise ValueError("Video processor not available.")
-                assert len(data) == 1, "Expected a tuple with a single video numpy array."
-                return video_processor(*data)
+                return video_processor(data)
             case _:
                 raise ValueError(f"Unsupported modality: {modality}")

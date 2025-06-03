@@ -142,10 +142,26 @@ class Qwen2_5OmniEncoder(EricModel):
         vision_config.rms_norm_eps = getattr(config.thinker_config.text_config, "rms_norm_eps", 1e-6)
         self.visual = qwen2_5_vl.Qwen2_5_VisionTransformer(vision_config)
 
-        # TODO(J1): Explore parallelizing with parallelize_module.
         audio_config = config.thinker_config.audio_config
         audio_config._attn_implementation_autoset = True
         audio_config._attn_implementation = "flash_attention_2"
+        #
+        # from torch.distributed.tensor.parallel import parallelize_module, ColwiseParallel, RowwiseParallel
+        # if parallel.get_tensor_parallel_group().world_size > 1:
+        #     self.audio_tower = parallelize_module(
+        #         Qwen2_5OmniAudioEncoder(audio_config),
+        #         device_mesh=parallel.get_tensor_parallel_group().device_mesh,
+        #         parallelize_plan={
+        #             "layers.*.self_attn.q": ColwiseParallel(),
+        #             "layers.*.self_attn.k": ColwiseParallel(),
+        #             "layers.*.self_attn.v": ColwiseParallel(),
+        #             "layers.*.self_attn.proj": RowwiseParallel(),
+        #             "layers.*.mlp.gate_proj": RowwiseParallel(),
+        #             "layers.*.mlp.up_proj": RowwiseParallel(),
+        #             "layers.*.mlp.down_proj": RowwiseParallel(),
+        #         },
+        #     )
+        # else:
         self.audio_tower = Qwen2_5OmniAudioEncoder(audio_config)
 
     @property
@@ -165,8 +181,40 @@ class Qwen2_5OmniEncoder(EricModel):
         modality: Modality,
         batch: dict[str, list[torch.Tensor]],
     ) -> list[torch.Tensor]:
-        # TODO(J1): Implement forward. Then, try to tensor-parallelize the audio tower.
-        raise NotImplementedError(f"Modality {modality} is not supported by {self.__class__.__name__}.")
+        """Forward pass of the model.
+
+        For images, `batch` is expected to have the following keys:
+        - `pixel_values`: The pixel values of the images. Each [seq_len, 6 * patch_size (14) * patch_size (14)].
+        - `image_grid_thw`: The grid size of the images, Each [1, 3].
+
+        For videos, `batch` is expected to have the following keys:
+        - `pixel_values_videos`: The pixel values of the videos. Each [seq_len, 6 * patch_size (14) * patch_size (14)].
+        - `video_grid_thw`: The grid size of the videos, Each [1, 3].
+
+        For audios, `batch` is expected to have the following keys:
+        - `input_audio_features`: The audio Mel spectrogram features. Each [feature_size (128), seq_len].
+        - `audio_feature_lengths`: The lengths of the audio features. Each [1,].
+        """
+        # Batch
+        match modality:
+            case Modality.IMAGE | Modality.VIDEO:
+                return self.visual(modality, batch)
+            case Modality.AUDIO:
+                input_features = torch.cat(batch["input_audio_features"], dim=1).to(
+                    device=self.device, dtype=self.dtype
+                )
+                audio_feature_lengths = torch.cat(batch["audio_feature_lengths"], dim=0).to(device=self.device)
+                aftercnn_lengths, audio_output_lengths = self.audio_tower._get_feat_extract_output_lengths(
+                    audio_feature_lengths,
+                )
+                audio_features = self.audio_tower(
+                    input_features,
+                    feature_lens=audio_feature_lengths,
+                    aftercnn_lens=aftercnn_lengths,
+                ).last_hidden_state
+                return audio_features.split(audio_output_lengths.tolist())
+            case _:
+                raise ValueError(f"Unsupported modality: {modality}")
 
 
 class ModalityProcessor(BaseModalityProcessor):
@@ -189,15 +237,24 @@ class ModalityProcessor(BaseModalityProcessor):
     def get_audio_processor(self) -> Callable | None:
         """Return the audio processor."""
 
-        def processor(audio: npt.NDArray, samplerate: int) -> dict[str, npt.NDArray]:
+        def processor(audio: npt.NDArray) -> dict[str, npt.NDArray]:
             """Invoke the HF processor and convert to dict."""
-            return self.hf_processor.feature_extractor(
+            data = self.hf_processor.feature_extractor(
                 [audio],
                 padding="max_length",
                 sampling_rate=self.hf_processor.feature_extractor.sampling_rate,
                 return_attention_mask=True,
-                return_tensors="np",
+                return_tensors="pt",
             ).data
+
+            input_features = data.pop("input_features")
+            attention_mask = data.pop("attention_mask")
+            input_features = input_features.permute(0, 2, 1)[attention_mask.bool()].permute(1, 0)
+            return dict(
+                input_audio_features=input_features.numpy(),
+                audio_feature_lengths=attention_mask.sum(-1).numpy(),
+                feature_attention_mask=attention_mask.numpy(),
+            )
 
         return processor
 
@@ -211,12 +268,12 @@ class ModalityProcessor(BaseModalityProcessor):
             #       In general, we should be able to pass in arbitrary processor-specific kwargs via requests
             #       and fallback to model-specific defaults if not provided.
             #       The defaults below were taken from HF Transformers `Qwen2_5OmniProcessorKwargs_defaults`.
-            return self.hf_processor.video_processor(
-                images=None,
+            data = self.hf_processor.video_processor(
                 videos=[video],
                 min_pixels=128 * 28 * 28,
                 max_pixels=768 * 28 * 28,
-                return_tensors="np",
+                return_tensors="pt",
             ).data
+            return {k: v.numpy() for k, v in data.items()}
 
         return processor

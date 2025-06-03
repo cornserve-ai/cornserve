@@ -1,6 +1,8 @@
 """Tests for the Qwen2.5-Omni model's vision encoder."""
 
+import pytest
 import torch
+from transformers.models.auto.processing_auto import AutoProcessor
 from transformers.models.qwen2_5_omni.modeling_qwen2_5_omni import Qwen2_5OmniForConditionalGeneration
 
 from cornserve.task_executors.eric.distributed.parallel import destroy_distributed, init_distributed
@@ -65,7 +67,7 @@ def test_audio_inference(test_audios: list[ModalityData], tp_size: int, dump_ten
     """Test if inference works correctly."""
     executor = ModelExecutor(model_id=model_id, tp_size=tp_size, sender_sidecar_ranks=None)
 
-    result = executor.execute_model(batch=batch_builder(model_id, model_shorthand, test_videos[:2]))
+    result = executor.execute_model(batch=batch_builder(model_id, model_shorthand, test_audios[:2]))
 
     assert result.status == Status.SUCCESS
 
@@ -90,16 +92,30 @@ def test_hf_reference(
     model = hf_model.thinker.cuda().eval()
     del model.model
 
-    audio1 = test_audios[0].processed(model_id)
-    input_features = torch.asarray(audio1["input_features"]).cuda()
-    feature_attention_mask = torch.asarray(audio1["attention_mask"]).cuda()
+    processor = AutoProcessor.from_pretrained(model_id)
+
+    audio1 = processor.feature_extractor(
+        [test_audios[0].raw()],
+        sampling_rate=processor.feature_extractor.sampling_rate,
+        padding="max_length",
+        return_attention_mask=True,
+        return_tensors="pt",
+    )
+    input_features = audio1["input_features"].cuda()
+    feature_attention_mask = audio1["attention_mask"].cuda()
     output1 = model.get_audio_features(
         input_features=input_features, feature_attention_mask=feature_attention_mask
     ).cpu()
 
-    audio2 = test_audios[1].processed(model_id)
-    input_features = torch.asarray(audio2["input_features"]).cuda()
-    feature_attention_mask = torch.asarray(audio2["attention_mask"]).cuda()
+    audio2 = processor.feature_extractor(
+        [test_audios[1].raw()],
+        sampling_rate=processor.feature_extractor.sampling_rate,
+        padding="max_length",
+        return_attention_mask=True,
+        return_tensors="pt",
+    )
+    input_features = audio2["input_features"].cuda()
+    feature_attention_mask = audio2["attention_mask"].cuda()
     output2 = model.get_audio_features(
         input_features=input_features, feature_attention_mask=feature_attention_mask
     ).cpu()
@@ -141,3 +157,6 @@ def test_hf_reference(
         assert_similar([output1, output2], output)
 
     del output1, output2
+
+
+pytestmark = pytest.mark.filterwarnings("ignore::DeprecationWarning")

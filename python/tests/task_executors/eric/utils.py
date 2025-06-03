@@ -13,7 +13,7 @@ import torch
 import torch.nn as nn
 
 from cornserve.task_executors.eric.config import AudioDataConfig, ImageDataConfig, ModalityConfig, VideoDataConfig
-from cornserve.task_executors.eric.router.processor import Processor
+from cornserve.task_executors.eric.router.processor import ModalityDataLoader, Processor
 from cornserve.task_executors.eric.schema import Modality, WorkerBatch
 
 TEST_NUM_GPUS: list[int] = [1, 2, 4, 8]
@@ -70,12 +70,18 @@ class ModalityData:
             video_config=VideoDataConfig(max_num_frames=32),
             audio_config=AudioDataConfig(),
         )
+        self.loader = ModalityDataLoader(self.modality_config)
 
     @cache
     def processed(self, model_id: str) -> dict[str, npt.NDArray]:
         """Process the data for the given model."""
         processor = Processor(model_id, self.modality_config)
         return processor._do_process(self.modality, self.url)
+
+    @cache
+    def raw(self) -> npt.NDArray:
+        """Download the data and return it as a raw numpy array."""
+        return self.loader.load_from_url(self.modality, self.url)
 
 
 def assert_same_weights(
