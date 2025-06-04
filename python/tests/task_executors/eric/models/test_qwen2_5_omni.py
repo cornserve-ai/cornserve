@@ -1,4 +1,4 @@
-"""Tests for the Qwen2.5-Omni model's vision encoder."""
+"""Tests for the Qwen2.5-Omni model's vision and audio encoders."""
 
 import pytest
 import torch

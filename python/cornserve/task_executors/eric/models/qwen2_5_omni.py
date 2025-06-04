@@ -376,23 +376,6 @@ class Qwen2_5OmniEncoder(EricModel):
         audio_config = config.thinker_config.audio_config
         audio_config._attn_implementation_autoset = True
         audio_config._attn_implementation = "flash_attention_2"
-        #
-        # from torch.distributed.tensor.parallel import parallelize_module, ColwiseParallel, RowwiseParallel
-        # if parallel.get_tensor_parallel_group().world_size > 1:
-        #     self.audio_tower = parallelize_module(
-        #         Qwen2_5OmniAudioEncoder(audio_config),
-        #         device_mesh=parallel.get_tensor_parallel_group().device_mesh,
-        #         parallelize_plan={
-        #             "layers.*.self_attn.q": ColwiseParallel(),
-        #             "layers.*.self_attn.k": ColwiseParallel(),
-        #             "layers.*.self_attn.v": ColwiseParallel(),
-        #             "layers.*.self_attn.proj": RowwiseParallel(),
-        #             "layers.*.mlp.gate_proj": RowwiseParallel(),
-        #             "layers.*.mlp.up_proj": RowwiseParallel(),
-        #             "layers.*.mlp.down_proj": RowwiseParallel(),
-        #         },
-        #     )
-        # else:
         self.audio_tower = Qwen2_5OmniAudioEncoder(audio_config)
 
     @property
