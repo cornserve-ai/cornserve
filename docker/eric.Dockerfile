@@ -24,6 +24,6 @@ RUN pip install -e '.[eric]'
 ENTRYPOINT ["python", "-u", "-m", "cornserve.task_executors.eric.entrypoint"]
 
 # Eric that has audio support.
-FROM eric-runtime AS eric-audio
+FROM eric AS eric-audio
 
 RUN pip install -e '.[audio]'
