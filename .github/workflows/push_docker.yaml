@@ -40,7 +40,7 @@ jobs:
           - component: eric
             build_args: |
               max_jobs=4
-              build_target=eric
+            build_target: eric
 
     steps:
       - name: Remove unnecessary files
