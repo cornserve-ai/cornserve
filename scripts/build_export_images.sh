@@ -5,17 +5,14 @@
 #     export REGISTRY=see-below-for-local-vs-distributed
 #     bash scripts/build_export_images.sh [service1 service2 ...]
 #
+# If no services are specified, it builds all services found in the docker/ directory except for `dev`.
+#
 # The `REGISTRY` environment variable:
 # - If set to `local`, it builds the images directly within the local k3s containerd.
 # - If set to `none`, it just builds the images with Docker without exporting them to anywhere.
 # - If set to `minikube`, it builds the images with Docker and loads them into Minikube.
 # - If set to a URL (e.g., `localhost:30070`), it builds the images with Docker and pushes them to that registry.
 # More details: https://cornserve.ai/contributor_guide/kubernetes/
-#
-# If `eric-audio` is included in the build list, it will be tagged as `eric:latest` instead of `eric-audio:latest`.
-#
-# If no services are specified, the script builds all services found in the docker/ directory except for `dev`.
-# In this case, `eric.Dockerfile` will be skipped, as `eric-audio.Dockerfile` will be used instead.
 
 set -euo pipefail
 
@@ -66,11 +63,6 @@ else
   while IFS= read -r file; do
     if [[ -f "$file" ]]; then
       service=$(basename "$file" .Dockerfile)
-      # Special case: skip eric.Dockerfile if eric-audio.Dockerfile exists
-      # eric-audio will be tagged as eric:latest instead
-      if [[ "$service" == "eric" ]] && [[ -f "docker/eric-audio.Dockerfile" ]]; then
-        continue
-      fi
       if [[ "$service" != "dev" ]]; then
         BUILD_LIST+=("$service")
       fi
@@ -95,14 +87,8 @@ build_and_export() {
     return
   fi
 
-  # Special case for eric-audio: name eric
-  if [[ "${SERVICE}" == "eric-audio" ]]; then
-    IMAGE="${NAMESPACE}/eric:latest"
-    PUSH_IMAGE="${REGISTRY}/${NAMESPACE}/eric:latest"
-  else
-    IMAGE="${NAMESPACE}/${SERVICE}:latest"
-    PUSH_IMAGE="${REGISTRY}/${NAMESPACE}/${SERVICE}:latest"
-  fi
+  IMAGE="${NAMESPACE}/${SERVICE}:latest"
+  PUSH_IMAGE="${REGISTRY}/${NAMESPACE}/${SERVICE}:latest"
   
   if [[ "${REGISTRY}" == "local" ]]; then
     echo "Building image directly within local k3s containerd..."
