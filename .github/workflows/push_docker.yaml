@@ -40,6 +40,7 @@ jobs:
           - component: eric
             build_args: |
               max_jobs=4
+              build_target=eric
 
     steps:
       - name: Remove unnecessary files
@@ -96,3 +97,4 @@ jobs:
           cache-to: type=registry,ref=${{ env.NAMESPACE }}/${{ matrix.component }}:buildcache,mode=max
           platforms: linux/amd64
           build-args: ${{ matrix.build_args }}
+          target: ${{ matrix.build_target || '' }}
