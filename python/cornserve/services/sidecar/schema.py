@@ -154,7 +154,7 @@ class SidecarServerConfig:
         """Create the sender config."""
         full_tensor, slab = init_shmem(
             filename=shm_filename(),
-            local_ranks=list(range(self.node_info.get_sidecar_num())),
+            local_ranks=self.node_info.get_local_ranks(self.group),
             num_local_sidecars=self.node_info.get_sidecar_num(),
             partition_numel=self.slab_numel * 2,
             dtype=self.tensor_dtype,
@@ -174,7 +174,7 @@ class SidecarServerConfig:
         """Create the receiver config."""
         full_tensor, slab = init_shmem(
             filename=shm_filename(),
-            local_ranks=list(range(self.node_info.get_sidecar_num())),
+            local_ranks=self.node_info.get_local_ranks(self.group),
             num_local_sidecars=self.node_info.get_sidecar_num(),
             partition_numel=self.slab_numel * 2,
             dtype=self.tensor_dtype,
