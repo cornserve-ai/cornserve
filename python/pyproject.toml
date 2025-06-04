@@ -142,6 +142,7 @@ exclude = [
 ]
 
 [tool.pytest.ini_options]
+addopts = "-v"
 asyncio_mode = "strict"
 asyncio_default_fixture_loop_scope = "function"
 

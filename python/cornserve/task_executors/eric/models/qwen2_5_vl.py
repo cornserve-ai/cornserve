@@ -33,19 +33,6 @@ def apply_rotary_pos_emb_vision(t: torch.Tensor, freqs: torch.Tensor) -> torch.T
     return output
 
 
-def all_gather_interleave(local_tensor, hidden_size: int, tp_size: int):
-    """All-gather the input tensor interleavely across model parallel group."""
-    import torch.distributed as dist
-
-    gathered_tensors = [torch.zeros_like(local_tensor) for _ in range(tp_size)]
-    dist.all_gather(gathered_tensors, local_tensor, group=parallel.get_tensor_parallel_group().process_group)
-
-    gathered_tensors_split = [torch.split(tensor, hidden_size // tp_size, -1) for tensor in gathered_tensors]
-    ordered_tensors = [tensor for pair in zip(*gathered_tensors_split) for tensor in pair]
-    result_tensor = torch.cat(ordered_tensors, dim=-1)
-    return result_tensor
-
-
 def cast_overflow_tensors(
     tensors: torch.Tensor,
     offset: float = 1000,
@@ -73,19 +60,12 @@ class Qwen2_5_VisionAttention(nn.Module):
         self.embed_dim = embed_dim
 
         self.qkv = ColumnParallelLinear(input_size=embed_dim, output_size=3 * projection_size)
-        # self.qkv = QKVParallelLinear(
-        #     hidden_size=embed_dim,
-        #     head_size=self.hidden_size_per_attention_head,
-        #     total_num_heads=num_heads,
-        #     total_num_kv_heads=num_heads,
-        #     bias=True)
         self.proj = RowParallelLinear(input_size=projection_size, output_size=embed_dim)
 
     def split_qkv(self, qkv: torch.Tensor) -> tuple[torch.Tensor, ...]:
         # [s, b, 3 * head * head_dim]
         seq_len, bs, _ = qkv.shape
         if self.tp_size > 1:
-            # qkv = all_gather_interleave(qkv, self.embed_dim, self.tp_size)
             qkv = self.tp_group.all_gather(qkv)
 
         # [s, b, 3 * head * head_dim] -> 3 * [s, b, head * head_dim]

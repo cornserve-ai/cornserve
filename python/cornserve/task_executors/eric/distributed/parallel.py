@@ -57,12 +57,6 @@ class DeviceGroup:
             self.world_size,
         )
 
-    def shutdown(self) -> None:
-        """Shutdown the device group."""
-        if self.process_group is not None:
-            torch.distributed.destroy_process_group(self.process_group)
-            logger.info("Device group %s destroyed.", self.name)
-
     def all_gather(self, input_: torch.Tensor, dim: int = -1) -> torch.Tensor:
         """Perform AllGather on the tensor across the device group.
 
@@ -178,6 +172,5 @@ def destroy_distributed() -> None:
         logger.warning("Distributed process group is not initialized. Skipping destruction.")
         return
 
-    get_tensor_parallel_group().shutdown()
     torch.distributed.destroy_process_group()
     logger.info("Uninitialized distributed process groups.")
