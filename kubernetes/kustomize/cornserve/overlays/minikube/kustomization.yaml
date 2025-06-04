@@ -12,19 +12,19 @@ patches:
 images:
 - name: cornserve/gateway
   newName: cornserve/gateway
-  newTag: v0.0.1.post1
+  newTag: v0.0.1.post2
 - name: cornserve/resource-manager
   newName: cornserve/resource-manager
-  newTag: v0.0.1.post1
+  newTag: v0.0.1.post2
 - name: cornserve/sidecar
   newName: cornserve/sidecar
-  newTag: v0.0.1.post1
+  newTag: v0.0.1.post2
 - name: cornserve/task-dispatcher
   newName: cornserve/task-dispatcher
-  newTag: v0.0.1.post1
+  newTag: v0.0.1.post2
 - name: cornserve/task-manager
   newName: cornserve/task-manager
-  newTag: v0.0.1.post1
+  newTag: v0.0.1.post2
 configMapGenerator:
 - name: cornserve-config
   namespace: cornserve
@@ -32,4 +32,4 @@ configMapGenerator:
   literals:
   - CORNSERVE_IMAGE_PREFIX=cornserve
   - CORNSERVE_IMAGE_PULL_POLICY=IfNotPresent
-  - CORNSERVE_IMAGE_TAG=v0.0.1.post1
+  - CORNSERVE_IMAGE_TAG=v0.0.1.post2

@@ -41,6 +41,8 @@ jobs:
             build_args: |
               max_jobs=4
             build_target: eric
+          - component: vllm
+            build_target: vllm
 
     steps:
       - name: Remove unnecessary files

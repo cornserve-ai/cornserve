@@ -1,4 +1,4 @@
-FROM nvidia/cuda:12.8.1-devel-ubuntu22.04
+FROM nvidia/cuda:12.8.1-devel-ubuntu22.04 AS base
 
 RUN apt-get update -y \
       && apt-get install -y git curl wget \
@@ -18,12 +18,19 @@ RUN cd ../.. && uv pip install './python[sidecar-api]'
 RUN uv pip install -r requirements/common.txt
 RUN uv pip install -r requirements/cuda.txt
 ENV SETUPTOOLS_SCM_PRETEND_VERSION=0.0.1.dev
-ENV VLLM_USE_PRECOMPILED=1
-RUN export VLLM_COMMIT=6b6d4961147220fb80f9cc7dcb74db478f9c9a23 \
-      && export VLLM_PRECOMPILED_WHEEL_LOCATION=https://wheels.vllm.ai/${VLLM_COMMIT}/vllm-1.0.0.dev-cp38-abi3-manylinux1_x86_64.whl \
-      && uv pip install -e . -e .[audio]
 
+ENV VLLM_USE_PRECOMPILED=1
+ENV VLLM_COMMIT=6b6d4961147220fb80f9cc7dcb74db478f9c9a23
+ENV VLLM_PRECOMPILED_WHEEL_LOCATION=https://wheels.vllm.ai/${VLLM_COMMIT}/vllm-1.0.0.dev-cp38-abi3-manylinux1_x86_64.whl
+
+# Intermediate vllm stage without audio
+FROM base AS vllm
+RUN uv pip install -e .
 
 ENV VLLM_USE_V1=1
 ENV HF_HOME="/root/.cache/huggingface"
 ENTRYPOINT ["vllm", "serve"]
+
+# Default final stage with audio support
+FROM vllm AS vllm-audio
+RUN uv pip install -e .[audio]
