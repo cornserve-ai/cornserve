@@ -63,7 +63,7 @@ jobs:
           python-version: 3.11
 
       - name: Install protobuf dependencies
-        run: pip install grpcio-tools
+        run: pip install grpcio-tools==1.71.0
 
       - name: Generate protobuf files
         run: bash scripts/generate_pb.sh
