@@ -144,8 +144,8 @@ class Task(BaseModel, ABC, Generic[InputT, OutputT]):
             return self.invoke(task_input)
 
 
-def discover_unit_tasks(tasks: Iterable[Task]) -> list[UnitTask]:
-    """Discover unit tasks from an iterable of tasks.
+def expand_tasks_into_unit_tasks(tasks: Iterable[Task]) -> list[UnitTask]:
+    """Expand an iterable of tasks into a list of unit tasks.
 
     A task may itself be a unit task, or a composite task that contains unit tasks
     as subtasks inside it.
@@ -158,7 +158,7 @@ def discover_unit_tasks(tasks: Iterable[Task]) -> list[UnitTask]:
         if isinstance(task, UnitTask):
             unit_tasks.append(task)
         else:
-            unit_tasks.extend(discover_unit_tasks(getattr(task, attr) for attr in task.subtask_attr_names))
+            unit_tasks.extend(expand_tasks_into_unit_tasks(getattr(task, attr) for attr in task.subtask_attr_names))
 
     return unit_tasks
 

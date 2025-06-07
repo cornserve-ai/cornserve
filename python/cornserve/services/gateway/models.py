@@ -22,9 +22,11 @@ class AppRegistrationResponse(BaseModel):
 
     Attributes:
         app_id: The unique identifier for the registered application.
+        task_names: The names of the unit tasks discovered in the application.
     """
 
     app_id: str
+    task_names: list[str]
 
 
 class AppInvocationRequest(BaseModel):

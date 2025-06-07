@@ -23,6 +23,7 @@ dependencies = [
   "rich",
   "requests",
   "tyro",
+  "kubernetes",
   "kubernetes_asyncio",
   "httpx",
   "pydantic>=2.11",

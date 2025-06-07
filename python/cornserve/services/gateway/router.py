@@ -18,6 +18,7 @@ from pydantic import ValidationError
 from cornserve.constants import K8S_RESOURCE_MANAGER_GRPC_URL
 from cornserve.logging import get_logger
 from cornserve.services.gateway.app.manager import AppManager
+from cornserve.services.gateway.app.models import AppState
 from cornserve.services.gateway.models import (
     AppInvocationRequest,
     AppRegistrationRequest,
@@ -38,10 +39,10 @@ async def register_app(request: AppRegistrationRequest, raw_request: Request):
     app_manager: AppManager = raw_request.app.state.app_manager
 
     try:
-        app_id = await app_manager.register_app(request.source_code)
-        return AppRegistrationResponse(app_id=app_id)
+        app_id, task_names = await app_manager.register_app(request.source_code)
+        return AppRegistrationResponse(app_id=app_id, task_names=task_names)
     except ValueError as e:
-        logger.info("Error while registering app: %s", e)
+        logger.info("Error while initiating app registration: %s", e)
         return Response(status_code=status.HTTP_400_BAD_REQUEST, content=str(e))
     except Exception as e:
         logger.exception("Unexpected error while registering app")
@@ -107,6 +108,27 @@ async def list_apps(raw_request: Request):
         return await app_manager.list_apps()
     except Exception as e:
         logger.exception("Unexpected error while listing apps")
+        return Response(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content=str(e),
+        )
+
+
+@router.get("/app/status/{app_id}")
+async def get_app_status(app_id: str, raw_request: Request):
+    """Get the registration status of an application."""
+    app_manager: AppManager = raw_request.app.state.app_manager
+    span = trace.get_current_span()
+    span.set_attribute("gateway.get_app_status.app_id", app_id)
+
+    try:
+        app_state = await app_manager.get_app_status(app_id)
+        if app_state is None:
+            return Response(status_code=status.HTTP_404_NOT_FOUND, content=f"App ID '{app_id}' not found")
+        # Return the app_id and the string value of the AppState enum
+        return {"app_id": app_id, "status": app_state.value}
+    except Exception as e:
+        logger.exception("Unexpected error while getting app status for %s", app_id)
         return Response(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             content=str(e),

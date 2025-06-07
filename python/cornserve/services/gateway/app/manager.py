@@ -15,7 +15,7 @@ from cornserve.app.base import AppConfig, AppRequest, AppResponse
 from cornserve.logging import get_logger
 from cornserve.services.gateway.app.models import AppClasses, AppDefinition, AppState
 from cornserve.services.gateway.task_manager import TaskManager
-from cornserve.task.base import discover_unit_tasks
+from cornserve.task.base import expand_tasks_into_unit_tasks
 
 logger = get_logger(__name__)
 tracer = trace.get_tracer(__name__)
@@ -110,65 +110,93 @@ class AppManager:
         self.app_driver_tasks: dict[str, list[asyncio.Task]] = defaultdict(list)
 
     @tracer.start_as_current_span(name="AppManager.register_app")
-    async def register_app(self, source_code: str) -> str:
-        """Register a new application with the given ID and source code.
-
-        This will deploy all unit tasks discovered in the app's config.
+    async def register_app(self, source_code: str) -> tuple[str, list[str]]:
+        """Register a new application with the given source code.
+        Return app_id and unit task names immediately after successful validation.
+        
+        Actual registration, in the background, will deploy all unit
+        tasks discovered in the app's config.
 
         Args:
             source_code: Python source code of the application
 
         Returns:
-            str: The app ID
+            tuple[str, list[str]]: The app ID and the list of unit task names.
 
         Raises:
             ValueError: If app validation fails
-            RuntimeError: If errors occur during registration
         """
         span = trace.get_current_span()
+        app_id: str | None = None # To be set inside the lock
+
         async with self.app_lock:
             # Generate a unique app ID
             while True:
                 app_id = f"app-{uuid.uuid4().hex}"
                 if app_id not in self.app_states:
                     break
+            
+            span.set_attribute("app_manager.register_app.app_id", app_id)
 
+            try:
+                # Validation and unit tasks discovery
+                module = load_module_from_source(source_code, app_id)
+                app_classes = validate_app_module(module)
+                tasks = expand_tasks_into_unit_tasks(app_classes.config_cls.tasks.values())
+                task_names = [t.execution_descriptor.create_executor_name().lower() for t in tasks]
+
+                for task in tasks:
+                    logger.info("Discovered task executor name: %s", task.execution_descriptor.create_executor_name().lower())
+            except (ImportError, ValueError) as e:
+                logger.error("App source code validation failed for app_id '%s': %s", app_id, e)
+                raise ValueError(f"App source code validation failed: {e}") from e
+
+            # If validation is successful, store definition and set initial state
+            self.apps[app_id] = AppDefinition(
+                app_id=app_id,
+                module=module,
+                classes=app_classes,
+                source_code=source_code,
+                tasks=tasks, # Store discovered unit tasks
+            )
             self.app_states[app_id] = AppState.NOT_READY
-        span.set_attribute("app_manager.register_app.app_id", app_id)
+            logger.info("App '%s' validated (tasks discovered: %s) and registered with state: %s. Scheduling task deployment.", 
+                        app_id, len(tasks), AppState.NOT_READY)
 
+        # Lock is released here
+
+        # Start background task for task deployment (app_id is guaranteed to be set if we reach here)
+        asyncio.create_task(self._deploy_app_tasks(app_id))
+
+        return app_id, task_names
+
+    async def _deploy_app_tasks(self, app_id: str) -> None:
+        """Deploys tasks for an already validated and registered app.
+        Updates app state to READY or REGISTRATION_FAILED based on task deployment.
+        """
+        tasks_to_deploy = []
         try:
-            # Load and validate the app
-            module = load_module_from_source(source_code, app_id)
-            app_classes = validate_app_module(module)
-            tasks = discover_unit_tasks(app_classes.config_cls.tasks.values())
+            # Retrieve app definition
+            async with self.app_lock: # Lock to safely read self.apps
+                app_def = self.apps.get(app_id)
+            
+            # Retrieve tasks from the AppDefinition
+            tasks_to_deploy = app_def.tasks 
 
-            # Deploy all unit tasks discovered
-            await self.task_manager.declare_used(tasks)
+            # Deploy unit tasks previously discovered
+            await self.task_manager.declare_used(tasks_to_deploy)
 
-            # Update app state and store app definition
+            # Update app state to READY
             async with self.app_lock:
                 self.app_states[app_id] = AppState.READY
-                self.apps[app_id] = AppDefinition(
-                    app_id=app_id,
-                    module=module,
-                    classes=app_classes,
-                    source_code=source_code,
-                )
-
-            logger.info("Successfully registered app '%s'", app_id)
-
-            return app_id
+            logger.info("Successfully deployed tasks (count: %s) for app '%s', state: %s.", 
+                        len(tasks_to_deploy), app_id, AppState.READY)
 
         except Exception as e:
-            logger.exception("Failed to register app: %s", e)
-
-            # Clean up any partially registered app
+            logger.exception("Failed to deploy tasks (count: %s) for app '%s': %s", 
+                             len(tasks_to_deploy), app_id, e)
             async with self.app_lock:
-                self.apps.pop(app_id, None)
-                self.app_states.pop(app_id, None)
-                self.app_driver_tasks.pop(app_id, None)
-
-            raise RuntimeError(f"Failed to register app: {e}") from e
+                self.app_states[app_id] = AppState.REGISTRATION_FAILED
 
     @tracer.start_as_current_span(name="AppManager.unregister_app")
     async def unregister_app(self, app_id: str) -> None:
@@ -194,7 +222,7 @@ class AppManager:
                 task.cancel()
 
         # Let the task manager know that this app no longer needs these tasks
-        tasks = discover_unit_tasks(app.classes.config_cls.tasks.values())
+        tasks = expand_tasks_into_unit_tasks(app.classes.config_cls.tasks.values())
 
         try:
             await self.task_manager.declare_not_used(tasks)
@@ -272,7 +300,20 @@ class AppManager:
         Returns:
             dict[str, AppState]: Mapping of app IDs to their states
         """
-        return self.app_states
+        async with self.app_lock: # Ensure thread-safe access for reading states
+            return self.app_states.copy()
+
+    async def get_app_status(self, app_id: str) -> AppState | None:
+        """Get the current status of a specific app.
+
+        Args:
+            app_id: The ID of the app.
+
+        Returns:
+            AppState or None if app_id not found.
+        """
+        async with self.app_lock:
+            return self.app_states.get(app_id)
 
     async def shutdown(self) -> None:
         """Shut down the server."""
