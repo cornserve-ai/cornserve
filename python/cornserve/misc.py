@@ -2,36 +2,27 @@
 
 from __future__ import annotations
 
-import random
 import subprocess
 import threading
 import time
-from collections import deque
-from typing import Deque
 
 import rich
-from rich.console import Console
-from rich.panel import Panel
-from rich.text import Text
-
 from kubernetes import client, config
 from kubernetes.client.rest import ApiException
 from kubernetes.config.config_exception import ConfigException
+from rich.console import Console
+from rich.text import Text
 
 # A list of visually distinct colors from rich.
-DISTINCT_COLORS = [
-    "bright_red",
-    "bright_green",
-    "bright_yellow",
-    "bright_blue",
-    "bright_magenta",
-    "bright_cyan",
-    "red",
+LOG_COLORS = [
     "green",
     "yellow",
     "blue",
-    "magenta",
     "cyan",
+    "green_yellow",
+    "dark_orange",
+    "purple",
+    "spring_green",
 ]
 
 
@@ -39,6 +30,13 @@ class LogStreamer:
     """Streams logs from Kubernetes pods related to unit tasks."""
 
     def __init__(self, unit_task_names: list[str], namespace: str = "cornserve", console: Console | None = None):
+        """Initialize the LogStreamer.
+
+        Args:
+            unit_task_names: A list of unit task names to monitor.
+            namespace: The Kubernetes namespace of executors.
+            console: The console object to output the logs.
+        """
         self.unit_task_names = unit_task_names
         self.namespace = namespace
         self.console = console or rich.get_console()
@@ -48,6 +46,7 @@ class LogStreamer:
 
         self.monitored_pods: set[str] = set()
         self.pod_colors: dict[str, str] = {}
+        self.color_index = 0
         self.stop_event = threading.Event()
         self.threads: list[threading.Thread] = []
         self.subprocesses: list[subprocess.Popen] = []
@@ -66,24 +65,22 @@ class LogStreamer:
             try:
                 loader()
                 # If loaded, try to access the API
-                self.console.print(f"[bold green]LogStreamer: {description.capitalize()} loaded successfully.[/bold green]")
+                self.console.print(f"LogStreamer: {description.capitalize()} loaded successfully.")
                 client.CoreV1Api().get_api_resources()
-                self.console.print(f"[bold green]LogStreamer: Kubernetes access confirmed. Going to stream executor logs ... [/bold green]")
+                self.console.print("LogStreamer: Kubernetes access confirmed. Going to stream executor logs ...")
                 return True
             except (ConfigException, FileNotFoundError):
-                self.console.print(f"[bold yellow]LogStreamer: Could not load {description}. Trying next option...[/bold yellow]")
+                self.console.print(f"LogStreamer: Could not load {description}. Trying next option...")
                 continue
             except ApiException as e:
-                self.console.print(f"[bold red]LogStreamer: API error with {description}: {e}. Aborting check.[/bold red]")
+                self.console.print(f"LogStreamer: API error with {description}: {e}. Check aborted.")
                 return False
             except Exception as e:
                 # Catch all other unexpected errors during loading or API call.
-                self.console.print(
-                    f"[bold red]LogStreamer: Unexpected error with {description}: {e}. Trying next option...[/bold red]"
-                )
+                self.console.print(f"LogStreamer: Unexpected error with {description}: {e}. Trying next option...")
                 continue
 
-        self.console.print("[bold red]LogStreamer: Kubernetes access failed. No log will be streamed.[/bold red]")
+        self.console.print("LogStreamer: Kubernetes access failed. No executor log will be streamed.")
         return False
 
     def _assign_color(self, pod_name: str):
@@ -91,15 +88,9 @@ class LogStreamer:
             if pod_name in self.pod_colors:
                 return
 
-            used_colors = set(self.pod_colors.values())
-            available_colors = [c for c in DISTINCT_COLORS if c not in used_colors]
-
-            if available_colors:
-                color = random.choice(available_colors)
-            else:
-                # All distinct colors are used, start reusing them
-                color = random.choice(DISTINCT_COLORS)
+            color = LOG_COLORS[self.color_index % len(LOG_COLORS)]
             self.pod_colors[pod_name] = color
+            self.color_index += 1
 
     def _pod_discovery_worker(self):
         api = client.CoreV1Api()
@@ -178,6 +169,7 @@ class LogStreamer:
             self.console.print(Text(f"Error streaming logs for {pod_name}: {e}", style="red"))
 
     def start(self):
+        """Start the executor discovery and log streaming."""
         if not self.k8s_available:
             return
 
@@ -186,6 +178,7 @@ class LogStreamer:
         discovery_thread.start()
 
     def stop(self):
+        """Stop the LogStreamer."""
         if not self.k8s_available:
             return
 
@@ -198,4 +191,4 @@ class LogStreamer:
             try:
                 proc.wait(timeout=1)
             except subprocess.TimeoutExpired:
-                proc.kill() 
+                proc.kill()

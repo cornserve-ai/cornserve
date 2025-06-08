@@ -15,19 +15,18 @@ import tyro
 import yaml
 from rich import box
 from rich.panel import Panel
+from rich.status import Status
 from rich.table import Table
 from rich.text import Text
-from rich.status import Status
 from tyro.constructors import PrimitiveConstructorSpec
 
+from cornserve.misc import LogStreamer
+from cornserve.services.gateway.app.models import AppState
 from cornserve.services.gateway.models import (
     AppInvocationRequest,
     AppRegistrationRequest,
     AppRegistrationResponse,
 )
-from cornserve.services.gateway.app.models import AppState
-from cornserve.misc import LogStreamer
-
 
 try:
     GATEWAY_URL = os.environ["CORNSERVE_GATEWAY_URL"]
@@ -164,9 +163,15 @@ def register(
         for name in task_names:
             tasks_table.add_row(name)
         rich.print(tasks_table)
-    
+
     if is_async:
-        rich.print(Panel(f"App '{app_id}' with alias '{current_alias}' is submitted for registration.", style="green", expand=False))
+        rich.print(
+            Panel(
+                f"App '{app_id}' with alias '{current_alias}' is submitted for registration.",
+                style="green",
+                expand=False,
+            )
+        )
         return
 
     console = rich.get_console()
@@ -220,15 +225,10 @@ def register(
                         break
                     time.sleep(1)
                 except requests.exceptions.Timeout:
-                    spinner_message = f" Polling timeout for app '{app_id}'. Retrying..."
+                    spinner_message = f" Polling request timedout for app '{app_id}'. Retrying..."
                     status.update(status=Text(spinner_message, style="orange"))
                     time.sleep(1)
-                except requests.exceptions.RequestException as e:
-                    status_str = "polling_error"
-                    rich.print(Text(f"Error polling status for '{app_id}': {e}", style="red"))
-                    break
                 except Exception as e:
-                    status_str = "unexpected_error"
                     rich.print(
                         Text(f"An unexpected error occurred while polling for '{app_id}': {e}", style="red"),
                     )
@@ -238,16 +238,17 @@ def register(
             log_streamer.stop()
 
     if status_str == AppState.READY.value:
-        rich.print(Panel(f"App '{app_id}' registered successfully with alias '{current_alias}'.", style="green", expand=False))
+        rich.print(
+            Panel(f"App '{app_id}' registered successfully with alias '{current_alias}'.", style="green", expand=False)
+        )
     elif status_str == AppState.REGISTRATION_FAILED.value:
         Alias().remove(current_alias)
-        rich.print(Panel(f"App '{app_id}' failed to register. Alias '{current_alias}' removed.", style="red", expand=False))
-    elif status_str == "polling_error":
-        rich.print(Panel(f"Could not determine final status for app '{app_id}' due to polling errors. Please check with 'cornserve list'.", style="red", expand=False))
-    elif status_str == "unexpected_error":
-        rich.print(Panel(f"An unexpected error occurred while checking status for '{app_id}'. Please check with 'cornserve list'.", style="red", expand=False))
+        rich.print(
+            Panel(f"App '{app_id}' failed to register. Alias '{current_alias}' removed.", style="red", expand=False)
+        )
     else:
-        rich.print(Panel(f"App '{app_id}' registration ended with an inconclusive status: '{status_str.title()}'. Please check with 'cornserve list'.", style="yellow", expand=False))
+        rich.print(Panel(f"Some error occured while polling app '{app_id}' .", style="red", expand=False))
+
 
 @app.command(name="unregister")
 def unregister(
@@ -379,7 +380,7 @@ def check_status(
             status_style = "green"
         elif status_str == AppState.REGISTRATION_FAILED.value:
             status_style = "red"
-        
+
         rich.print(f"Status for app '{app_id}': [{status_style}]{status_str.title()}[/{status_style}]")
 
     except requests.exceptions.RequestException as e:

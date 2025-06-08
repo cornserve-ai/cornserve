@@ -18,7 +18,6 @@ from pydantic import ValidationError
 from cornserve.constants import K8S_RESOURCE_MANAGER_GRPC_URL
 from cornserve.logging import get_logger
 from cornserve.services.gateway.app.manager import AppManager
-from cornserve.services.gateway.app.models import AppState
 from cornserve.services.gateway.models import (
     AppInvocationRequest,
     AppRegistrationRequest,

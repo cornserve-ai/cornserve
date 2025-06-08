@@ -6,7 +6,6 @@ import enum
 from collections.abc import Callable, Coroutine
 from dataclasses import dataclass
 from types import ModuleType
-from typing import List
 
 from cornserve.app.base import AppConfig, AppRequest, AppResponse
 from cornserve.task.base import UnitTask
@@ -53,4 +52,4 @@ class AppDefinition:
     module: ModuleType
     source_code: str
     classes: AppClasses
-    tasks: List[UnitTask]
+    tasks: list[UnitTask]
