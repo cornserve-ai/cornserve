@@ -15,6 +15,8 @@ from kubernetes.config.config_exception import ConfigException
 from rich.console import Console
 from rich.text import Text
 
+from cornserve.constants import K8S_NAMESPACE
+
 # A list of visually distinct colors from rich.
 LOG_COLORS = [
     "green",
@@ -31,16 +33,14 @@ LOG_COLORS = [
 class LogStreamer:
     """Streams logs from Kubernetes pods related to unit tasks."""
 
-    def __init__(self, unit_task_names: list[str], namespace: str = "cornserve", console: Console | None = None):
+    def __init__(self, unit_task_names: list[str], console: Console | None = None):
         """Initialize the LogStreamer.
 
         Args:
             unit_task_names: A list of unit task names to monitor.
-            namespace: The Kubernetes namespace of executors.
             console: The console object to output the logs.
         """
         self.unit_task_names = unit_task_names
-        self.namespace = namespace
         self.console = console or rich.get_console()
         self.k8s_available = self._check_k8s_access()
         if not self.k8s_available:
@@ -98,7 +98,7 @@ class LogStreamer:
         api = client.CoreV1Api()
         while not self.stop_event.is_set():
             try:
-                pods = api.list_namespaced_pod(self.namespace, timeout_seconds=5)
+                pods = api.list_namespaced_pod(K8S_NAMESPACE, timeout_seconds=5)
                 for pod in pods.items:
                     pod_name = pod.metadata.name
                     if pod_name in self.monitored_pods:
@@ -133,7 +133,7 @@ class LogStreamer:
             # Wait until pod is running
             api = client.CoreV1Api()
             while not self.stop_event.is_set():
-                pod: V1Pod = cast(V1Pod, api.read_namespaced_pod(pod_name, self.namespace))
+                pod: V1Pod = cast(V1Pod, api.read_namespaced_pod(pod_name, K8S_NAMESPACE))
                 if pod.status:
                     pod_status_str = pod.status.phase or "Empty"
                     if pod_status_str == "Running":
@@ -146,7 +146,7 @@ class LogStreamer:
                     time.sleep(1)
 
             proc = subprocess.Popen(
-                ["kubectl", "logs", "-f", "--tail=5", "-n", self.namespace, pod_name],
+                ["kubectl", "logs", "-f", "--tail=5", "-n", K8S_NAMESPACE, pod_name],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,  # Redirect stderr to stdout
                 text=True,

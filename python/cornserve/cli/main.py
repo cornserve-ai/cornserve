@@ -20,7 +20,7 @@ from rich.table import Table
 from rich.text import Text
 from tyro.constructors import PrimitiveConstructorSpec
 
-from cornserve.misc import LogStreamer
+from cornserve.cli.log_streamer import LogStreamer
 from cornserve.services.gateway.app.models import AppState
 from cornserve.services.gateway.models import (
     AppInvocationRequest,
