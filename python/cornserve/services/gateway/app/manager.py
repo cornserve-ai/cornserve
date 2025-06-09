@@ -183,6 +183,12 @@ class AppManager:
             async with self.app_lock:  # Lock to safely read self.apps
                 app_def = self.apps.get(app_id)
 
+            if not app_def:
+                logger.error("App definition for app_id '%s' not found during task deployment.", app_id)
+                async with self.app_lock:
+                    self.app_states[app_id] = AppState.REGISTRATION_FAILED
+                return
+
             # Retrieve tasks from the AppDefinition
             tasks_to_deploy = app_def.tasks
 
