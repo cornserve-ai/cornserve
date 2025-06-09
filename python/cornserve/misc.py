@@ -5,9 +5,11 @@ from __future__ import annotations
 import subprocess
 import threading
 import time
+from typing import cast
 
 import rich
 from kubernetes import client, config
+from kubernetes.client import V1Pod
 from kubernetes.client.rest import ApiException
 from kubernetes.config.config_exception import ConfigException
 from rich.console import Console
@@ -131,20 +133,17 @@ class LogStreamer:
             # Wait until pod is running
             api = client.CoreV1Api()
             while not self.stop_event.is_set():
-                pod = api.read_namespaced_pod_status(pod_name, self.namespace)
-                if not pod.status:
+                pod: V1Pod = cast(V1Pod, api.read_namespaced_pod(pod_name, self.namespace))
+                if pod.status:
+                    pod_status_str = pod.status.phase or "Empty"
+                    if pod_status_str == "Running":
+                        break
+                    if pod_status_str in ["Succeeded", "Failed", "Unknown", "Empty"]:
+                        self.console.print(
+                            Text(f"Pod {pod_name} is in state {pod_status_str}, not streaming logs.", style="yellow")
+                        )
+                        return
                     time.sleep(1)
-                    continue
-
-                pod_status = pod.status.phase
-                if pod_status == "Running":
-                    break
-                if pod_status in ["Succeeded", "Failed", "Unknown"]:
-                    self.console.print(
-                        Text(f"Pod {pod_name} is in state {pod_status}, not streaming logs.", style="yellow")
-                    )
-                    return
-                time.sleep(1)
 
             proc = subprocess.Popen(
                 ["kubectl", "logs", "-f", "--tail=5", "-n", self.namespace, pod_name],
@@ -156,18 +155,17 @@ class LogStreamer:
             )
             self.subprocesses.append(proc)
 
-            if proc.stdout:
-                for line in iter(proc.stdout.readline, ""):
-                    if self.stop_event.is_set():
-                        break
-                    with self.lock:
-                        color = self.pod_colors.get(pod_name, "white")
-                        log_text = f"{pod_name: <40} | {line.strip()}"
-                        log_message = Text(log_text, style=color)
-                    self.console.print(log_message)
+            assert proc.stdout is not None
+            for line in iter(proc.stdout.readline, ""):
+                if self.stop_event.is_set():
+                    break
+                with self.lock:
+                    color = self.pod_colors.get(pod_name, "white")
+                    log_text = f"{pod_name: <40} | {line.strip()}"
+                    log_message = Text(log_text, style=color)
+                self.console.print(log_message)
 
-                proc.stdout.close()
-
+            proc.stdout.close()
             return_code = proc.wait()
             if return_code != 0 and not self.stop_event.is_set():
                 self.console.print(Text(f"Pod {pod_name} exited with code {return_code}.", style="yellow"))
