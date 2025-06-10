@@ -199,6 +199,27 @@ class SidecarSender:
             del self.saved_buffers[id]
         return sidecar_pb2.UnlinkResponse(status=common_pb2.Status.STATUS_OK)
 
+    async def close_stream(
+        self,
+        request: sidecar_pb2.CloseStreamRequest,
+        context: grpc.aio.ServicerContext,
+    ) -> sidecar_pb2.CloseStreamResponse:
+        """Close the stream on a Dataforward. Should only be called once."""
+        if not self._validate_dst_groups(list(request.dst_ranks)):
+            await context.abort(grpc.StatusCode.INVALID_ARGUMENT, "Invalid destination rank")
+        dst_ranks = [dst_group.ranks[0] for dst_group in request.dst_ranks]
+        coros = []
+        for rank in dst_ranks:
+            # no need to set dst_ranks for the receiver
+            req = sidecar_pb2.OnStreamCloseRequest(id=request.id)
+            stub = self._get_grpc_stub(rank)
+            coros.append(stub.OnStreamClose(req))
+        responses = await asyncio.gather(*coros)
+        if any(res.status != common_pb2.Status.STATUS_OK for res in responses):
+            logger.error("Failed to close stream")
+            return sidecar_pb2.CloseStreamResponse(status=common_pb2.Status.STATUS_ERROR)
+        return sidecar_pb2.CloseStreamResponse(status=common_pb2.Status.STATUS_OK)
+
     async def send(
         self,
         request: sidecar_pb2.SendRequest,

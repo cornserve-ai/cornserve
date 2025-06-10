@@ -7,6 +7,8 @@ import "common.proto";
 service Sidecar {
   rpc Register(RegisterRequest) returns (RegisterResponse);
   rpc Send(SendRequest) returns (SendResponse);
+  rpc CloseStream(CloseStreamRequest) returns (CloseStreamResponse);
+  rpc OnStreamClose(OnStreamCloseRequest) returns (OnStreamCloseResponse);
   rpc Receive(ReceiveRequest) returns (ReceiveResponse);
   rpc MarkDone(MarkDoneRequest) returns (MarkDoneResponse);
   rpc Unlink(UnlinkRequest) returns (UnlinkResponse);
@@ -46,6 +48,23 @@ message SendRequest {
 }
 
 message SendResponse {
+  common.Status status = 1;
+}
+
+message CloseStreamRequest {
+  string id = 1;
+  repeated RankGroup dst_ranks = 2;
+}
+
+message CloseStreamResponse {
+  common.Status status = 1;
+}
+
+message OnStreamCloseRequest {
+  string id = 1;
+}
+
+message OnStreamCloseResponse {
   common.Status status = 1;
 }
 

@@ -42,7 +42,7 @@ ThreadingInstrumentor().instrument()
 class Sidecar:
     """The sidecar client to send or receive data to/from other sidecars."""
 
-    supported_classes = [str, bytes, int, float, bool, torch.Tensor]
+    supported_classes = [str, bytes, int, float, bool, torch.Tensor, dict]
 
     def __init__(
         self,
@@ -98,6 +98,52 @@ class Sidecar:
 
         self._finalizer = weakref.finalize(self, self.__del__)
 
+    @tracer.start_as_current_span(name="Sidecar.close_stream")
+    def close_stream(
+        self,
+        id: str,
+        dst_sidecar_ranks: list[list[int]],
+    ) -> None:
+        """Signal the end of a stream to the sidecar server.
+
+        Args:
+            id: The id of the data. This is used to identify the data in the sidecar.
+            dst_sidecar_ranks: The ranks of the sidecars to send the data to. This is a list of lists,
+                where each list is a sidecar TP group.
+        """
+        span = trace.get_current_span()
+        span.set_attribute("sidecar.close_stream.id", id)
+
+        future = self.worker_pool.submit(
+            self._close_stream_worker,
+            id,
+            dst_sidecar_ranks,
+        )
+        future.add_done_callback(lambda f: f.result())
+
+    @tracer.start_as_current_span(name="Sidecar._close_stream_worker")
+    def _close_stream_worker(
+        self,
+        id: str,
+        dst_sidecar_ranks: list[list[int]],
+    ) -> None:
+        """The worker function to close a stream in the sidecar server.
+
+        Args:
+            id: The id of the data. This is used to identify the data in the sidecar.
+            dst_sidecar_ranks: The ranks of the sidecars to send the data to.
+        """
+        dst_ranks = [sidecar_pb2.RankGroup(ranks=group) for group in dst_sidecar_ranks]
+        request = sidecar_pb2.CloseStreamRequest(
+            id=id,
+            dst_ranks=dst_ranks,
+        )
+        response = self.stub.CloseStream(request)
+        if response.status == common_pb2.Status.STATUS_OK:
+            logger.info("Closed stream %s successfully", id)
+        else:
+            logger.error("Failed to close stream with id %s", id)
+
     @tracer.start_as_current_span(name="Sidecar.send")
     def send(
         self,
@@ -106,6 +152,7 @@ class Sidecar:
         dst_sidecar_ranks: list[list[int]],
         chunk_id: int = 0,
         num_chunks: int = 1,
+        stream: bool = False,
     ) -> None:
         """Send some data to other sidecars.
 
@@ -116,6 +163,8 @@ class Sidecar:
                 where each list is a sidecar TP group.
             chunk_id: The chunk id of the data when only sending a chunk.
             num_chunks: The number of chunks the entire data is split into.
+            stream: Whether to stream the data. If True, `num_chunks` is ignored, and the sender needs
+                to call `done_streaming` to mark the end of the stream.
         """
         # need to pass a shared pytorch tensor handle
         # assume broadcast
@@ -130,6 +179,10 @@ class Sidecar:
 
         span = trace.get_current_span()
         span.set_attribute("sidecar.send.id", id)
+
+        if stream:
+            logger.info("<<<< setting num_chunks to 0 for streaming >>>>")
+            num_chunks = 0
 
         future = self.worker_pool.submit(
             self._send_worker,
@@ -184,6 +237,8 @@ class Sidecar:
         else:
             logger.error("Failed to send data with id %s", id)
 
+    # TODO (Jeff): Async Generator for streaming
+
     @tracer.start_as_current_span(name="Sidecar.recv")
     async def recv(self, id: str, chunk_id: int = 0) -> Any:
         """Receive data from the sidecar server.
@@ -194,7 +249,6 @@ class Sidecar:
             id: The id of the data.
             chunk_id: The chunk id of the data to receive.
         """
-        # TODO (Jeff): Async Generator
         span = trace.get_current_span()
         span.set_attribute("sidecar.recv.id", id)
         span.set_attribute("sidecar.recv.chunk_id", chunk_id)

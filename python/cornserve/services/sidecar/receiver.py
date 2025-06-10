@@ -123,6 +123,25 @@ class SidecarReceiver:
         with contextlib.suppress(Exception):
             os.unlink(shm_filename())
 
+    async def on_stream_close(
+        self,
+        request: sidecar_pb2.OnStreamCloseRequest,
+        context: grpc.aio.ServicerContext,
+    ) -> sidecar_pb2.OnStreamCloseResponse:
+        """Close a stream for a given request ID in the receiver."""
+        try:
+            async with self.recv_done_lock:
+                req_state = self.ledger[request.id]
+                # TODO: make sender provide the max chunk id
+                max_chunk_id = max(req_state.chunks.keys()) + 1
+                logger.info("Closing stream for request %s with max chunk id %d", request.id, max_chunk_id)
+                req_state.num_chunks = max_chunk_id
+                req_state.done_event.set()
+            return sidecar_pb2.OnStreamCloseResponse(status=common_pb2.Status.STATUS_OK)
+        except Exception:
+            logger.exception("Failed to close stream for request %s", request.id)
+            await context.abort(grpc.StatusCode.INTERNAL, "Failed to close stream")
+
     async def prepare_receive(
         self,
         request: sidecar_pb2.PrepareReceiveRequest,
@@ -217,7 +236,7 @@ class SidecarReceiver:
         elif isinstance(obj, SharedTensorHandle):
             span.set_attribute("SidecarReceiver.prepare_receive.type", "SharedTensorHandle")
             # intra-node
-            logger.info("Intra node prepare receive request for request id %s", request.id)
+            logger.info("Intra node prepare receive request for request id %s - %s", request.id, request.chunk_id)
             cbuf = (ctypes.c_byte * obj.numel * self.dtype.itemsize).from_address(self.config.base_ptr + obj.offset)
             tensor = torch.frombuffer(cbuf, dtype=self.dtype, count=obj.numel)
             dummy_buffer = SharedMemoryBuffer(size=obj.numel, data=tensor, slots=[])
@@ -271,7 +290,7 @@ class SidecarReceiver:
         waken up again, and the already woken ones can still check the chunk_id
         """
         span = trace.get_current_span()
-        logger.info("==> Receive request for request id %s", recv_req.id)
+        logger.info("==> Receive request for request id %s - chunk %s", recv_req.id, recv_req.chunk_id)
         span.set_attribute("SidecarReceiver.receive.id", recv_req.id)
         span.set_attribute("SidecarReceiver.receive.chunk_id", recv_req.chunk_id)
 
@@ -284,8 +303,14 @@ class SidecarReceiver:
         while True:
             await req_state.done_event.wait()
             # some chunk of this request is already received
-            if recv_req.chunk_id > req_state.num_chunks:
+            if req_state.num_chunks and recv_req.chunk_id >= req_state.num_chunks:
                 # check out of bound
+                logger.warning(
+                    "receive: chunk_id %d out of bound for request %s > request.num_chunks %s",
+                    recv_req.chunk_id,
+                    recv_req.id,
+                    req_state.num_chunks,
+                )
                 return sidecar_pb2.ReceiveResponse(
                     status=common_pb2.Status.STATUS_OK,
                     data=self.encoder.encode(None),
@@ -340,13 +365,14 @@ class SidecarReceiver:
         span.set_attribute("SidecarReceiver.mark_done.id", mark_done_req.id)
         span.set_attribute("SidecarReceiver.mark_done.chunk_id", mark_done_req.chunk_id)
         if mark_done_req.id not in self.ledger or mark_done_req.chunk_id not in self.ledger[mark_done_req.id].chunks:
-            logger.error("mark_done: %s not found", mark_done_req.id)
+            logger.error("mark_done: %s chunk %s not found", mark_done_req.id, mark_done_req.chunk_id)
             await context.abort(grpc.StatusCode.NOT_FOUND, "mark_done_req not found")
         req_state = self.ledger[mark_done_req.id]
         chunk_state = req_state.chunks[mark_done_req.chunk_id]
 
         if isinstance(chunk_state, RecvObjState):
             span.set_attribute("SidecarReceiver.mark_done.type", "Object")
+            logger.info("mark_done: deleting object state for id %s-%s", mark_done_req.id, mark_done_req.chunk_id)
             del req_state.chunks[mark_done_req.chunk_id]
             # TODO: make this counter instead of assuming sequential access
             if req_state.num_chunks == mark_done_req.chunk_id + 1:
@@ -358,8 +384,9 @@ class SidecarReceiver:
 
         if chunk_state.intra_node_rank >= 0:
             logger.info(
-                "mark_done: unlink refcount for id %s in rank %d",
+                "mark_done: unlink refcount for id %s-%s in rank %d",
                 mark_done_req.id,
+                mark_done_req.chunk_id,
                 chunk_state.intra_node_rank,
             )
             stub = self._get_grpc_stub(chunk_state.intra_node_rank)

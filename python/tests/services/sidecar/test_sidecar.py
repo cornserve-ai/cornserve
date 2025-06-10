@@ -2,6 +2,7 @@ import asyncio
 import multiprocessing
 import os
 import random
+import time
 import uuid
 from typing import Any, Generator, Literal
 
@@ -276,6 +277,179 @@ async def test_tensors(
         chunk = await receivers[0].recv(id=id, chunk_id=num_chunks + 1)
         assert chunk is None
         for i in range(num_chunks):
+            await receivers[0].mark_done(id=id, chunk_id=i)
+
+    async def verify_all(
+        ids: list[str],
+        data: list[list[torch.Tensor]],
+        sender_ranks: list[int],
+        receivers: list[Sidecar],
+    ):
+        futures = []
+        for k, id in enumerate(ids):
+            future = verify(id, data[k], sender_ranks[0], receivers)
+            futures.append(future)
+
+        # we gather them all to avoid live lock from memory fragmentation
+        await asyncio.gather(*futures)
+
+    # sender => receiver
+    ids, data = send_all(sidecar_senders, receiver_ranks)
+    await verify_all(ids, data, sender_ranks, sidecar_receivers)
+
+    print("------------------------------------------------------------")
+
+    # receiver => sender
+    ids, data = send_all(sidecar_receivers, sender_ranks)
+    await verify_all(ids, data, receiver_ranks, sidecar_senders)
+
+    for sender in sidecar_senders:
+        await sender.shutdown()
+    for receiver in sidecar_receivers:
+        await receiver.shutdown()
+
+
+streaming_test_params = [
+    # # Single copy
+    # Single copy
+    # ([0], [2], 1, (100,), torch.bfloat16, 1, 1, False, 4),
+    # ([0], [2], 1, (100,), torch.float64, 5, 10, False, 5),
+    # ([0, 1], [2], 2, (1176,), torch.bfloat16, 5, 10, False, 6),
+    # ([0, 1], [2, 3], 4, (29, 4096), torch.bfloat16, 100, 200, False, 7),
+    # Concurrent copy
+    ([0], [2], {"first_token": 11908, "num_prefill_tokens": 100}, 10, (3584,), torch.bfloat16, 1, 5, True, 1),
+    # ([0, 1], [2], 2, (1176,), torch.bfloat16, 50, 100, True, 9),
+    # ([0, 1], [2, 3], 1, (100,), torch.float64, 5, 50, True, 10),
+    # ([0, 1], [2, 3], 1, (100,), torch.bfloat16, 1, 1, True, 3),
+]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "sidecar_servers",
+    ["intranode", "internode"],
+    indirect=True,
+    ids=["intra", "inter"],
+)
+@pytest.mark.parametrize(
+    "sender_ranks, receiver_ranks, obj, num_chunks, chunk_shape, dtype, token_min, token_max, concurrent_copy, count",
+    streaming_test_params,
+)
+async def test_mixed_streaming(
+    sidecar_servers: tuple[list[multiprocessing.Process], Literal["intranode", "internode"]],
+    sender_ranks: list[int],
+    receiver_ranks: list[int],
+    obj: dict[str, Any],
+    num_chunks: int,
+    chunk_shape: tuple[int, ...],
+    dtype: torch.dtype,
+    token_min: int,
+    token_max: int,
+    concurrent_copy: bool,
+    count: int,
+):
+    """Test sending and receiving mixed data types through streaming between senders and receivers.
+    Works with both intranode and internode setups.
+    """
+    servers, setup_type = sidecar_servers
+    assert servers is not None, "Servers fixture should be available"
+
+    from cornserve.sidecar.api import Sidecar
+    from cornserve.sidecar.schema import SidecarConfig
+
+    print("------------------------------------------------------------")
+    print(
+        f"Testing {setup_type} tensor communication:\n",
+        f"Sender ranks: {sender_ranks} Receiver ranks: {receiver_ranks} concurrent_copy: {concurrent_copy}\n",
+        f"num_chunks: {num_chunks} chunk_shape: {chunk_shape} dtype: {dtype} token_min: {token_min} token_max: {token_max}",
+    )
+
+    sidecar_senders = []
+    sidecar_receivers = []
+
+    for r in sender_ranks:
+        config = SidecarConfig(
+            sidecar_rank=r,
+            group=sender_ranks,
+            send_tensor_shape=(-1, *chunk_shape),
+            send_tensor_dtype=dtype,
+            concurrent_copy=concurrent_copy,
+        )
+        sidecar_senders.append(Sidecar(config))
+
+    for r in receiver_ranks:
+        config = SidecarConfig(
+            sidecar_rank=r,
+            group=receiver_ranks,
+            recv_tensor_shape=(-1, *chunk_shape),
+            recv_tensor_dtype=dtype,
+            concurrent_copy=concurrent_copy,
+        )
+        sidecar_receivers.append(Sidecar(config))
+
+    def send_all(
+        senders: list[Sidecar],
+        receiver_ranks: list[int],
+    ) -> tuple[list[str], list[list[torch.Tensor]]]:
+        ids = []
+        data = []
+
+        for _ in range(count):
+            chunks = []
+            id = uuid.uuid4().hex
+            ids.append(id)
+
+            n = random.randint(token_min, token_max)
+            for i in range(1, num_chunks + 1):
+                print(f"--> Sender {sender_ranks} sending chunk {i} of data_id {id} with {n} tokens")
+                chunk = torch.randn(n, *chunk_shape, dtype=dtype)
+                chunks.append(chunk)
+                for r, sender in enumerate(senders):
+                    sender.send(
+                        id=id,
+                        data=chunk.to(device_from_rank(r)),
+                        dst_sidecar_ranks=[receiver_ranks],
+                        chunk_id=i,
+                        stream=True,
+                    )
+                print("TEST: Sent data id", id, "chunk", i, "of tensor", chunk.shape)
+
+            # Out of order chunking
+            print(f"--> Sender {sender_ranks} sending chunk 0 of data_id {id} with data {obj}")
+            for r, sender in enumerate(senders):
+                sender.send(
+                    id=id,
+                    data=obj,
+                    dst_sidecar_ranks=[receiver_ranks],
+                    chunk_id=0,
+                    stream=True,
+                )
+            time.sleep(5)
+            senders[0].close_stream(id=id, dst_sidecar_ranks=[receiver_ranks])
+            data.append(chunks)
+        return ids, data
+
+    async def verify(
+        id: str,
+        data: list[torch.Tensor],
+        sender_rank: int,
+        receivers: list[Sidecar],
+    ):
+        for receiver in receivers:
+            received = await receiver.recv(id=id, chunk_id=0)
+            assert obj == received, f"Object mismatch for id {id}-0: {obj} vs {received}"
+
+        for i in range(num_chunks):
+            for receiver in receivers:
+                received = await receiver.recv(id=id, chunk_id=i + 1)
+                sent = data[i].to(device_from_rank(sender_rank))
+                received = received.to(device_from_rank(sender_rank))
+                assert torch.allclose(sent, received), f"Data mismatch for id {id}-{i + 1}: {sent} vs {received}"
+
+        chunk = await receivers[0].recv(id=id, chunk_id=num_chunks + 1)
+
+        assert chunk is None
+        for i in range(num_chunks + 1):
             await receivers[0].mark_done(id=id, chunk_id=i)
 
     async def verify_all(
