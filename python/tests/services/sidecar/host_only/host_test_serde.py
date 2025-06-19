@@ -94,20 +94,20 @@ class DockerTestManager:
         
         container_name = f"{CLIENT_CONTAINER_PREFIX}_{gpu_id}"
 
-        # base_cmd = [
-        #     "--name", container_name,
-        #     CONTAINER_IMAGE,
-        #     "python", "-u", "client.py", str(gpu_id), "--device-id", str(0) # -u for unbuffered output
-        # ]
-        #
-        # cmd = self.build_docker_command(base_cmd, gpu_spec=f"device={gpu_id}")
-
         base_cmd = [
             "--name", container_name,
             CONTAINER_IMAGE,
-            "python", "-u", "client.py", str(gpu_id), # -u for unbuffered output
+            "python", "-u", "client.py", str(gpu_id), "--device-id", str(0) # -u for unbuffered output
         ]
-        cmd = self.build_docker_command(base_cmd, gpu_spec="all")
+
+        cmd = self.build_docker_command(base_cmd, gpu_spec=f"device={gpu_id}")
+
+        # base_cmd = [
+        #     "--name", container_name,
+        #     CONTAINER_IMAGE,
+        #     "python", "-u", "client.py", str(gpu_id), # -u for unbuffered output
+        # ]
+        # cmd = self.build_docker_command(base_cmd, gpu_spec="all")
         
         print(f"Running: {' '.join(cmd)}")
         process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, bufsize=1)
