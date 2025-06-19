@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import uuid
 from collections import defaultdict
 from collections.abc import Iterator
@@ -285,15 +286,25 @@ class TaskDispatcher:
             logger.exception("Error while invoking task")
             raise RuntimeError(f"HTTP request failed: {e}") from e
 
-        logger.info(
-            "Task %s response: %s",
-            execution.invocation.task.__class__.__name__,
-            response.content.decode(),
-        )
+        content_type = response.headers.get("content-type", "").lower()
+        if content_type.startswith("application/json"):
+            # JSON response from task executor -> `TaskOutput` -> dump
+            task_output: TaskOutput = execution.invocation.task.execution_descriptor.from_response(
+                task_output=execution.invocation.task_output,
+                response=response.json(),
+            )
+        elif content_type.startswith("audio/") or content_type.startswith("video/"):
+            # Binary response from task executor -> `TaskOutput` -> dump
+            task_output = execution.invocation.task.execution_descriptor.from_response(
+                task_output=execution.invocation.task_output,
+                response={
+                    "content":base64.b64encode(response.content).decode('utf-8'),
+                    "content_type": content_type,
+                    "encoding": "base64",
+                },
+            )
+        else:
+            logger.error("Unsupported content type: %s", content_type)
+            raise ValueError(f"Unsupported content type: {content_type}")
 
-        # JSON response from task executor -> `TaskOutput` -> dump
-        task_output: TaskOutput = execution.invocation.task.execution_descriptor.from_response(
-            task_output=execution.invocation.task_output,
-            response=response.json(),
-        )
         return task_output.model_dump()
