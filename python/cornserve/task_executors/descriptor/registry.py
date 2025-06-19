@@ -64,7 +64,7 @@ class TaskExecutionDescriptorRegistry:
             name: The name of the descriptor. If None, use the default descriptor.
         """
         # Lazily import built-in descriptors to avoid circular imports
-        import cornserve.task_executors.descriptor.builtins  # noqa: F401
+        import cornserve.task_executors.descriptor.builtins  # noqa: F401, PLC0415
 
         if task not in self.registry:
             raise ValueError(f"No descriptors registered for task {task.__name__}")

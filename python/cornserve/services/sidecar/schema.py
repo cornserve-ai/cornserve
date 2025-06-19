@@ -150,6 +150,19 @@ class SidecarServerConfig:
             and self.concurrent_copy == other.concurrent_copy
         )
 
+    def __hash__(self) -> int:
+        """Hash function for SidecarServerConfig."""
+        return hash(
+            (
+                tuple(self.group),
+                self.tensor_dtype,
+                self.slab_numel,
+                self.send_slot_numel,
+                self.recv_slot_numel,
+                self.concurrent_copy,
+            )
+        )
+
     def sender_config(self) -> SidecarSenderConfig:
         """Create the sender config."""
         full_tensor, slab = init_shmem(

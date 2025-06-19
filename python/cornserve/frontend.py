@@ -6,6 +6,7 @@ Developers can use this client to deploy and teardown tasks from the Cornserve g
 import enum
 import os
 import threading
+import time
 from urllib.parse import urlparse
 
 import websocket
@@ -111,8 +112,6 @@ class CornserveClient:
             socket: The WebSocket connection to keep alive.
             lock: A threading lock to ensure thread safety for sending messages.
         """
-        import time
-
         while True:
             try:
                 request = TaskRequest(verb=TaskRequestVerb.HEARTBEAT, task_list=None)
