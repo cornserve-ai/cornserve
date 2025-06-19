@@ -1,0 +1,4 @@
+prompt: "What am I drawing here?"
+multimodal_data:
+- ["video", "https://dedicated.junzema.com/draw.mp4"]
+return_audio: True

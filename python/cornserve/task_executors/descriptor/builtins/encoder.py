@@ -25,7 +25,7 @@ class EricDescriptor(TaskExecutionDescriptor[EncoderTask, EncoderInput, EncoderO
             [
                 "eric",
                 self.task.modality,
-                self.task.model_id.split("/")[-1].lower(),
+                self.task.model_id.split("/")[-1].lower().replace(".", "-"),
             ]
         ).lower()
         return name

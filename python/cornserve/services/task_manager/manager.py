@@ -294,6 +294,10 @@ class TaskManager:
                                 name="NVIDIA_VISIBLE_DEVICES",
                                 value=",".join(str(gpu.local_rank) for gpu in gpus),
                             ),
+                            # kclient.V1EnvVar(
+                            #     name="HF_HUB_OFFLINE",
+                            #     value="0" if "eric" in pod_name else "1",
+                            # ),
                             kclient.V1EnvVar(
                                 name="HF_TOKEN",
                                 value_from=kclient.V1EnvVarSource(
@@ -323,6 +327,7 @@ class TaskManager:
                 ],
                 node_name=node_name,
                 host_ipc=True,
+                host_pid=True,
             ),
         )
 

@@ -1,0 +1,4 @@
+prompt: "You are a helpful assistant"
+multimodal_data:
+- ["audio", "https://dedicated.junzema.com/draw.wav"]
+return_audio: True

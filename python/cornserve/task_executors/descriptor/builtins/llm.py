@@ -33,7 +33,6 @@ class VLLMDescriptor(TaskExecutionDescriptor[LLMBaseTask, LLMInput, LLMOutputBas
             self.task.model_id,
             "--tensor-parallel-size", str(len(gpus)),
             "--port", str(port),
-            "--limit-mm-per-prompt", "image=5",  # TODO: Is this still needed?
             "--cornserve-sidecar-ranks", *[str(gpu.global_rank) for gpu in gpus],
         ]
         # fmt: on

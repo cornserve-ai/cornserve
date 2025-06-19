@@ -1,0 +1,4 @@
+prompt: "What do you see in the video?"
+multimodal_data:
+- ["video", "https://dedicated.junzema.com/draw.mp4"]
+return_audio: False

@@ -53,4 +53,4 @@ class EncoderTask(UnitTask[EncoderInput, EncoderOutput]):
 
     def make_name(self) -> str:
         """Create a concise string representation of the task."""
-        return f"encoder-{self.modality.lower()}-{self.model_id.split('/')[-1].lower()}"
+        return f"encoder-{self.modality.lower()}-{self.model_id.split('/')[-1].lower().replace('.', '-')}"

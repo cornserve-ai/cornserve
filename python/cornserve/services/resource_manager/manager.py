@@ -423,7 +423,7 @@ class ResourceManager:
             )
 
             # Create a new task manager pod and service
-            state.pod_name = state.service_name = f"tm-{state.id}".lower()
+            state.pod_name = state.service_name = f"tm-{state.id}".lower().replace(".", "-")
             port = 50051
 
             pod = kclient.V1Pod(

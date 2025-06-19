@@ -231,7 +231,7 @@ class TaskManager:
             assert len(running_task_ids) == len(dispatch.invocations)
 
         # Dispatch to the Task Dispatcher
-        async with httpx.AsyncClient(timeout=60.0) as client:
+        async with httpx.AsyncClient(timeout=180.0) as client:
             invocation_task = asyncio.create_task(
                 client.post(K8S_TASK_DISPATCHER_HTTP_URL + "/task", json=dispatch.model_dump())
             )

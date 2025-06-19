@@ -2,8 +2,8 @@ import ctypes
 import hashlib
 import multiprocessing
 import random
-from multiprocessing.process import BaseProcess
 from collections.abc import Generator
+from multiprocessing.process import BaseProcess
 
 import pytest
 import torch
