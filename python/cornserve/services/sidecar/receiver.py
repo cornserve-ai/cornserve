@@ -306,7 +306,7 @@ class SidecarReceiver:
             if req_state.num_chunks and recv_req.chunk_id >= req_state.num_chunks:
                 # check out of bound
                 logger.warning(
-                    "receive: chunk_id %d out of bound for request %s > request.num_chunks %s",
+                    "receive: chunk_id %d out of bound for request %s >= request.num_chunks %s",
                     recv_req.chunk_id,
                     recv_req.id,
                     req_state.num_chunks,

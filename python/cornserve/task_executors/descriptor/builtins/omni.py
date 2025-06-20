@@ -45,6 +45,10 @@ class OmniThinkerDescriptor(
         cmd = [
             self.task.model_id,
             "--tensor-parallel-size", str(len(gpus)),
+            "--no-enable-prefix-caching",
+            # Jeff: this is required for now bc vLLM V1 cannot cache prompt embeddings,
+            # resulting the direct reuse of matched prefix, leaving no prompt embeddings
+            # to stream to the talker
             "--enforce-eager",
             "--port", str(port),
             "--cornserve-sidecar-ranks", *[str(gpu.global_rank) for gpu in gpus],
