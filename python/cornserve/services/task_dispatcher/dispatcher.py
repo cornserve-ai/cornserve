@@ -298,7 +298,7 @@ class TaskDispatcher:
             task_output = execution.invocation.task.execution_descriptor.from_response(
                 task_output=execution.invocation.task_output,
                 response={
-                    "content":base64.b64encode(response.content).decode('utf-8'),
+                    "content": base64.b64encode(response.content).decode("utf-8"),
                     "content_type": content_type,
                     "encoding": "base64",
                 },
