@@ -4,7 +4,7 @@ FROM pytorch/pytorch:2.7.0-cuda12.6-cudnn9-devel AS builder
 ARG max_jobs=64
 ENV MAX_JOBS=${max_jobs}
 ENV NVCC_THREADS=8
-RUN pip wheel -w /tmp/wheels --no-build-isolation --no-deps --verbose flash-attn
+RUN pip wheel -w /tmp/wheels --no-build-isolation --no-deps --verbose flash-attn==2.7.4.post1
 
 # Actual Eric runs inside the `runtime` image. Just copy over the flash-attn wheel.
 FROM pytorch/pytorch:2.7.0-cuda12.6-cudnn9-runtime AS eric
@@ -16,7 +16,7 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends build-essential \
     && rm -rf /var/lib/apt/lists/*
 
-ADD ./python /workspace/cornserve/python
+ADD . /workspace/cornserve
 
 WORKDIR /workspace/cornserve/python
 RUN pip install -e '.[eric]'
