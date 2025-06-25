@@ -16,7 +16,7 @@ from cornserve.constants import K8S_TASK_DISPATCHER_HTTP_URL
 from cornserve.logging import get_logger
 from cornserve.services.pb.resource_manager_pb2 import DeployUnitTaskRequest, TeardownUnitTaskRequest
 from cornserve.services.pb.resource_manager_pb2_grpc import ResourceManagerStub
-from cornserve.task.base import TaskGraphDispatch, UnitTask, TASK_TIMEOUT
+from cornserve.task.base import TASK_TIMEOUT, TaskGraphDispatch, UnitTask
 
 logger = get_logger(__name__)
 tracer = trace.get_tracer(__name__)
