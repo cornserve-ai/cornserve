@@ -21,6 +21,8 @@ class LLMInput(TaskInput):
     prompt: str
     multimodal_data: list[tuple[str, str]] = []
     embeddings: list[DataForward[Tensor]] = []
+    max_completion_tokens: int | None = None
+    seed: int | None = None
 
 
 class LLMOutputBase(TaskOutput):

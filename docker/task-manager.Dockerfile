@@ -1,6 +1,6 @@
 FROM python:3.11.11
 
-ADD . /workspace/cornserve
+ADD ./python /workspace/cornserve/python
 
 WORKDIR /workspace/cornserve/python
 RUN pip install -e .[task-manager]

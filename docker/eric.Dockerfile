@@ -16,7 +16,7 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends build-essential \
     && rm -rf /var/lib/apt/lists/*
 
-ADD . /workspace/cornserve
+ADD ./python /workspace/cornserve/python
 
 WORKDIR /workspace/cornserve/python
 RUN pip install -e '.[eric]'
