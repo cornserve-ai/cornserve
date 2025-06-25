@@ -39,7 +39,7 @@ jobs:
         include:
           - component: eric
             build_args: |
-              max_jobs=4
+              max_jobs=2
             build_target: eric
           - component: vllm
             build_target: vllm
