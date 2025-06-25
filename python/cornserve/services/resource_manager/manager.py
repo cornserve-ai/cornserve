@@ -140,7 +140,20 @@ class ResourceManager:
         core_api = kclient.CoreV1Api(api_client)
 
         # first find the all the nodes in the cluster
-        nodes = await core_api.list_node()
+        nodes_response = await core_api.list_node()
+        # filter READY nodes
+        nodes = []
+        for node in nodes_response.items:
+            if node.status and node.status.conditions:
+                if any(
+                    condition.type == "Ready" and condition.status == "True" for condition in node.status.conditions
+                ):
+                    nodes.append(node)
+                else:
+                    logger.warning("Node %s is not ready, skipping", node.metadata.name)
+            else:
+                logger.warning("Node %s has no status or conditions, skipping", node.metadata.name)
+
         # then for each node, we create num_gpu_per_node sidecars with rank
         coros = []
         gpus = []
@@ -148,11 +161,11 @@ class ResourceManager:
         try:
             gpu_per_node = {}
             # first query the number of GPUs on each node
-            for node in nodes.items:
+            for node in nodes:
                 gpu_per_node[node.metadata.name] = int(node.status.capacity["nvidia.com/gpu"])
             world_size = sum(gpu_per_node.values())
             sidecar_rank = 0
-            for node in nodes.items:
+            for node in nodes:
                 min_node_rank = sidecar_rank
                 n_gpu = gpu_per_node[node.metadata.name]
                 for j in range(n_gpu):

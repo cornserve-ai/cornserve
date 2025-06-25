@@ -20,7 +20,7 @@ ENV RAPIDS_LIBUCX_PREFER_SYSTEM_LIBRARY=true
 ENV LD_LIBRARY_PATH=/opt/conda/lib:$LD_LIBRARY_PATH
 ########### End Install UCX ###########
 
-ADD . /workspace/cornserve
+ADD ./python /workspace/cornserve/python
 
 WORKDIR /workspace/cornserve/python
 RUN pip install -e '.[sidecar]'

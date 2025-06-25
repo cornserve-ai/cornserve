@@ -19,6 +19,8 @@ class MLLMInput(TaskInput):
 
     prompt: str
     multimodal_data: list[tuple[str, str]] = []
+    max_completion_tokens: int | None = None
+    seed: int | None = None
 
 
 class MLLMOutput(TaskOutput):
@@ -94,6 +96,8 @@ class MLLMTask(Task[MLLMInput, MLLMOutput]):
             prompt=task_input.prompt,
             multimodal_data=task_input.multimodal_data,
             embeddings=embeddings,
+            max_completion_tokens=task_input.max_completion_tokens,
+            seed=task_input.seed,
         )
         llm_output = self.llm.invoke(llm_input)
 

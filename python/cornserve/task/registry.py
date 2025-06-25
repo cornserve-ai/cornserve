@@ -35,7 +35,7 @@ class TaskRegistry:
     def get(self, name: str) -> tuple[type[UnitTask], type[TaskInput], type[TaskOutput]]:
         """Get a task by its name."""
         # Lazy import builtin tasks to avoid circular import issues
-        import cornserve.task.builtins  # noqa: F401
+        import cornserve.task.builtins  # noqa: F401, PLC0415
 
         if name not in self._tasks:
             raise KeyError(f"Unit task with {name=} not found")
