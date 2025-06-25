@@ -57,7 +57,7 @@ class VLLMDescriptor(TaskExecutionDescriptor[LLMBaseTask, LLMInput, LLMOutputBas
             messages=[dict(role="user", content=content)],
         )
         if task_input.max_completion_tokens is not None:
-            request["max_tokens"] = task_input.max_completion_tokens
+            request["max_completion_tokens"] = task_input.max_completion_tokens
         if task_input.seed is not None:
             request["seed"] = task_input.seed
 
