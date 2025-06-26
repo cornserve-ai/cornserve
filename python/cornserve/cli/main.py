@@ -153,7 +153,7 @@ def register(
     initial_table = Table(box=box.ROUNDED)
     initial_table.add_column("App ID")
     initial_table.add_column("Alias")
-    initial_table.add_column("Status")
+    initial_table.add_column("Initial Status")
     initial_table.add_row(app_id, current_alias, Text(AppState.NOT_READY.value.title(), style="yellow"))
     rich.print(initial_table)
 
