@@ -30,6 +30,7 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 tracer = trace.get_tracer(__name__)
 
+TASK_TIMEOUT = 300
 
 # This context variable is set inside the top-level task's `__call__` method
 # just before creating an `asyncio.Task` (`_call_impl`) to run the task.
@@ -510,7 +511,7 @@ class TaskContext:
             logger.info("Dispatching tasks to %s/tasks/invoke", gateway_url)
 
             try:
-                async with httpx.AsyncClient(timeout=180.0) as client:
+                async with httpx.AsyncClient(timeout=TASK_TIMEOUT) as client:
                     response = await client.post(gateway_url + "/tasks/invoke", json=graph_dispatch.model_dump())
                 response.raise_for_status()
                 dispatch_outputs = response.json()
