@@ -16,7 +16,7 @@ from pydantic import BaseModel
 
 from cornserve.logging import get_logger
 from cornserve.services.pb import task_manager_pb2, task_manager_pb2_grpc
-from cornserve.task.base import TaskInvocation, TaskOutput, UnitTask
+from cornserve.task.base import TASK_TIMEOUT, TaskInvocation, TaskOutput, UnitTask
 from cornserve.task.forward import DataForward
 
 logger = get_logger(__name__)
@@ -244,7 +244,7 @@ class TaskDispatcher:
 
         # Dispatch all task invocations to task executors
         dispatch_coros: list[asyncio.Task[Any]] = []
-        client = httpx.AsyncClient(timeout=180.0)
+        client = httpx.AsyncClient(timeout=TASK_TIMEOUT)
         try:
             async with asyncio.TaskGroup() as tg:
                 for execution in task_executions:
