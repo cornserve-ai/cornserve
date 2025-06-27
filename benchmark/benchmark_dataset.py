@@ -4,23 +4,24 @@ This module defines a framework for sampling benchmark requests from various
 datasets. Each dataset subclass of BenchmarkDataset must implement sample
 generation. Supported dataset types include:
   - VisionArena
+
+This file is based on https://github.com/vllm-project/vllm/blob/main/benchmarks/benchmark_dataset.py
 """
 
 import base64
 import hashlib
-import os
 import io
 import logging
+import os
 import random
 from abc import ABC, abstractmethod
-from collections.abc import Mapping
 from dataclasses import dataclass, field
 from io import BytesIO
-from typing import Any, Callable, Optional, Union
+from typing import Any, Callable
 
 from datasets import load_dataset
 from PIL import Image
-from transformers import PreTrainedTokenizerBase
+from transformers.tokenization_utils_base import PreTrainedTokenizerBase
 
 logger = logging.getLogger(__name__)
 
@@ -28,7 +29,7 @@ logger = logging.getLogger(__name__)
 # Data Classes
 # -----------------------------------------------------------------------------
 
-FILE_SERVER_URL = "http://ampere00.eecs.umich.edu:32000"
+FILE_SERVER_URL = "http://localhost:32000"
 
 @dataclass
 class SampleRequest:
@@ -36,10 +37,10 @@ class SampleRequest:
     Represents a single inference request for benchmarking.
     """
 
-    prompt: Union[str, Any]
+    prompt: str | Any
     prompt_len: int
     expected_output_len: int
-    multi_modal_data: Optional[dict] = None
+    multi_modal_data: dict[str, Any]
     video_urls: list[str] = field(default_factory=list)
     audio_urls: list[str] = field(default_factory=list)
     image_urls: list[str] = field(default_factory=list)
@@ -55,7 +56,7 @@ class BenchmarkDataset(ABC):
 
     def __init__(
         self,
-        dataset_path: Optional[str] = None,
+        dataset_path: str,
         random_seed: int = DEFAULT_SEED,
     ) -> None:
         """
@@ -158,7 +159,7 @@ def is_valid_sequence(
                 or combined_too_long)
 
 
-def save_image(image: Any) -> Mapping[str, Any]:
+def save_image(image: Any) -> dict[str, Any]:
     """
     Process a single image input, save it to local file, and return a multimedia content dictionary.
 
@@ -256,8 +257,7 @@ def save_image(image: Any) -> Mapping[str, Any]:
         },
     }
 
-def process_image(image: Any) -> Mapping[str, Any]:
-    # TODO: hash and save the image to a local file under videos, and return the http url
+def process_image(image: Any) -> dict[str, Any]:
     """
     Process a single image input and return a multimedia content dictionary.
 
@@ -307,13 +307,13 @@ def process_image(image: Any) -> Mapping[str, Any]:
 class HuggingFaceDataset(BenchmarkDataset):
     """Base class for datasets hosted on HuggingFace."""
 
-    SUPPORTED_DATASET_PATHS: Union[set[str], dict[str, Callable]] = set()
+    SUPPORTED_DATASET_PATHS: set[str] | dict[str, Callable] = set()
 
     def __init__(
         self,
         dataset_path: str,
         dataset_split: str,
-        dataset_subset: Optional[str] = None,
+        dataset_subset: str | None = None,
         **kwargs,
     ) -> None:
         super().__init__(dataset_path=dataset_path, **kwargs)
@@ -355,7 +355,7 @@ class VisionArenaDataset(HuggingFaceDataset):
         self,
         tokenizer: PreTrainedTokenizerBase,
         num_requests: int,
-        output_len: Optional[int] = None,
+        output_len: int | None = None,
     ) -> list:
         output_len = (output_len
                       if output_len is not None else self.DEFAULT_OUTPUT_LEN)
@@ -363,13 +363,12 @@ class VisionArenaDataset(HuggingFaceDataset):
         for item in self.data:
             if len(sampled_requests) >= num_requests:
                 break
-            parser_fn = self.SUPPORTED_DATASET_PATHS.get(self.dataset_path)
+            parser_fn = self.SUPPORTED_DATASET_PATHS.get(self.dataset_path)  # type: ignore
             if parser_fn is None:
                 raise ValueError(
                     f"Unsupported dataset path: {self.dataset_path}")
             prompt = parser_fn(item)
-            # mm_content = save_image(item["images"][0])
-            mm_content = process_image(item["images"][0])
+            mm_content = process_image(item["images"][0])  # type: ignore
             prompt_len = len(tokenizer(prompt).input_ids)
             sampled_requests.append(
                 SampleRequest(
@@ -380,4 +379,3 @@ class VisionArenaDataset(HuggingFaceDataset):
                 ))
         self.maybe_oversample_requests(sampled_requests, num_requests)
         return sampled_requests
-

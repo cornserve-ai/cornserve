@@ -17,6 +17,8 @@ class Request(AppRequest):
 
     prompt: str
     multimodal_data: list[tuple[str, str]] = []
+    max_completion_tokens: int | None = None
+    seed: int | None = None
 
 
 class Response(AppResponse):
@@ -30,8 +32,8 @@ class Response(AppResponse):
 
 
 mllm = MLLMTask(
-    # model_id="Qwen/Qwen2-VL-7B-Instruct",
-    model_id="google/gemma-3-4b-it",
+    model_id="Qwen/Qwen2-VL-7B-Instruct",
+    # model_id="google/gemma-3-4b-it",
     modalities=[Modality.IMAGE],
 )
 
@@ -44,6 +46,11 @@ class Config(AppConfig):
 
 async def serve(request: Request) -> Response:
     """Main serve function for the app."""
-    mllm_input = MLLMInput(prompt=request.prompt, multimodal_data=request.multimodal_data)
+    mllm_input = MLLMInput(
+        prompt=request.prompt,
+        multimodal_data=request.multimodal_data,
+        max_completion_tokens=request.max_completion_tokens,
+        seed=request.seed,
+    )
     mllm_output = await mllm(mllm_input)
     return Response(response=mllm_output.response)

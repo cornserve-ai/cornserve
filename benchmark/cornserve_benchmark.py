@@ -1,37 +1,29 @@
 import argparse
 import asyncio
 import contextlib
-from datetime import datetime
 import json
-import os
-import sys
 import time
-from typing import AsyncGenerator
-import uuid
+from dataclasses import asdict
+from datetime import datetime
+from typing import Any, AsyncGenerator, Callable
 
 import aiohttp
-from cornserve.services.gateway.models import AppInvocationRequest
 import numpy as np
+from tqdm.asyncio import tqdm
 from transformers import AutoTokenizer
 
-from benchmark_dataset import SampleRequest, VisionArenaDataset
+from benchmark_backend import TRANSFORM_FUNCS, RequestInput, RequestOutput
+from benchmark_dataset import FILE_SERVER_URL, SampleRequest, VisionArenaDataset
 from utils import get_benchmark_filenames
-try:
-    GATEWAY_URL = os.environ["CORNSERVE_GATEWAY_URL"]
-except KeyError:
-    print(
-        "Environment variable CORNSERVE_GATEWAY_URL is not set. Defaulting to http://localhost:30080.\n",
-    )
-    GATEWAY_URL = "http://localhost:30080"
 
-FILE_SERVER_URL = "http://ampere00.eecs.umich.edu:32000"
+GATEWAY_URL = "http://localhost:30080"
+BACKEND_URLS = {
+    "cornserve": GATEWAY_URL,
+    "vllm": "http://localhost:8000",
+    "eric": "http://localhost:7999",
+}
 AIOHTTP_TIMEOUT = aiohttp.ClientTimeout(total=6 * 60 * 60)
 MAX_MM_COUNT = 40
-
-video_filenames, audio_filenames, image_filenames = get_benchmark_filenames(MAX_MM_COUNT)
-video_urls = [f"{FILE_SERVER_URL}/videos/{filename}" for filename in video_filenames]
-audio_urls = [f"{FILE_SERVER_URL}/audios/{filename}" for filename in audio_filenames]
-image_urls = [f"{FILE_SERVER_URL}/images/{filename}" for filename in image_filenames]
 
 def sample_mm_count(max_count: int, distribution: str = "poisson") -> int:
     """Sample number of multimedia items based on distribution."""
@@ -52,184 +44,36 @@ def sample_mm_count(max_count: int, distribution: str = "poisson") -> int:
     else:
         return np.random.randint(0, max_count + 1)
 
-async def invoke(
-    app_id: str,
-    sampled_request: SampleRequest,
-    use_sampled_mm_data: bool = True,
-    video_urls: list[str] = [],
-    audio_urls: list[str] = [],
-    image_urls: list[str] = [],
-):
-    # data={"prompt": prompt, "multimodal_data": [], "return_audio": True}
-    data={"prompt": sampled_request.prompt, "multimodal_data": []}
-    if not use_sampled_mm_data:
-        if len(video_urls):
-            for u in video_urls:
-                data["multimodal_data"].append(("video", u))
-        if len(audio_urls):
-            for u in audio_urls:
-                data["multimodal_data"].append(("audio", u))
-        if len(image_urls):
-            for u in image_urls:
-                data["multimodal_data"].append(("image", u))
-    else:
-        # sampled multimedia data only has one image in the VisionArena dataset
-        assert sampled_request.multi_modal_data is not None, "SampleRequest missing multi_modal_data"
-        data["multimodal_data"].append(("image", sampled_request.multi_modal_data["image_url"]["url"]))
 
-
-    data["max_completion_tokens"] = sampled_request.expected_output_len
-    request = AppInvocationRequest(request_data=data)
-    api_url = f"{GATEWAY_URL}/app/invoke/{app_id}"
-    result = {
-        "success": False,
-        "video_urls": video_urls,
-        "audio_urls": audio_urls,
-        "image_urls": image_urls,
-    }
+async def post(
+    request_input: RequestInput,
+    pbar: tqdm | None,
+) -> RequestOutput:
+    """Send a POST request to the specified URL with the given payload."""
+    result = RequestOutput()
     start_time = time.perf_counter()
     async with aiohttp.ClientSession(timeout=AIOHTTP_TIMEOUT) as session:
         try:
-            async with session.post(api_url, json=request.model_dump()) as response:
-                end_time = time.perf_counter()
+            async with session.post(request_input.url, json=request_input.payload) as response:
                 if response.status == 200:
-                    result["success"] = True
-                    result["latency"] = end_time - start_time
-                    print(f"Response received in {result['latency']:.2f} seconds")
-        except Exception:
-            print(sys.exc_info()[0])
-            result["latency"] = 0.0
-    return result
-
-async def post_to_eric(
-    sampled_request: SampleRequest,
-    use_sampled_mm_data: bool = True,
-    video_urls: list[str] = [],
-    audio_urls: list[str] = [],
-    image_urls: list[str] = [],
-) -> dict:
-    base_url = "http://localhost:7999"
-    api_url = f"{base_url}/embeddings"
-
-    payload = {"data": []}
-    if not use_sampled_mm_data:
-        for url in video_urls:
-            payload["data"].append({
-                "id": uuid.uuid4().hex,
-                "modality": "video",
-                "url": url,
-            })
-        for url in audio_urls:
-            payload["data"].append({
-                "id": uuid.uuid4().hex,
-                "modality": "audio",
-                "url": url,
-            })
-        for url in image_urls:
-            payload["data"].append({
-                "id": uuid.uuid4().hex,
-                "modality": "image",
-                "url": url,
-            })
-    else:
-        # sampled multimedia data only has one image in the VisionArena dataset
-        assert sampled_request.multi_modal_data is not None, "SampleRequest missing multi_modal_data"
-        url = sampled_request.multi_modal_data["image_url"]["url"]
-        payload["data"].append({
-            "id": uuid.uuid4().hex,
-            "modality": "image",
-            "url": url,
-        })
-
-    result = {
-        "success": False,
-        "video_urls": video_urls,
-        "audio_urls": audio_urls,
-        "image_urls": image_urls,
-    }
-    start_time = time.perf_counter()
-    async with aiohttp.ClientSession(timeout=AIOHTTP_TIMEOUT) as session:
-        try:
-            async with session.post(api_url, json=payload) as response:
-                end_time = time.perf_counter()
-                if response.status == 200:
-                    result["success"] = True
-                    result["latency"] = end_time - start_time
-                    print(f"Response received in {result['latency']:.2f} seconds")
-        except Exception:
-            print(sys.exc_info()[0])
-            result["latency"] = 0.0
-    return result
-
-async def post_to_vllm(
-    model_id: str,
-    sampled_request: SampleRequest,
-    use_sampled_mm_data: bool = True,
-    video_urls: list[str] = [],
-    audio_urls: list[str] = [],
-    image_urls: list[str] = [],
-) -> dict:
-    base_url = "http://localhost:8000"
-    api_url = f"{base_url}/v1/chat/completions"
-
-    payload = {
-        "model": model_id,
-        "messages": [
-            {
-                "role": "user",
-                "content": [
-                    {"type" : "text", "text": sampled_request.prompt},
-                ]
-            },
-        ],
-        "max_completion_tokens": sampled_request.expected_output_len,
-    }
-    if not use_sampled_mm_data:
-        for url in video_urls:
-            payload["messages"][0]["content"].append({
-                "type": "video_url",
-                "video_url": url,
-            })
-        for url in audio_urls:
-            payload["messages"][0]["content"].append({
-                "type": "audio_url",
-                "audio_url": url,
-            })
-        for url in image_urls:
-            payload["messages"][0]["content"].append({
-                "type": "image_url",
-                "image_url": url,
-            })
-    else:
-        # sampled multimedia data only has one image in the VisionArena dataset
-        assert sampled_request.multi_modal_data is not None, "SampleRequest missing multi_modal_data"
-        payload["messages"][0]["content"].append(sampled_request.multi_modal_data)
-
-    result = {
-        "success": False,
-        "video_urls": video_urls,
-        "audio_urls": audio_urls,
-        "image_urls": image_urls,
-    }
-    start_time = time.perf_counter()
-    async with aiohttp.ClientSession(timeout=AIOHTTP_TIMEOUT) as session:
-        try:
-            async with session.post(api_url, json=payload) as response:
-                end_time = time.perf_counter()
-                if response.status == 200:
-                    result["success"] = True
-                    result["latency"] = end_time - start_time
-                    print(f"Response received in {result['latency']:.2f} seconds")
-        except Exception:
-            print(sys.exc_info()[0])
-            result["latency"] = 0.0
+                    content = await response.json()
+                    end_time = time.perf_counter()
+                    result.success = True
+                    result.latency = end_time - start_time
+                    result.output = content
+                else:
+                    result.error = f"Request failed with status {response.status}"
+        except Exception as e:
+            result.error = f"Request failed with exception: {str(e)}"
+    if pbar:
+        pbar.update(1)
     return result
 
 async def get_request(
-    input_requests: list[SampleRequest],
+    input_requests: list[RequestInput],
     request_rate: float,
     burstiness: float = 1.0,
-) -> AsyncGenerator[SampleRequest, None]:
+) -> AsyncGenerator[RequestInput, None]:
     """
     Asynchronously generates requests at a specified rate
     with OPTIONAL burstiness.
@@ -267,81 +111,56 @@ async def get_request(
         # The next request will be sent after the interval.
         await asyncio.sleep(interval)
 
-async def benchmark(input_requests: list[SampleRequest], args) -> None:
-    # semaphore = asyncio.Semaphore(args.max_concurrency) if args.max_concurrency else contextlib.nullcontext()
-    #
-    # async def limited_request_func(request_func_input, pbar):
-    #     async with semaphore:
-    #         return await request_func(request_func_input=request_func_input, pbar=pbar)
+
+async def benchmark(
+    request_inputs: list[RequestInput],
+    backend: str,
+    num_prompts: int,
+    request_rate: float,
+    burstiness: float,
+    max_concurrency: int | None,
+    disable_tqdm: bool,
+) -> dict[str, Any]:
+    pbar = None if disable_tqdm else tqdm(total=len(request_inputs))
+    semaphore = asyncio.Semaphore(max_concurrency) if max_concurrency else contextlib.nullcontext()
+    async def request_func(request_input: RequestInput, pbar: tqdm | None = None) -> RequestOutput:
+        async with semaphore:
+            return await post(request_input=request_input, pbar=pbar)
+    
+    """Run benchmark and collect statistics."""
+    
+    print(f"Starting benchmark with {len(request_inputs)} requests...")
+    distribution = "Poisson process" if burstiness == 1.0 else "Gamma distribution"
+    print(f"Traffic request rate: {request_rate}")
+    print(f"Burstiness factor: {burstiness} ({distribution})")
+    print(f"Maximum request concurrency: {max_concurrency}")
     
     # Start time for overall benchmark
     benchmark_start_time = time.perf_counter()
-    """Run benchmark and collect statistics."""
     tasks = []
-    
-    print(f"Starting benchmark with {len(input_requests)} requests...")
-    
     # Generate requests and create tasks
-    async for request in get_request(input_requests, args.request_rate, args.burstiness):
-        # Get the URLs for this request
-        video_urls = getattr(request, 'video_urls', [])
-        audio_urls = getattr(request, 'audio_urls', [])
-        image_urls = getattr(request, 'image_urls', [])
-        
-        # Create task for this request
-        if args.backend.lower() == "cornserve":
-            task = asyncio.create_task(invoke(
-                app_id=args.app_id,
-                sampled_request=request,
-                video_urls=video_urls,
-                audio_urls=audio_urls,
-                image_urls=image_urls
-            ))
-        elif args.backend.lower() == "eric":
-            # For Eric backend, we use the post_to_eric function
-            task = asyncio.create_task(post_to_eric(
-                sampled_request=request,
-                video_urls=video_urls,
-                audio_urls=audio_urls,
-                image_urls=image_urls
-            ))
-        elif args.backend.lower() == "vllm":
-            # For vLLM backend, we use the post_to_vllm function
-            task = asyncio.create_task(post_to_vllm(
-                model_id=args.model_id,
-                sampled_request=request,
-                video_urls=video_urls,
-                audio_urls=audio_urls,
-                image_urls=image_urls
-            ))
-        else:
-            raise ValueError(f"Unsupported backend: {args.backend}")
-
+    async for request in get_request(request_inputs, request_rate, burstiness):
+        task = asyncio.create_task(request_func(request_input=request, pbar=pbar))
         tasks.append(task)
     
     # Wait for all tasks to complete
-    results = await asyncio.gather(*tasks, return_exceptions=True)
+    results = await asyncio.gather(*tasks)
     
     benchmark_end_time = time.perf_counter()
     total_time = benchmark_end_time - benchmark_start_time
     
-    # Filter out exceptions and process results
-    errors = [r for r in results if isinstance(r, Exception)]
-    for error in errors:
-        print(f"Error occurred: {error}")
-    valid_results = [r for r in results if isinstance(r, dict)]
-    successful_requests = [r for r in valid_results if r.get("success", False)]
-    failed_requests = [r for r in valid_results if not r.get("success", False)]
-    latencies = [r["latency"] for r in successful_requests if r.get("latency", 0) > 0]
+    successful_requests = [r for r in results if r.success]
+    failed_requests = [r for r in results if not r.success]
+    latencies = [r.latency for r in successful_requests if r.latency > 0]
     
     # Calculate statistics
     stats = {
-        "total_requests": len(valid_results),
+        "total_requests": len(results),
         "successful_requests": len(successful_requests),
         "failed_requests": len(failed_requests),
-        "success_rate": len(successful_requests) / len(valid_results) if valid_results else 0,
+        "success_rate": len(successful_requests) / len(results) if results else 0,
         "total_time": total_time,
-        "actual_request_rate": len(valid_results) / total_time if total_time > 0 else 0,
+        "actual_request_rate": len(results) / total_time if total_time > 0 else 0,
     }
     
     if latencies:
@@ -362,50 +181,19 @@ async def benchmark(input_requests: list[SampleRequest], args) -> None:
             "latency_min": 0,
             "latency_max": 0,
         })
-    
-    output_filename = f"benchmark_results_{args.backend}_{args.num_prompts}_{int(time.time())}.json"
 
-    output_filename = f"benchmark_results_{args.backend}_{args.num_prompts}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
-    
     output_data = {
         "statistics": stats,
-        "detailed_results": valid_results,
+        "detailed_results": [asdict(result) for result in results],
         "benchmark_config": {
-            "seed": args.seed,
-            "request_rate": args.request_rate,
-            "burstiness": args.burstiness,
-            "num_prompts": args.num_prompts,
-            "video_prob": args.video_prob,
-            "audio_prob": args.audio_prob,
-            "image_prob": args.image_prob,
-            "max_videos_per_request": args.max_videos_per_request,
-            "max_audios_per_request": args.max_audios_per_request,
-            "max_images_per_request": args.max_images_per_request,
-            "mm_distribution": args.mm_distribution,
+            "request_rate": request_rate,
+            "burstiness": burstiness,
+            "num_prompts": num_prompts,
         }
     }
+
+    return output_data
     
-    with open(output_filename, 'w') as f:
-        json.dump(output_data, f, indent=2)
-    
-    print(f"\nBenchmark completed!")
-    print(f"Results saved to: {output_filename}")
-    print(f"\n=== BENCHMARK STATISTICS ===")
-    print(f"Total requests: {stats['total_requests']}")
-    print(f"Successful requests: {stats['successful_requests']}")
-    print(f"Failed requests: {stats['failed_requests']}")
-    print(f"Success rate: {stats['success_rate']:.2%}")
-    print(f"Total time: {stats['total_time']:.2f}s")
-    print(f"Actual request rate: {stats['actual_request_rate']:.2f} req/s")
-    
-    if latencies:
-        print(f"\n=== LATENCY STATISTICS ===")
-        print(f"Mean latency: {stats['latency_mean']:.3f}s")
-        print(f"Median latency: {stats['latency_median']:.3f}s")
-        print(f"95th percentile: {stats['latency_p95']:.3f}s")
-        print(f"99th percentile: {stats['latency_p99']:.3f}s")
-        print(f"Min latency: {stats['latency_min']:.3f}s")
-        print(f"Max latency: {stats['latency_max']:.3f}s")
 
 
 async def main(args: argparse.Namespace) -> None:
@@ -415,7 +203,7 @@ async def main(args: argparse.Namespace) -> None:
     tokenizer = AutoTokenizer.from_pretrained(model_id, tokenizer_mode = "auto", trust_remote_code=True)
 
     # Currently default to the VisionArena dataset
-    input_requests: list[SampleRequest]= VisionArenaDataset(
+    sampled_requests: list[SampleRequest]= VisionArenaDataset(
         dataset_path="lmarena-ai/VisionArena-Chat",
         dataset_subset=None,
         dataset_split="train",
@@ -426,59 +214,118 @@ async def main(args: argparse.Namespace) -> None:
             output_len=args.hf_output_len,
         )
 
-    backend = args.backend.lower()
-    if backend == "cornserve":
-        response = await invoke(args.app_id, input_requests[0])
-        print(f"Test response from Cornserve: {response}")
-    elif backend == "vllm":
-        response = await post_to_vllm(model_id=model_id, sampled_request=input_requests[0])
-        print(f"Test response from vLLM: {response}")
-    elif backend == "eric":
-        response = await post_to_eric(sampled_request=input_requests[0])
-        print(f"Test response from Eric: {response}")
-    else:
-        raise ValueError(f"Unsupported backend: {backend}")
-    if args.test_only:
-        print("Test completed successfully. Exiting without running full benchmark.")
-        return
-
     # Add random multimedia URLs to each request
-    for request in input_requests:
-        # Decide whether to include each media type
-        include_videos = np.random.random() < args.video_prob
-        include_audios = np.random.random() < args.audio_prob  
-        include_images = np.random.random() < args.image_prob
-    
-        # Sample number of each media type
-        if include_videos and args.max_videos_per_request > 0 and len(video_urls) > 0:
-            num_videos = sample_mm_count(args.max_videos_per_request, args.mm_distribution)
-            if num_videos > 0:
-                request.video_urls = np.random.choice(video_urls, 
-                                                    size=min(num_videos, len(video_urls)), 
-                                                    replace=False).tolist()  # type: ignore
+    if args.synthesize_mm_data:
+        video_filenames, audio_filenames, image_filenames = get_benchmark_filenames(MAX_MM_COUNT)
+        video_urls = [f"{FILE_SERVER_URL}/videos/{filename}" for filename in video_filenames]
+        audio_urls = [f"{FILE_SERVER_URL}/audios/{filename}" for filename in audio_filenames]
+        image_urls = [f"{FILE_SERVER_URL}/images/{filename}" for filename in image_filenames]
+
+        for request in sampled_requests:
+            # Decide whether to include each media type
+            include_videos = np.random.random() < args.video_prob
+            include_audios = np.random.random() < args.audio_prob  
+            include_images = np.random.random() < args.image_prob
         
-        if include_audios and args.max_audios_per_request > 0 and len(audio_urls) > 0:
-            num_audios = sample_mm_count(args.max_audios_per_request, args.mm_distribution)
-            if num_audios > 0:
-                request.audio_urls = np.random.choice(audio_urls,
-                                                    size=min(num_audios, len(audio_urls)),
-                                                    replace=False).tolist()  # type: ignore
+            # Sample number of each media type
+            if include_videos and args.max_videos_per_request > 0 and len(video_urls) > 0:
+                num_videos = sample_mm_count(args.max_videos_per_request, args.mm_distribution)
+                if num_videos > 0:
+                    request.video_urls = np.random.choice(
+                        video_urls,
+                        size=min(num_videos, len(video_urls)),
+                        replace=False,
+                    ).tolist()  # type: ignore
             
-        if include_images and args.max_images_per_request > 0 and len(image_urls) > 0:
-            num_images = sample_mm_count(args.max_images_per_request, args.mm_distribution)
-            if num_images > 0:
-                request.image_urls = np.random.choice(image_urls,
-                                                    size=min(num_images, len(image_urls)),
-                                                    replace=False).tolist()  # type: ignore
+            if include_audios and args.max_audios_per_request > 0 and len(audio_urls) > 0:
+                num_audios = sample_mm_count(args.max_audios_per_request, args.mm_distribution)
+                if num_audios > 0:
+                    request.audio_urls = np.random.choice(
+                        audio_urls,
+                        size=min(num_audios, len(audio_urls)),
+                        replace=False,
+                    ).tolist()  # type: ignore
+                
+            if include_images and args.max_images_per_request > 0 and len(image_urls) > 0:
+                num_images = sample_mm_count(args.max_images_per_request, args.mm_distribution)
+                if num_images > 0:
+                    request.image_urls = np.random.choice(
+                        image_urls,
+                        size=min(num_images, len(image_urls)),
+                        replace=False,
+                    ).tolist()  # type: ignore
 
-    print(f"Sample requests prepared: {len(input_requests)}")
-    await benchmark(input_requests, args)
+    backend = args.backend.lower()
+    if backend not in TRANSFORM_FUNCS:
+        raise ValueError(f"Unsupported backend: {backend}")
+    transform_func: Callable = TRANSFORM_FUNCS[backend]
 
+    request_inputs = []
+    for req in sampled_requests:
+        request_input = transform_func(
+            base_url=BACKEND_URLS[backend] if args.backend_url is None else args.backend_url,
+            app_id=args.app_id,
+            model_id=model_id,
+            sampled_request=req,
+            use_sampled_mm_data=not args.synthesize_mm_data,
+            video_urls=req.video_urls,
+            audio_urls=req.audio_urls,
+            image_urls=req.image_urls,
+        )
+        request_inputs.append(request_input)
+
+    print("Sending test request...")
+    result = await post(request_input=request_inputs[0], pbar=None)
+    if not result.success:
+        print("Test request failed with error:", result.error)
+        exit(1)
+    if args.test_only:
+        exit(0)
+
+    benchmark_results = await benchmark(
+        request_inputs=request_inputs,
+        backend=args.backend,
+        num_prompts=args.num_prompts,
+        request_rate=args.request_rate,
+        burstiness=args.burstiness,
+        max_concurrency=args.max_concurrency,
+        disable_tqdm=args.disable_tqdm,
+    )
+    benchmark_results["args"] = vars(args)
+
+    output_filename = (f"benchmark_{args.backend}_{args.num_prompts}_"
+                       f"seed{args.seed}_request_rate{args.request_rate}_"
+                       f"burstiness{args.burstiness}_synthesize{args.synthesize_mm_data}_"
+                          f"{datetime.now().strftime('%Y%m%d_%H%M%S')}.json")
+    
+    with open(output_filename, 'w') as f:
+        json.dump(benchmark_results , f, indent=2)
+    
+    print("\nBenchmark completed!")
+    print(f"Results saved to: {output_filename}")
+    print("\n=== BENCHMARK STATISTICS ===")
+    print(f"Total requests: {benchmark_results['statistics']['total_requests']}")
+    print(f"Successful requests: {benchmark_results['statistics']['successful_requests']}")
+    print(f"Failed requests: {benchmark_results['statistics']['failed_requests']}")
+    print(f"Success rate: {benchmark_results['statistics']['success_rate']:.2%}")
+    print(f"Total time: {benchmark_results['statistics']['total_time']:.2f}s")
+    print(f"Actual request rate: {benchmark_results['statistics']['actual_request_rate']:.2f} req/s")
+    
+    if benchmark_results['statistics']['successful_requests'] > 0:
+        print("\n=== LATENCY STATISTICS ===")
+        print(f"Mean latency: {benchmark_results['statistics']['latency_mean']:.3f}s")
+        print(f"Median latency: {benchmark_results['statistics']['latency_median']:.3f}s")
+        print(f"95th percentile: {benchmark_results['statistics']['latency_p95']:.3f}s")
+        print(f"99th percentile: {benchmark_results['statistics']['latency_p99']:.3f}s")
+        print(f"Min latency: {benchmark_results['statistics']['latency_min']:.3f}s")
+        print(f"Max latency: {benchmark_results['statistics']['latency_max']:.3f}s")
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser("Cornserve e2e benchmark")
     parser.add_argument("--backend", type=str, default="cornserve", choices=["cornserve", "eric", "vllm"], help="Backend to use for the benchmark.")
+    parser.add_argument("--disable-tqdm", action="store_true", help="Disable tqdm progress bar.")
+    parser.add_argument("--backend-url", type=str, help="URL of the backend service.")
     parser.add_argument("--app-id", type=str, help="App ID to invoke")
     parser.add_argument("--model-id", type=str, default="Qwen/Qwen2-VL-7B-Instruct", help="Model ID to use for the benchmark.")
     parser.add_argument("--seed", type=int, default=0)
@@ -486,7 +333,7 @@ if __name__ == "__main__":
                         help="Request rate in requests per second.")
     parser.add_argument("--burstiness", type=float, default=1.0, 
                         help="Burstiness factor for request generation.")
-    parser.add_argument("--num-prompts", type=int, default=1000, help="Number of prompts to process.")
+    parser.add_argument("--num-prompts", type=int, default=100, help="Number of prompts to process.")
     parser.add_argument("--hf-subset",
                           type=str,
                           default=None,
