@@ -30,6 +30,10 @@ jobs:
       matrix:
         component:
           - eric
+        include:
+          - component: eric
+            build_args: |
+              max_jobs=2
 
     steps:
       - name: Free Disk Space (Ubuntu)
