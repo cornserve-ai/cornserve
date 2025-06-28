@@ -1,0 +1,58 @@
+name: Test free space
+
+on:
+  push:
+    branches:
+      - jm-reduce-eric-image
+    tags:
+      - v*
+    paths:
+      - '.github/workflows/test_free_space.yaml'
+      - '.gitmodules'
+      - 'docker/**'
+      - 'python/**'
+      - 'proto/**'
+      - 'third_party/**'
+      - 'scripts/generate_pb.sh'
+      - '.dockerignore'
+      - 'LICENSE'
+      - 'setup.py'
+      - 'pyproject.toml'
+
+env:
+  NAMESPACE: cornserve
+
+jobs:
+  free-disk-space:
+    if: github.repository_owner == 'cornserve-ai'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Remove unnecessary files
+        run: |
+          df . -h
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /opt/ghc
+          sudo rm -rf "/usr/local/share/boost"
+          sudo rm -rf "$AGENT_TOOLSDIRECTORY"
+          df . -h
+
+      - name: Free Disk Space (Ubuntu)
+        uses: jlumbroso/free-disk-space@main
+        with:
+          # this might remove tools that are actually needed,
+          # if set to "true" but frees about 6 GB
+          tool-cache: true
+          
+          # all of these default to true, but feel free to set to
+          # "false" if necessary for your workflow
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: true
+          docker-images: true
+          swap-storage: true
+
+      - name: Check disk space
+        run: |
+          df . -h
