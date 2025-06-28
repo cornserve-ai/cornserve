@@ -23,9 +23,13 @@ env:
   NAMESPACE: cornserve
 
 jobs:
-  free-disk-space:
+  build_and_push:
     if: github.repository_owner == 'cornserve-ai'
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        component:
+          - eric
 
     steps:
       - name: Free Disk Space (Ubuntu)
