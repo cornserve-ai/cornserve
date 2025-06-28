@@ -1,0 +1,97 @@
+name: Test build eric
+
+on:
+  push:
+    branches:
+      - master
+      - jm-reduce-eric-image
+    tags:
+      - v*
+    paths:
+      - '.github/workflows/test_build_eric.yaml'
+      - '.gitmodules'
+      - 'docker/**'
+      - 'python/**'
+      - 'proto/**'
+      - 'third_party/**'
+      - 'scripts/generate_pb.sh'
+      - '.dockerignore'
+      - 'LICENSE'
+      - 'setup.py'
+      - 'pyproject.toml'
+
+env:
+  NAMESPACE: cornserve
+
+jobs:
+  build_and_push:
+    if: github.repository_owner == 'cornserve-ai'
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        component:
+          - eric
+        include:
+          - component: eric
+            build_args: |
+              max_jobs=2
+            build_target: eric
+
+    steps:
+      - name: Remove unnecessary files
+        run: |
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /opt/ghc
+          sudo rm -rf "/usr/local/share/boost"
+          sudo rm -rf "$AGENT_TOOLSDIRECTORY"
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Get more space
+        run: |
+          df . -h
+          sudo rm -rf ${GITHUB_WORKSPACE}/.git
+          df . -h
+
+      - name: Setup Python for protobuf generation
+        uses: actions/setup-python@v5
+        with:
+          python-version: 3.11
+
+      - name: Install protobuf dependencies
+        run: pip install grpcio-tools==1.71.0
+
+      - name: Generate protobuf files
+        run: bash scripts/generate_pb.sh
+
+      - name: Docker Hub login
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_HUB_USERNAME }}
+          password: ${{ secrets.DOCKER_HUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Generate image metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: |
+            ${{ env.NAMESPACE }}/${{ matrix.component }}
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=match,pattern=v.*
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/${{ matrix.component }}.Dockerfile
+          push: false
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          platforms: linux/amd64
+          build-args: ${{ matrix.build_args }}
+          target: ${{ matrix.build_target || '' }}
