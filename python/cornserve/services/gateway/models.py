@@ -17,16 +17,6 @@ class AppRegistrationRequest(BaseModel):
     source_code: str
 
 
-class AppRegistrationResponse(BaseModel):
-    """Response for registering a new application.
-
-    Attributes:
-        app_id: The unique identifier for the registered application.
-    """
-
-    app_id: str
-
-
 class AppInvocationRequest(BaseModel):
     """Request for invoking a registered application.
 

@@ -23,6 +23,7 @@ dependencies = [
   "rich",
   "requests",
   "tyro",
+  "kubernetes",
   "kubernetes_asyncio",
   "httpx",
   "pydantic>=2.11",
@@ -34,7 +35,7 @@ dependencies = [
 dynamic = ["version"]
 
 [project.scripts]
-cornserve = "cornserve.cli:main"
+cornserve = "cornserve.cli.main:main"
 
 [project.optional-dependencies]
 sidecar-api = [

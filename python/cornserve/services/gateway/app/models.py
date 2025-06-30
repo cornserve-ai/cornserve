@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from types import ModuleType
 
 from cornserve.app.base import AppConfig, AppRequest, AppResponse
+from cornserve.task.base import UnitTask
 
 
 class AppState(enum.StrEnum):
@@ -15,6 +16,7 @@ class AppState(enum.StrEnum):
 
     NOT_READY = "not ready"
     READY = "ready"
+    REGISTRATION_FAILED = "registration failed"
 
 
 @dataclass
@@ -43,9 +45,11 @@ class AppDefinition:
         module: The module that contains the app's code.
         source_code: The Python source code of the app.
         classes: The classes that define the app's schema and logic.
+        tasks: The unit tasks discovered in the app's config.
     """
 
     app_id: str
     module: ModuleType
     source_code: str
     classes: AppClasses
+    tasks: list[UnitTask]
