@@ -121,7 +121,6 @@ def register(
     """
     request = AppRegistrationRequest(source_code=path.read_text().strip())
 
-    # Make streaming request to registration endpoint
     try:
         response = requests.post(
             f"{GATEWAY_URL}/app/register",
@@ -130,9 +129,6 @@ def register(
             stream=True,
         )
         response.raise_for_status()
-    except requests.exceptions.RequestException as e:
-        rich.print(Panel(f"Failed to send registration request: {e}", style="red", expand=False))
-        return
     except Exception as e:
         rich.print(Panel(f"Failed to process registration: {e}", style="red", expand=False))
         return
@@ -149,17 +145,14 @@ def register(
     # Get immediate initial response
     for line in response_iter:
         if line and line.startswith("data: "):
-            try:
-                data = json.loads(line[6:])
-                if data.get("type") == "error_response":
-                    error_msg = data.get("message", "Registration failed without details")
-                    rich.print(Panel(f"Registration failed: {error_msg}", style="red", expand=False))
-                    return
-                elif data.get("type") == "initial_response":
-                    initial_resp = data
-                    break
-            except json.JSONDecodeError:
-                continue
+            data = json.loads(line[6:])
+            if data.get("type") == "error_response":
+                error_msg = data.get("message", "Registration failed without details")
+                rich.print(Panel(f"Registration failed: {error_msg}", style="red", expand=False))
+                return
+            elif data.get("type") == "initial_response":
+                initial_resp = data
+                break
 
     if not initial_resp or not initial_resp.get("app_id"):
         rich.print(Panel("Invalid initial response from server", style="red", expand=False))
@@ -210,28 +203,25 @@ def register(
                 )
             )
 
-    # Wait for final response with spinner (can take ~20 minutes)
+    # Wait for final response with spinner
     spinner_message = f" Registering app '{app_id}'... Deploying tasks"
     try:
         with Status(spinner_message, spinner="dots", console=console) as status:
             for line in response_iter:
                 if line and line.startswith("data: "):
-                    try:
-                        data = json.loads(line[6:])
-                        if data.get("type") == "error_response":
-                            error_msg = data.get("message", "Registration failed")
-                            final_resp = {"status": "registration_failed", "message": error_msg}
-                            status.update(status=Text(f" Registration error: {error_msg}", style="red"))
-                            break
-                        elif data.get("type") == "final_response":
-                            final_resp = data
-                            final_status = data.get("status", "unknown")
-                            final_message = data.get("message", "Registration completed")
-                            style = "green" if final_status == "ready" else "red"
-                            status.update(status=Text(f" Registering app '{app_id}'... {final_message}", style=style))
-                            break
-                    except json.JSONDecodeError:
-                        continue
+                    data = json.loads(line[6:])
+                    if data.get("type") == "error_response":
+                        error_msg = data.get("message", "Registration failed")
+                        final_resp = {"status": "registration_failed", "message": error_msg}
+                        status.update(status=Text(f" Registration error: {error_msg}", style="red"))
+                        break
+                    elif data.get("type") == "final_response":
+                        final_resp = data
+                        final_status = data.get("status", "unknown")
+                        final_message = data.get("message", "Registration completed")
+                        style = "green" if final_status == "ready" else "red"
+                        status.update(status=Text(f" Registering app '{app_id}'... {final_message}", style=style))
+                        break
     finally:
         if log_streamer:
             log_streamer.stop()
