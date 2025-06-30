@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import json
+from collections.abc import AsyncGenerator
+
 from fastapi import (
     APIRouter,
     FastAPI,
@@ -12,6 +15,7 @@ from fastapi import (
     status,
 )
 from fastapi.exceptions import RequestValidationError
+from fastapi.responses import StreamingResponse
 from opentelemetry import trace
 from pydantic import ValidationError
 
@@ -21,7 +25,6 @@ from cornserve.services.gateway.app.manager import AppManager
 from cornserve.services.gateway.models import (
     AppInvocationRequest,
     AppRegistrationRequest,
-    AppRegistrationResponse,
 )
 from cornserve.services.gateway.session import SessionManager
 from cornserve.services.gateway.task_manager import TaskManager
@@ -32,23 +35,46 @@ logger = get_logger(__name__)
 tracer = trace.get_tracer(__name__)
 
 
-@router.post("/app/register", response_model=AppRegistrationResponse)
+@router.post("/app/register")
 async def register_app(request: AppRegistrationRequest, raw_request: Request):
-    """Register a new application with the given ID and source code."""
+    """Register a new application with streaming response for deployment progress."""
     app_manager: AppManager = raw_request.app.state.app_manager
 
-    try:
-        app_id, task_names = await app_manager.register_app(request.source_code)
-        return AppRegistrationResponse(app_id=app_id, task_names=task_names)
-    except ValueError as e:
-        logger.info("Error while initiating app registration: %s", e)
-        return Response(status_code=status.HTTP_400_BAD_REQUEST, content=str(e))
-    except Exception as e:
-        logger.exception("Unexpected error while registering app")
-        return Response(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            content=str(e),
-        )
+    async def generate_registration_stream() -> AsyncGenerator[str, None]:
+        """Generate Server-Sent Events for the registration process."""
+        app_id: str | None = None
+        try:
+            # First, validate and get initial app data
+            app_id, task_names = await app_manager.validate_and_create_app(request.source_code)
+
+            # Send initial response with app_id and task_names
+            initial_response = {
+                "type": "initial_response",
+                "app_id": app_id,
+                "task_names": task_names,
+                "status": "not_ready",
+            }
+            yield f"data: {json.dumps(initial_response)}\n\n"
+
+            # Now deploy tasks and get final result
+            final_result = await app_manager.deploy_app_tasks(app_id)
+            final_response = {
+                "type": "final_response",
+                "status": final_result["status"],
+                "message": final_result["message"],
+            }
+            yield f"data: {json.dumps(final_response)}\n\n"
+
+        except Exception as e:
+            logger.info("Error during app registration for app_id '%s': %s", app_id, e)
+            error_response = {"type": "error_response", "status": "registration_failed", "message": str(e)}
+            yield f"data: {json.dumps(error_response)}\n\n"
+
+    return StreamingResponse(
+        generate_registration_stream(),
+        media_type="text/plain",
+        headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
+    )
 
 
 @router.post("/app/unregister/{app_id}")

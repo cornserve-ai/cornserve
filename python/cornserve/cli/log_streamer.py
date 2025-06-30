@@ -1,4 +1,4 @@
-"""Miscellaneous utilities for the Cornserve CLI."""
+"""LogStreamer utilities for the Cornserve CLI."""
 
 from __future__ import annotations
 
@@ -33,7 +33,7 @@ LOG_COLORS = [
 class LogStreamer:
     """Streams logs from Kubernetes pods related to unit tasks."""
 
-    def __init__(self, unit_task_names: list[str], console: Console | None = None):
+    def __init__(self, unit_task_names: list[str], console: Console | None = None) -> None:
         """Initialize the LogStreamer.
 
         Args:
@@ -85,7 +85,7 @@ class LogStreamer:
         self.console.print("LogStreamer: Kubernetes access failed. No executor log will be streamed.")
         return False
 
-    def _assign_color(self, pod_name: str):
+    def _assign_color(self, pod_name: str) -> None:
         with self.lock:
             if pod_name in self.pod_colors:
                 return
@@ -94,7 +94,7 @@ class LogStreamer:
             self.pod_colors[pod_name] = color
             self.color_index += 1
 
-    def _pod_discovery_worker(self):
+    def _pod_discovery_worker(self) -> None:
         api = client.CoreV1Api()
         while not self.stop_event.is_set():
             try:
@@ -128,7 +128,7 @@ class LogStreamer:
 
             time.sleep(2)  # Poll every 2 seconds for new pods
 
-    def _log_streaming_worker(self, pod_name: str):
+    def _log_streaming_worker(self, pod_name: str) -> None:
         try:
             # Wait until pod is running
             api = client.CoreV1Api()
@@ -173,7 +173,7 @@ class LogStreamer:
         except Exception as e:
             self.console.print(Text(f"Error streaming logs for {pod_name}: {e}", style="red"))
 
-    def start(self):
+    def start(self) -> None:
         """Start the executor discovery and log streaming."""
         if not self.k8s_available:
             return
@@ -182,7 +182,7 @@ class LogStreamer:
         self.threads.append(discovery_thread)
         discovery_thread.start()
 
-    def stop(self):
+    def stop(self) -> None:
         """Stop the LogStreamer."""
         if not self.k8s_available:
             return

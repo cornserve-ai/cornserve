@@ -17,18 +17,6 @@ class AppRegistrationRequest(BaseModel):
     source_code: str
 
 
-class AppRegistrationResponse(BaseModel):
-    """Response for registering a new application.
-
-    Attributes:
-        app_id: The unique identifier for the registered application.
-        task_names: The names of the unit tasks discovered in the application.
-    """
-
-    app_id: str
-    task_names: list[str]
-
-
 class AppInvocationRequest(BaseModel):
     """Request for invoking a registered application.
 

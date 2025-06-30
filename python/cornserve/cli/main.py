@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 import os
 import sys
-import time
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -22,11 +21,7 @@ from tyro.constructors import PrimitiveConstructorSpec
 
 from cornserve.cli.log_streamer import LogStreamer
 from cornserve.services.gateway.app.models import AppState
-from cornserve.services.gateway.models import (
-    AppInvocationRequest,
-    AppRegistrationRequest,
-    AppRegistrationResponse,
-)
+from cornserve.services.gateway.models import AppInvocationRequest, AppRegistrationRequest
 
 try:
     GATEWAY_URL = os.environ["CORNSERVE_GATEWAY_URL"]
@@ -125,36 +120,62 @@ def register(
         is_async: If true, exit immediately after submission without waiting.
     """
     request = AppRegistrationRequest(source_code=path.read_text().strip())
+
+    # Make streaming request to registration endpoint
     try:
-        raw_response = requests.post(
+        response = requests.post(
             f"{GATEWAY_URL}/app/register",
             json=request.model_dump(),
-            timeout=10,
+            timeout=(5, 1200),  # Short connection timeout but longer timeout waiting for streaming response
+            stream=True,
         )
-        raw_response.raise_for_status()
-        response = AppRegistrationResponse.model_validate(raw_response.json())
-        app_id = response.app_id
-        task_names = response.task_names
+        response.raise_for_status()
     except requests.exceptions.RequestException as e:
         rich.print(Panel(f"Failed to send registration request: {e}", style="red", expand=False))
         return
     except Exception as e:
-        rich.print(Panel(f"Failed to initiate registration: {e}", style="red", expand=False))
-        return
-
-    if not app_id:
-        rich.print(Panel("Failed to get app_id from registration response.", style="red", expand=False))
+        rich.print(Panel(f"Failed to process registration: {e}", style="red", expand=False))
         return
 
     current_alias = alias or path.stem
+    console = rich.get_console()
+
+    # Parse responses from single stream
+    initial_resp = None
+    final_resp = None
+
+    response_iter = response.iter_lines(decode_unicode=True)
+
+    # Get immediate initial response
+    for line in response_iter:
+        if line and line.startswith("data: "):
+            try:
+                data = json.loads(line[6:])
+                if data.get("type") == "error_response":
+                    error_msg = data.get("message", "Registration failed without details")
+                    rich.print(Panel(f"Registration failed: {error_msg}", style="red", expand=False))
+                    return
+                elif data.get("type") == "initial_response":
+                    initial_resp = data
+                    break
+            except json.JSONDecodeError:
+                continue
+
+    if not initial_resp or not initial_resp.get("app_id"):
+        rich.print(Panel("Invalid initial response from server", style="red", expand=False))
+        return
+
+    app_id = initial_resp["app_id"]
+    task_names = initial_resp.get("task_names", [])
+
+    # Set up alias and show initial registration info
     Alias().set(app_id, current_alias)
 
-    # Initial display before polling starts
     initial_table = Table(box=box.ROUNDED)
     initial_table.add_column("App ID")
     initial_table.add_column("Alias")
     initial_table.add_column("Initial Status")
-    initial_table.add_row(app_id, current_alias, Text(AppState.NOT_READY.value.title(), style="yellow"))
+    initial_table.add_row(app_id, current_alias, Text("Not Ready", style="yellow"))
     rich.print(initial_table)
 
     if task_names:
@@ -174,80 +195,72 @@ def register(
         )
         return
 
-    console = rich.get_console()
-    # Have a spinner while we are waiting
-    status_str = AppState.NOT_READY.value
-    spinner_message = f" Waiting for app '{app_id}' to initialize ... Current status: {status_str.title()}"
+    # Start log streamer for non-async mode
+    log_streamer = None
+    if task_names:
+        log_streamer = LogStreamer(task_names, console=console)
+        if log_streamer.k8s_available:
+            log_streamer.start()
+        else:
+            rich.print(
+                Panel(
+                    Text("Could not connect to Kubernetes cluster. Logs will not be streamed.", style="yellow"),
+                    title="[bold yellow]Log Streaming[/bold yellow]",
+                    border_style="dim",
+                )
+            )
 
-    log_streamer: LogStreamer | None = None
+    # Wait for final response with spinner (can take ~20 minutes)
+    spinner_message = f" Registering app '{app_id}'... Deploying tasks"
     try:
         with Status(spinner_message, spinner="dots", console=console) as status:
-            start_time = time.time()
-            streamer_attempted = False
-
-            time.sleep(0.2)
-
-            while status_str == AppState.NOT_READY.value:
-                # Start log streamer after a delay
-                if not streamer_attempted and (time.time() - start_time) > 3 and task_names:
-                    log_streamer = LogStreamer(task_names, console=console)
-                    if log_streamer.k8s_available:
-                        log_streamer.start()
-                    else:
-                        rich.print(
-                            Panel(
-                                Text(
-                                    "Could not connect to Kubernetes cluster. Logs will not be streamed.",
-                                    style="yellow",
-                                ),
-                                title="[bold yellow]Log Streaming[/bold yellow]",
-                                border_style="dim",
-                            )
-                        )
-                    streamer_attempted = True  # Attempt to start only once
-
-                try:
-                    status_response = requests.get(f"{GATEWAY_URL}/app/status/{app_id}", timeout=5)
-                    status_response.raise_for_status()
-                    status_data = status_response.json()
-                    status_str = status_data.get("status", "unknown").lower()
-
-                    current_style = "yellow"
-                    if status_str == AppState.READY.value:
-                        current_style = "green"
-                    elif status_str == AppState.REGISTRATION_FAILED.value:
-                        current_style = "red"
-
-                    spinner_message = f" Registering app '{app_id}'... Current status: {status_str.title()}"
-                    status.update(status=Text(spinner_message, style=current_style))
-
-                    if status_str != AppState.NOT_READY.value:
-                        break
-                    time.sleep(1)
-                except requests.exceptions.Timeout:
-                    spinner_message = f" Polling request timedout for app '{app_id}'. Retrying..."
-                    status.update(status=Text(spinner_message, style="orange"))
-                    time.sleep(1)
-                except Exception as e:
-                    rich.print(
-                        Text(f"An unexpected error occurred while polling for '{app_id}': {e}", style="red"),
-                    )
-                    break
+            for line in response_iter:
+                if line and line.startswith("data: "):
+                    try:
+                        data = json.loads(line[6:])
+                        if data.get("type") == "error_response":
+                            error_msg = data.get("message", "Registration failed")
+                            final_resp = {"status": "registration_failed", "message": error_msg}
+                            status.update(status=Text(f" Registration error: {error_msg}", style="red"))
+                            break
+                        elif data.get("type") == "final_response":
+                            final_resp = data
+                            final_status = data.get("status", "unknown")
+                            final_message = data.get("message", "Registration completed")
+                            style = "green" if final_status == "ready" else "red"
+                            status.update(status=Text(f" Registering app '{app_id}'... {final_message}", style=style))
+                            break
+                    except json.JSONDecodeError:
+                        continue
     finally:
         if log_streamer:
             log_streamer.stop()
 
-    if status_str == AppState.READY.value:
+    # Show final result
+    if final_resp:
+        final_status = final_resp.get("status", "unknown")
+        final_message = final_resp.get("message", "Registration completed")
+    else:
+        final_status = "unknown"
+        final_message = "Failed to receive or parse final response"
+
+    if final_status == "ready":
         rich.print(
             Panel(f"App '{app_id}' registered successfully with alias '{current_alias}'.", style="green", expand=False)
         )
-    elif status_str == AppState.REGISTRATION_FAILED.value:
+    elif final_status == "registration_failed":
         Alias().remove(current_alias)
         rich.print(
-            Panel(f"App '{app_id}' failed to register. Alias '{current_alias}' removed.", style="red", expand=False)
+            Panel(
+                f"App '{app_id}' failed to register: {final_message}. Alias '{current_alias}' removed.",
+                style="red",
+                expand=False,
+            )
         )
     else:
-        rich.print(Panel(f"Some error occured while polling app '{app_id}' .", style="red", expand=False))
+        rich.print(
+            Panel(f"App '{app_id}' registration status: {final_status}. {final_message}", style="yellow", expand=False)
+        )
 
 
 @app.command(name="unregister")
