@@ -242,6 +242,114 @@ class ResourceManager:
             logger.error("Error during resource initialization: %s", str(e))
             raise
 
+    @tracer.start_as_current_span("ResourceManager.scale_up_unit_task")
+    async def scale_up_unit_task(self, task: UnitTask, num_gpus: int) -> None:
+        """Scale up a unit task by allocating additional GPUs to the task manager."""
+        logger.info("Scaling up unit task %s by %d GPUs", task, num_gpus)
+
+        span = trace.get_current_span()
+        span.set_attribute("resource_manager.scale_up_unit_task.task", str(task))
+        span.set_attribute("resource_manager.scale_up_unit_task.num_gpus", num_gpus)
+
+        # Find the task manager state for this task
+        task_state = None
+        async with self.task_states_lock:
+            for state in self.task_states.values():
+                if state.deployment and state.deployment.task == task:
+                    task_state = state
+
+            if task_state is None:
+                logger.info("Task %s is not running, returning immediately", task)
+                return
+
+        async with self.task_states_lock:
+            resources = self.resource.allocate(num_gpus=num_gpus, owner=task_state.id)
+
+        assert task_state.stub is not None, "Task manager stub is not initialized"
+        async with task_state.lock:
+            try:
+                gpus = [
+                    task_manager_pb2.GPUResource(
+                        action=task_manager_pb2.ResourceAction.ADD,
+                        node_id=gpu.node,
+                        global_rank=gpu.global_rank,
+                        local_rank=gpu.local_rank,
+                    )
+                    for gpu in resources
+                ]
+                update_resource_req = task_manager_pb2.UpdateResourcesRequest(task_manager_id=task_state.id, gpus=gpus)
+                response = await task_state.stub.UpdateResources(update_resource_req)
+                if response.status != common_pb2.Status.STATUS_OK:
+                    raise RuntimeError(
+                        f"UpdateResources gRPC error when trying to scale up task manager: {response}",
+                    )
+                # Add the new GPUs to the task state resources
+                async with self.task_states_lock:
+                    if task_state.resources is None:
+                        task_state.resources = []
+                    task_state.resources.extend(resources)
+            except Exception as e:
+                async with self.task_states_lock:
+                    for gpu in resources:
+                        gpu.free()
+                logger.exception("Failed to scale up task %s by %d GPUs: %s", task, num_gpus, e)
+                raise RuntimeError(f"Failed to scale up task {task} by {num_gpus} GPUs: {e}") from e
+
+    @tracer.start_as_current_span("ResourceManager.scale_down_unit_task")
+    async def scale_down_unit_task(self, task: UnitTask, num_gpus: int) -> None:
+        """Scale down a unit task by removing GPUs from the task manager."""
+        logger.info("Scaling down unit task %s by %d GPUs", task, num_gpus)
+
+        span = trace.get_current_span()
+        span.set_attribute("resource_manager.scale_down_unit_task.task", str(task))
+        span.set_attribute("resource_manager.scale_down_unit_task.num_gpus", num_gpus)
+
+        # Find the task manager state for this task
+        task_state = None
+        async with self.task_states_lock:
+            for state in self.task_states.values():
+                if state.deployment and state.deployment.task == task:
+                    task_state = state
+
+            if task_state is None:
+                logger.info("Task %s is not running, returning immediately", task)
+                return
+
+        assert task_state.stub is not None, "Task manager stub is not initialized"
+        # check there are enough GPUs to scale down
+        if task_state.resources is None or len(task_state.resources) < num_gpus:
+            raise RuntimeError(
+                f"{task} has only {
+                    (len(task_state.resources) if task_state.resources else 0,)
+                } GPUs, cannot scale down by {num_gpus}"
+            )
+        async with task_state.lock:
+            try:
+                gpus_to_remove = task_state.resources[:num_gpus]
+                gpus = [
+                    task_manager_pb2.GPUResource(
+                        action=task_manager_pb2.ResourceAction.REMOVE,
+                        node_id=gpu.node,
+                        global_rank=gpu.global_rank,
+                        local_rank=gpu.local_rank,
+                    )
+                    for gpu in gpus_to_remove
+                ]
+                update_resource_req = task_manager_pb2.UpdateResourcesRequest(task_manager_id=task_state.id, gpus=gpus)
+                response = await task_state.stub.UpdateResources(update_resource_req)
+                if response.status != common_pb2.Status.STATUS_OK:
+                    raise RuntimeError(
+                        f"UpdateResources gRPC error when trying to scale down task manager: {response}",
+                    )
+                # Remove the GPUs from the task state resources
+                async with self.task_states_lock:
+                    task_state.resources = task_state.resources[num_gpus:]
+                    for gpu in gpus_to_remove:
+                        gpu.free()
+            except Exception as e:
+                logger.exception("Failed to scale down task %s by %d GPUs: %s", task, num_gpus, e)
+                raise RuntimeError(f"Failed to scale down task {task} by {num_gpus} GPUs: {e}") from e
+
     @tracer.start_as_current_span("ResourceManager.deploy_unit_task")
     async def deploy_unit_task(self, task: UnitTask) -> None:
         """Deploy a unit task by spawning its task manager if needed.

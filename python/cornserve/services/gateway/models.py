@@ -36,3 +36,15 @@ class AppInvocationRequest(BaseModel):
     """
 
     request_data: dict[str, Any]
+
+
+class ScaleTaskRequest(BaseModel):
+    """Request to scale a unit task up or down.
+
+    Attributes:
+        id: The task_id of the unit task to scale.
+        num_gpus: The number of GPUs to add or remove.
+    """
+
+    id: str
+    num_gpus: int

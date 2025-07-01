@@ -14,7 +14,13 @@ from opentelemetry import trace
 
 from cornserve.constants import K8S_TASK_DISPATCHER_HTTP_URL
 from cornserve.logging import get_logger
-from cornserve.services.pb.resource_manager_pb2 import DeployUnitTaskRequest, TeardownUnitTaskRequest
+from cornserve.services.pb import common_pb2
+from cornserve.services.pb.resource_manager_pb2 import (
+    DeployUnitTaskRequest,
+    ScaleDownUnitTaskRequest,
+    ScaleUpUnitTaskRequest,
+    TeardownUnitTaskRequest,
+)
 from cornserve.services.pb.resource_manager_pb2_grpc import ResourceManagerStub
 from cornserve.task.base import TASK_TIMEOUT, TaskGraphDispatch, UnitTask
 
@@ -189,13 +195,47 @@ class TaskManager:
                 logger.error("Errors occured while tearing down tasks")
                 raise RuntimeError(f"Error while tearing down tasks: {errors}")
 
-    def list_tasks(self) -> list[tuple[UnitTask, TaskState]]:
+    async def scale_up_unit_task(self, id: str, num_gpus: int) -> None:
+        """Scale up the given unit task by id with the specified number of GPUs."""
+        try:
+            if id not in self.tasks:
+                raise KeyError(f"Unit Task with ID {id} is not deployed")
+            if self.task_states[id] != TaskState.READY:
+                raise RuntimeError(f"Unit Task with ID {id} is not ready to be scaled up")
+            task = self.tasks[id]
+            response = await self.resource_manager.ScaleUpUnitTask(
+                ScaleUpUnitTaskRequest(task=task.to_pb(), num_gpus=num_gpus)
+            )
+            if response.status != common_pb2.Status.STATUS_OK:
+                raise RuntimeError(f"Failed to scale up task {task}: {response.status}")
+        except Exception as e:
+            logger.error("Error while scaling up unit task: %s", e)
+            raise RuntimeError(f"Error while scaling up unit task: {e}") from e
+
+    async def scale_down_unit_task(self, id: str, num_gpus: int) -> None:
+        """Scale down the given unit task by id with the specified number of GPUs."""
+        try:
+            if id not in self.tasks:
+                raise KeyError(f"Task with ID {id} is not deployed")
+            if self.task_states[id] != TaskState.READY:
+                raise RuntimeError(f"Task {id} is not ready to be scaled down, current state: {self.task_states[id]}")
+            task = self.tasks[id]
+            response = await self.resource_manager.ScaleDownUnitTask(
+                ScaleDownUnitTaskRequest(task=task.to_pb(), num_gpus=num_gpus)
+            )
+            if response.status != common_pb2.Status.STATUS_OK:
+                raise RuntimeError(f"Failed to scale down task {task}: {response.status}")
+        except Exception as e:
+            logger.error("Error while scaling down unit task: %s", e)
+            raise RuntimeError(f"Error while scaling down unit task: {e}") from e
+
+    def list_tasks(self) -> list[tuple[UnitTask, str, TaskState]]:
         """List all deployed tasks.
 
         Returns:
             A list of tuples containing the task and its state.
         """
-        return [(task, self.task_states[task_id]) for task_id, task in self.tasks.items()]
+        return [(task, task_id, self.task_states[task_id]) for task_id, task in self.tasks.items()]
 
     async def invoke_tasks(self, dispatch: TaskGraphDispatch) -> list[Any]:
         """Invoke the given tasks.
