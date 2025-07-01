@@ -111,67 +111,49 @@ class AppManager:
 
     @tracer.start_as_current_span(name="AppManager.validate_and_create_app")
     async def validate_and_create_app(self, source_code: str) -> tuple[str, list[str]]:
-        """Validate application source code and create app entry in self.apps.
+        """Validate and create an app from source code.
 
         Args:
-            source_code: Python source code of the application
+            source_code: Source code of the app
 
         Returns:
-            tuple[str, list[str]]: The app ID and the list of unit task names.
+            tuple[str, list[str]]: A tuple containing the App ID and a list of unit task names
 
         Raises:
-            ValueError: If app validation fails
+            ValueError: If the app source code validation fails
         """
         span = trace.get_current_span()
-        app_id: str | None = None  # To be set inside the lock
 
         async with self.app_lock:
-            # Generate a unique app ID
-            while True:
-                app_id = f"app-{uuid.uuid4().hex}"
-                if app_id not in self.app_states:
-                    break
+            app_id = f"app-{uuid.uuid4().hex}"
+        span.set_attribute("app_manager.validate_and_create_app.app_id", app_id)
 
-            span.set_attribute("app_manager.validate_and_create_app.app_id", app_id)
+        try:
+            module = load_module_from_source(source_code, app_id)
+            app_classes = validate_app_module(module)
+            tasks = expand_tasks_into_unit_tasks(app_classes.config_cls.tasks.values())
+            task_names = [t.execution_descriptor.create_executor_name().lower() for t in tasks]
+        except (ImportError, ValueError) as e:
+            raise ValueError(f"App source code validation failed: {e}") from e
 
-            try:
-                # Validation and unit tasks discovery
-                module = load_module_from_source(source_code, app_id)
-                app_classes = validate_app_module(module)
-                tasks = expand_tasks_into_unit_tasks(app_classes.config_cls.tasks.values())
-                task_names = [t.execution_descriptor.create_executor_name().lower() for t in tasks]
-
-                for task in tasks:
-                    logger.info(
-                        "Discovered task executor name: %s", task.execution_descriptor.create_executor_name().lower()
-                    )
-            except (ImportError, ValueError) as e:
-                logger.error("App source code validation failed for app_id '%s': %s", app_id, e)
-                raise ValueError(f"App source code validation failed: {e}") from e
-
-            # If validation is successful, store definition and set initial state
+        async with self.app_lock:
             self.apps[app_id] = AppDefinition(
                 app_id=app_id,
                 module=module,
                 classes=app_classes,
                 source_code=source_code,
-                tasks=tasks,  # Store discovered unit tasks
+                tasks=tasks,
             )
             self.app_states[app_id] = AppState.NOT_READY
-            logger.info(
-                "App '%s' validated (tasks discovered: %s) and registered with state: %s. Ready for deployment.",
-                app_id,
-                len(tasks),
-                AppState.NOT_READY,
-            )
 
         return app_id, task_names
 
+    @tracer.start_as_current_span(name="AppManager.deploy_app_tasks")
     async def deploy_app_tasks(self, app_id: str) -> dict[str, str]:
         """Deploy tasks for an app and return final result.
 
         Args:
-            app_id: The ID of the app to deploy tasks for
+            app_id: The App's ID
 
         Returns:
             dict: Final status with either success or failure information
@@ -179,6 +161,9 @@ class AppManager:
         Raises:
             RuntimeError: If task deployment gets any Exception
         """
+        span = trace.get_current_span()
+        span.set_attribute("app_manager.deploy_app_tasks.app_id", app_id)
+
         tasks_to_deploy = []
         try:
             async with self.app_lock:
