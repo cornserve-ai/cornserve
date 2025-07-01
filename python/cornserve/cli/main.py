@@ -95,17 +95,7 @@ class Alias:
         """Set an alias for an app ID."""
         if alias.startswith("app-"):
             raise ValueError("Alias cannot start with 'app-'")
-        if alias in self.aliases:
-            raise ValueError(f"Alias '{alias}' is already in use for app '{self.aliases[alias]}'.")
         self.aliases[alias] = app_id
-        with open(self.file_path, "w") as file:
-            json.dump(self.aliases, file)
-
-    def update(self, alias: str, new_app_id: str) -> None:
-        """Update the app ID for an existing alias."""
-        if alias not in self.aliases:
-            raise ValueError(f"Alias '{alias}' not found for update.")
-        self.aliases[alias] = new_app_id
         with open(self.file_path, "w") as file:
             json.dump(self.aliases, file)
 
@@ -130,7 +120,6 @@ def register(
     current_alias = alias or path.stem
     aliases = Alias()
 
-    # Use a placeholder app_id to reserve the alias
     try:
         aliases.set("pending-registration-no-id-yet", current_alias)
     except ValueError as e:
@@ -181,8 +170,8 @@ def register(
     app_id = initial_resp["app_id"]
     task_names = initial_resp.get("task_names", [])
 
-    # Update the placeholder app_id with the real one
-    aliases.update(current_alias, app_id)
+    # Update the alias to the real app ID
+    aliases.set(app_id, current_alias)
 
     app_info_table = Table(box=box.ROUNDED)
     app_info_table.add_column("App ID")
