@@ -66,7 +66,7 @@ REGISTRY=myregistry.com:5000 bash scripts/build_export_images.sh
 ```
 
 !!! NOTE
-    Building Eric can consume large amount of memory and may trigger OOMs that freeze the instance. Please set a proper `max_jobs` in `eric.dockerfile`, where having 16 GB memory space for each parallel job is usually safe.
+    Building Eric can consume large amount of memory and may trigger OOMs that freeze the instance. Please set a proper `max_jobs` in `eric.Dockerfile`, where having 16 GB memory space for each parallel job is usually safe.
 
 (5) Use the `dev` overlay (which specifies `imagePullPolicy: Always`) to deploy Cornserve:
 
