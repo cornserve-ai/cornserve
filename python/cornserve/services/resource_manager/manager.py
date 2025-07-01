@@ -320,7 +320,7 @@ class ResourceManager:
         if task_state.resources is None or len(task_state.resources) < num_gpus:
             raise RuntimeError(
                 f"{task} has only {
-                    (len(task_state.resources) if task_state.resources else 0,)
+                    len(task_state.resources) if task_state.resources else 0
                 } GPUs, cannot scale down by {num_gpus}"
             )
         async with task_state.lock:
