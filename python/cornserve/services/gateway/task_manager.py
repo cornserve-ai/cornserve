@@ -195,14 +195,14 @@ class TaskManager:
                 logger.error("Errors occured while tearing down tasks")
                 raise RuntimeError(f"Error while tearing down tasks: {errors}")
 
-    async def scale_up_unit_task(self, id: str, num_gpus: int) -> None:
-        """Scale up the given unit task by id with the specified number of GPUs."""
+    async def scale_up_unit_task(self, task_id: str, num_gpus: int) -> None:
+        """Scale up the given unit task of task_id with the specified number of GPUs."""
         try:
-            if id not in self.tasks:
-                raise KeyError(f"Unit Task with ID {id} is not deployed")
-            if self.task_states[id] != TaskState.READY:
-                raise RuntimeError(f"Unit Task with ID {id} is not ready to be scaled up")
-            task = self.tasks[id]
+            if task_id not in self.tasks:
+                raise KeyError(f"Unit Task with task_id {task_id} is not deployed")
+            if self.task_states[task_id] != TaskState.READY:
+                raise RuntimeError(f"Unit Task with task_id {task_id} is not ready to be scaled up")
+            task = self.tasks[task_id]
             response = await self.resource_manager.ScaleUpUnitTask(
                 ScaleUpUnitTaskRequest(task=task.to_pb(), num_gpus=num_gpus)
             )
@@ -212,14 +212,16 @@ class TaskManager:
             logger.error("Error while scaling up unit task: %s", e)
             raise RuntimeError(f"Error while scaling up unit task: {e}") from e
 
-    async def scale_down_unit_task(self, id: str, num_gpus: int) -> None:
-        """Scale down the given unit task by id with the specified number of GPUs."""
+    async def scale_down_unit_task(self, task_id: str, num_gpus: int) -> None:
+        """Scale down the given unit task by task_id with the specified number of GPUs."""
         try:
-            if id not in self.tasks:
-                raise KeyError(f"Task with ID {id} is not deployed")
-            if self.task_states[id] != TaskState.READY:
-                raise RuntimeError(f"Task {id} is not ready to be scaled down, current state: {self.task_states[id]}")
-            task = self.tasks[id]
+            if task_id not in self.tasks:
+                raise KeyError(f"Task with task_id {task_id} is not deployed")
+            if self.task_states[task_id] != TaskState.READY:
+                raise RuntimeError(
+                    f"Task {task_id} is not ready to be scaled down, current state: {self.task_states[task_id]}"
+                )
+            task = self.tasks[task_id]
             response = await self.resource_manager.ScaleDownUnitTask(
                 ScaleDownUnitTaskRequest(task=task.to_pb(), num_gpus=num_gpus)
             )
@@ -233,7 +235,7 @@ class TaskManager:
         """List all deployed tasks.
 
         Returns:
-            A list of tuples containing the task and its state.
+            A list of tuples containing the task, task_id, and its state.
         """
         return [(task, task_id, self.task_states[task_id]) for task_id, task in self.tasks.items()]
 

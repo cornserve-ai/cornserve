@@ -87,7 +87,7 @@ class TaskManager:
         just use one GPU.
         """
         logger.info(
-            "Updating resources for task manager %s: add_gpus=%s, remove_gpus=%s self.gpus=%s",
+            "Updating resources for task manager %s: add_gpus=%s, remove_gpus=%s, self.gpus=%s",
             self.id,
             add_gpus,
             remove_gpus,

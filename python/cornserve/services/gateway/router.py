@@ -144,28 +144,13 @@ async def register_task(raw_request: Request):
     raise NotImplementedError("Task registration is not implemented yet.")
 
 
-@router.get("/task/list")
-async def list_tasks(raw_request: Request):
-    """List all deployed unit tasks."""
-    task_manager: TaskManager = raw_request.app.state.task_manager
-
-    try:
-        return task_manager.list_tasks()
-    except Exception as e:
-        logger.exception("Unexpected error while listing tasks")
-        return Response(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            content=str(e),
-        )
-
-
 @router.post("/task/scale/up")
 async def scale_up_task(request: ScaleTaskRequest, raw_request: Request):
     """Scale up the number of GPUs for a task."""
     task_manager: TaskManager = raw_request.app.state.task_manager
 
     try:
-        await task_manager.scale_up_unit_task(request.id, request.num_gpus)
+        await task_manager.scale_up_unit_task(request.task_id, request.num_gpus)
         return Response(status_code=status.HTTP_200_OK)
     except KeyError as e:
         return Response(status_code=status.HTTP_404_NOT_FOUND, content=str(e))
@@ -183,12 +168,27 @@ async def scale_down_task(request: ScaleTaskRequest, raw_request: Request):
     task_manager: TaskManager = raw_request.app.state.task_manager
 
     try:
-        await task_manager.scale_down_unit_task(request.id, request.num_gpus)
+        await task_manager.scale_down_unit_task(request.task_id, request.num_gpus)
         return Response(status_code=status.HTTP_200_OK)
     except KeyError as e:
         return Response(status_code=status.HTTP_404_NOT_FOUND, content=str(e))
     except Exception as e:
         logger.exception("Unexpected error while scaling down task")
+        return Response(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content=str(e),
+        )
+
+
+@router.get("/tasks/list")
+async def list_tasks(raw_request: Request):
+    """List all deployed unit tasks."""
+    task_manager: TaskManager = raw_request.app.state.task_manager
+
+    try:
+        return task_manager.list_tasks()
+    except Exception as e:
+        logger.exception("Unexpected error while listing tasks")
         return Response(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             content=str(e),
