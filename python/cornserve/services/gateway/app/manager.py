@@ -185,17 +185,15 @@ class AppManager:
         """
         tasks_to_deploy = []
         try:
-            # Retrieve app definition
             async with self.app_lock:
                 app_def = self.apps[app_id]
 
-            # Retrieve tasks from the AppDefinition
             tasks_to_deploy = app_def.tasks
 
             # Deploy unit tasks
             await self.task_manager.declare_used(tasks_to_deploy)
 
-            # Update app state to READY
+            # Update app state
             async with self.app_lock:
                 self.app_states[app_id] = AppState.READY
 

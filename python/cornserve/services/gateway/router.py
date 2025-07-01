@@ -44,10 +44,10 @@ async def register_app(request: AppRegistrationRequest, raw_request: Request):
         """Generate Server-Sent Events for the registration process."""
         app_id: str | None = None
         try:
-            # First, validate and get initial app data
+            # Parse and validate the app
             app_id, task_names = await app_manager.validate_and_create_app(request.source_code)
 
-            # Send initial response with app_id and task_names
+            # Send initial response so the client can
             initial_response = {
                 "type": "initial_response",
                 "app_id": app_id,
@@ -56,7 +56,7 @@ async def register_app(request: AppRegistrationRequest, raw_request: Request):
             }
             yield f"data: {json.dumps(initial_response)}\n\n"
 
-            # Now deploy tasks and get final result
+            # Now deploy tasks and send final result
             final_result = await app_manager.deploy_app_tasks(app_id)
             final_response = {
                 "type": "final_response",

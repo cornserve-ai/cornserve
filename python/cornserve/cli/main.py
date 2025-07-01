@@ -110,14 +110,12 @@ class Alias:
 def register(
     path: Annotated[Path, tyro.conf.Positional],
     alias: str | None = None,
-    is_async: bool = False,
 ) -> None:
     """Register an app with the Cornserve gateway.
 
     Args:
         path: Path to the app's source file.
         alias: Optional alias for the app.
-        is_async: If true, exit immediately after submission without waiting.
     """
     request = AppRegistrationRequest(source_code=path.read_text().strip())
 
@@ -155,7 +153,7 @@ def register(
                 break
 
     if not initial_resp or not initial_resp.get("app_id"):
-        rich.print(Panel("Invalid initial response from server", style="red", expand=False))
+        rich.print(Panel("Invalid initial response from gateway", style="red", expand=False))
         return
 
     app_id = initial_resp["app_id"]
@@ -164,31 +162,20 @@ def register(
     # Set up alias and show initial registration info
     Alias().set(app_id, current_alias)
 
-    initial_table = Table(box=box.ROUNDED)
-    initial_table.add_column("App ID")
-    initial_table.add_column("Alias")
-    initial_table.add_column("Initial Status")
-    initial_table.add_row(app_id, current_alias, Text("Not Ready", style="yellow"))
-    rich.print(initial_table)
+    app_info_table = Table(box=box.ROUNDED)
+    app_info_table.add_column("App ID")
+    app_info_table.add_column("Alias")
+    app_info_table.add_row(app_id, current_alias)
+    rich.print(app_info_table)
 
     if task_names:
-        tasks_table = Table(box=box.ROUNDED, title="Discovered Unit Tasks")
-        tasks_table.add_column("Task Name")
+        tasks_table = Table(box=box.ROUNDED)
+        tasks_table.add_column("Unit Tasks")
         for name in task_names:
             tasks_table.add_row(name)
         rich.print(tasks_table)
 
-    if is_async:
-        rich.print(
-            Panel(
-                f"App '{app_id}' with alias '{current_alias}' is submitted for registration.",
-                style="green",
-                expand=False,
-            )
-        )
-        return
-
-    # Start log streamer for non-async mode
+    # Start log streamer
     log_streamer = None
     if task_names:
         log_streamer = LogStreamer(task_names, console=console)
@@ -238,18 +225,14 @@ def register(
         rich.print(
             Panel(f"App '{app_id}' registered successfully with alias '{current_alias}'.", style="green", expand=False)
         )
-    elif final_status == "registration_failed":
+    else:
         Alias().remove(current_alias)
         rich.print(
             Panel(
-                f"App '{app_id}' failed to register: {final_message}. Alias '{current_alias}' removed.",
+                f"App '{app_id}' status: {final_status}. {final_message}\nAlias '{current_alias}' removed.",
                 style="red",
                 expand=False,
             )
-        )
-    else:
-        rich.print(
-            Panel(f"App '{app_id}' registration status: {final_status}. {final_message}", style="yellow", expand=False)
         )
 
 
