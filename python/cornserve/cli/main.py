@@ -95,7 +95,17 @@ class Alias:
         """Set an alias for an app ID."""
         if alias.startswith("app-"):
             raise ValueError("Alias cannot start with 'app-'")
+        if alias in self.aliases:
+            raise ValueError(f"Alias '{alias}' is already in use for app '{self.aliases[alias]}'.")
         self.aliases[alias] = app_id
+        with open(self.file_path, "w") as file:
+            json.dump(self.aliases, file)
+
+    def update(self, alias: str, new_app_id: str) -> None:
+        """Update the app ID for an existing alias."""
+        if alias not in self.aliases:
+            raise ValueError(f"Alias '{alias}' not found for update.")
+        self.aliases[alias] = new_app_id
         with open(self.file_path, "w") as file:
             json.dump(self.aliases, file)
 
@@ -117,6 +127,16 @@ def register(
         path: Path to the app's source file.
         alias: Optional alias for the app.
     """
+    current_alias = alias or path.stem
+    aliases = Alias()
+
+    # Use a placeholder app_id to reserve the alias
+    try:
+        aliases.set("pending-registration-no-id-yet", current_alias)
+    except ValueError as e:
+        rich.print(Panel(f"{e}", style="red", expand=False, title="Alias Error"))
+        return
+
     request = AppRegistrationRequest(source_code=path.read_text().strip())
 
     try:
@@ -128,10 +148,10 @@ def register(
         )
         response.raise_for_status()
     except Exception as e:
+        aliases.remove(current_alias)
         rich.print(Panel(f"Failed to process registration: {e}", style="red", expand=False))
         return
 
-    current_alias = alias or path.stem
     console = rich.get_console()
 
     # Parse responses from single stream
@@ -147,20 +167,22 @@ def register(
             if data.get("type") == "error_response":
                 error_msg = data.get("message", "Registration failed without details")
                 rich.print(Panel(f"Registration failed: {error_msg}", style="red", expand=False))
+                aliases.remove(current_alias)
                 return
             elif data.get("type") == "initial_response":
                 initial_resp = data
                 break
 
     if not initial_resp or not initial_resp.get("app_id"):
+        aliases.remove(current_alias)
         rich.print(Panel("Invalid initial response from gateway", style="red", expand=False))
         return
 
     app_id = initial_resp["app_id"]
     task_names = initial_resp.get("task_names", [])
 
-    # Set up alias and show initial registration info
-    Alias().set(app_id, current_alias)
+    # Update the placeholder app_id with the real one
+    aliases.update(current_alias, app_id)
 
     app_info_table = Table(box=box.ROUNDED)
     app_info_table.add_column("App ID")
@@ -226,7 +248,7 @@ def register(
             Panel(f"App '{app_id}' registered successfully with alias '{current_alias}'.", style="green", expand=False)
         )
     else:
-        Alias().remove(current_alias)
+        aliases.remove(current_alias)
         rich.print(
             Panel(
                 f"App '{app_id}' status: {final_status}. {final_message}\nAlias '{current_alias}' removed.",

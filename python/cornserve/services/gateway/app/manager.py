@@ -111,11 +111,7 @@ class AppManager:
 
     @tracer.start_as_current_span(name="AppManager.validate_and_create_app")
     async def validate_and_create_app(self, source_code: str) -> tuple[str, list[str]]:
-        """Validate application source code and create app entry.
-
-        This method performs validation and creates the app entry but does NOT
-        deploy tasks. Task deployment should be done separately via
-        deploy_app_tasks() for streaming progress updates.
+        """Validate application source code and create app entry in self.apps.
 
         Args:
             source_code: Python source code of the application
@@ -181,7 +177,7 @@ class AppManager:
             dict: Final status with either success or failure information
 
         Raises:
-            RuntimeError: If task deployment fails
+            RuntimeError: If task deployment gets any Exception
         """
         tasks_to_deploy = []
         try:
@@ -197,12 +193,7 @@ class AppManager:
             async with self.app_lock:
                 self.app_states[app_id] = AppState.READY
 
-            logger.info(
-                "Successfully deployed tasks (count: %s) for app '%s', state: %s.",
-                len(tasks_to_deploy),
-                app_id,
-                AppState.READY,
-            )
+            logger.info("Successfully deployed %s tasks for app '%s'.", len(tasks_to_deploy), app_id)
 
             return {"status": "ready", "message": f"Successfully deployed {len(tasks_to_deploy)} tasks"}
 
