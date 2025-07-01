@@ -43,7 +43,8 @@ class ScaleTaskRequest(BaseModel):
 
     Attributes:
         task_id: The task_id of the unit task to scale.
-        num_gpus: The number of GPUs to add or remove.
+        num_gpus: The number of GPUs to add or remove. Positive values will
+            scale up, and negative values will scale down.
     """
 
     task_id: str

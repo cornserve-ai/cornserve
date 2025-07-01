@@ -37,23 +37,17 @@ class ResourceManagerServicer(resource_manager_pb2_grpc.ResourceManagerServicer)
         await self.manager.teardown_unit_task(UnitTask.from_pb(request.task))
         return resource_manager_pb2.TeardownUnitTaskResponse(status=common_pb2.Status.STATUS_OK)
 
-    async def ScaleUpUnitTask(
+    async def ScaleUnitTask(
         self,
-        request: resource_manager_pb2.ScaleUpUnitTaskRequest,
+        request: resource_manager_pb2.ScaleUnitTaskRequest,
         context: grpc.aio.ServicerContext,
-    ) -> resource_manager_pb2.ScaleUpUnitTaskResponse:
-        """Scale up a unit task by adding more resources."""
-        await self.manager.scale_up_unit_task(UnitTask.from_pb(request.task), request.num_gpus)
-        return resource_manager_pb2.ScaleUpUnitTaskResponse(status=common_pb2.Status.STATUS_OK)
-
-    async def ScaleDownUnitTask(
-        self,
-        request: resource_manager_pb2.ScaleDownUnitTaskRequest,
-        context: grpc.aio.ServicerContext,
-    ) -> resource_manager_pb2.ScaleDownUnitTaskResponse:
-        """Scale down a unit task by removing resources."""
-        await self.manager.scale_down_unit_task(UnitTask.from_pb(request.task), request.num_gpus)
-        return resource_manager_pb2.ScaleDownUnitTaskResponse(status=common_pb2.Status.STATUS_OK)
+    ) -> resource_manager_pb2.ScaleUnitTaskResponse:
+        """Scale a unit task up or down."""
+        if request.num_gpus < 0:
+            await self.manager.scale_down_unit_task(UnitTask.from_pb(request.task), -request.num_gpus)
+        else:
+            await self.manager.scale_up_unit_task(UnitTask.from_pb(request.task), request.num_gpus)
+        return resource_manager_pb2.ScaleUnitTaskResponse(status=common_pb2.Status.STATUS_OK)
 
     async def Healthcheck(
         self,

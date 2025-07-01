@@ -245,6 +245,7 @@ class ResourceManager:
     @tracer.start_as_current_span("ResourceManager.scale_up_unit_task")
     async def scale_up_unit_task(self, task: UnitTask, num_gpus: int) -> None:
         """Scale up a unit task by allocating additional GPUs to the task manager."""
+        assert num_gpus > 0, "Number of GPUs to scale up must be positive"
         logger.info("Scaling up unit task %s by %d GPUs", task, num_gpus)
 
         span = trace.get_current_span()
@@ -298,6 +299,7 @@ class ResourceManager:
     @tracer.start_as_current_span("ResourceManager.scale_down_unit_task")
     async def scale_down_unit_task(self, task: UnitTask, num_gpus: int) -> None:
         """Scale down a unit task by removing GPUs from the task manager."""
+        assert num_gpus > 0, "Number of GPUs to scale down must be positive"
         logger.info("Scaling down unit task %s by %d GPUs", task, num_gpus)
 
         span = trace.get_current_span()
@@ -319,9 +321,9 @@ class ResourceManager:
         # check there are enough GPUs to scale down
         if task_state.resources is None or len(task_state.resources) < num_gpus:
             raise RuntimeError(
-                f"{task} has only {
-                    len(task_state.resources) if task_state.resources else 0
-                } GPUs, cannot scale down by {num_gpus}"
+                f"{task} has only "
+                f"{len(task_state.resources) if task_state.resources else 0} GPUs, "
+                f"cannot scale down by {num_gpus}"
             )
         async with task_state.lock:
             try:

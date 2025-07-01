@@ -144,36 +144,26 @@ async def register_task(raw_request: Request):
     raise NotImplementedError("Task registration is not implemented yet.")
 
 
-@router.post("/task/scale/up")
-async def scale_up_task(request: ScaleTaskRequest, raw_request: Request):
-    """Scale up the number of GPUs for a task."""
+@router.post("/task/scale")
+async def scale_task(request: ScaleTaskRequest, raw_request: Request):
+    """Scale the number of GPUs for a unit task.
+
+    Positive values will scale up, negative values will scale down.
+    """
+    if request.num_gpus == 0:
+        return Response(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            content="Scaling with 0 GPUs has no effect.",
+        )
     task_manager: TaskManager = raw_request.app.state.task_manager
 
     try:
-        await task_manager.scale_up_unit_task(request.task_id, request.num_gpus)
+        await task_manager.scale_unit_task(request.task_id, request.num_gpus)
         return Response(status_code=status.HTTP_200_OK)
     except KeyError as e:
         return Response(status_code=status.HTTP_404_NOT_FOUND, content=str(e))
     except Exception as e:
         logger.exception("Unexpected error while scaling up task")
-        return Response(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            content=str(e),
-        )
-
-
-@router.post("/task/scale/down")
-async def scale_down_task(request: ScaleTaskRequest, raw_request: Request):
-    """Scale down the number of GPUs for a task."""
-    task_manager: TaskManager = raw_request.app.state.task_manager
-
-    try:
-        await task_manager.scale_down_unit_task(request.task_id, request.num_gpus)
-        return Response(status_code=status.HTTP_200_OK)
-    except KeyError as e:
-        return Response(status_code=status.HTTP_404_NOT_FOUND, content=str(e))
-    except Exception as e:
-        logger.exception("Unexpected error while scaling down task")
         return Response(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             content=str(e),

@@ -17,8 +17,7 @@ from cornserve.logging import get_logger
 from cornserve.services.pb import common_pb2
 from cornserve.services.pb.resource_manager_pb2 import (
     DeployUnitTaskRequest,
-    ScaleDownUnitTaskRequest,
-    ScaleUpUnitTaskRequest,
+    ScaleUnitTaskRequest,
     TeardownUnitTaskRequest,
 )
 from cornserve.services.pb.resource_manager_pb2_grpc import ResourceManagerStub
@@ -195,41 +194,22 @@ class TaskManager:
                 logger.error("Errors occured while tearing down tasks")
                 raise RuntimeError(f"Error while tearing down tasks: {errors}")
 
-    async def scale_up_unit_task(self, task_id: str, num_gpus: int) -> None:
-        """Scale up the given unit task of task_id with the specified number of GPUs."""
+    async def scale_unit_task(self, task_id: str, num_gpus: int) -> None:
+        """Scale the given unit task of task_id to add or remove specified number of GPUs."""
         try:
             if task_id not in self.tasks:
                 raise KeyError(f"Unit Task with task_id {task_id} is not deployed")
             if self.task_states[task_id] != TaskState.READY:
                 raise RuntimeError(f"Unit Task with task_id {task_id} is not ready to be scaled up")
             task = self.tasks[task_id]
-            response = await self.resource_manager.ScaleUpUnitTask(
-                ScaleUpUnitTaskRequest(task=task.to_pb(), num_gpus=num_gpus)
+            response = await self.resource_manager.ScaleUnitTask(
+                ScaleUnitTaskRequest(task=task.to_pb(), num_gpus=num_gpus)
             )
             if response.status != common_pb2.Status.STATUS_OK:
-                raise RuntimeError(f"Failed to scale up task {task}: {response.status}")
+                raise RuntimeError(f"Failed to scale task {task} to update {num_gpus} GPUs: {response.message}")
         except Exception as e:
-            logger.error("Error while scaling up unit task: %s", e)
-            raise RuntimeError(f"Error while scaling up unit task: {e}") from e
-
-    async def scale_down_unit_task(self, task_id: str, num_gpus: int) -> None:
-        """Scale down the given unit task by task_id with the specified number of GPUs."""
-        try:
-            if task_id not in self.tasks:
-                raise KeyError(f"Task with task_id {task_id} is not deployed")
-            if self.task_states[task_id] != TaskState.READY:
-                raise RuntimeError(
-                    f"Task {task_id} is not ready to be scaled down, current state: {self.task_states[task_id]}"
-                )
-            task = self.tasks[task_id]
-            response = await self.resource_manager.ScaleDownUnitTask(
-                ScaleDownUnitTaskRequest(task=task.to_pb(), num_gpus=num_gpus)
-            )
-            if response.status != common_pb2.Status.STATUS_OK:
-                raise RuntimeError(f"Failed to scale down task {task}: {response.status}")
-        except Exception as e:
-            logger.error("Error while scaling down unit task: %s", e)
-            raise RuntimeError(f"Error while scaling down unit task: {e}") from e
+            logger.error("Error while scaling unit task %s", task_id)
+            raise RuntimeError(f"Error while scaling unit task {task_id}: {e}") from e
 
     def list_tasks(self) -> list[tuple[UnitTask, str, TaskState]]:
         """List all deployed tasks.
