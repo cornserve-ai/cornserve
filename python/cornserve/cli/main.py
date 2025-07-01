@@ -375,8 +375,6 @@ def check_status(
         status_style = "yellow"
         if status_str == AppState.READY.value:
             status_style = "green"
-        elif status_str == AppState.REGISTRATION_FAILED.value:
-            status_style = "red"
 
         rich.print(f"Status for app '{app_id}': [{status_style}]{status_str.title()}[/{status_style}]")
 

@@ -125,7 +125,12 @@ class AppManager:
         span = trace.get_current_span()
 
         async with self.app_lock:
-            app_id = f"app-{uuid.uuid4().hex}"
+            # Generate a unique app ID
+            while True:
+                app_id = f"app-{uuid.uuid4().hex}"
+                if app_id not in self.app_states:
+                    break
+
         span.set_attribute("app_manager.validate_and_create_app.app_id", app_id)
 
         try:
@@ -185,7 +190,9 @@ class AppManager:
         except Exception as e:
             logger.exception("Failed to deploy tasks (count: %s) for app '%s': %s", len(tasks_to_deploy), app_id, e)
             async with self.app_lock:
-                self.app_states[app_id] = AppState.REGISTRATION_FAILED
+                self.apps.pop(app_id, None)
+                self.app_states.pop(app_id, None)
+                self.app_driver_tasks.pop(app_id, None)
 
             # Re-raise as a runtime error to be caught by the router
             raise RuntimeError(f"Failed to deploy tasks: {e}") from e

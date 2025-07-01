@@ -16,7 +16,6 @@ class AppState(enum.StrEnum):
 
     NOT_READY = "not ready"
     READY = "ready"
-    REGISTRATION_FAILED = "registration failed"
 
 
 @dataclass
