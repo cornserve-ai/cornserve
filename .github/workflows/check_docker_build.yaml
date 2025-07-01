@@ -13,7 +13,6 @@ on:
       - 'scripts/generate_pb.sh'
       - '.dockerignore'
       - 'LICENSE'
-      - 'setup.py'
       - 'pyproject.toml'
 
 # Jobs initiated by previous `ready` get cancelled by re-adding `ready`
