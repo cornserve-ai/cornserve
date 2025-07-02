@@ -30,7 +30,6 @@ from cornserve.services.gateway.app.models import (
 from cornserve.services.gateway.models import (
     AppInvocationRequest,
     AppRegistrationRequest,
-    AppRegistrationResponse,
     ScaleTaskRequest,
 )
 from cornserve.services.gateway.session import SessionManager
