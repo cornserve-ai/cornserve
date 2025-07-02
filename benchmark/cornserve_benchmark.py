@@ -212,6 +212,7 @@ async def main(args: argparse.Namespace) -> None:
             num_requests=args.num_prompts,
             tokenizer=tokenizer,
             output_len=args.hf_output_len,
+            enforced_prompt_len=args.enforced_prompt_len,
         )
 
     # Add random multimedia URLs to each request
@@ -283,6 +284,7 @@ async def main(args: argparse.Namespace) -> None:
         print("Test request failed with error:", result.error)
         exit(1)
     if args.test_only:
+        print("Sent", request_inputs[0])
         print("Test request succeeded, result:", result)
         exit(0)
 
@@ -385,6 +387,8 @@ if __name__ == "__main__":
                         help="If set, only test the connection to the backend without running the full benchmark.")
     parser.add_argument("--synthesize-mm-data", action="store_true",
                         help="If set, synthesize multimedia data for each request instead of using the image in VisionArena dataset.")
+    parser.add_argument("--enforced-prompt-len", type=int, default=None,
+                        help="Enforce the prompt length for each request. If not set, the prompt length will be determined by the sampled HF dataset.")
     args = parser.parse_args()
 
     if args.backend == "cornserve" and not args.app_id:

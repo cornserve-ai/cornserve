@@ -356,6 +356,7 @@ class VisionArenaDataset(HuggingFaceDataset):
         tokenizer: PreTrainedTokenizerBase,
         num_requests: int,
         output_len: int | None = None,
+        enforced_prompt_len: int | None = None,
     ) -> list:
         output_len = (output_len
                       if output_len is not None else self.DEFAULT_OUTPUT_LEN)
@@ -369,7 +370,35 @@ class VisionArenaDataset(HuggingFaceDataset):
                     f"Unsupported dataset path: {self.dataset_path}")
             prompt = parser_fn(item)
             mm_content = process_image(item["images"][0])  # type: ignore
-            prompt_len = len(tokenizer(prompt).input_ids)
+            prompt_input_ids = tokenizer(prompt).input_ids
+            prompt_len = len(prompt_input_ids)
+            if enforced_prompt_len is not None:
+                if prompt_len < enforced_prompt_len:
+                    # duplciate the input_ids until we reach the enforced length
+                    input_ids = prompt_input_ids * (enforced_prompt_len //
+                                                    prompt_len + 1)
+                    input_ids = input_ids[:enforced_prompt_len]
+                elif prompt_len > enforced_prompt_len:
+                    input_ids = prompt_input_ids[:enforced_prompt_len]
+                prompt = tokenizer.decode(
+                    input_ids,
+                    skip_special_tokens=True,
+                    clean_up_tokenization_spaces=False,
+                )
+                prompt_len = enforced_prompt_len
+                # tokenize again to check
+                retokenized_input_ids = tokenizer(prompt).input_ids
+                if len(retokenized_input_ids) != enforced_prompt_len:
+                    # sometimes this is enevitable so we log a warning
+                    logger.warning(
+                        (
+                            "Enforced input length %d does not match retokenized length %d "
+                            "for prompt: %s"
+                        ),
+                        enforced_prompt_len,
+                        len(retokenized_input_ids),
+                        prompt,
+                    )
             sampled_requests.append(
                 SampleRequest(
                     prompt=prompt,
