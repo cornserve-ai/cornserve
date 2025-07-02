@@ -297,18 +297,6 @@ class AppManager:
         async with self.app_lock:  # Ensure thread-safe access for reading states
             return self.app_states.copy()
 
-    async def get_app_status(self, app_id: str) -> AppState | None:
-        """Get the current status of a specific app.
-
-        Args:
-            app_id: The ID of the app.
-
-        Returns:
-            AppState or None if app_id not found.
-        """
-        async with self.app_lock:
-            return self.app_states.get(app_id)
-
     async def shutdown(self) -> None:
         """Shut down the server."""
         await self.task_manager.shutdown()
