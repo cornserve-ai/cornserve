@@ -1,13 +1,10 @@
-name: Push Docker image
+name: Check docker build
 
 on:
-  push:
-    branches:
-      - master
-    tags:
-      - v*
+  pull_request:
+    types: [opened, reopened, ready_for_review, labeled]
     paths:
-      - '.github/workflows/push_docker.yaml'
+      - '.github/workflows/check_docker_build.yaml'
       - '.gitmodules'
       - 'docker/**'
       - 'python/**'
@@ -16,15 +13,21 @@ on:
       - 'scripts/generate_pb.sh'
       - '.dockerignore'
       - 'LICENSE'
-      - 'setup.py'
       - 'pyproject.toml'
+
+# Jobs initiated by previous `ready` get cancelled by re-adding `ready`
+concurrency:
+  group: docker-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
 
 env:
   NAMESPACE: cornserve
 
 jobs:
-  build_and_push:
-    if: github.repository_owner == 'cornserve-ai'
+  build:
+    if: >
+      github.repository_owner == 'cornserve-ai' &&
+      ( github.event.action != 'labeled' || github.event.label.name == 'ready')
     runs-on: ${{ (matrix.component == 'eric' && 'blacksmith-4vcpu-ubuntu-2404') || 'ubuntu-latest' }}
     strategy:
       matrix:
@@ -104,11 +107,10 @@ jobs:
         with:
           context: .
           file: docker/${{ matrix.component }}.Dockerfile
-          push: true
+          push: false
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=registry,ref=${{ env.NAMESPACE }}/${{ matrix.component }}:buildcache
-          cache-to: type=registry,ref=${{ env.NAMESPACE }}/${{ matrix.component }}:buildcache,mode=max
           platforms: linux/amd64
           build-args: ${{ matrix.build_args }}
           target: ${{ matrix.build_target || '' }}

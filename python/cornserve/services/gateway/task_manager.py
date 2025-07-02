@@ -14,7 +14,12 @@ from opentelemetry import trace
 
 from cornserve.constants import K8S_TASK_DISPATCHER_HTTP_URL
 from cornserve.logging import get_logger
-from cornserve.services.pb.resource_manager_pb2 import DeployUnitTaskRequest, TeardownUnitTaskRequest
+from cornserve.services.pb import common_pb2
+from cornserve.services.pb.resource_manager_pb2 import (
+    DeployUnitTaskRequest,
+    ScaleUnitTaskRequest,
+    TeardownUnitTaskRequest,
+)
 from cornserve.services.pb.resource_manager_pb2_grpc import ResourceManagerStub
 from cornserve.task.base import TASK_TIMEOUT, TaskGraphDispatch, UnitTask
 
@@ -189,13 +194,30 @@ class TaskManager:
                 logger.error("Errors occured while tearing down tasks")
                 raise RuntimeError(f"Error while tearing down tasks: {errors}")
 
-    def list_tasks(self) -> list[tuple[UnitTask, TaskState]]:
+    async def scale_unit_task(self, task_id: str, num_gpus: int) -> None:
+        """Scale the given unit task of task_id to add or remove specified number of GPUs."""
+        try:
+            if task_id not in self.tasks:
+                raise KeyError(f"Unit Task with task_id {task_id} is not deployed")
+            if self.task_states[task_id] != TaskState.READY:
+                raise RuntimeError(f"Unit Task {task_id} is not ready yet. Retry when it's ready.")
+            task = self.tasks[task_id]
+            response = await self.resource_manager.ScaleUnitTask(
+                ScaleUnitTaskRequest(task=task.to_pb(), num_gpus=num_gpus)
+            )
+            if response.status != common_pb2.Status.STATUS_OK:
+                raise RuntimeError(f"Failed to scale task {task} to update {num_gpus} GPUs: {response.message}")
+        except Exception as e:
+            logger.error("Error while scaling unit task %s", task_id)
+            raise RuntimeError(f"Error while scaling unit task {task_id}: {e}") from e
+
+    def list_tasks(self) -> list[tuple[UnitTask, str, TaskState]]:
         """List all deployed tasks.
 
         Returns:
-            A list of tuples containing the task and its state.
+            A list of tuples containing the task, task_id, and its state.
         """
-        return [(task, self.task_states[task_id]) for task_id, task in self.tasks.items()]
+        return [(task, task_id, self.task_states[task_id]) for task_id, task in self.tasks.items()]
 
     async def invoke_tasks(self, dispatch: TaskGraphDispatch) -> list[Any]:
         """Invoke the given tasks.
