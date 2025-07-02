@@ -172,7 +172,7 @@ def register(
         if isinstance(event, RegistrationInitialResponse):
             app_id = event.app_id
             task_names = event.task_names
-            # Update alias to actual app ID
+            # Update alias with actual app ID
             aliases.set(app_id, current_alias)
 
             app_info_table = Table(box=box.ROUNDED)
@@ -195,9 +195,7 @@ def register(
                 else:
                     rich.print(
                         Panel(
-                            Text("Could not connect to Kubernetes cluster. Logs will not be streamed.", style="yellow"),
-                            title="[bold yellow]Log Streaming[/bold yellow]",
-                            border_style="dim",
+                            Text("Could not connect to Kubernetes cluster. Logs will not be streamed.", style="yellow")
                         )
                     )
             break
