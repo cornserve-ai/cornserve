@@ -1,4 +1,7 @@
+from __future__ import annotations
+import base64
 from concurrent.futures import ThreadPoolExecutor
+import mimetypes
 import os
 import random
 import uuid
@@ -616,6 +619,31 @@ def get_benchmark_configs() -> tuple[list, list, list]:
     image_configs = [(1920, 1080, 'mandala')]
     return video_configs, audio_configs, image_configs
     
+
+def _file_to_data_uri(path: str) -> str:
+    """
+    Read a binary file and return a data-URI, e.g.
+        data:image/png;base64,iVBORw0KGgo…
+    """
+    mime, _ = mimetypes.guess_type(path)
+    mime = mime or "application/octet-stream"
+    with open(path, "rb") as f:
+        payload = base64.b64encode(f.read()).decode("ascii")
+    return f"data:{mime};base64,{payload}"
+
+def get_image_data_uris(filenames: list[str], root: str = "images") -> list[str]:
+    """Return list of data-URIs for image files."""
+    return [_file_to_data_uri(os.path.join(root, name)) for name in filenames]
+
+
+def get_video_data_uris(filenames: list[str], root: str = "videos") -> list[str]:
+    """Return list of data-URIs for video files."""
+    return [_file_to_data_uri(os.path.join(root, name)) for name in filenames]
+
+
+def get_audio_data_uris(filenames: list[str], root: str = "audios") -> list[str]:
+    """Return list of data-URIs for audio files."""
+    return [_file_to_data_uri(os.path.join(root, name)) for name in filenames]
 
 if __name__ == "__main__":
     # Example configurations: (height, width, pattern)

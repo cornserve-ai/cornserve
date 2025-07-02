@@ -14,7 +14,7 @@ from transformers import AutoTokenizer
 
 from benchmark_backend import TRANSFORM_FUNCS, RequestInput, RequestOutput
 from benchmark_dataset import FILE_SERVER_URL, SampleRequest, VisionArenaDataset
-from utils import get_benchmark_filenames
+from utils import get_audio_data_uris, get_benchmark_filenames, get_image_data_uris, get_video_data_uris
 
 GATEWAY_URL = "http://localhost:30080"
 BACKEND_URLS = {
@@ -217,9 +217,12 @@ async def main(args: argparse.Namespace) -> None:
     # Add random multimedia URLs to each request
     if args.synthesize_mm_data:
         video_filenames, audio_filenames, image_filenames = get_benchmark_filenames(MAX_MM_COUNT)
-        video_urls = [f"{FILE_SERVER_URL}/videos/{filename}" for filename in video_filenames]
-        audio_urls = [f"{FILE_SERVER_URL}/audios/{filename}" for filename in audio_filenames]
-        image_urls = [f"{FILE_SERVER_URL}/images/{filename}" for filename in image_filenames]
+        video_urls = get_video_data_uris(video_filenames)
+        image_urls = get_image_data_uris(image_filenames)
+        audio_urls = get_audio_data_uris(audio_filenames)
+        # video_urls = [f"{FILE_SERVER_URL}/videos/{filename}" for filename in video_filenames]
+        # audio_urls = [f"{FILE_SERVER_URL}/audios/{filename}" for filename in audio_filenames]
+        # image_urls = [f"{FILE_SERVER_URL}/images/{filename}" for filename in image_filenames]
 
         for request in sampled_requests:
             # Decide whether to include each media type
@@ -280,6 +283,7 @@ async def main(args: argparse.Namespace) -> None:
         print("Test request failed with error:", result.error)
         exit(1)
     if args.test_only:
+        print("Test request succeeded, result:", result)
         exit(0)
 
     benchmark_results = await benchmark(
