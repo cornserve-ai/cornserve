@@ -47,7 +47,11 @@ async def register_app(request: AppRegistrationRequest, raw_request: Request):
     app_manager: AppManager = raw_request.app.state.app_manager
 
     async def generate_registration_stream() -> AsyncGenerator[str, None]:
-        """Generate Server-Sent Events for the registration process."""
+        """Generate Server-Sent Events (SSE) for the registration process.
+
+        For SSE standards (e.g. the "data: " prefix),
+        see https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events/Using_server-sent_events
+        """
         app_id: str | None = None
         try:
             # Parse and validate the app

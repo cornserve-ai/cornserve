@@ -163,6 +163,7 @@ def register(
             continue
 
         try:
+            # For parsing the line, see gateway.router.register_app for SSE format
             event = RegistrationStatusEvent.model_validate_json(line[6:]).event
         except Exception as e:
             rich.print(Panel(f"Failed to parse response from gateway: {e}", style="red", expand=False))
@@ -219,6 +220,7 @@ def register(
                     continue
 
                 try:
+                    # For parsing the line, see gateway.router.register_app for SSE format
                     event = RegistrationStatusEvent.model_validate_json(line[6:]).event
                 except Exception as e:
                     final_message = f"Failed to parse response from gateway: {e}"
