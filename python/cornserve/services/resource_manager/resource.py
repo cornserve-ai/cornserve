@@ -32,6 +32,16 @@ class GPU:
         """Represent the GPU resource as a string."""
         return f"GPU(node={self.node}, grank={self.global_rank}, lrank={self.local_rank})"
 
+    def __eq__(self, other: object) -> bool:
+        """Check equality based on node, global_rank, and local_rank."""
+        if not isinstance(other, GPU):
+            return False
+        return self.node == other.node and self.global_rank == other.global_rank and self.local_rank == other.local_rank
+
+    def __hash__(self) -> int:
+        """Hash based on node, global_rank, and local_rank."""
+        return hash((self.node, self.global_rank, self.local_rank))
+
     @property
     def is_free(self) -> bool:
         """Check if the GPU is free."""
