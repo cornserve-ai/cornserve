@@ -200,7 +200,7 @@ class TaskManager:
             if task_id not in self.tasks:
                 raise KeyError(f"Unit Task with task_id {task_id} is not deployed")
             if self.task_states[task_id] != TaskState.READY:
-                raise RuntimeError(f"Unit Task with task_id {task_id} is not ready to be scaled up")
+                raise RuntimeError(f"Unit Task {task_id} is not ready yet. Retry when it's ready.")
             task = self.tasks[task_id]
             response = await self.resource_manager.ScaleUnitTask(
                 ScaleUnitTaskRequest(task=task.to_pb(), num_gpus=num_gpus)
