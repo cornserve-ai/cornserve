@@ -6,9 +6,6 @@ import enum
 from collections.abc import Callable, Coroutine
 from dataclasses import dataclass
 from types import ModuleType
-from typing import Literal
-
-from pydantic import BaseModel, Field
 
 from cornserve.app.base import AppConfig, AppRequest, AppResponse
 from cornserve.task.base import UnitTask
@@ -55,33 +52,3 @@ class AppDefinition:
     source_code: str
     classes: AppClasses
     tasks: list[UnitTask]
-
-
-class RegistrationInitialResponse(BaseModel):
-    """Initial response sent when app validation is complete."""
-
-    type: Literal["initial"] = "initial"
-    app_id: str
-    task_names: list[str]
-
-
-class RegistrationFinalResponse(BaseModel):
-    """Final response sent when app deployment is complete."""
-
-    type: Literal["final"] = "final"
-    message: str
-
-
-class RegistrationErrorResponse(BaseModel):
-    """Response sent on any registration error."""
-
-    type: Literal["error"] = "error"
-    message: str
-
-
-class RegistrationStatusEvent(BaseModel):
-    """Wrapper for all app registration status events."""
-
-    event: RegistrationInitialResponse | RegistrationFinalResponse | RegistrationErrorResponse = Field(
-        discriminator="type"
-    )

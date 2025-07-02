@@ -20,13 +20,14 @@ from rich.text import Text
 from tyro.constructors import PrimitiveConstructorSpec
 
 from cornserve.cli.log_streamer import LogStreamer
-from cornserve.services.gateway.app.models import (
+from cornserve.services.gateway.models import (
+    AppInvocationRequest,
+    AppRegistrationRequest,
     RegistrationErrorResponse,
     RegistrationFinalResponse,
     RegistrationInitialResponse,
     RegistrationStatusEvent,
 )
-from cornserve.services.gateway.models import AppInvocationRequest, AppRegistrationRequest
 
 try:
     GATEWAY_URL = os.environ["CORNSERVE_GATEWAY_URL"]

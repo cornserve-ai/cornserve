@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class AppRegistrationRequest(BaseModel):
@@ -39,3 +39,33 @@ class ScaleTaskRequest(BaseModel):
 
     task_id: str
     num_gpus: int
+
+
+class RegistrationInitialResponse(BaseModel):
+    """Initial response sent when app validation is complete."""
+
+    type: Literal["initial"] = "initial"
+    app_id: str
+    task_names: list[str]
+
+
+class RegistrationFinalResponse(BaseModel):
+    """Final response sent when app deployment is complete."""
+
+    type: Literal["final"] = "final"
+    message: str
+
+
+class RegistrationErrorResponse(BaseModel):
+    """Response sent on any registration error."""
+
+    type: Literal["error"] = "error"
+    message: str
+
+
+class RegistrationStatusEvent(BaseModel):
+    """Wrapper for all app registration status events."""
+
+    event: RegistrationInitialResponse | RegistrationFinalResponse | RegistrationErrorResponse = Field(
+        discriminator="type"
+    )
