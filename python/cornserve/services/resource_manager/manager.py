@@ -256,14 +256,14 @@ class ResourceManager:
         task_state = None
         async with self.task_states_lock:
             for state in self.task_states.values():
-                if state.deployment and state.deployment.task == task:
+                if state.deployment and state.deployment.task.is_equivalent_to(task):
                     task_state = state
 
             if task_state is None:
                 logger.info("Task %s is not running, returning immediately", task)
                 return
 
-        async with self.task_states_lock:
+            # TODO: decide GPU placement strategy & preference
             resources = self.resource.allocate(num_gpus=num_gpus, owner=task_state.id)
 
         assert task_state.stub is not None, "Task manager stub is not initialized"
@@ -327,6 +327,7 @@ class ResourceManager:
             )
         async with task_state.lock:
             try:
+                # TODO: decide GPU placement strategy & preference
                 gpus_to_remove = task_state.resources[:num_gpus]
                 gpus = [
                     task_manager_pb2.GPUResource(
