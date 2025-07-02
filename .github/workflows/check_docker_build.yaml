@@ -2,6 +2,7 @@ name: Check docker build
 
 on:
   pull_request:
+    types: [opened, reopened, ready_for_review, labeled]
     paths:
       - '.github/workflows/check_docker_build.yaml'
       - '.gitmodules'
@@ -12,15 +13,21 @@ on:
       - 'scripts/generate_pb.sh'
       - '.dockerignore'
       - 'LICENSE'
-      - 'setup.py'
       - 'pyproject.toml'
+
+# Jobs initiated by previous `ready` get cancelled by re-adding `ready`
+concurrency:
+  group: docker-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
 
 env:
   NAMESPACE: cornserve
 
 jobs:
   build:
-    if: github.repository_owner == 'cornserve-ai'
+    if: >
+      github.repository_owner == 'cornserve-ai' &&
+      ( github.event.action != 'labeled' || github.event.label.name == 'ready')
     runs-on: ${{ (matrix.component == 'eric' && 'blacksmith-4vcpu-ubuntu-2404') || 'ubuntu-latest' }}
     strategy:
       matrix:
