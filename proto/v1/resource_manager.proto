@@ -13,6 +13,9 @@ service ResourceManager {
 
   // Health checking
   rpc Healthcheck(HealthcheckRequest) returns (HealthcheckResponse);
+
+  // Scale up a unit task
+  rpc ScaleUnitTask(ScaleUnitTaskRequest) returns (ScaleUnitTaskResponse);
 }
 
 // Deploy a new task
@@ -48,4 +51,16 @@ message HealthcheckRequest {}
 message HealthcheckResponse {
   common.Status status = 1;
   repeated TaskManagerStatus task_manager_statuses = 2;
+}
+
+message ScaleUnitTaskRequest {
+  // Task to scale
+  common.UnitTask task = 1;
+  // Number of GPUs to add or remove
+  int32 num_gpus = 2;
+}
+
+message ScaleUnitTaskResponse {
+  // Success or failure
+  common.Status status = 1;
 }
