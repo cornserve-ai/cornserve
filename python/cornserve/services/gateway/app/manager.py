@@ -15,7 +15,7 @@ from cornserve.app.base import AppConfig, AppRequest, AppResponse
 from cornserve.logging import get_logger
 from cornserve.services.gateway.app.models import AppClasses, AppDefinition, AppState
 from cornserve.services.gateway.task_manager import TaskManager
-from cornserve.task.base import expand_tasks_into_unit_tasks
+from cornserve.task.base import discover_unit_tasks
 
 logger = get_logger(__name__)
 tracer = trace.get_tracer(__name__)
@@ -114,13 +114,13 @@ class AppManager:
         """Validate and create an app from source code.
 
         Args:
-            source_code: Source code of the app
+            source_code: Python source code of the application
 
         Returns:
             tuple[str, list[str]]: A tuple containing the App ID and a list of unit task names
 
         Raises:
-            ValueError: If the app source code validation fails
+            ValueError: If app validation fails
         """
         span = trace.get_current_span()
 
@@ -136,7 +136,7 @@ class AppManager:
         try:
             module = load_module_from_source(source_code, app_id)
             app_classes = validate_app_module(module)
-            tasks = expand_tasks_into_unit_tasks(app_classes.config_cls.tasks.values())
+            tasks = discover_unit_tasks(app_classes.config_cls.tasks.values())
             task_names = [t.execution_descriptor.create_executor_name().lower() for t in tasks]
         except (ImportError, ValueError) as e:
             raise ValueError(f"App source code validation failed: {e}") from e
@@ -154,14 +154,11 @@ class AppManager:
         return app_id, task_names
 
     @tracer.start_as_current_span(name="AppManager.deploy_app_tasks")
-    async def deploy_app_tasks(self, app_id: str) -> dict[str, str]:
+    async def deploy_app_tasks(self, app_id: str) -> None:
         """Deploy tasks for an app and return final result.
 
         Args:
             app_id: The App's ID
-
-        Returns:
-            dict: Final status with either success or failure information
 
         Raises:
             RuntimeError: If task deployment gets any Exception
@@ -184,8 +181,6 @@ class AppManager:
                 self.app_states[app_id] = AppState.READY
 
             logger.info("Successfully deployed %s tasks for app '%s'.", len(tasks_to_deploy), app_id)
-
-            return {"status": "ready", "message": f"Successfully deployed {len(tasks_to_deploy)} tasks"}
 
         except Exception as e:
             logger.exception("Failed to deploy tasks (count: %s) for app '%s': %s", len(tasks_to_deploy), app_id, e)
@@ -221,7 +216,7 @@ class AppManager:
                 task.cancel()
 
         # Let the task manager know that this app no longer needs these tasks
-        tasks = expand_tasks_into_unit_tasks(app.classes.config_cls.tasks.values())
+        tasks = discover_unit_tasks(app.classes.config_cls.tasks.values())
 
         try:
             await self.task_manager.declare_not_used(tasks)

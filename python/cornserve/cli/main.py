@@ -20,7 +20,12 @@ from rich.text import Text
 from tyro.constructors import PrimitiveConstructorSpec
 
 from cornserve.cli.log_streamer import LogStreamer
-from cornserve.services.gateway.app.models import AppState
+from cornserve.services.gateway.app.models import (
+    RegistrationErrorResponse,
+    RegistrationFinalResponse,
+    RegistrationInitialResponse,
+    RegistrationStatusEvent,
+)
 from cornserve.services.gateway.models import AppInvocationRequest, AppRegistrationRequest
 
 try:
@@ -143,104 +148,105 @@ def register(
 
     console = rich.get_console()
 
-    # Parse responses from single stream
-    initial_resp = None
-    final_resp = None
-
+    # Parse responses from stream
     response_iter = response.iter_lines(decode_unicode=True)
+
+    app_id: str | None = None
+    task_names: list[str] = []
+    log_streamer: LogStreamer | None = None
+    final_message: str | None = None
+    success = False
 
     # Get immediate initial response
     for line in response_iter:
-        if line and line.startswith("data: "):
-            data = json.loads(line[6:])
-            if data.get("type") == "error_response":
-                error_msg = data.get("message", "Registration failed without details")
-                rich.print(Panel(f"Registration failed: {error_msg}", style="red", expand=False))
-                aliases.remove(current_alias)
-                return
-            elif data.get("type") == "initial_response":
-                initial_resp = data
-                break
+        if not line or not line.startswith("data: "):
+            continue
 
-    if not initial_resp or not initial_resp.get("app_id"):
+        try:
+            event = RegistrationStatusEvent.model_validate_json(line[6:]).event
+        except Exception as e:
+            rich.print(Panel(f"Failed to parse response from gateway: {e}", style="red", expand=False))
+            aliases.remove(current_alias)
+            return
+
+        if isinstance(event, RegistrationInitialResponse):
+            app_id = event.app_id
+            task_names = event.task_names
+            # Update alias to actual app ID
+            aliases.set(app_id, current_alias)
+
+            app_info_table = Table(box=box.ROUNDED)
+            app_info_table.add_column("App ID")
+            app_info_table.add_column("Alias")
+            app_info_table.add_row(app_id, current_alias)
+            rich.print(app_info_table)
+
+            if task_names:
+                tasks_table = Table(box=box.ROUNDED)
+                tasks_table.add_column("Unit Tasks")
+                for name in task_names:
+                    tasks_table.add_row(name)
+                rich.print(tasks_table)
+
+                # Start log streamer
+                log_streamer = LogStreamer(task_names, console=console)
+                if log_streamer.k8s_available:
+                    log_streamer.start()
+                else:
+                    rich.print(
+                        Panel(
+                            Text("Could not connect to Kubernetes cluster. Logs will not be streamed.", style="yellow"),
+                            title="[bold yellow]Log Streaming[/bold yellow]",
+                            border_style="dim",
+                        )
+                    )
+            break
+
+        if isinstance(event, RegistrationErrorResponse):
+            rich.print(Panel(f"Registration failed: {event.message}", style="red", expand=False))
+            aliases.remove(current_alias)
+            return
+
+    if not app_id:
         aliases.remove(current_alias)
         rich.print(Panel("Invalid initial response from gateway", style="red", expand=False))
         return
 
-    app_id = initial_resp["app_id"]
-    task_names = initial_resp.get("task_names", [])
-
-    # Update the alias to the real app ID
-    aliases.set(app_id, current_alias)
-
-    app_info_table = Table(box=box.ROUNDED)
-    app_info_table.add_column("App ID")
-    app_info_table.add_column("Alias")
-    app_info_table.add_row(app_id, current_alias)
-    rich.print(app_info_table)
-
-    if task_names:
-        tasks_table = Table(box=box.ROUNDED)
-        tasks_table.add_column("Unit Tasks")
-        for name in task_names:
-            tasks_table.add_row(name)
-        rich.print(tasks_table)
-
-    # Start log streamer
-    log_streamer = None
-    if task_names:
-        log_streamer = LogStreamer(task_names, console=console)
-        if log_streamer.k8s_available:
-            log_streamer.start()
-        else:
-            rich.print(
-                Panel(
-                    Text("Could not connect to Kubernetes cluster. Logs will not be streamed.", style="yellow"),
-                    title="[bold yellow]Log Streaming[/bold yellow]",
-                    border_style="dim",
-                )
-            )
-
     # Wait for final response with spinner
-    spinner_message = f" Registering app '{app_id}'... Deploying tasks"
+    spinner_message = f" Registering app '{app_id}'. Waiting for tasks deployment..."
     try:
-        with Status(spinner_message, spinner="dots", console=console) as status:
+        with Status(spinner_message, spinner="dots", console=console):
             for line in response_iter:
-                if line and line.startswith("data: "):
-                    data = json.loads(line[6:])
-                    if data.get("type") == "error_response":
-                        error_msg = data.get("message", "Registration failed")
-                        final_resp = {"status": "registration_failed", "message": error_msg}
-                        status.update(status=Text(f" Registration error: {error_msg}", style="red"))
-                        break
-                    elif data.get("type") == "final_response":
-                        final_resp = data
-                        final_status = data.get("status", "unknown")
-                        final_message = data.get("message", "Registration completed")
-                        style = "green" if final_status == "ready" else "red"
-                        status.update(status=Text(f" Registering app '{app_id}'... {final_message}", style=style))
-                        break
+                if not line or not line.startswith("data: "):
+                    continue
+
+                try:
+                    event = RegistrationStatusEvent.model_validate_json(line[6:]).event
+                except Exception as e:
+                    final_message = f"Failed to parse response from gateway: {e}"
+                    break
+
+                if isinstance(event, RegistrationErrorResponse):
+                    final_message = event.message
+                    break
+                if isinstance(event, RegistrationFinalResponse):
+                    final_message = event.message
+                    success = True
+                    break
     finally:
         if log_streamer:
             log_streamer.stop()
 
-    # Show final result
-    if final_resp:
-        final_status = final_resp.get("status", "unknown")
-        final_message = final_resp.get("message", "Registration completed")
-    else:
-        final_status = "unknown"
-        final_message = "Failed to receive or parse final response"
-
-    if final_status == "ready":
+    if success:
         rich.print(
             Panel(f"App '{app_id}' registered successfully with alias '{current_alias}'.", style="green", expand=False)
         )
     else:
         aliases.remove(current_alias)
+        final_message = final_message or "Failed to receive or parse final response"
         rich.print(
             Panel(
-                f"App '{app_id}' status: {final_status}. {final_message}\nAlias '{current_alias}' removed.",
+                f"App '{app_id}' registration failed. {final_message}\nAlias '{current_alias}' removed.",
                 style="red",
                 expand=False,
             )
@@ -345,43 +351,6 @@ def invoke(
     for key, value in raw_response.json().items():
         table.add_row(key, value)
     rich.print(table)
-
-
-@app.command(name="check-status")
-def check_status(
-    app_id_or_alias: Annotated[str, tyro.conf.Positional],
-) -> None:
-    """Check the registration status of an application."""
-    if app_id_or_alias.startswith("app-"):
-        app_id = app_id_or_alias
-    else:
-        alias = Alias()
-        app_id = alias.get(app_id_or_alias)
-        if not app_id:
-            rich.print(Panel(f"Alias '{app_id_or_alias}' not found.", style="red", expand=False))
-            return
-
-    try:
-        status_response = requests.get(f"{GATEWAY_URL}/app/status/{app_id}", timeout=5)
-
-        if status_response.status_code == 404:
-            rich.print(f"App '{app_id}' not found.")
-            return
-
-        status_response.raise_for_status()
-        status_data = status_response.json()
-        status_str = status_data.get("status", "unknown").lower()
-
-        status_style = "yellow"
-        if status_str == AppState.READY.value:
-            status_style = "green"
-
-        rich.print(f"Status for app '{app_id}': [{status_style}]{status_str.title()}[/{status_style}]")
-
-    except requests.exceptions.RequestException as e:
-        rich.print(Panel(f"Error checking status for '{app_id}': {e}", style="red", expand=False))
-    except Exception as e:
-        rich.print(Panel(f"Unexpected error while checking '{app_id}': {e}", style="red", expand=False))
 
 
 def main() -> None:

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from collections.abc import AsyncGenerator
 
 from fastapi import (
@@ -22,6 +21,12 @@ from pydantic import ValidationError
 from cornserve.constants import K8S_RESOURCE_MANAGER_GRPC_URL
 from cornserve.logging import get_logger
 from cornserve.services.gateway.app.manager import AppManager
+from cornserve.services.gateway.app.models import (
+    RegistrationErrorResponse,
+    RegistrationFinalResponse,
+    RegistrationInitialResponse,
+    RegistrationStatusEvent,
+)
 from cornserve.services.gateway.models import (
     AppInvocationRequest,
     AppRegistrationRequest,
@@ -47,32 +52,27 @@ async def register_app(request: AppRegistrationRequest, raw_request: Request):
             # Parse and validate the app
             app_id, task_names = await app_manager.validate_and_create_app(request.source_code)
 
-            # Send initial response so the client can
-            initial_response = {
-                "type": "initial_response",
-                "app_id": app_id,
-                "task_names": task_names,
-                "status": "not_ready",
-            }
-            yield f"data: {json.dumps(initial_response)}\n\n"
+            # Send initial response
+            initial_event = RegistrationStatusEvent(
+                event=RegistrationInitialResponse(app_id=app_id, task_names=task_names)
+            )
+            yield f"data: {initial_event.model_dump_json()}\n\n"
 
             # Now deploy tasks and send final result
-            final_result = await app_manager.deploy_app_tasks(app_id)
-            final_response = {
-                "type": "final_response",
-                "status": final_result["status"],
-                "message": final_result["message"],
-            }
-            yield f"data: {json.dumps(final_response)}\n\n"
+            await app_manager.deploy_app_tasks(app_id)
+            final_event = RegistrationStatusEvent(
+                event=RegistrationFinalResponse(message=f"Successfully deployed {len(task_names)} unit tasks")
+            )
+            yield f"data: {final_event.model_dump_json()}\n\n"
 
         except Exception as e:
             logger.info("Error during app registration for app_id '%s': %s", app_id, e)
-            error_response = {"type": "error_response", "status": "registration_failed", "message": str(e)}
-            yield f"data: {json.dumps(error_response)}\n\n"
+            error_event = RegistrationStatusEvent(event=RegistrationErrorResponse(message=str(e)))
+            yield f"data: {error_event.model_dump_json()}\n\n"
 
     return StreamingResponse(
         generate_registration_stream(),
-        media_type="text/plain",
+        media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
     )
 
@@ -133,27 +133,6 @@ async def list_apps(raw_request: Request):
         return await app_manager.list_apps()
     except Exception as e:
         logger.exception("Unexpected error while listing apps")
-        return Response(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            content=str(e),
-        )
-
-
-@router.get("/app/status/{app_id}")
-async def get_app_status(app_id: str, raw_request: Request):
-    """Get the registration status of an application."""
-    app_manager: AppManager = raw_request.app.state.app_manager
-    span = trace.get_current_span()
-    span.set_attribute("gateway.get_app_status.app_id", app_id)
-
-    try:
-        app_state = await app_manager.get_app_status(app_id)
-        if app_state is None:
-            return Response(status_code=status.HTTP_404_NOT_FOUND, content=f"App ID '{app_id}' not found")
-        # Return the app_id and the string value of the AppState enum
-        return {"app_id": app_id, "status": app_state.value}
-    except Exception as e:
-        logger.exception("Unexpected error while getting app status for %s", app_id)
         return Response(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             content=str(e),

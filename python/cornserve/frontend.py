@@ -13,7 +13,7 @@ import websocket
 from pydantic import BaseModel
 
 from cornserve.constants import K8S_GATEWAY_SERVICE_HTTP_URL
-from cornserve.task.base import Task, UnitTask, UnitTaskList, expand_tasks_into_unit_tasks
+from cornserve.task.base import Task, UnitTask, UnitTaskList, discover_unit_tasks
 
 
 class TaskRequestVerb(enum.Enum):
@@ -161,7 +161,7 @@ class CornserveClient:
         """
         if not self.is_connected():
             raise ConnectionError("Not connected to the Cornserve gateway.")
-        tasks = expand_tasks_into_unit_tasks([task])
+        tasks = discover_unit_tasks([task])
         return self.deploy_unit_tasks(tasks)
 
     def teardown_unit_tasks(self, tasks: list[UnitTask]) -> TaskResponse:
@@ -193,7 +193,7 @@ class CornserveClient:
         """
         if not self.is_connected():
             raise ConnectionError("Not connected to the Cornserve gateway.")
-        tasks = expand_tasks_into_unit_tasks([task])
+        tasks = discover_unit_tasks([task])
         return self.teardown_unit_tasks(tasks)
 
     def close(self) -> None:
