@@ -45,8 +45,10 @@ class ResourceManagerServicer(resource_manager_pb2_grpc.ResourceManagerServicer)
         """Scale a unit task up or down."""
         if request.num_gpus < 0:
             await self.manager.scale_down_unit_task(UnitTask.from_pb(request.task), -request.num_gpus)
-        else:
+        elif request.num_gpus > 0:
             await self.manager.scale_up_unit_task(UnitTask.from_pb(request.task), request.num_gpus)
+        else:
+            raise ValueError("The number of GPUs should not be zero.")
         return resource_manager_pb2.ScaleUnitTaskResponse(status=common_pb2.Status.STATUS_OK)
 
     async def Healthcheck(
