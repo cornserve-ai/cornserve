@@ -33,7 +33,7 @@ fi
 # Get the user to type their password if they want local k3s containerd export
 if [[ "${REGISTRY}" == "local" ]]; then
   # Ensure k3s is installed and list existing images
-  echo "Building iamge directly within local k3s containerd"
+  echo "Building image directly within local k3s containerd"
   k3s_bin="$(which k3s)"
   sudo "${k3s_bin}" ctr images ls | grep -i "${NAMESPACE}" || true
 

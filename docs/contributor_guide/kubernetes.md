@@ -35,7 +35,7 @@ You are developing on a multi-node cluster.
 
 ```bash
 bash kubernetes/registry.sh
-REGISTRY=myregisty.com:5000 bash kubernetes/set_registry.sh  # (1)!
+REGISTRY=myregistry.com:5000 bash kubernetes/set_registry.sh  # (1)!
 ```
 
 1. Modifies `kustomization.yaml` and `k3s/registries.yaml`
@@ -48,13 +48,27 @@ sudo cp kubernetes/k3s/registries.yaml /etc/rancher/k3s/registries.yaml
 sudo systemctl start k3s  # or k3s-agent
 ```
 
-(3) Build and push images to the registry using the `build_export_images.sh` script with the `REGISTRY` environment variable set to the registry address:
+(3) On the node that you want to build the images, you also need to specify insecure registries for docker so that it can push images to it. So, in `/etc/docker/daemon.json`, you should add something like,
+
+```
+{
+    "existing configs...",
+    "insecure-registries": ["myregistry.com:5000"]
+}
+```
+
+Then restart docker by `sudo systemctl restart docker`.
+
+(4) Build and push images to the registry using the `build_export_images.sh` script with the `REGISTRY` environment variable set to the registry address:
 
 ```bash
 REGISTRY=myregistry.com:5000 bash scripts/build_export_images.sh
 ```
 
-(4) Use the `dev` overlay (which specifies `imagePullPolicy: Always`) to deploy Cornserve:
+!!! NOTE
+    Building Eric can consume a lot of memory and may trigger OOMs that freeze the instance. Please set a proper `max_jobs` in `eric.Dockerfile`.
+
+(5) Use the `dev` overlay (which specifies `imagePullPolicy: Always`) to deploy Cornserve:
 
 ```bash
 kubectl apply -k kustomize/cornserve-system/overlays/dev

@@ -148,7 +148,14 @@ class ResourceManager:
                 if any(
                     condition.type == "Ready" and condition.status == "True" for condition in node.status.conditions
                 ):
-                    nodes.append(node)
+                    if (
+                        node.status.capacity
+                        and "nvidia.com/gpu" in node.status.capacity
+                        and int(node.status.capacity["nvidia.com/gpu"]) > 0
+                    ):
+                        nodes.append(node)
+                    else:
+                        logger.warning("Node %s has no GPUs, skipping", node.metadata.name)
                 else:
                     logger.warning("Node %s is not ready, skipping", node.metadata.name)
             else:

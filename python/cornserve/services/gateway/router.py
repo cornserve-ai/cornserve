@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import AsyncGenerator
+
 from fastapi import (
     APIRouter,
     FastAPI,
@@ -12,6 +14,7 @@ from fastapi import (
     status,
 )
 from fastapi.exceptions import RequestValidationError
+from fastapi.responses import StreamingResponse
 from opentelemetry import trace
 from pydantic import ValidationError
 
@@ -21,7 +24,10 @@ from cornserve.services.gateway.app.manager import AppManager
 from cornserve.services.gateway.models import (
     AppInvocationRequest,
     AppRegistrationRequest,
-    AppRegistrationResponse,
+    RegistrationErrorResponse,
+    RegistrationFinalResponse,
+    RegistrationInitialResponse,
+    RegistrationStatusEvent,
     ScaleTaskRequest,
 )
 from cornserve.services.gateway.session import SessionManager
@@ -33,23 +39,45 @@ logger = get_logger(__name__)
 tracer = trace.get_tracer(__name__)
 
 
-@router.post("/app/register", response_model=AppRegistrationResponse)
+@router.post("/app/register")
 async def register_app(request: AppRegistrationRequest, raw_request: Request):
-    """Register a new application with the given ID and source code."""
+    """Register a new application with streaming response for deployment progress."""
     app_manager: AppManager = raw_request.app.state.app_manager
 
-    try:
-        app_id = await app_manager.register_app(request.source_code)
-        return AppRegistrationResponse(app_id=app_id)
-    except ValueError as e:
-        logger.info("Error while registering app: %s", e)
-        return Response(status_code=status.HTTP_400_BAD_REQUEST, content=str(e))
-    except Exception as e:
-        logger.exception("Unexpected error while registering app")
-        return Response(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            content=str(e),
-        )
+    async def generate_registration_stream() -> AsyncGenerator[str, None]:
+        """Generate Server-Sent Events (SSE) for the registration process.
+
+        For SSE standards (e.g. the "data: " prefix),
+        see https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events/Using_server-sent_events
+        """
+        app_id: str | None = None
+        try:
+            # Parse and validate the app
+            app_id, task_names = await app_manager.validate_and_create_app(request.source_code)
+
+            # Send initial response
+            initial_event = RegistrationStatusEvent(
+                event=RegistrationInitialResponse(app_id=app_id, task_names=task_names)
+            )
+            yield f"data: {initial_event.model_dump_json()}\n\n"
+
+            # Now deploy tasks and send final result
+            await app_manager.deploy_app_tasks(app_id)
+            final_event = RegistrationStatusEvent(
+                event=RegistrationFinalResponse(message=f"Successfully deployed {len(task_names)} unit tasks")
+            )
+            yield f"data: {final_event.model_dump_json()}\n\n"
+
+        except Exception as e:
+            logger.info("Error during app registration for app_id '%s': %s", app_id, e)
+            error_event = RegistrationStatusEvent(event=RegistrationErrorResponse(message=str(e)))
+            yield f"data: {error_event.model_dump_json()}\n\n"
+
+    return StreamingResponse(
+        generate_registration_stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
+    )
 
 
 @router.post("/app/unregister/{app_id}")
