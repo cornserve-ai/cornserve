@@ -25,24 +25,31 @@ BACKEND_URLS = {
 AIOHTTP_TIMEOUT = aiohttp.ClientTimeout(total=6 * 60 * 60)
 MAX_MM_COUNT = 40
 
-def sample_mm_count(max_count: int, distribution: str = "poisson") -> int:
-    """Sample number of multimedia items based on distribution."""
+def sample_mm_count(max_count: int, distribution: str = "uniform") -> int:
+    """Sample a strictly positive number (1‒max_count) of multimedia items.
+
+    If max_count ≤ 0, returns 0.
+    """
     if max_count <= 0:
         return 0
-    
+
     if distribution == "uniform":
-        return np.random.randint(0, max_count + 1)
+        # 1 … max_count (np.random.randint is [low, high) )
+        return np.random.randint(1, max_count + 1)
+
     elif distribution == "poisson":
-        # Use max_count/2 as lambda to keep most values within range
-        lambda_val = max(0.5, max_count / 2.0)  # Ensure lambda is positive
+        # Center λ around half the range but clamp to ≥1
+        lambda_val = max(1.0, max_count / 2.0)
         sampled = np.random.poisson(lambda_val)
-        return min(sampled, max_count)
+        return max(1, min(sampled, max_count))
+
     elif distribution == "geometric":
-        # Geometric with p = 0.3 to favor smaller numbers
-        sampled = np.random.geometric(0.3) - 1  # -1 because geometric starts at 1
-        return min(max(sampled, 0), max_count)  # Ensure non-negative
-    else:
-        return np.random.randint(0, max_count + 1)
+        # Geometric(p) already produces 1,2,…  (no “−1” needed)
+        sampled = np.random.geometric(0.3)
+        return max(1, min(sampled, max_count))
+
+    # Fallback: behave like “uniform”
+    return np.random.randint(1, max_count + 1)
 
 
 async def post(
@@ -365,9 +372,9 @@ if __name__ == "__main__":
                         help="Maximum number of videos per request.")
     parser.add_argument("--max-audios-per-request", type=int, default=0,
                         help="Maximum number of audios per request.")
-    parser.add_argument("--max-images-per-request", type=int, default=3,
+    parser.add_argument("--max-images-per-request", type=int, default=1,
                         help="Maximum number of images per request.")
-    parser.add_argument("--mm-distribution", type=str, default="poisson",
+    parser.add_argument("--mm-distribution", type=str, default="unfiorm",
                         choices=["uniform", "poisson", "geometric"],
                         help="Distribution for number of multimedia items per request.")
     parser.add_argument(
@@ -395,3 +402,5 @@ if __name__ == "__main__":
         parser.error("--app-id is required when --backend is 'cornserve'")
 
     asyncio.run(main(args))
+
+    # python3 cornserve_benchmark.py --app-id app-56fbb78ff5c54d319c2252dae5e3065a --synthesize-mm-data --num-prompts 10 --enforced-prompt-len 5

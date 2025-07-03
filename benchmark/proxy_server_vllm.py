@@ -3,7 +3,7 @@ import argparse, asyncio, sys
 from itertools import cycle
 
 import httpx
-from fastapi import FastAPI, Request, HTTPException
+from fastapi import FastAPI, Request, HTTPException, Response
 from fastapi.responses import StreamingResponse
 import uvicorn
 
@@ -44,6 +44,10 @@ def create_app(addrs: list[str]) -> FastAPI:
 
     app = FastAPI()
 
+    @app.get("/health")
+    async def health():
+        return Response(status_code=200, content="OK")
+
     @app.post("/v1/chat/completions")
     async def completions(req: Request):
         payload = await req.json()
@@ -73,6 +77,16 @@ def create_app(addrs: list[str]) -> FastAPI:
 
     return app
 
+async def start_proxy_server(proxy_addrs: list[str], port: int = 8000) -> None:
+    print(f"Starting proxy for {len(proxy_addrs)} back-ends")
+    print("Waiting for back-ends to be ready...")
+    await wait_for_backends(proxy_addrs)
+    try:
+        uvicorn.run(create_app(proxy_addrs),
+                    host="0.0.0.0", port=port, log_level="info")
+    except KeyboardInterrupt:
+        print("Shutting down gracefully...")
+
 # --------------------------- CLI / entry-point ----------------------------- #
 if __name__ == "__main__":
     p = argparse.ArgumentParser("minimal vLLM round-robin proxy (stream-safe)")
@@ -80,7 +94,4 @@ if __name__ == "__main__":
     p.add_argument("--port", type=int, default=8000, help="listen port (8000)")
     args = p.parse_args()
 
-    asyncio.run(wait_for_backends(args.proxy_addrs))
-    uvicorn.run(create_app(args.proxy_addrs),
-                host="0.0.0.0", port=args.port, log_level="info")
-
+    asyncio.run(start_proxy_server(args.proxy_addrs, args.port))

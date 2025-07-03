@@ -108,11 +108,11 @@ def build_vllm_input(
         payload["messages"][0]["content"].append(sampled_request.multi_modal_data)
     else:
         for url in video_urls:
-            payload["messages"][0]["content"].append({"type": "video_url", "video_url": url})
+            payload["messages"][0]["content"].append({"type": "video_url", "video_url": {"url": url}})
         for url in audio_urls:
-            payload["messages"][0]["content"].append({"type": "audio_url", "audio_url": url})
+            payload["messages"][0]["content"].append({"type": "audio_url", "audio_url": {"url": url}})
         for url in image_urls:
-            payload["messages"][0]["content"].append({"type": "image_url", "image_url": url})
+            payload["messages"][0]["content"].append({"type": "image_url", "image_url": {"url": url}})
     return RequestInput(backend=Backend.VLLM, url=api_url, payload=payload)
 
 
