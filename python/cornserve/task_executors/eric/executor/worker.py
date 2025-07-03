@@ -61,6 +61,7 @@ class Worker:
     def __init__(
         self,
         model_id: str,
+        adapter_model_ids: list[str],
         tp_rank: int,
         tp_size: int,
         input_mq: MessageQueue,
@@ -79,7 +80,10 @@ class Worker:
         init_distributed(world_size=tp_size, rank=tp_rank)
 
         # TP rank is now known. Instantiate the load the model.
-        self.model = load_model(model_name_or_path=model_id)
+        self.model = load_model(
+            model_name_or_path=model_id,
+            adapter_model_names_or_paths=adapter_model_ids,
+        )
 
         # Initialize the sender sidecar client
         if sender_sidecar_ranks:
@@ -97,6 +101,7 @@ class Worker:
     @staticmethod
     def spawn_worker(
         model_id: str,
+        adapter_model_ids: list[str],
         tp_rank: int,
         tp_size: int,
         input_mq_handle: MessageQueueHandle,
@@ -119,6 +124,7 @@ class Worker:
             target=Worker.main,
             kwargs=dict(
                 model_id=model_id,
+                adapter_model_ids=adapter_model_ids,
                 tp_rank=tp_rank,
                 tp_size=tp_size,
                 input_mq_handle=input_mq_handle,
@@ -153,6 +159,7 @@ class Worker:
     @staticmethod
     def main(
         model_id: str,
+        adapter_model_ids: list[str],
         tp_rank: int,
         tp_size: int,
         input_mq_handle: MessageQueueHandle,
@@ -201,6 +208,7 @@ class Worker:
             # and load the model
             worker = Worker(
                 model_id=model_id,
+                adapter_model_ids=adapter_model_ids,
                 tp_rank=tp_rank,
                 tp_size=tp_size,
                 input_mq=input_mq,
@@ -279,7 +287,11 @@ class Worker:
                 worker_span.add_event("model_foward.start")
                 unique_spans[request_id] = worker_span
 
-        output = self.model(modality=batch.modality, batch=batch.data)
+        output = self.model(
+            modality=batch.modality,
+            adapter_name=batch.adapter_name,
+            batch=batch.data,
+        )
         for worker_span in unique_spans.values():
             worker_span.add_event("model_forward.done")
 

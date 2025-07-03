@@ -23,6 +23,7 @@ class EmbeddingData(BaseModel):
     Attributes:
         id: Modality data ID unique within the request.
         modality: The modality of the data.
+        model_id: Model (adapter) ID this data should be embedded with.
         url: The URL where the data can be downloaded from.
         receiver_sidecar_ranks: List of sidecar ranks to send the embeddings to.
             If omitted, tensors will not be sent to any sidecar.
@@ -30,6 +31,7 @@ class EmbeddingData(BaseModel):
 
     id: ID
     modality: Modality
+    model_id: str
     url: str
     receiver_sidecar_ranks: list[list[int]] | None = None
 

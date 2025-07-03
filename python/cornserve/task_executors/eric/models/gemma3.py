@@ -8,7 +8,7 @@ import numpy.typing as npt
 from transformers.models.auto.processing_auto import AutoProcessor
 from transformers.models.gemma3.configuration_gemma3 import Gemma3Config
 
-from .base import EricModel
+from .base import EricModel, BaseAdapterModule
 from cornserve.task_executors.eric.schema import Modality
 from cornserve.task_executors.eric.router.processor import BaseModalityProcessor
 from cornserve.task_executors.eric.models.layers.norm import GemmaRMSNorm
@@ -49,21 +49,29 @@ class Gemma3MultiModalProjector(nn.Module):
         return projected_vision_outputs.type_as(vision_outputs)
 
 
+class Gemma3MultiModalProjectorAdapter(BaseAdapterModule[Gemma3Config]):
+    """Adapter module for Gemma 3 multi-modal projector."""
+
+    def __init__(self) -> None:
+        """Initialize the adapter."""
+        super().__init__(adapter_cls=Gemma3MultiModalProjector)
+
+
 class Gemma3VisionEncoder(EricModel):
     def __init__(self, config: Gemma3Config) -> None:
         super().__init__()
         self.config = config
 
         self.vision_tower = SiglipVisionModel(config=config.vision_config)
-        self.multi_modal_projector = Gemma3MultiModalProjector(config)
+        self.multi_modal_projector = Gemma3MultiModalProjectorAdapter()
 
     @property
     def dtype(self) -> torch.dtype:
-        return self.multi_modal_projector.mm_input_projection_weight.dtype
+        return self.vision_tower.vision_model.embeddings.patch_embedding.weight.dtype
 
     @property
     def device(self) -> torch.device:
-        return self.multi_modal_projector.mm_input_projection_weight.device
+        return self.vision_tower.vision_model.embeddings.patch_embedding.weight.device
 
     @property
     def chunk_shape(self) -> tuple[int, ...]:
@@ -77,6 +85,7 @@ class Gemma3VisionEncoder(EricModel):
     def forward(
         self,
         modality: Modality,
+        adapter_name: str,
         batch: dict[str, list[torch.Tensor]],
     ) -> list[torch.Tensor]:
         """Forward pass of the model.
@@ -98,6 +107,9 @@ class Gemma3VisionEncoder(EricModel):
         if modality != Modality.IMAGE:
             raise ValueError(f"Unsupported modality: {modality}")
 
+        if adapter_name is None:
+            raise ValueError("Adapter name must be provided for Gemma 3 vision encoder.")
+
         # Sanity check
         assert len(batch["pixel_values"]) == len(batch["num_crops"])
         for pixels in batch["pixel_values"]:
@@ -111,7 +123,7 @@ class Gemma3VisionEncoder(EricModel):
 
         # Embedding
         image_features = self.vision_tower(pixel_values)
-        image_embeds = self.multi_modal_projector(image_features)
+        image_embeds = self.multi_modal_projector(adapter_name, image_features)
 
         # Unbatch
         result = [e.flatten(0, 1) for e in image_embeds.split(num_patches.tolist())]

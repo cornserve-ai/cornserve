@@ -96,6 +96,7 @@ class Processor:
             ProcessedEmbeddingData(
                 id=item.id,
                 modality=item.modality,
+                model_id=item.model_id,
                 data=feature,
                 receiver_sidecar_ranks=item.receiver_sidecar_ranks,
             )

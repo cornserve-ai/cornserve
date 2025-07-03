@@ -61,6 +61,7 @@ class EricDescriptor(TaskExecutionDescriptor[EncoderTask, EncoderInput, EncoderO
                 EmbeddingData(
                     id=forward.id,
                     modality=Modality(self.task.modality.value),
+                    model_id=task_input.model_id,
                     url=url,
                     receiver_sidecar_ranks=forward.dst_sidecar_ranks,
                 )

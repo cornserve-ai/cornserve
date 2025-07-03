@@ -393,6 +393,7 @@ class Qwen2_5OmniEncoder(EricModel):
     def forward(
         self,
         modality: Modality,
+        adapter_name: str,
         batch: dict[str, list[torch.Tensor]],
     ) -> list[torch.Tensor]:
         """Forward pass of the model.
@@ -412,7 +413,7 @@ class Qwen2_5OmniEncoder(EricModel):
         # Batch
         match modality:
             case Modality.IMAGE | Modality.VIDEO:
-                return self.visual(modality, batch)
+                return self.visual(modality, adapter_name, batch)
             case Modality.AUDIO:
                 input_features = torch.cat(batch["input_audio_features"], dim=1).to(
                     device=self.device, dtype=self.dtype

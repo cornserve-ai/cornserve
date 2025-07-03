@@ -395,9 +395,8 @@ class Qwen2_5_VisionTransformer(EricModel):
 
     def forward(
         self,
-        # x: torch.Tensor,
-        # grid_thw: torch.Tensor,
         modality: Modality,
+        adapter_name: str,
         batch: dict[str, list[torch.Tensor]],
     ) -> list[torch.Tensor]:
         """Forward pass of the model.

@@ -20,9 +20,12 @@ class EncoderInput(TaskInput):
     """Input model for encoder tasks.
 
     Attributes:
+        model_id: The ID of the model to use for the task. If this is an
+            adapter-supported model, this should be the name of the adapter.
         data_urls: The URLs of the data to encode.
     """
 
+    model_id: str
     data_urls: list[str]
 
 
@@ -42,10 +45,14 @@ class EncoderTask(UnitTask[EncoderInput, EncoderOutput]):
     Attributes:
         model_id: The ID of the model to use for the task.
         modality: Modality of data this encoder can embed.
+        adapter_model_ids: Some models support multiple adapters and allow the
+            base model to be shared (e.g., Gemma 3). This list specifies model IDs
+            from which to load adapters. Base model weights are loaded from `model_id`.
     """
 
     model_id: str
     modality: Modality
+    adapter_model_ids: list[str] = []
 
     def make_record_output(self, task_input: EncoderInput) -> EncoderOutput:
         """Create a task output for task invocation recording."""

@@ -24,6 +24,11 @@ class WeightInfo:
     # `strip_prefixes` set to `True`.
     ignored_prefixes: list[str] = field(default_factory=list)
 
+    # List of model weight name prefixes that are to populate adapters.
+    # Same as `ignored_prefixes` -- these prefixes are *after* prefix striping
+    # if you have `strip_prefixes` set to `True`.
+    adapter_prefixes: list[str] = field(default_factory=list)
+
     # Whether or not to strip the prefixes from weight names before
     # calling `load_state_dict`.
     strip_prefixes: bool = True
@@ -66,6 +71,10 @@ class RegistryEntry:
     # Name of the model class
     class_name: str
 
+    # Fully qualified name of the adapter submodule attribute.
+    # Calling `getattr(model, adapter_attr)` should return the adapter
+    adapter_attr: str | None
+
     # Resolution type of the Vision Transformer model
     vit_resolution_type: ViTResolutionType
 
@@ -75,12 +84,24 @@ class RegistryEntry:
     # Modality-specific info
     modality: dict[Modality, ModalityEntry]
 
+    def __post_init__(self) -> None:
+        """Post-init hook to validate the registry entry."""
+        if self.adapter_attr is not None and not self.weight.adapter_prefixes:
+            raise ValueError(
+                f"Registry entry for {self.class_name} must have `adapter_prefixes` set if `adapter_attr` is specified."
+            )
+        if self.adapter_attr is None and self.weight.adapter_prefixes:
+            raise ValueError(
+                f"Registry entry for {self.class_name} must have `adapter_attr` set if `adapter_prefixes` is specified."
+            )
+
 
 # Keyed by a model's type (usually its HF config `model_type`).
 MODEL_REGISTRY: dict[str, RegistryEntry] = {
     "qwen2_vl": RegistryEntry(
         module="qwen2_vl",
         class_name="Qwen2VisionTransformer",
+        adapter_attr=None,
         vit_resolution_type=ViTResolutionType.DYNAMIC,
         weight=WeightInfo(
             required_prefixes=["visual."],
@@ -94,6 +115,7 @@ MODEL_REGISTRY: dict[str, RegistryEntry] = {
     "qwen2_5_vl": RegistryEntry(
         module="qwen2_5_vl",
         class_name="Qwen2_5_VisionTransformer",
+        adapter_attr=None,
         vit_resolution_type=ViTResolutionType.DYNAMIC,
         weight=WeightInfo(
             required_prefixes=["visual."],
@@ -107,6 +129,7 @@ MODEL_REGISTRY: dict[str, RegistryEntry] = {
     "qwen2_5_omni": RegistryEntry(
         module="qwen2_5_omni",
         class_name="Qwen2_5OmniEncoder",
+        adapter_attr=None,
         vit_resolution_type=ViTResolutionType.DYNAMIC,
         weight=WeightInfo(
             required_prefixes=["thinker."],
@@ -122,6 +145,7 @@ MODEL_REGISTRY: dict[str, RegistryEntry] = {
     "llava_onevision": RegistryEntry(
         module="llava_onevision",
         class_name="LlavaOneVisionEncoder",
+        adapter_attr=None,
         vit_resolution_type=ViTResolutionType.FIXED,
         weight=WeightInfo(
             required_prefixes=["vision_tower.", "multi_modal_projector.", "image_newline"],
@@ -136,10 +160,12 @@ MODEL_REGISTRY: dict[str, RegistryEntry] = {
     "gemma3": RegistryEntry(
         module="gemma3",
         class_name="Gemma3VisionEncoder",
+        adapter_attr="multi_modal_projector",
         vit_resolution_type=ViTResolutionType.FIXED,
         weight=WeightInfo(
             required_prefixes=["vision_tower.", "multi_modal_projector."],
             ignored_prefixes=["vision_tower.vision_model.post_layernorm"],
+            adapter_prefixes=["multi_modal_projector."],
             strip_prefixes=False,
         ),
         modality={

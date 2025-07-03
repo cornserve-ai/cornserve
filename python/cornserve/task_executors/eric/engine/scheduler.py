@@ -97,11 +97,12 @@ class RequestQueue:
     def iter_waiting(
         self,
         modality: Modality,
+        model_id: str,
         max_items: int | None = None,
     ) -> Generator[tuple[EngineEnqueueRequest, ProcessedEmbeddingData], None, None]:
-        """Iterate over the queue and yield waiting data with the given modality.
+        """Iterate over the queue and yield waiting data with the given modality and model ID.
 
-        When the modality of the data changes, stop iterating.
+        When the modality or model ID of the data changes, stop iterating.
         """
         count = 0
         for request in self.request_id_to_request.values():
@@ -111,7 +112,7 @@ class RequestQueue:
                     continue
 
                 # Modality change, stop!
-                if data.modality != modality:
+                if data.modality != modality or data.model_id != model_id:
                     return
 
                 yield request, data
@@ -147,9 +148,10 @@ class Scheduler:
         # XXX: This is currently a simple scheduler that iterates over the queue
         # in order and batches *all* data items with the same modality.
         modality = self.queue.peek_data().modality
-        batch = SchedulerBatch(modality=modality)
-        # spans = []
-        for req, data in self.queue.iter_waiting(modality=modality, max_items=None):
+        adapter_name = self.queue.peek_data().model_id
+        batch = SchedulerBatch(modality=modality, adapter_name=adapter_name)
+
+        for req, data in self.queue.iter_waiting(modality=modality, model_id=adapter_name, max_items=None):
             if req.span:
                 req.span.add_event("engine.scheduler.dequeue", attributes={"data_id": data.id})
 
@@ -164,14 +166,8 @@ class Scheduler:
                 otel_spans=[req.span],
                 otel_carriers=[carrier],
             )
-            # spans.append(req.span)
 
         assert batch.request_ids, "Batch should not be empty"
-        # # here we record all the batch_size for each request
-        # for span in spans:
-        #     if span:
-        #         # here we cannot use attributes because it might be overwritten
-        #         span.add_event("engine.scheduler.batch_size", attributes={"batch_size": len(batch)})
 
         return batch
 
