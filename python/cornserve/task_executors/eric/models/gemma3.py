@@ -77,10 +77,15 @@ class Gemma3VisionEncoder(EricModel):
     def chunk_shape(self) -> tuple[int, ...]:
         """Fixed resolution ViT followed by pooling.
 
-        4096 vision tokens are pooled to 256 tokens. Hidden size is 2560.
+        4096 vision tokens are pooled to 256 tokens.
+        Hidden size is 2560 for 4B, 3840 for 12B, and 5376 for 27B.
         This is with Pan & Scan disabled, so any image is just resized to 896x896.
         """
-        return (1, self.config.mm_tokens_per_image, self.config.text_config.hidden_size)
+        # HACK: The multimodal projector adapter outputs different hidden sizes, but
+        # our sidecar currently expects a fixed size. Use the GCD of three known Gemma 3
+        # hidden sizes (2560, 3840, 5376), but eventually, the sidecar should be able to
+        # handle different hidden sizes.
+        return (1, self.config.mm_tokens_per_image, 256)
 
     def forward(
         self,

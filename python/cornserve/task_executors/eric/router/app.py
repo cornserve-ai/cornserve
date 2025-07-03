@@ -56,6 +56,20 @@ async def embeddings(
             f"eric.embeddings.data.{data_item.id}.url",
             data_item.url,
         )
+
+    # Request validation: model id and modality
+    config: EricConfig = raw_request.app.state.config
+    supported_model_ids = [config.model.id, *config.model.adapter_model_ids]
+    for data_item in request.data:
+        if data_item.model_id not in supported_model_ids:
+            logger.info("Data item %s has unknown model ID %s", data_item.id, data_item.model_id)
+            raw_response.status_code = status.HTTP_400_BAD_REQUEST
+            return EmbeddingResponse(status=Status.ERROR, error_message="Unsupported model ID")
+        if data_item.modality != config.model.modality:
+            logger.info("Data item %s has unsupported modality %s", data_item.id, data_item.modality)
+            raw_response.status_code = status.HTTP_400_BAD_REQUEST
+            return EmbeddingResponse(status=Status.ERROR, error_message="Unsupported modality")
+
     processor: Processor = raw_request.app.state.processor
     engine_client: EngineClient = raw_request.app.state.engine_client
 
