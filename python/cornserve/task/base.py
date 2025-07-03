@@ -82,6 +82,15 @@ class Task(BaseModel, ABC, Generic[InputT, OutputT]):
         This is a good place to initialize subtasks called by this task.
         """
 
+    def add_subtask(self, name: str, task: Task) -> None:
+        """Add a subtask to this task.
+
+        Args:
+            name: The name of the subtask.
+            task: The subtask to add.
+        """
+        setattr(self, name, task)
+
     def model_post_init(self, context: Any, /) -> None:
         """Called after the model is initialized."""
         self.post_init()
@@ -307,12 +316,19 @@ class UnitTask(Task, Generic[InputT, OutputT]):
         Behaviors like this are expected to be implemented by this method.
         """
 
+    def validate_input(self, task_input: InputT) -> None:
+        """Validate the task input.
+
+        This hook is called before invoking the task during recording mode.
+        """
+
     @final
     def invoke(self, task_input: InputT) -> OutputT:
         """Invoke the task."""
         ctx = task_context.get()
 
         if ctx.is_recording:
+            self.validate_input(task_input)
             task_output = self.make_record_output(task_input)
             ctx.record_invocation(
                 task=self,

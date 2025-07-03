@@ -1,4 +1,10 @@
-"""An app that runs a Multimodal LLM task."""
+"""An app that shares an encoder task across multiple LLM tasks.
+
+The request can specify any of the following model IDs and the encoder will be shared:
+- google/gemma-3-4b-it
+- google/gemma-3-12b-it
+- google/gemma-3-27b-it
+"""
 
 from __future__ import annotations
 
@@ -11,6 +17,7 @@ class Request(AppRequest):
 
     Attributes:
         prompt: The prompt to send to the LLM.
+        model_id: The model ID to use for the task.
         multimodal_data: List of tuples (modality, data URL).
             "image", "video", etc. for modality.
         max_completion_tokens: Max number of tokens to generate in the response.
@@ -18,6 +25,7 @@ class Request(AppRequest):
     """
 
     prompt: str
+    model_id: str
     multimodal_data: list[tuple[str, str]] = []
     max_completion_tokens: int | None = None
     seed: int | None = None
@@ -34,9 +42,9 @@ class Response(AppResponse):
 
 
 mllm = MLLMTask(
-    model_id="Qwen/Qwen2-VL-7B-Instruct",
-    # model_id="google/gemma-3-4b-it",
     modalities=[Modality.IMAGE],
+    model_id="google/gemma-3-4b-it",
+    adapter_model_ids=["google/gemma-3-12b-it", "google/gemma-3-27b-it"],
 )
 
 
@@ -51,6 +59,7 @@ async def serve(request: Request) -> Response:
     mllm_input = MLLMInput(
         prompt=request.prompt,
         multimodal_data=request.multimodal_data,
+        model_id=request.model_id,
         max_completion_tokens=request.max_completion_tokens,
         seed=request.seed,
     )

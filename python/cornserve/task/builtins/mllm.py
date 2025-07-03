@@ -15,14 +15,15 @@ class MLLMInput(TaskInput):
         prompt: The prompt to send to the LLM.
         multimodal_data: List of tuples (modality, data URL).
             "image", "audio", "video", etc. for modality.
-        model_id: The ID of the model to use for the task.
-        max_completion_tokens: Maximum number of tokens to generate in the response.
+        model_id: The ID of the model to use for the task. If None,
+            the model ID from the task will be used.
+        max_completion_tokens: Max number of tokens to generate in the response.
         seed: Optional random seed.
     """
 
     prompt: str
     multimodal_data: list[tuple[str, str]] = []
-    model_id: str
+    model_id: str | None = None
     max_completion_tokens: int | None = None
     seed: int | None = None
 
@@ -74,10 +75,8 @@ class MLLMTask(Task[MLLMInput, MLLMOutput]):
         Given multimodal data and a text prompt, run the corresponding encoder
         for multimodal data and then pass the embeddings and text prompt to the LLM.
         """
-        if task_input.model_id not in self.adapter_model_ids:
-            raise ValueError(
-                f"Model ID {task_input.model_id} not found in adapter model IDs. Available: {self.adapter_model_ids}"
-            )
+        if task_input.model_id is None:
+            task_input.model_id = self.model_id
 
         image_data = []
         video_data = []
