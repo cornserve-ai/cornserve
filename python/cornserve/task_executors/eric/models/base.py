@@ -68,7 +68,7 @@ class BaseAdapterModule(nn.Module, Generic[ConfigT], ABC):
         """Create an adapter with the name and init arguments and return it."""
         if self.default_adapter_name is None:
             self.default_adapter_name = name
-        adapter = self.adapter_cls(config)
+        adapter = self.adapter_cls(config).eval()
         self.adapters[name] = adapter
         return adapter
 
