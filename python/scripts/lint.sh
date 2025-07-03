@@ -15,4 +15,4 @@ else
 fi
 
 ruff check --target-version py311 cornserve
-pyright cornserve examples
+pyright cornserve
