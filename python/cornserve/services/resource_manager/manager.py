@@ -264,7 +264,12 @@ class ResourceManager:
                 return
 
             # TODO: decide GPU placement strategy & preference
-            resources = self.resource.allocate(num_gpus=num_gpus, owner=task_state.id)
+            resources = self.resource.allocate(
+                num_gpus=num_gpus,
+                owner=task_state.id,
+                must_colocate=False,
+                node_selection_policy="pack",
+            )
 
         assert task_state.stub is not None, "Task manager stub is not initialized"
         async with task_state.lock:
@@ -328,7 +333,8 @@ class ResourceManager:
         async with task_state.lock:
             try:
                 # TODO: decide GPU placement strategy & preference
-                gpus_to_remove = task_state.resources[:num_gpus]
+                # remove from tail
+                gpus_to_remove = task_state.resources[-num_gpus:]
                 gpus = [
                     task_manager_pb2.GPUResource(
                         action=task_manager_pb2.ResourceAction.REMOVE,
@@ -346,9 +352,10 @@ class ResourceManager:
                     )
                 # Remove the GPUs from the task state resources
                 async with self.task_states_lock:
-                    task_state.resources = task_state.resources[num_gpus:]
+                    task_state.resources = task_state.resources[:-num_gpus]
                     for gpu in gpus_to_remove:
                         gpu.free()
+                self.resource.print_resource_status()
             except Exception as e:
                 logger.exception("Failed to scale down task %s by %d GPUs: %s", task, num_gpus, e)
                 raise RuntimeError(f"Failed to scale down task {task} by {num_gpus} GPUs: {e}") from e
