@@ -19,7 +19,6 @@ from cornserve.constants import K8S_NAMESPACE
 
 # A list of visually distinct colors from rich.
 LOG_COLORS = [
-    "green",
     "yellow",
     "blue",
     "cyan",
