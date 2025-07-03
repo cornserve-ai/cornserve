@@ -64,7 +64,7 @@ def test_weight_loading() -> None:
 @param_tp_size
 def test_image_inference(test_images: list[ModalityData], tp_size: int, dump_tensors: str) -> None:
     """Test if inference works correctly."""
-    executor = ModelExecutor(model_id=model_id, tp_size=tp_size, sender_sidecar_ranks=None)
+    executor = ModelExecutor(model_id=model_id, adapter_model_ids=[], tp_size=tp_size, sender_sidecar_ranks=None)
 
     result = executor.execute_model(batch=batch_builder(model_id, model_shorthand, test_images))
 
@@ -76,7 +76,7 @@ def test_image_inference(test_images: list[ModalityData], tp_size: int, dump_ten
 @param_tp_size
 def test_video_inference(test_videos: list[ModalityData], tp_size: int, dump_tensors: str) -> None:
     """Test if inference works correctly."""
-    executor = ModelExecutor(model_id=model_id, tp_size=tp_size, sender_sidecar_ranks=None)
+    executor = ModelExecutor(model_id=model_id, adapter_model_ids=[], tp_size=tp_size, sender_sidecar_ranks=None)
 
     result = executor.execute_model(batch=batch_builder(model_id, model_shorthand, test_videos[:2]))
 
@@ -86,6 +86,7 @@ def test_video_inference(test_videos: list[ModalityData], tp_size: int, dump_ten
 
 
 @depends_on("test_image_inference", "test_video_inference")
+@pytest.mark.skip(reason="HF transformers behavior changed by #38084. To fix when inconsistent with vLLM.")
 def test_hf_reference(test_images: list[ModalityData], test_videos: list[ModalityData], dump_tensors: str) -> None:
     """Generate reference outputs from the Hugging Face model."""
     torch.set_grad_enabled(False)

@@ -45,6 +45,8 @@ class EricDescriptor(TaskExecutionDescriptor[EncoderTask, EncoderInput, EncoderO
             "--sidecar.ranks", *[str(gpu.global_rank) for gpu in gpus],
         ]
         # fmt: on
+        if self.task.adapter_model_ids:
+            cmd.extend(["--model.adapter-model-ids", *self.task.adapter_model_ids])
         return cmd
 
     def get_api_url(self, base: str) -> str:
@@ -61,6 +63,7 @@ class EricDescriptor(TaskExecutionDescriptor[EncoderTask, EncoderInput, EncoderO
                 EmbeddingData(
                     id=forward.id,
                     modality=Modality(self.task.modality.value),
+                    model_id=task_input.model_id,
                     url=url,
                     receiver_sidecar_ranks=forward.dst_sidecar_ranks,
                 )

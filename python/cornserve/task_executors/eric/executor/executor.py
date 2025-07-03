@@ -43,6 +43,7 @@ class ModelExecutor:
     def __init__(
         self,
         model_id: str,
+        adapter_model_ids: list[str],
         tp_size: int,
         sender_sidecar_ranks: list[int] | None,
     ) -> None:
@@ -73,6 +74,7 @@ class ModelExecutor:
             logger.info("Spawning worker %d", tp_rank)
             worker = Worker.spawn_worker(
                 model_id=model_id,
+                adapter_model_ids=adapter_model_ids,
                 tp_rank=tp_rank,
                 tp_size=tp_size,
                 input_mq_handle=input_mq_handle,

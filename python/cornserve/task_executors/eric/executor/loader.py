@@ -22,7 +22,7 @@ from transformers.models.auto.configuration_auto import AutoConfig
 
 from cornserve.logging import get_logger
 from cornserve.task_executors.eric.distributed import parallel
-from cornserve.task_executors.eric.models.base import EricModel
+from cornserve.task_executors.eric.models.base import BaseAdapterModule, EricModel
 from cornserve.task_executors.eric.models.registry import MODEL_REGISTRY
 
 logger = get_logger(__name__)
@@ -30,6 +30,7 @@ logger = get_logger(__name__)
 
 def load_model(
     model_name_or_path: str,
+    adapter_model_names_or_paths: list[str] | None = None,
     weight_format: Literal["safetensors"] = "safetensors",
     cache_dir: str | None = None,
     revision: str | None = None,
@@ -41,9 +42,11 @@ def load_model(
     1. Instantiate the model.
     2. Download the model weights from Hugging Face Hub.
     3. Load the downloaded model weights into the model.
+    4. If specified by the registry and the model config, load adapters into the model.
 
     Args:
         model_name_or_path: The model name or path.
+        adapter_model_names_or_paths: Optional list of model names or paths to load adapters from.
         weight_format: The format of the model weights. Currently only "safetensors" is supported.
         cache_dir: The cache directory to store the model weights. If None, will use HF defaults.
         revision: The revision of the model.
@@ -96,7 +99,7 @@ def load_model(
         )
         raise
 
-    # Ensure that the model class is an EricModel
+    # Ensure that the model class is an EricModel.
     assert issubclass(model_class, EricModel), (
         f"Model class {model_class} is not a subclass of EricModel. Registry entry: {registry_entry}"
     )
@@ -108,6 +111,7 @@ def load_model(
     with set_default_torch_dtype(torch_dtype), torch_device:
         model = model_class(hf_config)
 
+    # Download weights, but only the ones we actually need.
     weight_dict = get_safetensors_weight_dict(
         model_name_or_path,
         weight_prefixes=registry_entry.weight.required_prefixes,
@@ -116,6 +120,11 @@ def load_model(
         revision=revision,
     )
 
+    # Exclude prefixes specified as for adapters. They'll be loaded separately.
+    for prefix in registry_entry.weight.adapter_prefixes:
+        weight_dict = {k: v for k, v in weight_dict.items() if not k.startswith(prefix)}
+
+    # Load model weights.
     incompatible = model.load_state_dict(weight_dict, strict=False)
     if incompatible.missing_keys:
         raise ValueError(f"Missing weights in the model: {incompatible.missing_keys}")
@@ -127,6 +136,39 @@ def load_model(
                 actually_unexpected_keys.append(key)
         if actually_unexpected_keys:
             raise ValueError(f"Unexpected weights in the model: {actually_unexpected_keys}")
+
+    # If there are no adapters for this module, return early.
+    if not registry_entry.weight.adapter_prefixes:
+        logger.info("No adapters to load for model %s", model_name_or_path)
+        return model.eval()
+
+    # Fish out the adapter submodule and load adapter weight into it.
+    assert registry_entry.adapter_attr is not None
+    adapter = getattr(model, registry_entry.adapter_attr)
+    assert isinstance(adapter, BaseAdapterModule), (
+        f"Adapter submodule {registry_entry.adapter_attr} is not a BaseAdapterModule. Got {type(adapter)}."
+    )
+    for model_id in [model_name_or_path, *(adapter_model_names_or_paths or [])]:
+        logger.info("Loading adapter weights from %s", model_id)
+
+        config = AutoConfig.from_pretrained(model_id, cache_dir=cache_dir, revision=revision)
+
+        with set_default_torch_dtype(torch_dtype), torch_device:
+            new_adapter_module = adapter.make_adapter(model_id, config)
+
+        adapter_weight_dict = get_safetensors_weight_dict(
+            model_id,
+            weight_prefixes=registry_entry.weight.adapter_prefixes,
+            strip_prefixes=True,
+            cache_dir=cache_dir,
+            revision=revision,
+        )
+
+        incompatible = new_adapter_module.load_state_dict(adapter_weight_dict, strict=False)
+        if incompatible.missing_keys:
+            raise ValueError(f"Missing adapter weights: {incompatible.missing_keys}")
+        if incompatible.unexpected_keys:
+            raise ValueError(f"Unexpected adapter weights: {incompatible.unexpected_keys}")
 
     return model.eval()
 

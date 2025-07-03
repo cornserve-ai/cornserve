@@ -167,6 +167,7 @@ def batch_builder(model_id: str, nickname: str, data: list[ModalityData]) -> Wor
     }
     batch = WorkerBatch(
         modality=data[0].modality,
+        adapter_name=model_id,
         request_ids=[uuid.uuid4().hex for _ in data],
         data_ids=[uuid.uuid4().hex for _ in data],
         chunk_ids=[0 for _ in data],

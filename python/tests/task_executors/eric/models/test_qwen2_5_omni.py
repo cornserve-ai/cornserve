@@ -41,7 +41,7 @@ def test_weight_loading() -> None:
 @param_tp_size
 def test_image_inference(test_images: list[ModalityData], tp_size: int, dump_tensors: str) -> None:
     """Test if inference works correctly."""
-    executor = ModelExecutor(model_id=model_id, tp_size=tp_size, sender_sidecar_ranks=None)
+    executor = ModelExecutor(model_id=model_id, adapter_model_ids=[], tp_size=tp_size, sender_sidecar_ranks=None)
 
     result = executor.execute_model(batch=batch_builder(model_id, model_shorthand, test_images))
 
@@ -53,7 +53,7 @@ def test_image_inference(test_images: list[ModalityData], tp_size: int, dump_ten
 @param_tp_size
 def test_video_inference(test_videos: list[ModalityData], tp_size: int, dump_tensors: str) -> None:
     """Test if inference works correctly."""
-    executor = ModelExecutor(model_id=model_id, tp_size=tp_size, sender_sidecar_ranks=None)
+    executor = ModelExecutor(model_id=model_id, adapter_model_ids=[], tp_size=tp_size, sender_sidecar_ranks=None)
 
     result = executor.execute_model(batch=batch_builder(model_id, model_shorthand, test_videos[:2]))
 
@@ -65,7 +65,7 @@ def test_video_inference(test_videos: list[ModalityData], tp_size: int, dump_ten
 @param_tp_size
 def test_audio_inference(test_audios: list[ModalityData], tp_size: int, dump_tensors: str) -> None:
     """Test if inference works correctly."""
-    executor = ModelExecutor(model_id=model_id, tp_size=tp_size, sender_sidecar_ranks=None)
+    executor = ModelExecutor(model_id=model_id, adapter_model_ids=[], tp_size=tp_size, sender_sidecar_ranks=None)
 
     result = executor.execute_model(batch=batch_builder(model_id, model_shorthand, test_audios[:2]))
 

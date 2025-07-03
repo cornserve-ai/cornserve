@@ -24,7 +24,6 @@ from cornserve.task_executors.eric.schema import (
     EngineEnqueueRequest,
     EngineOpcode,
     EngineResponse,
-    WorkerBatch,
 )
 from cornserve.task_executors.eric.utils.serde import MsgpackDecoder, MsgpackEncoder
 from cornserve.task_executors.eric.utils.zmq import zmq_sync_socket
@@ -56,6 +55,7 @@ class Engine:
 
         self.executor = ModelExecutor(
             model_id=config.model.id,
+            adapter_model_ids=config.model.adapter_model_ids,
             tp_size=config.model.tp_size,
             sender_sidecar_ranks=config.sidecar.ranks,
         )
@@ -216,7 +216,7 @@ class Engine:
         responses. It handles scheduling, executing, and processing results.
         """
         batch = self.scheduler.schedule()
-        batch_result = self.executor.execute_model(WorkerBatch.from_scheduler_batch(batch))
+        batch_result = self.executor.execute_model(batch.to_worker_batch())
         done_request_ids = self.scheduler.process_batch_result(
             batch_result.request_ids,
             batch_result.data_ids,

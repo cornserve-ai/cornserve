@@ -23,6 +23,9 @@ class ModelConfig(BaseModel):
     # Hugging Face model ID
     id: str
 
+    # Optional list of model IDs to load adapters from
+    adapter_model_ids: list[str] = []
+
     # Tensor parallel degree
     tp_size: PositiveInt = 1
 
