@@ -39,6 +39,7 @@ class EricDescriptor(TaskExecutionDescriptor[EncoderTask, EncoderInput, EncoderO
         # fmt: off
         cmd = [
             "--model.id", self.task.model_id,
+            "--model.adapter-model-ids", *self.task.adapter_model_ids,
             "--model.tp-size", str(len(gpus)),
             "--model.modality", self.task.modality.value.upper(),
             "--server.port", str(port),
