@@ -56,24 +56,24 @@ def create_app(addrs: list[str]) -> FastAPI:
 
         url = f"http://{backend}/v1/chat/completions"
 
-        # ---- one request, streamed ----------------------------------------
-        req_obj = client.build_request("POST", url, json=payload)
-        resp    = await client.send(req_obj, stream=True)
-
-        if resp.status_code != 200:
-            body = await resp.aread()
-            await resp.aclose()
-            raise HTTPException(resp.status_code, body.decode())
-
-        async def body_iter():
-            try:
-                async for chunk in resp.aiter_raw():
-                    yield chunk
-            finally:
-                await resp.aclose()        # make sure connection is freed
-        # -------------------------------------------------------------------
-
-        return StreamingResponse(body_iter(), status_code=resp.status_code)
+        # Forward request ----------------------------------------------------
+        async with client.stream("POST", url, json=payload) as resp:
+            if payload.get("stream", False):          # streaming mode
+                if resp.status_code != 200:
+                    body = await resp.aread()
+                    raise HTTPException(resp.status_code, body.decode())
+                return StreamingResponse(
+                    resp.aiter_raw(),
+                    status_code=resp.status_code,
+                    media_type=resp.headers.get("content-type", "application/json"),
+                )
+            else:                                     # regular (JSON) reply
+                content = await resp.aread()
+                return Response(
+                    content=content,
+                    status_code=resp.status_code,
+                    media_type=resp.headers.get("content-type", "application/json"),
+                )
 
     return app
 
@@ -81,11 +81,15 @@ async def start_proxy_server(proxy_addrs: list[str], port: int = 8000) -> None:
     print(f"Starting proxy for {len(proxy_addrs)} back-ends")
     print("Waiting for back-ends to be ready...")
     await wait_for_backends(proxy_addrs)
-    try:
-        uvicorn.run(create_app(proxy_addrs),
-                    host="0.0.0.0", port=port, log_level="info")
-    except KeyboardInterrupt:
-        print("Shutting down gracefully...")
+    config = uvicorn.Config(
+        create_app(proxy_addrs),
+        host="0.0.0.0",
+        port=port,
+        log_level="info",
+    )
+    server = uvicorn.Server(config)
+    # this is *async*; no nested event-loop problem
+    await server.serve()
 
 # --------------------------- CLI / entry-point ----------------------------- #
 if __name__ == "__main__":

@@ -27,6 +27,8 @@ class RequestInput:
 class RequestOutput:
     """Output for the benchmark request."""
     success: bool = False
+    start_time: float = 0.0
+    end_time: float = 0.0
     latency: float = 0.0
     error: str = ""
     output: Any = None

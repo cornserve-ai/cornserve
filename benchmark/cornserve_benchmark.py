@@ -68,6 +68,8 @@ async def post(
                     result.success = True
                     result.latency = end_time - start_time
                     result.output = content
+                    result.start_time = start_time
+                    result.end_time = end_time
                 else:
                     result.error = f"Request failed with status {response.status}"
         except Exception as e:
@@ -168,6 +170,8 @@ async def benchmark(
         "success_rate": len(successful_requests) / len(results) if results else 0,
         "total_time": total_time,
         "actual_request_rate": len(results) / total_time if total_time > 0 else 0,
+        "first_start_time": min(r.start_time for r in results) if results else 0,
+        "completion_time": benchmark_end_time,
     }
     
     if latencies:
