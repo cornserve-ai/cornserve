@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
-
 from cornserve.app.base import AppRequest, AppResponse, AppConfig
 from cornserve.task.base import Task, TaskInput, TaskOutput
 from cornserve.task.builtins.llm import LLMInput, LLMTask
@@ -59,7 +57,6 @@ class ArenaTask(Task[ArenaInput, ArenaOutput]):
         self.llms: list[tuple[str, str, LLMTask]] = []
         for name, model_id in self.models.items():
             task = LLMTask(model_id=model_id)
-            self.add_subtask(name, task)
             self.llms.append((name, model_id, task))
 
     def invoke(self, task_input: ArenaInput) -> ArenaOutput:

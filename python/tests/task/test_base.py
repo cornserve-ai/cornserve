@@ -30,7 +30,7 @@ def test_serde_graph():
     """Tests whether task graph invocations can be serialized and deserialized."""
     encoder_invocation = TaskInvocation(
         task=EncoderTask(model_id="clip", modality=Modality.IMAGE),
-        task_input=EncoderInput(data_urls=["https://example.com/image.jpg"]),
+        task_input=EncoderInput(model_id="clip", data_urls=["https://example.com/image.jpg"]),
         task_output=EncoderOutput(embeddings=[DataForward[Tensor]()]),
     )
     llm_invocation = TaskInvocation(
@@ -38,10 +38,7 @@ def test_serde_graph():
         task_input=LLMInput(prompt="Hello", multimodal_data=[("image", "https://example.com/image.jpg")]),
         task_output=LLMOutput(response="Hello"),
     )
-    graph = TaskGraphDispatch(
-        task_id="test-graph",
-        invocations=[encoder_invocation, llm_invocation],
-    )
+    graph = TaskGraphDispatch(invocations=[encoder_invocation, llm_invocation])
     graph_json = graph.model_dump_json()
 
     graph_deserialized = TaskGraphDispatch.model_validate_json(graph_json)

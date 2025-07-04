@@ -14,7 +14,7 @@ def test_mllm_record():
     task = MLLMTask(model_id="llava", modalities=[Modality.IMAGE])
     task_input = MLLMInput(prompt="Hello, world!", multimodal_data=[("image", "http://example.com/image.jpg")])
 
-    ctx = TaskContext(task_id="mllm-test")
+    ctx = TaskContext()
     task_context.set(ctx)
     with ctx.record():
         task_output = task.invoke(task_input)
@@ -46,7 +46,7 @@ async def test_mllm_record_concurrent():
     )
 
     async def call(task: MLLMTask, task_input: MLLMInput) -> list[TaskInvocation]:
-        task_context.set(TaskContext(task_id=task.id))
+        task_context.set(TaskContext())
         return await asyncio.create_task(call_impl(task, task_input))
 
     async def call_impl(task: MLLMTask, task_input: MLLMInput) -> list[TaskInvocation]:

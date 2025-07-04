@@ -43,6 +43,10 @@ task_context: ContextVar[TaskContext] = ContextVar("task_context")
 # dispatch task invocations to the Task Dispatcher.
 task_manager_context: ContextVar[TaskManager | None] = ContextVar("task_manager_context", default=None)
 
+# This context variable is used to keep track of the current task being executed.
+# THe current task is retrieved to properly register subtasks as they are constructed.
+current_task_context: ContextVar[Task | None] = ContextVar("current_task_context", default=None)
+
 
 class TaskInput(BaseModel):
     """Base class for task input."""
@@ -77,23 +81,30 @@ class Task(BaseModel, ABC, Generic[InputT, OutputT]):
     model_config = ConfigDict(extra="allow")
 
     def post_init(self) -> None:
-        """This function runs after fields are initialized.
+        """Initialize subtasks.
 
-        This is a good place to initialize subtasks called by this task.
+        Any `Task` instance that is constructed inside this method will be
+        automatically registered as a subtask of this task.
         """
-
-    def add_subtask(self, name: str, task: Task) -> None:
-        """Add a subtask to this task.
-
-        Args:
-            name: The name of the subtask.
-            task: The subtask to add.
-        """
-        setattr(self, name, task)
 
     def model_post_init(self, context: Any, /) -> None:
         """Called after the model is initialized."""
-        self.post_init()
+        # See if the current task context is set.
+        # If so, `self` has been constructed as a subtask of that task, so add it as a subtask.
+        # Otherwise, `self` is the top-level task and it's not a subtask of any other task.
+        current_task = current_task_context.get()
+        if current_task is not None:
+            attr_name = f"__subtask_{len(current_task.subtask_attr_names)}__"
+            setattr(current_task, attr_name, self)
+            current_task.subtask_attr_names.append(attr_name)
+
+        # Now we call `post_init` to initialize our own subtasks.
+        # We want our subtasks to be added as subtasks to ourself.
+        token = current_task_context.set(self)
+        try:
+            self.post_init()
+        finally:
+            current_task_context.reset(token)
 
     @abstractmethod
     def invoke(self, task_input: InputT) -> OutputT:
@@ -110,12 +121,6 @@ class Task(BaseModel, ABC, Generic[InputT, OutputT]):
         if inspect.iscoroutinefunction(cls.invoke):
             raise TypeError(f"{cls.__name__}.invoke should not be an async function")
 
-    def __setattr__(self, name: str, value: Any, /) -> None:
-        """Same old setattr but puts tasks in the subtasks list."""
-        if isinstance(value, Task):
-            self.subtask_attr_names.append(name)
-        return super().__setattr__(name, value)
-
     async def __call__(self, task_input: InputT) -> OutputT:
         """Invoke the task.
 
@@ -123,7 +128,7 @@ class Task(BaseModel, ABC, Generic[InputT, OutputT]):
             task_input: The input to the task.
         """
         # Initialize a new task context for the top-level task invocation.
-        task_context.set(TaskContext(task_id=self.id))
+        task_context.set(TaskContext())
 
         return await asyncio.create_task(self._call_impl(task_input))
 
@@ -406,11 +411,9 @@ class TaskGraphDispatch(BaseModel):
     """Payload used for dispatching recorded task invocations.
 
     Attributes:
-        task_id: The ID of the top-level task.
         invocations: The recorded task invocations.
     """
 
-    task_id: str
     invocations: list[TaskInvocation]
 
 
@@ -422,14 +425,8 @@ class TaskContext:
         is_replaying: Whether the context is in replay mode.
     """
 
-    def __init__(self, task_id: str) -> None:
-        """Initialize the task context.
-
-        Args:
-            task_id: The ID of the top-level task.
-        """
-        self.task_id = task_id
-
+    def __init__(self) -> None:
+        """Initialize the task context."""
         # Task invocations during recording mode.
         self.invocations: list[TaskInvocation] = []
 
@@ -505,7 +502,6 @@ class TaskContext:
             raise RuntimeError("Task outputs already exist. Task contexts are not supposed to be reused.")
 
         span = trace.get_current_span()
-        span.set_attribute("task_context.task_id", self.task_id)
         span.set_attributes(
             {
                 f"task_context.task.{i}.invocation": invocation.model_dump_json()
@@ -514,7 +510,7 @@ class TaskContext:
         )
 
         # Build the task graph dispatch payload.
-        graph_dispatch = TaskGraphDispatch(task_id=self.task_id, invocations=self.invocations)
+        graph_dispatch = TaskGraphDispatch(invocations=self.invocations)
 
         # Get the Task Manager from the context variable.
         task_manager = task_manager_context.get()
