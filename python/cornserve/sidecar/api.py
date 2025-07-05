@@ -11,13 +11,13 @@ from typing import Any
 
 import grpc
 import torch
+from opentelemetry import context as context_api
 from opentelemetry import trace
 from opentelemetry.instrumentation.grpc import (
     GrpcAioInstrumentorClient,
     GrpcInstrumentorClient,
 )
 from opentelemetry.instrumentation.threading import ThreadingInstrumentor
-from opentelemetry import context as context_api
 
 from cornserve.logging import get_logger
 from cornserve.services.pb import common_pb2, sidecar_pb2, sidecar_pb2_grpc
@@ -118,7 +118,6 @@ class Sidecar:
             chunk_id: The chunk id of the data when only sending a chunk.
             num_chunks: The number of chunks the entire data is split into.
         """
-        # Manually create a span so that context propagates correctly when using ThreadPoolExecutor
         span = tracer.start_span("Sidecar.send")
         token = context_api.attach(trace.set_span_in_context(span))
         try:
@@ -275,7 +274,6 @@ class Sidecar:
         else:
             logger.error("Failed to mark request %s done", id)
 
-    # OpenTelemetry decorator removed; span will be created manually inside the function
     def mark_done_sync(self, id: str, chunk_id: int = 0) -> None:
         """Synchronously mark a tensor as done in the sidecar server to free the shared memory buffer.
 
