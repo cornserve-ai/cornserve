@@ -66,7 +66,15 @@ REGISTRY=myregistry.com:5000 bash scripts/build_export_images.sh
 ```
 
 !!! NOTE
-    Building Eric can consume a lot of memory and may trigger OOMs that freeze the instance. Please set a proper `max_jobs` in `eric.Dockerfile`.
+    Building Eric can consume a lot of memory when compiling `flash_attn` and may trigger OOMs that freeze the instance. Please set a proper `max_jobs` in `eric.Dockerfile`. Alternatively, you can reuse the `flash_attn` layer cache from our DockerHub:
+    ```
+    docker buildx build \
+        --cache-from=type=registry,ref=cornserve/eric:buildcache \
+        --build-arg max_jobs=2 \
+        -f docker/eric.Dockerfile \
+        -t cornserve/eric:latest --load .
+    ```
+    After this, the `flash_attn` layer is cached in your local docker and can be used by all future builds.
 
 (5) Use the `dev` overlay (which specifies `imagePullPolicy: Always`) to deploy Cornserve:
 
