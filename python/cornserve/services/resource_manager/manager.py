@@ -25,6 +25,7 @@ from cornserve.services.pb import (
 )
 from cornserve.services.resource_manager.resource import GPU, Resource
 from cornserve.services.sidecar.launch import SidecarLaunchInfo
+from cornserve.services.utils import to_strict_k8s_name
 from cornserve.sidecar.constants import grpc_url_from_rank
 from cornserve.task.base import UnitTask
 
@@ -554,7 +555,8 @@ class ResourceManager:
             )
 
             # Create a new task manager pod and service
-            state.pod_name = state.service_name = f"tm-{state.id}".lower()
+            state.pod_name = f"tm-{state.id}".lower()
+            state.service_name = to_strict_k8s_name(state.pod_name)
             port = 50051
 
             pod = kclient.V1Pod(
