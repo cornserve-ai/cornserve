@@ -14,6 +14,7 @@ import kubernetes_asyncio.config as kconfig
 from cornserve import constants
 from cornserve.logging import get_logger
 from cornserve.services.resource_manager.resource import GPU
+from cornserve.services.utils import to_strict_k8s_name
 from cornserve.task.base import UnitTask
 
 logger = get_logger(__name__)
@@ -259,7 +260,7 @@ class TaskManager:
         executor_id = self.descriptor.create_executor_name().lower()
         executor_id = "-".join([executor_id, *(f"{gpu.global_rank}" for gpu in gpus)])
         pod_name = f"te-{executor_id}"
-        service_name = f"te-{executor_id}"
+        service_name = to_strict_k8s_name(f"te-{executor_id}")
         port = 8000
 
         # Kubernetes labels cannot be longer than 63 characters, but the generated
