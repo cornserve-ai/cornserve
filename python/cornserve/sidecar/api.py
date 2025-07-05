@@ -11,7 +11,7 @@ from typing import Any
 
 import grpc
 import torch
-from opentelemetry import trace
+from opentelemetry import trace, context as otel_ctx
 from opentelemetry.instrumentation.grpc import (
     GrpcAioInstrumentorClient,
     GrpcInstrumentorClient,
@@ -53,6 +53,7 @@ class Sidecar:
         Args:
             config: The configuration for the sidecar.
         """
+        logger.info("new sidecar api")
         self.config = config
         self.sidecar_rank = config.sidecar_rank
         self.group = config.group
@@ -94,7 +95,10 @@ class Sidecar:
         self.msgpack_encoder = MsgpackEncoder()
         self.msgpack_decoder = MsgpackDecoder()
 
-        self.worker_pool = ThreadPoolExecutor(max_workers=self.config.max_workers, thread_name_prefix="sidecar-worker")
+        self.worker_pool = ThreadPoolExecutor(
+            max_workers=self.config.max_workers,
+            thread_name_prefix="sidecar-worker",
+        )
 
         self._finalizer = weakref.finalize(self, self.__del__)
 
@@ -131,7 +135,9 @@ class Sidecar:
         span = trace.get_current_span()
         span.set_attribute("sidecar.send.id", id)
 
-        future = self.worker_pool.submit(
+        # Propagate context so that _send_worker's span becomes a child of
+        # this "Sidecar.send" span.
+        self._submit_with_current_context(
             self._send_worker,
             data,
             id,
@@ -139,7 +145,6 @@ class Sidecar:
             chunk_id,
             num_chunks,
         )
-        future.add_done_callback(lambda f: f.result())
 
     @tracer.start_as_current_span(name="Sidecar._send_worker")
     def _send_worker(
@@ -277,12 +282,12 @@ class Sidecar:
             id: The id of the data.
             chunk_id: The chunk id of the data to mark as done.
         """
-        future = self.worker_pool.submit(
+        # Ensure child span linkage when running in the pool thread.
+        self._submit_with_current_context(
             self._mark_done_worker,
             id,
             chunk_id,
         )
-        future.add_done_callback(lambda f: f.result())
 
     def __del__(self) -> None:
         """Unlink the shared memory buffer."""
@@ -310,3 +315,33 @@ class Sidecar:
         """Synchronously shutdown the sidecar client."""
         with contextlib.suppress(Exception):
             asyncio.run(self.shutdown())
+
+    # ---------------------------------------------------------------------
+    # Helper: submit a callable to the worker pool while propagating the
+    # current OpenTelemetry context so that spans created in the worker
+    # thread become children of the span that is active in the caller
+    # thread.
+    # ---------------------------------------------------------------------
+    def _submit_with_current_context(self, fn, *args, **kwargs):
+        """Submit *fn* to *worker_pool* with context propagation.
+
+        Every ThreadPoolExecutor worker thread is created once when the pool
+        is constructed, so it does **not** automatically inherit the tracing
+        context that is active at *submit* time.  We capture the current
+        context here and *attach* it inside the pool thread before executing
+        *fn*.
+        """
+
+        # Capture caller context (includes the currently active span)
+        current_ctx = otel_ctx.get_current()
+
+        def _wrapped():
+            token = otel_ctx.attach(current_ctx)
+            try:
+                return fn(*args, **kwargs)
+            finally:
+                otel_ctx.detach(token)
+
+        future = self.worker_pool.submit(_wrapped)
+        future.add_done_callback(lambda f: f.result())
+        return future
