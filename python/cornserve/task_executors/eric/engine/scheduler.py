@@ -126,7 +126,7 @@ class RequestQueue:
 class Scheduler:
     """Scheduler for batching embedding requests."""
 
-    def __init__(self, max_batch_size: int) -> None:
+    def __init__(self, max_batch_size: int | None = None) -> None:
         """Initialize the scheduler."""
         self.max_batch_size = max_batch_size
 
