@@ -64,7 +64,7 @@ class ServerConfig(BaseModel):
     port: PositiveInt = 8000
 
     # Maximum batch size to run the encoder with
-    max_batch_size: PositiveInt = 4
+    max_batch_size: PositiveInt | None = None
 
 
 class ImageDataConfig(BaseModel):
