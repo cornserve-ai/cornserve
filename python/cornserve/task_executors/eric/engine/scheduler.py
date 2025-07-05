@@ -126,8 +126,10 @@ class RequestQueue:
 class Scheduler:
     """Scheduler for batching embedding requests."""
 
-    def __init__(self) -> None:
+    def __init__(self, max_batch_size: int | None = None) -> None:
         """Initialize the scheduler."""
+        self.max_batch_size = max_batch_size
+
         self.queue = RequestQueue()
 
     def enqueue(self, request: EngineEnqueueRequest) -> None:
@@ -151,7 +153,11 @@ class Scheduler:
         adapter_name = self.queue.peek_data().model_id
         batch = SchedulerBatch(modality=modality, adapter_name=adapter_name)
 
-        for req, data in self.queue.iter_waiting(modality=modality, model_id=adapter_name, max_items=None):
+        for req, data in self.queue.iter_waiting(
+            modality=modality,
+            model_id=adapter_name,
+            max_items=self.max_batch_size,
+        ):
             if req.span:
                 req.span.add_event("engine.scheduler.dequeue", attributes={"data_id": data.id})
 

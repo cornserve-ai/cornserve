@@ -42,6 +42,7 @@ class EricDescriptor(TaskExecutionDescriptor[EncoderTask, EncoderInput, EncoderO
             "--model.tp-size", str(len(gpus)),
             "--model.modality", self.task.modality.value.upper(),
             "--server.port", str(port),
+            "--server.max-batch-size", str(self.task.max_batch_size),
             "--sidecar.ranks", *[str(gpu.global_rank) for gpu in gpus],
         ]
         # fmt: on

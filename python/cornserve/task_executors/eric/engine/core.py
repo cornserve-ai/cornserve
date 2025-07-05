@@ -60,7 +60,7 @@ class Engine:
             sender_sidecar_ranks=config.sidecar.ranks,
         )
 
-        self.scheduler = Scheduler()
+        self.scheduler = Scheduler(max_batch_size=config.server.max_batch_size)
 
         # Background thread that continuously receives from the request
         # ZMQ socket and pushes it into the request queue

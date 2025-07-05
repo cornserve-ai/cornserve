@@ -48,11 +48,13 @@ class EncoderTask(UnitTask[EncoderInput, EncoderOutput]):
         adapter_model_ids: Some models support multiple adapters and allow the
             base model to be shared (e.g., Gemma 3). This list specifies model IDs
             from which to load adapters. Base model weights are loaded from `model_id`.
+        max_batch_size: Maximum batch size to use for the serving system.
     """
 
     modality: Modality
     model_id: str
     adapter_model_ids: list[str] = []
+    max_batch_size: int = 1
 
     def make_record_output(self, task_input: EncoderInput) -> EncoderOutput:
         """Create a task output for task invocation recording."""

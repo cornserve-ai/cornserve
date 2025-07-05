@@ -63,6 +63,9 @@ class ServerConfig(BaseModel):
     # Port to bind to
     port: PositiveInt = 8000
 
+    # Maximum batch size to run the encoder with
+    max_batch_size: PositiveInt | None = None
+
 
 class ImageDataConfig(BaseModel):
     """Configuration related to downloading and processing image data."""

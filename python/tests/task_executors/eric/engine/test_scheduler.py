@@ -88,3 +88,47 @@ def test_uniform_modality_and_adapter():
     scheduler.process_batch_result(request_ids=["4"], data_ids=["vid5"])
 
     assert not scheduler.has_waiting_requests()
+
+
+def test_max_batch_size():
+    """Test that the scheduler respects the max batch size."""
+    scheduler = Scheduler(max_batch_size=1)
+
+    scheduler.enqueue(
+        EngineEnqueueRequest(
+            request_id="1",
+            data=[
+                ProcessedEmbeddingData(id="im1", model_id="m1", modality=Modality.IMAGE, data={}),
+                ProcessedEmbeddingData(id="im2", model_id="m1", modality=Modality.IMAGE, data={}),
+            ],
+        )
+    )
+    scheduler.enqueue(
+        EngineEnqueueRequest(
+            request_id="2",
+            data=[
+                ProcessedEmbeddingData(id="vid1", model_id="m1", modality=Modality.VIDEO, data={}),
+                ProcessedEmbeddingData(id="vid2", model_id="m1", modality=Modality.VIDEO, data={}),
+            ],
+        )
+    )
+
+    assert scheduler.has_waiting_requests()
+    batch = scheduler.schedule()
+    assert len(batch.request_ids) == 1
+    scheduler.process_batch_result(request_ids=["1"], data_ids=["im1"])
+
+    assert scheduler.has_waiting_requests()
+    batch = scheduler.schedule()
+    assert len(batch.request_ids) == 1
+    scheduler.process_batch_result(request_ids=["1"], data_ids=["im2"])
+
+    assert scheduler.has_waiting_requests()
+    batch = scheduler.schedule()
+    assert len(batch.request_ids) == 1
+    scheduler.process_batch_result(request_ids=["2"], data_ids=["vid1"])
+
+    assert scheduler.has_waiting_requests()
+    batch = scheduler.schedule()
+    assert len(batch.request_ids) == 1
+    scheduler.process_batch_result(request_ids=["2"], data_ids=["vid2"])
