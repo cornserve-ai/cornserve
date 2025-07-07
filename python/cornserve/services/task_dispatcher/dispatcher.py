@@ -19,6 +19,8 @@ from cornserve.services.pb import task_manager_pb2, task_manager_pb2_grpc
 from cornserve.task.base import TASK_TIMEOUT, TaskInvocation, TaskOutput, UnitTask
 from cornserve.task.forward import DataForward
 
+from .utils import parse_chat_sse_response
+
 logger = get_logger(__name__)
 tracer = trace.get_tracer(__name__)
 
@@ -244,7 +246,7 @@ class TaskDispatcher:
 
         # Dispatch all task invocations to task executors
         dispatch_coros: list[asyncio.Task[Any]] = []
-        client = httpx.AsyncClient(timeout=TASK_TIMEOUT- 10 * 60)
+        client = httpx.AsyncClient(timeout=TASK_TIMEOUT- 5 * 60)
         try:
             async with asyncio.TaskGroup() as tg:
                 for execution in task_executions:
@@ -288,12 +290,24 @@ class TaskDispatcher:
         logger.info(
             "Task %s response: %s",
             execution.invocation.task.__class__.__name__,
-            response.content.decode(),
+            response.content.decode()[:100],
         )
 
         # JSON response from task executor -> `TaskOutput` -> dump
-        task_output: TaskOutput = execution.invocation.task.execution_descriptor.from_response(
-            task_output=execution.invocation.task_output,
-            response=response.json(),
-        )
+        content_type = response.headers.get("content-type", "").lower()
+        if content_type.startswith("application/json"):
+            # JSON response from task executor -> `TaskOutput` -> dump
+            task_output: TaskOutput = execution.invocation.task.execution_descriptor.from_response(
+                task_output=execution.invocation.task_output,
+                response=response.json(),
+            )
+        elif content_type.startswith("text/event-stream"):
+            logger.info("Processing SSE response from task executor")
+            json_response = parse_chat_sse_response(response)
+            task_output: TaskOutput = execution.invocation.task.execution_descriptor.from_response(
+                task_output=execution.invocation.task_output,
+                response=json_response,
+            )
+        else:
+            raise ValueError("Unsupported content type in response: %s", content_type)
         return task_output.model_dump()

@@ -122,6 +122,7 @@ class OpenAIvLLMDescriptor(TaskExecutionDescriptor[OpenAILLMTask, OpenAILLMInput
             model=self.task.model_id,
             messages=[dict(role="user", content=content)],
             stream=True,
+            stream_options=dict(include_usage=True, continuous_usage_stats= True)
         )
         if task_input.max_completion_tokens is not None:
             request["max_completion_tokens"] = task_input.max_completion_tokens
