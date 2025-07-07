@@ -44,6 +44,7 @@ class SampleRequest:
     video_urls: list[str] = field(default_factory=list)
     audio_urls: list[str] = field(default_factory=list)
     image_urls: list[str] = field(default_factory=list)
+    filenames: list[str] = field(default_factory=list)
 
 
 # -----------------------------------------------------------------------------

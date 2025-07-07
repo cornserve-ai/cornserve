@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import enum
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Callable
 
 from cornserve.services.gateway.models import AppInvocationRequest
@@ -22,6 +22,12 @@ class RequestInput:
     backend: Backend
     url: str
     payload: dict[str, Any]
+    # could be empty
+    prompt: str
+    filenames: list[str] = field(default_factory=list)
+
+    def __repr__(self):
+        return f"RequestInput(backend={self.backend}, prompt={self.prompt}, filenames={self.filenames})"
 
 @dataclass
 class RequestOutput:
@@ -32,6 +38,7 @@ class RequestOutput:
     latency: float = 0.0
     error: str = ""
     output: Any = None
+    input: Any = None
 
 def build_cornserve_vlm_input(
     base_url: str,
@@ -69,7 +76,13 @@ def build_cornserve_vlm_input(
 
     api_url = f"{base_url}/app/invoke/{app_id}"
     request = AppInvocationRequest(request_data=data)
-    return RequestInput(backend=Backend.CORNSERVE, url=api_url, payload=request.model_dump())
+    return RequestInput(
+        backend=Backend.CORNSERVE,
+        url=api_url,
+        payload=request.model_dump(),
+        prompt=sampled_request.prompt,
+        filenames=sampled_request.filenames,
+    )
 
 def build_vllm_input(
     base_url: str,
@@ -115,7 +128,13 @@ def build_vllm_input(
             payload["messages"][0]["content"].append({"type": "audio_url", "audio_url": {"url": url}})
         for url in image_urls:
             payload["messages"][0]["content"].append({"type": "image_url", "image_url": {"url": url}})
-    return RequestInput(backend=Backend.VLLM, url=api_url, payload=payload)
+    return RequestInput(
+        backend=Backend.VLLM,
+        url=api_url,
+        payload=payload,
+        prompt=sampled_request.prompt,
+        filenames=sampled_request.filenames,
+    )
 
 
 def build_eric_input(
@@ -153,7 +172,13 @@ def build_eric_input(
             payload["data"].append({"id": uuid.uuid4().hex, "modality": "audio", "url": url})
         for url in image_urls:
             payload["data"].append({"id": uuid.uuid4().hex, "modality": "image", "url": url})
-    return RequestInput(backend=Backend.ERIC, url=api_url, payload=payload)
+    return RequestInput(
+        backend=Backend.ERIC,
+        url=api_url,
+        payload=payload,
+        prompt="",
+        filenames=sampled_request.filenames,
+    )
 
 TRANSFORM_FUNCS: dict[str, Callable] = {
     "cornserve": build_cornserve_vlm_input,

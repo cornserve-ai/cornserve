@@ -235,7 +235,7 @@ class TaskDispatcher:
                 producer_forward.src_sidecar_ranks = execution.executor_sidecar_ranks
                 producer_forwards[producer_forward.id] = producer_forward
 
-        logger.info("Connected all DataForward objects in task invocations: %s", invocations)
+        logger.info("Connected all DataForward objects in task invocations: %s", len(invocations))
 
         # Verify whether all `DataForward` objects are properly connected
         for data_forward in producer_forwards.values():
@@ -244,7 +244,7 @@ class TaskDispatcher:
 
         # Dispatch all task invocations to task executors
         dispatch_coros: list[asyncio.Task[Any]] = []
-        client = httpx.AsyncClient(timeout=TASK_TIMEOUT)
+        client = httpx.AsyncClient(timeout=TASK_TIMEOUT- 10 * 60)
         try:
             async with asyncio.TaskGroup() as tg:
                 for execution in task_executions:
@@ -271,7 +271,7 @@ class TaskDispatcher:
         logger.info(
             "Invoking task %s with request: %s",
             execution.invocation.task.__class__.__name__,
-            request,
+            str(request)[:200],
         )
         try:
             response = await client.post(url=url, json=request)

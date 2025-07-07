@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Generic, TypeVar
+from typing import Any, Generic, TypeVar
 
 from cornserve.task.base import TaskInput, TaskOutput, UnitTask
 from cornserve.task.forward import DataForward, Tensor
@@ -24,10 +24,31 @@ class LLMInput(TaskInput):
     max_completion_tokens: int | None = None
     seed: int | None = None
 
+class OpenAILLMInput(LLMInput):
+    """Input model for OpenAI LLM tasks.
+
+    Attributes:
+        prompt: The prompt to send to the LLM.
+        multimodal_data: List of tuples (modality, data URL).
+            "image", "audio", "video", etc. for modality.
+        embeddings: Multimodal embeddings to send to the LLM.
+    """
+
+    # Inherits everything from LLMInput, no additional fields needed.
+    pass
+
 
 class LLMOutputBase(TaskOutput):
     """Base output model for LLM tasks."""
 
+class OpenAILLMOutput(LLMOutputBase):
+    """Output model for LLM tasks.
+
+    Attributes:
+        response: The response from the LLM.
+    """
+
+    response: dict[str, Any]
 
 InputT = TypeVar("InputT", bound=TaskInput)
 OutputT = TypeVar("OutputT", bound=TaskOutput)
@@ -69,6 +90,20 @@ class LLMTask(LLMBaseTask[LLMInput, LLMOutput]):
     def make_record_output(self, task_input: LLMInput) -> LLMOutput:
         """Create a task output for task invocation recording."""
         return LLMOutput(response="")
+
+
+class OpenAILLMTask(UnitTask[OpenAILLMInput, OpenAILLMOutput]):
+    """A task that invokes an OpenAI LLM and returns the response.
+
+    Attributes:
+        model_id: The ID of the model to use for the task.
+    """
+
+    model_id: str
+
+    def make_record_output(self, task_input: OpenAILLMInput) -> OpenAILLMOutput:
+        """Create a task output for task invocation recording."""
+        return OpenAILLMOutput(response={})
 
 
 class LLMForwardOutput(LLMOutputBase):

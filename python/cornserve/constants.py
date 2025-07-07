@@ -68,6 +68,9 @@ K8S_TASK_EXECUTOR_SECRET_NAME = "cornserve-env"
 K8S_TASK_EXECUTOR_HF_TOKEN_KEY = "hf-token"
 K8S_TASK_EXECUTOR_HEALTHY_TIMEOUT = 20 * 60.0
 
+# Sidecar config constants
+SIDECAR_SHM_SIZE = 1 << 34
+
 # Volume host paths.
 VOLUME_HF_CACHE = "/data/hfcache"
 VOLUME_SHM = "/dev/shm"

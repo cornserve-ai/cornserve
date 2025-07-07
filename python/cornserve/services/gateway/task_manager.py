@@ -101,6 +101,7 @@ class TaskManager:
             coros = []
             for task_id in to_deploy:
                 task = self.tasks[task_id]
+                logger.info("Trying to deploying task: %r", task)
                 coros.append(self.resource_manager.DeployUnitTask(DeployUnitTaskRequest(task=task.to_pb())))
             responses = await asyncio.gather(*coros, return_exceptions=True)
 
@@ -130,7 +131,7 @@ class TaskManager:
                         del self.task_usage_counter[task_id]
                 await asyncio.gather(*cleanup_coros)
                 logger.info("Rolled back deployment of all deployed tasks")
-                raise RuntimeError(f"Error while deploying tasks: {errors}")
+                raise RuntimeError(f"Error while deploying tasks: {errors}") from errors[0]
 
             # Update task states
             for task_id in task_ids:
@@ -232,7 +233,8 @@ class TaskManager:
         Returns:
             The outputs of all tasks.
         """
-        logger.info("Invoking tasks: %s", dispatch)
+        # logger.info("Invoking tasks: %s", dispatch)
+        logger.info("Invoking tasks")
 
         # Check if all tasks are deployed
         running_task_ids: list[str] = []

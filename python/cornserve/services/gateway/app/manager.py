@@ -140,6 +140,8 @@ class AppManager:
             # Load and validate the app
             module = load_module_from_source(source_code, app_id)
             app_classes = validate_app_module(module)
+            for cls in (app_classes.request_cls, app_classes.response_cls):
+                cls.model_rebuild(force=True, _types_namespace=module.__dict__)
             tasks = discover_unit_tasks(app_classes.config_cls.tasks.values())
 
             # Deploy all unit tasks discovered

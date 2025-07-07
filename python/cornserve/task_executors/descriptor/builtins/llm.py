@@ -6,7 +6,7 @@ from typing import Any
 
 from cornserve import constants
 from cornserve.services.resource_manager.resource import GPU
-from cornserve.task.builtins.llm import LLMBaseTask, LLMForwardOutput, LLMInput, LLMOutput, LLMOutputBase
+from cornserve.task.builtins.llm import LLMBaseTask, LLMForwardOutput, LLMInput, LLMOutput, LLMOutputBase, OpenAILLMInput, OpenAILLMOutput, OpenAILLMTask
 from cornserve.task_executors.descriptor.base import TaskExecutionDescriptor
 from cornserve.task_executors.descriptor.registry import DESCRIPTOR_REGISTRY
 
@@ -33,7 +33,7 @@ class VLLMDescriptor(TaskExecutionDescriptor[LLMBaseTask, LLMInput, LLMOutputBas
             self.task.model_id,
             "--tensor-parallel-size", str(len(gpus)),
             "--port", str(port),
-            "--limit-mm-per-prompt", "image=5",  # TODO: Is this still needed?
+            "--no-enable-prefix-caching",
             "--cornserve-sidecar-ranks", *[str(gpu.global_rank) for gpu in gpus],
         ]
         # fmt: on
@@ -55,6 +55,7 @@ class VLLMDescriptor(TaskExecutionDescriptor[LLMBaseTask, LLMInput, LLMOutputBas
         request: dict[str, Any] = dict(
             model=self.task.model_id,
             messages=[dict(role="user", content=content)],
+            stream=True,
         )
         if task_input.max_completion_tokens is not None:
             request["max_completion_tokens"] = task_input.max_completion_tokens
@@ -75,3 +76,62 @@ class VLLMDescriptor(TaskExecutionDescriptor[LLMBaseTask, LLMInput, LLMOutputBas
 
 
 DESCRIPTOR_REGISTRY.register(LLMBaseTask, VLLMDescriptor, default=True)
+
+class OpenAIvLLMDescriptor(TaskExecutionDescriptor[OpenAILLMTask, OpenAILLMInput, OpenAILLMOutput]):
+    """Task execution descriptor for Encoder tasks.
+
+    This descriptor handles launching Eric (multimodal encoder) tasks and converting between
+    the external task API types and internal executor types.
+    """
+
+    def create_executor_name(self) -> str:
+        """Create a name for the task executor."""
+        return "-".join(["vllm", self.task.model_id.split("/")[-1]]).lower()
+
+    def get_container_image(self) -> str:
+        """Get the container image name for the task executor."""
+        return constants.CONTAINER_IMAGE_VLLM
+
+    def get_container_args(self, gpus: list[GPU], port: int) -> list[str]:
+        """Get the container command for the task executor."""
+        # fmt: off
+        cmd = [
+            self.task.model_id,
+            "--tensor-parallel-size", str(len(gpus)),
+            "--port", str(port),
+            "--no-enable-prefix-caching",
+            "--cornserve-sidecar-ranks", *[str(gpu.global_rank) for gpu in gpus],
+        ]
+        # fmt: on
+        return cmd
+
+    def get_api_url(self, base: str) -> str:
+        """Get the task executor's base URL for API calls."""
+        return f"{base}/v1/chat/completions"
+
+    def to_request(self, task_input: OpenAILLMInput, task_output: OpenAILLMOutput) -> dict[str, Any]:
+        """Convert TaskInput to a request object for the task executor."""
+        # XXX: `DataForward[str]` not supported yet.
+        # Compatibility with OpenAI Chat Completion API is kept.
+        content: list[dict[str, Any]] = [dict(type="text", text=task_input.prompt)]
+        for (modality, data_url), forward in zip(task_input.multimodal_data, task_input.embeddings, strict=True):
+            data_uri = f"data:{modality}/uuid;data_id={forward.id};url={data_url},"
+            content.append({"type": f"{modality}_url", f"{modality}_url": {"url": data_uri}})
+
+        request: dict[str, Any] = dict(
+            model=self.task.model_id,
+            messages=[dict(role="user", content=content)],
+            stream=True,
+        )
+        if task_input.max_completion_tokens is not None:
+            request["max_completion_tokens"] = task_input.max_completion_tokens
+        if task_input.seed is not None:
+            request["seed"] = task_input.seed
+
+        return request
+
+    def from_response(self, task_output: OpenAILLMOutput, response: dict[str, Any]) -> OpenAILLMOutput:
+        """Convert the task executor response to TaskOutput."""
+        return OpenAILLMOutput(response=response)
+
+DESCRIPTOR_REGISTRY.register(OpenAILLMTask, OpenAIvLLMDescriptor, default=True)

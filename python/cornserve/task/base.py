@@ -30,7 +30,7 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 tracer = trace.get_tracer(__name__)
 
-TASK_TIMEOUT = 300
+TASK_TIMEOUT = 30 * 60
 
 # This context variable is set inside the top-level task's `__call__` method
 # just before creating an `asyncio.Task` (`_call_impl`) to run the task.
@@ -235,11 +235,14 @@ class UnitTask(Task, Generic[InputT, OutputT]):
 
             Basically, the two generic type arguments must be filled with concrete types.
             """
+            # print(">>> maybe_register_task", cls.__name__)
             args = cls.__pydantic_generic_metadata__["args"]
             if len(args) != 2:
+                # print(f"Skipping {cls.__name__} because it does not have exactly two type arguments.")
                 return
             input_arg, output_arg = args
             if issubclass(input_arg, TaskInput) and issubclass(output_arg, TaskOutput):
+                # print(f"Registering {cls.__name__} with input {input_arg.__name__} and output {output_arg.__name__}.")
                 TASK_REGISTRY.register(cls, input_arg, output_arg)
 
         # If any immediate base (or proxies) is `UnitTask`, cls is the root.

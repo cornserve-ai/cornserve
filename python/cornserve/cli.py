@@ -16,6 +16,7 @@ from rich import box
 from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
+from rich.pretty import Pretty
 from tyro.constructors import PrimitiveConstructorSpec
 
 from cornserve.services.gateway.models import (
@@ -234,7 +235,7 @@ def invoke(
 
     table = Table(box=box.ROUNDED, show_header=False)
     for key, value in raw_response.json().items():
-        table.add_row(key, value)
+        table.add_row(key, Pretty(value, indent_size=2))
     rich.print(table)
 
 

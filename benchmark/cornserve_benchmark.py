@@ -5,7 +5,7 @@ import json
 import time
 from dataclasses import asdict
 from datetime import datetime
-from typing import Any, AsyncGenerator, Callable
+from typing import Any, AsyncGenerator, Callable, cast
 
 import aiohttp
 import numpy as np
@@ -58,7 +58,9 @@ async def post(
 ) -> RequestOutput:
     """Send a POST request to the specified URL with the given payload."""
     result = RequestOutput()
+    result.input = request_input
     start_time = time.perf_counter()
+    result.start_time = start_time
     async with aiohttp.ClientSession(timeout=AIOHTTP_TIMEOUT) as session:
         try:
             async with session.post(request_input.url, json=request_input.payload) as response:
@@ -68,7 +70,6 @@ async def post(
                     result.success = True
                     result.latency = end_time - start_time
                     result.output = content
-                    result.start_time = start_time
                     result.end_time = end_time
                 else:
                     result.error = f"Request failed with status {response.status}"
@@ -161,6 +162,10 @@ async def benchmark(
     successful_requests = [r for r in results if r.success]
     failed_requests = [r for r in results if not r.success]
     latencies = [r.latency for r in successful_requests if r.latency > 0]
+
+    first_start_time = min(r.start_time for r in results) if results else 0
+    last_end_time = max(r.end_time for r in results) if results else 0
+    throughput = len(successful_requests) / (last_end_time - first_start_time) if last_end_time > first_start_time else 0
     
     # Calculate statistics
     stats = {
@@ -169,8 +174,10 @@ async def benchmark(
         "failed_requests": len(failed_requests),
         "success_rate": len(successful_requests) / len(results) if results else 0,
         "total_time": total_time,
+        "first_start_time": first_start_time,
+        "last_end_time": last_end_time,
+        "throughput": throughput,
         "actual_request_rate": len(results) / total_time if total_time > 0 else 0,
-        "first_start_time": min(r.start_time for r in results) if results else 0,
         "completion_time": benchmark_end_time,
     }
     
@@ -193,9 +200,11 @@ async def benchmark(
             "latency_max": 0,
         })
 
+    no_payload_dict = lambda items: {k: v for k, v in items if k != "payload"}
+
     output_data = {
         "statistics": stats,
-        "detailed_results": [asdict(result) for result in results],
+        "detailed_results": [asdict(result, dict_factory=no_payload_dict) for result in results],
         "benchmark_config": {
             "request_rate": request_rate,
             "burstiness": burstiness,
@@ -229,9 +238,9 @@ async def main(args: argparse.Namespace) -> None:
     # Add random multimedia URLs to each request
     if args.synthesize_mm_data:
         video_filenames, audio_filenames, image_filenames = get_benchmark_filenames(MAX_MM_COUNT)
-        video_urls = get_video_data_uris(video_filenames)
-        image_urls = get_image_data_uris(image_filenames)
-        audio_urls = get_audio_data_uris(audio_filenames)
+        # video_urls = get_video_data_uris(video_filenames)
+        # image_urls = get_image_data_uris(image_filenames)
+        # audio_urls = get_audio_data_uris(audio_filenames)
         # video_urls = [f"{FILE_SERVER_URL}/videos/{filename}" for filename in video_filenames]
         # audio_urls = [f"{FILE_SERVER_URL}/audios/{filename}" for filename in audio_filenames]
         # image_urls = [f"{FILE_SERVER_URL}/images/{filename}" for filename in image_filenames]
@@ -243,32 +252,38 @@ async def main(args: argparse.Namespace) -> None:
             include_images = np.random.random() < args.image_prob
         
             # Sample number of each media type
-            if include_videos and args.max_videos_per_request > 0 and len(video_urls) > 0:
+            if include_videos and args.max_videos_per_request > 0 and len(video_filenames) > 0:
                 num_videos = sample_mm_count(args.max_videos_per_request, args.mm_distribution)
                 if num_videos > 0:
-                    request.video_urls = np.random.choice(
-                        video_urls,
-                        size=min(num_videos, len(video_urls)),
+                    chosen_video_files = cast(list[str], np.random.choice(
+                        video_filenames,
+                        size=min(num_videos, len(video_filenames)),
                         replace=False,
-                    ).tolist()  # type: ignore
+                    ).tolist())
+                    request.filenames.extend(chosen_video_files)
+                    request.video_urls = get_video_data_uris(chosen_video_files)
             
-            if include_audios and args.max_audios_per_request > 0 and len(audio_urls) > 0:
+            if include_audios and args.max_audios_per_request > 0 and len(audio_filenames) > 0:
                 num_audios = sample_mm_count(args.max_audios_per_request, args.mm_distribution)
                 if num_audios > 0:
-                    request.audio_urls = np.random.choice(
-                        audio_urls,
-                        size=min(num_audios, len(audio_urls)),
+                    chosen_audio_files = cast(list[str], np.random.choice(
+                        audio_filenames,
+                        size=min(num_audios, len(audio_filenames)),
                         replace=False,
-                    ).tolist()  # type: ignore
+                    ).tolist())
+                    request.filenames.extend(chosen_audio_files)
+                    request.audio_urls = get_audio_data_uris(chosen_audio_files)
                 
-            if include_images and args.max_images_per_request > 0 and len(image_urls) > 0:
+            if include_images and args.max_images_per_request > 0 and len(image_filenames) > 0:
                 num_images = sample_mm_count(args.max_images_per_request, args.mm_distribution)
                 if num_images > 0:
-                    request.image_urls = np.random.choice(
-                        image_urls,
-                        size=min(num_images, len(image_urls)),
+                    chosen_image_files = cast(list[str], np.random.choice(
+                        image_filenames,
+                        size=min(num_images, len(image_filenames)),
                         replace=False,
-                    ).tolist()  # type: ignore
+                    ).tolist())
+                    request.filenames.extend(chosen_image_files)
+                    request.image_urls = get_image_data_uris(chosen_image_files)
 
     backend = args.backend.lower()
     if backend not in TRANSFORM_FUNCS:

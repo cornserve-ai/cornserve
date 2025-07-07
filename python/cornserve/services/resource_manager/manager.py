@@ -268,7 +268,7 @@ class ResourceManager:
                 num_gpus=num_gpus,
                 owner=task_state.id,
                 must_colocate=False,
-                node_selection_policy="pack",
+                node_selection_policy="spread",
             )
 
         assert task_state.stub is not None, "Task manager stub is not initialized"
@@ -382,7 +382,10 @@ class ResourceManager:
                     return
 
             # Create a new task manager state
-            task_manager_id = f"{task.make_name()}-{uuid.uuid4().hex[:8]}"
+            # Important: here we are generating a url for DNS so no dots
+            # TODO: a helper function to create a valid ID for service names
+            task_manager_id = f"{task.make_name()}-{uuid.uuid4().hex[:8]}".replace(".", "-")
+            logger.info("Creating new task manager state with ID %s for task %s", task_manager_id, task)
             state = TaskManagerState(id=task_manager_id)
             self.task_states[task_manager_id] = state
 

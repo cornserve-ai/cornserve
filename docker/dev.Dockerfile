@@ -1,7 +1,22 @@
-FROM pytorch/pytorch:2.7.0-cuda12.6-cudnn9-devel
+# Build flash-attn wheel inside the `devel` image which has `nvcc`.
+FROM pytorch/pytorch:2.7.0-cuda12.6-cudnn9-devel AS builder
 
-RUN apt-get update && apt-get upgrade -y
-RUN apt-get install wget build-essential librdmacm-dev net-tools -y
+ARG max_jobs=64
+ENV MAX_JOBS=${max_jobs}
+ENV NVCC_THREADS=8
+RUN pip wheel -w /tmp/wheels --no-build-isolation --no-deps --verbose flash-attn==2.7.4.post1
+
+# Just copy over the flash-attn wheel for eric
+FROM pytorch/pytorch:2.7.0-cuda12.6-cudnn9-runtime
+
+COPY --from=builder /tmp/wheels/*.whl /tmp/wheels/
+RUN pip install --no-cache-dir /tmp/wheels/*.whl && rm -rf /tmp/wheels
+
+ARG DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        wget build-essential librdmacm-dev net-tools && \
+    rm -rf /var/lib/apt/lists/*
 
 ########### Install UCX 1.18.0 ###########
 RUN wget https://github.com/openucx/ucx/releases/download/v1.18.0/ucx-1.18.0.tar.gz
@@ -27,16 +42,20 @@ ENV UCX_LOG_LEVEL=trace
 ENV UCX_TLS=rc,ib,tcp
 ########### End Install UCX ###########
 
-ADD . /workspace/cornserve
+ADD ./python /workspace/cornserve/python
+ADD ./third_party /workspace/cornserve/third_party
 WORKDIR /workspace/cornserve/python
 
 RUN pip install -e '.[dev]'
 
 # UCXX logging
-ENV UCXPY_LOG_LEVEL=DEBUG
+ENV UCXPY_LOG_LEVEL=ERROR
 # python log level syntax: DEBUG, INFO, WARNING, ERROR, CRITICAL
 
 # Disable OpenTelemetry
 ENV OTEL_SDK_DISABLED=true
+# use local sidecar
+ENV SIDECAR_IS_LOCAL=true
 
+WORKDIR /workspace/cornserve
 CMD ["bash"]

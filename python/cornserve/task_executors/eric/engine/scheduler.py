@@ -164,6 +164,7 @@ class Scheduler:
                 otel_spans=[req.span],
                 otel_carriers=[carrier],
             )
+            break
             # spans.append(req.span)
 
         assert batch.request_ids, "Batch should not be empty"

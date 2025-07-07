@@ -99,6 +99,8 @@ class SidecarLaunchInfo:
         return [
             ("SIDECAR_WORLD_SIZE", str(world_size)),
             ("SIDECAR_RANK", str(sidecar_rank)),
+            ("SIDECAR_SHM_SIZE", str(constants.SIDECAR_SHM_SIZE)),
+            ("SIDECAR_LOCAL_PEER_SIZE", str(len(peer_ranks))),
             ("SIDECAR_LOCAL_PEER_RANKS", ",".join(map(str, peer_ranks))),
             ("NVIDIA_VISIBLE_DEVICES", "all"),
         ]

@@ -197,6 +197,12 @@ class SidecarSender:
             logger.info("Freeing buffer %s", id)
             await self._free(buffer)
             del self.saved_buffers[id]
+        logger.info(
+            "Unlinked buffer %s, remaining ref count: %s, used slots: %d",
+            id,
+            self.ref_counts.get(id, 0),
+            self.shm_manager.used_slots,
+        )
         return sidecar_pb2.UnlinkResponse(status=common_pb2.Status.STATUS_OK)
 
     async def send(
@@ -379,6 +385,12 @@ class SidecarSender:
             request: The original gRPC send request.
             data: The tensor to send.
         """
+        dst_ranks_pretty = [list(group.ranks) for group in request.dst_ranks]
+        logger.info(
+            "Trying to send %s data to %s with concurrent copy",
+            request.id,
+            dst_ranks_pretty,
+        )
         span = trace.get_current_span()
         span.set_attribute("SidecarSender.copy.mode", "concurrent")
         # this is similar to prepare_recv, the first call will allocate the buffer
@@ -469,7 +481,18 @@ class SidecarSender:
             del self.saved_buffers[id]
             del self.ref_counts[id]
         if any(failed):
+            logger.error(
+                "Failed to send %s data to %s with concurrent copy",
+                request.id,
+                dst_ranks_pretty,
+            )
             return sidecar_pb2.SendResponse(status=common_pb2.Status.STATUS_ERROR)
+        logger.info(
+            "Sent %s data to %s with concurrent copy successfully, used slots: %d",
+            request.id,
+            dst_ranks_pretty,
+            self.shm_manager.used_slots,
+        )
         return sidecar_pb2.SendResponse(status=common_pb2.Status.STATUS_OK)
 
     async def _single_copy_send(
@@ -483,6 +506,8 @@ class SidecarSender:
             request: The original gRPC send request.
             data: The tensor to send.
         """
+        dst_ranks_pretty = [list(group.ranks) for group in request.dst_ranks]
+        logger.info("Trying to send %s data to %s with single copy", request.id, dst_ranks_pretty)
         span = trace.get_current_span()
         span.set_attribute("SidecarSender.copy.mode", "single")
         id = request.id + f"-{request.chunk_id}"
@@ -535,7 +560,18 @@ class SidecarSender:
             del self.saved_buffers[id]
             del self.ref_counts[id]
         if any(failed):
+            logger.error(
+                "Failed to send %s data to %s with single copy",
+                request.id,
+                dst_ranks_pretty,
+            )
             return sidecar_pb2.SendResponse(status=common_pb2.Status.STATUS_ERROR)
+        logger.info(
+            "Sent %s data to %s with single copy successfully, used slots: %d",
+            request.id,
+            dst_ranks_pretty,
+            self.shm_manager.used_slots,
+        )
         return sidecar_pb2.SendResponse(status=common_pb2.Status.STATUS_OK)
 
     async def _send_tensor(

@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 from cornserve.app.base import AppRequest, AppResponse, AppConfig
-from cornserve.task.builtins.mllm import MLLMInput, MLLMTask, Modality
+from cornserve.task.builtins.mllm import OpenAIMLLMTask, OpenAIMLLMInput, Modality
+from typing import Any
 
 
 class Request(AppRequest):
@@ -28,11 +29,11 @@ class Response(AppResponse):
         response: The response from the LLM.
     """
 
-    response: str
+    response: dict[str, Any]
 
 
-mllm = MLLMTask(
-    model_id="Qwen/Qwen2-VL-7B-Instruct",
+mllm = OpenAIMLLMTask(
+    model_id="Qwen/Qwen2.5-VL-7B-Instruct",
     # model_id="google/gemma-3-4b-it",
     modalities=[Modality.IMAGE],
 )
@@ -46,7 +47,7 @@ class Config(AppConfig):
 
 async def serve(request: Request) -> Response:
     """Main serve function for the app."""
-    mllm_input = MLLMInput(
+    mllm_input = OpenAIMLLMInput(
         prompt=request.prompt,
         multimodal_data=request.multimodal_data,
         max_completion_tokens=request.max_completion_tokens,

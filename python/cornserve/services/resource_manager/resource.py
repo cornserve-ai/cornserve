@@ -206,13 +206,18 @@ class Resource:
         num_allocated = 0
         allocated_gpus: list[GPU] = []
         while num_allocated < num_gpus and node_priority:
-            _, _, node = heapq.heappop(node_priority)
+            negative_num_free_gpus, num_gpus_allocated_to_owner, node = heapq.heappop(node_priority)
             gpus = self.node_to_gpus[node]
             gpus = [gpu for gpu in gpus if gpu.is_free][: num_gpus - num_allocated]
             for gpu in gpus:
                 allocated_gpus.append(gpu.allocate_to(owner))
                 num_allocated += 1
                 if num_allocated >= num_gpus:
+                    break
+                # if no need to colocate and the policy is "spread", we can go to next node
+                if not must_colocate and node_selection_policy == "spread":
+                    # we push the current node back to the heap with adjusted priority
+                    heapq.heappush(node_priority, (negative_num_free_gpus+1, num_gpus_allocated_to_owner+1, node))
                     break
             if num_allocated >= num_gpus:
                 break
