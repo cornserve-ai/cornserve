@@ -31,7 +31,7 @@ async def serve() -> None:
     # FastAPI server
     app = create_app()
 
-    FastAPIInstrumentor.instrument_app(app)
+    FastAPIInstrumentor.instrument_app(app, exclude_spans=["send", "receive"])
     HTTPXClientInstrumentor().instrument()
     GrpcInstrumentorClient().instrument()
     GrpcInstrumentorServer().instrument()
