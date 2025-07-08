@@ -29,7 +29,7 @@ async def serve() -> None:
     configure_otel("gateway")
 
     app = create_app()
-    FastAPIInstrumentor.instrument_app(app)
+    FastAPIInstrumentor.instrument_app(app, exclude_spans=["send", "receive"])
     GrpcAioInstrumentorClient().instrument()
     HTTPXClientInstrumentor().instrument()
 

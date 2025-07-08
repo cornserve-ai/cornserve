@@ -27,7 +27,7 @@ async def serve(eric_config: EricConfig) -> None:
 
     app = create_app(eric_config)
 
-    FastAPIInstrumentor().instrument_app(app)
+    FastAPIInstrumentor().instrument_app(app, exclude_spans=["send", "receive"])
     ThreadingInstrumentor().instrument()
 
     logger.info("Available routes are:")
