@@ -11,7 +11,6 @@ from typing import Any
 
 import grpc
 import torch
-from opentelemetry import context as context_api
 from opentelemetry import trace
 from opentelemetry.instrumentation.grpc import (
     GrpcAioInstrumentorClient,
@@ -99,7 +98,7 @@ class Sidecar:
 
         self._finalizer = weakref.finalize(self, self.__del__)
 
-    # OpenTelemetry decorator removed; span will be created manually inside the function
+    @tracer.start_as_current_span(name="Sidecar.send")
     def send(
         self,
         data: Any,
@@ -118,33 +117,29 @@ class Sidecar:
             chunk_id: The chunk id of the data when only sending a chunk.
             num_chunks: The number of chunks the entire data is split into.
         """
-        span = tracer.start_span("Sidecar.send")
-        token = context_api.attach(trace.set_span_in_context(span))
-        try:
-            span.set_attribute("sidecar.send.id", id)
-            # need to pass a shared pytorch tensor handle
-            # assume broadcast
-            if any(rank == self.config.sidecar_rank for group in dst_sidecar_ranks for rank in group):
-                raise ValueError("Cannot send to self")
-            if any(rank < 0 for group in dst_sidecar_ranks for rank in group):
-                raise ValueError("Invalid sidecar rank")
-            if not any(isinstance(data, cls) for cls in self.supported_classes):
-                raise ValueError(f"Unsupported data type: {type(data)}")
-            if isinstance(data, torch.Tensor) and data.device != self.device:
-                raise ValueError(f"Tensor must be on {self.device}, but got {data.device}")
+        # need to pass a shared pytorch tensor handle
+        # assume broadcast
+        if any(rank == self.config.sidecar_rank for group in dst_sidecar_ranks for rank in group):
+            raise ValueError("Cannot send to self")
+        if any(rank < 0 for group in dst_sidecar_ranks for rank in group):
+            raise ValueError("Invalid sidecar rank")
+        if not any(isinstance(data, cls) for cls in self.supported_classes):
+            raise ValueError(f"Unsupported data type: {type(data)}")
+        if isinstance(data, torch.Tensor) and data.device != self.device:
+            raise ValueError(f"Tensor must be on {self.device}, but got {data.device}")
 
-            future = self.worker_pool.submit(
-                self._send_worker,
-                data,
-                id,
-                dst_sidecar_ranks,
-                chunk_id,
-                num_chunks,
-            )
-            future.add_done_callback(lambda f: f.result())
-        finally:
-            context_api.detach(token)
-            span.end()
+        span = trace.get_current_span()
+        span.set_attribute("sidecar.send.id", id)
+
+        future = self.worker_pool.submit(
+            self._send_worker,
+            data,
+            id,
+            dst_sidecar_ranks,
+            chunk_id,
+            num_chunks,
+        )
+        future.add_done_callback(lambda f: f.result())
 
     @tracer.start_as_current_span(name="Sidecar._send_worker")
     def _send_worker(
@@ -274,6 +269,7 @@ class Sidecar:
         else:
             logger.error("Failed to mark request %s done", id)
 
+    @tracer.start_as_current_span(name="Sidecar.mark_done_sync")
     def mark_done_sync(self, id: str, chunk_id: int = 0) -> None:
         """Synchronously mark a tensor as done in the sidecar server to free the shared memory buffer.
 
@@ -281,19 +277,12 @@ class Sidecar:
             id: The id of the data.
             chunk_id: The chunk id of the data to mark as done.
         """
-        span = tracer.start_span("Sidecar.mark_done_sync")
-        token = context_api.attach(trace.set_span_in_context(span))
-        try:
-            span.set_attribute("sidecar.mark_done.id", id)
-            future = self.worker_pool.submit(
-                self._mark_done_worker,
-                id,
-                chunk_id,
-            )
-            future.add_done_callback(lambda f: f.result())
-        finally:
-            context_api.detach(token)
-            span.end()
+        future = self.worker_pool.submit(
+            self._mark_done_worker,
+            id,
+            chunk_id,
+        )
+        future.add_done_callback(lambda f: f.result())
 
     def __del__(self) -> None:
         """Unlink the shared memory buffer."""

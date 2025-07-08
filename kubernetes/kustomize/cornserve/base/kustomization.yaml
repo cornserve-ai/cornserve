@@ -25,5 +25,6 @@ configMapGenerator:
   - CORNSERVE_IMAGE_PREFIX=docker.io/cornserve
   - CORNSERVE_IMAGE_TAG=latest
   - CORNSERVE_IMAGE_PULL_POLICY=IfNotPresent
+  - OTEL_SPAN_ATTRIBUTE_VALUE_LENGTH_LIMIT=2048
 generatorOptions:
   disableNameSuffixHash: true

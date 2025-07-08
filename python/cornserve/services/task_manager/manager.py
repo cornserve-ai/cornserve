@@ -305,6 +305,10 @@ class TaskManager:
                                     ),
                                 ),
                             ),
+                            kclient.V1EnvVar(
+                                name="OTEL_SPAN_ATTRIBUTE_VALUE_LENGTH_LIMIT",
+                                value="2048",
+                            ),
                         ],
                         volume_mounts=[
                             kclient.V1VolumeMount(
