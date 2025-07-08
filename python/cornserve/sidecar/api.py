@@ -36,7 +36,6 @@ tracer = trace.get_tracer(__name__)
 
 GrpcInstrumentorClient().instrument()
 GrpcAioInstrumentorClient().instrument()
-ThreadingInstrumentor().instrument()
 
 
 class Sidecar:
@@ -98,7 +97,6 @@ class Sidecar:
 
         self._finalizer = weakref.finalize(self, self.__del__)
 
-    @tracer.start_as_current_span(name="Sidecar.send")
     def send(
         self,
         data: Any,
@@ -128,20 +126,30 @@ class Sidecar:
         if isinstance(data, torch.Tensor) and data.device != self.device:
             raise ValueError(f"Tensor must be on {self.device}, but got {data.device}")
 
-        span = trace.get_current_span()
-        span.set_attribute("sidecar.send.id", id)
+        # Manually start a span that will live until the worker finishes.
+        span = tracer.start_span("Sidecar.send")
+        with trace.use_span(span, end_on_exit=False):
+            span.set_attribute("sidecar.send.id", id)
 
-        future = self.worker_pool.submit(
-            self._send_worker,
-            data,
-            id,
-            dst_sidecar_ranks,
-            chunk_id,
-            num_chunks,
-        )
-        future.add_done_callback(lambda f: f.result())
+            future = self.worker_pool.submit(
+                self._send_worker,
+                data,
+                id,
+                dst_sidecar_ranks,
+                chunk_id,
+                num_chunks,
+            )
 
-    @tracer.start_as_current_span(name="Sidecar._send_worker")
+            def _end_span_callback(f):
+                """End the span once the background task completes."""
+                try:
+                    f.result()
+                finally:
+                    span.end()
+
+            future.add_done_callback(_end_span_callback)
+
+
     def _send_worker(
         self,
         obj: Any,
@@ -269,7 +277,6 @@ class Sidecar:
         else:
             logger.error("Failed to mark request %s done", id)
 
-    @tracer.start_as_current_span(name="Sidecar.mark_done_sync")
     def mark_done_sync(self, id: str, chunk_id: int = 0) -> None:
         """Synchronously mark a tensor as done in the sidecar server to free the shared memory buffer.
 
@@ -277,12 +284,22 @@ class Sidecar:
             id: The id of the data.
             chunk_id: The chunk id of the data to mark as done.
         """
-        future = self.worker_pool.submit(
-            self._mark_done_worker,
-            id,
-            chunk_id,
-        )
-        future.add_done_callback(lambda f: f.result())
+        # Manually start a span that persists until the worker finishes.
+        span = tracer.start_span("Sidecar.mark_done_sync")
+        with trace.use_span(span, end_on_exit=False):
+            future = self.worker_pool.submit(
+                self._mark_done_worker,
+                id,
+                chunk_id,
+            )
+
+            def _end_span_callback(f):
+                try:
+                    f.result()
+                finally:
+                    span.end()
+
+            future.add_done_callback(_end_span_callback)
 
     def __del__(self) -> None:
         """Unlink the shared memory buffer."""
