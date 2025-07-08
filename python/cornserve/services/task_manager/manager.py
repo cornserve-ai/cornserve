@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import uuid
 from contextlib import suppress
 from dataclasses import dataclass
@@ -305,9 +306,15 @@ class TaskManager:
                                     ),
                                 ),
                             ),
-                            kclient.V1EnvVar(
-                                name="OTEL_SPAN_ATTRIBUTE_VALUE_LENGTH_LIMIT",
-                                value="2048",
+                            *(
+                                [
+                                    kclient.V1EnvVar(
+                                        name="OTEL_SPAN_ATTRIBUTE_VALUE_LENGTH_LIMIT",
+                                        value=os.environ["OTEL_SPAN_ATTRIBUTE_VALUE_LENGTH_LIMIT"],
+                                    )
+                                ]
+                                if "OTEL_SPAN_ATTRIBUTE_VALUE_LENGTH_LIMIT" in os.environ
+                                else []
                             ),
                         ],
                         volume_mounts=[
