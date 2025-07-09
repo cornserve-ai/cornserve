@@ -37,4 +37,4 @@ docker run --rm -it \
   -v /sys/class/infiniband:/sys/class/infiniband \
   -v /dev/infiniband:/dev/infiniband \
   "${IMAGE}" \
-  Qwen/Qwen2.5-VL-7B-Instruct --no-enable-prefix-caching --port "${PORT}"
+  Qwen/Qwen2.5-VL-7B-Instruct --no-enable-prefix-caching --port "${PORT}" --max-num-batched-tokens 8192
