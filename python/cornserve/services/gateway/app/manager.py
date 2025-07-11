@@ -288,13 +288,8 @@ class AppManager:
 
             response = await app_driver
 
-            # For streaming apps, return the async iterator directly
-            if app_def.components.is_streaming:
-                # Response should be an AsyncIterator[pydantic.BaseModel]
-                return response
-
-            # For non-streaming apps, validate the single response
-            if not isinstance(response, app_def.components.response_cls):
+            # For non-streaming apps, validate the single response.
+            if not app_def.components.is_streaming and not isinstance(response, app_def.components.response_cls):
                 raise ValueError(
                     f"App returned invalid response type. "
                     f"Expected {app_def.components.response_cls.__name__}, "

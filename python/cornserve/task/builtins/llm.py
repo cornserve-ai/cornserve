@@ -200,6 +200,13 @@ class MLLMTask(Task[OpenAIChatCompletionRequest, Stream[OpenAIChatCompletionChun
                 data_url: str = getattr(multimodal_content, multimodal_content.type)
                 encoder_input_urls[modality].append(data_url)
 
+            # Check if modalities not specified in the task are present in the input.
+            if diff := set(encoder_input_urls.keys()) - set(self.modalities):
+                raise ValueError(
+                    "The following modalities in the input are not specified in the task: "
+                    f"{[mod.value for mod in diff]}",
+                )
+
             # Invoke the encoder tasks for each modality
             encoder_outputs: dict[Modality, EncoderOutput] = {}
             for modality, encoder_task in self.encoders.items():

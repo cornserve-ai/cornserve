@@ -140,7 +140,7 @@ class TaskDispatcher:
         logger.info("Task dispatcher shutdown complete")
 
     @tracer.start_as_current_span("TaskDispatcher.invoke")
-    async def invoke(self, invocations: list[TaskInvocation]) -> list[Any]:
+    async def invoke(self, invocations: list[TaskInvocation]) -> list[TaskOutput]:
         """Dispatch a graph of task invocations to task managers.
 
         This method:
@@ -243,7 +243,7 @@ class TaskDispatcher:
             assert data_forward.dst_sidecar_ranks is not None
 
         # Dispatch all task invocations to task executors
-        dispatch_coros: list[asyncio.Task[Any]] = []
+        dispatch_coros: list[asyncio.Task[TaskOutput]] = []
         client = httpx.AsyncClient(timeout=TASK_TIMEOUT)
         try:
             async with asyncio.TaskGroup() as tg:
@@ -265,7 +265,7 @@ class TaskDispatcher:
 
     async def _execute_unit_task(
         self, client: httpx.AsyncClient, execution: UnitTaskExecution, request: dict[str, Any]
-    ) -> Any:
+    ) -> TaskOutput:
         """Execute a single task by sending request to executor and processing response."""
         url = execution.invocation.task.execution_descriptor.get_api_url(execution.executor_url)
         logger.info(
@@ -291,9 +291,10 @@ class TaskDispatcher:
             response.content.decode(),
         )
 
-        # JSON response from task executor -> `TaskOutput` -> dump
+        # HTTP response from the Task Executor is converted to TaskOutput.
+        # For streaming tasks, `task_output` is a Stream object.
         task_output: TaskOutput = execution.invocation.task.execution_descriptor.from_response(
             task_output=execution.invocation.task_output,
             response=response,
         )
-        return task_output.model_dump()
+        return task_output

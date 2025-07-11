@@ -79,8 +79,6 @@ class VLLMDescriptor(
             str(len(gpus)),
             "--port",
             str(port),
-            "--limit-mm-per-prompt",
-            "image=5",  # TODO: Is this still needed?
         ]
 
         # If `receive_embeddings` is True, this task will be connected to an
@@ -111,24 +109,25 @@ class VLLMDescriptor(
         # with Cornserve sidecar-compatible URIs (using data IDs in `DataForward`).
         # The expectation is that the number of multimodal data is the same as the
         # length of `cornserve_embeddings`.
-        multimodal_data = extract_multimodal_content(task_input.messages)
-        if len(multimodal_data) != len(task_input.cornserve_embeddings):
-            logger.error(
-                "The number of multimodal data in messages (%d) does not match "
-                "the number of embeddings provided (%d). Multimodal data: %s, Embeddings: %s",
-                len(multimodal_data),
-                len(task_input.cornserve_embeddings),
-                multimodal_data,
-                task_input.cornserve_embeddings,
-            )
-            raise ValueError(
-                "The number of multimodal data in messages does not match the number of embeddings provided."
-            )
-        for multimodal_content, forward in zip(multimodal_data, task_input.cornserve_embeddings, strict=True):
-            modality = multimodal_content.type.split("_")[0]  # e.g., "audio", "image", "video"
-            data_url = getattr(multimodal_content, multimodal_content.type)
-            data_uri = f"data:{modality}/uuid;data_id={forward.id};url={data_url},"
-            setattr(multimodal_content, multimodal_content.type, data_uri)
+        if self.task.receive_embeddings:
+            multimodal_data = extract_multimodal_content(task_input.messages)
+            if len(multimodal_data) != len(task_input.cornserve_embeddings):
+                logger.error(
+                    "The number of multimodal data in messages (%d) does not match "
+                    "the number of embeddings provided (%d). Multimodal data: %s, Embeddings: %s",
+                    len(multimodal_data),
+                    len(task_input.cornserve_embeddings),
+                    multimodal_data,
+                    task_input.cornserve_embeddings,
+                )
+                raise ValueError(
+                    "The number of multimodal data in messages does not match the number of embeddings provided."
+                )
+            for multimodal_content, forward in zip(multimodal_data, task_input.cornserve_embeddings, strict=True):
+                modality = multimodal_content.type.split("_")[0]  # e.g., "audio", "image", "video"
+                data_url = getattr(multimodal_content, multimodal_content.type)
+                data_uri = f"data:{modality}/uuid;data_id={forward.id};url={data_url},"
+                setattr(multimodal_content, multimodal_content.type, data_uri)
 
         request = task_input.model_dump(exclude={"cornserve_embeddings"})
         request["stream"] = True
