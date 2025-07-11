@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+from collections.abc import AsyncGenerator
 from typing import Generic, TypeVar
+
+import pytest
+from openai.types.chat.chat_completion_chunk import Choice, ChoiceDelta
 
 from cornserve.task.base import Stream, TaskGraphDispatch, TaskInput, TaskInvocation, TaskOutput, UnitTask
 from cornserve.task.builtins.encoder import EncoderInput, EncoderOutput, EncoderTask, Modality
@@ -128,3 +132,34 @@ def test_task_equivalence():
     assert not EncoderTask(model_id="clip", modality=Modality.IMAGE).is_equivalent_to(
         EncoderTask(model_id="clip", modality=Modality.VIDEO)
     )
+
+
+@pytest.mark.asyncio
+async def test_stream():
+    """Tests Stream functionality."""
+
+    async def async_gen() -> AsyncGenerator[str]:
+        for i in range(3):
+            yield (
+                OpenAIChatCompletionChunk(
+                    id="chunk",
+                    choices=[Choice(index=i, delta=ChoiceDelta(content=f"Chunk {i}"))],
+                    created=1234567890,
+                    model="llama",
+                    object="chat.completion.chunk",
+                ).model_dump_json()
+                + "\n"
+            )
+
+    stream = Stream[OpenAIChatCompletionChunk](async_iterator=async_gen())
+
+    i = 0
+    async for chunk in stream:
+        assert isinstance(chunk, OpenAIChatCompletionChunk)
+        assert chunk.id == "chunk"
+        assert chunk.created == 1234567890
+        assert chunk.model == "llama"
+        assert chunk.object == "chat.completion.chunk"
+        assert chunk.choices[0].delta.content == f"Chunk {i}"
+        i += 1
+    assert i == 3

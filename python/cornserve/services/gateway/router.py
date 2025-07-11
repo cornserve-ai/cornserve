@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, AsyncIterator
 
 from fastapi import (
     APIRouter,
@@ -124,7 +124,7 @@ async def invoke_app(app_id: str, request: AppInvocationRequest, raw_request: Re
         response = await app_manager.invoke_app(app_id, request.request_data)
 
         # Check if response is an async iterator (streaming)
-        if hasattr(response, "__aiter__"):
+        if isinstance(response, AsyncIterator):
             # Return streaming response
             return StreamingResponse(
                 stream_app_response(response),
