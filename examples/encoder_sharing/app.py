@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from pydantic import BaseModel
 
-from cornserve.task.builtins.lllm import MLLMInput, MLLMTask, Modality
+from cornserve.task.builtins.llm import MLLMInput, MLLMTask, Modality
 
 
 class Request(BaseModel):
