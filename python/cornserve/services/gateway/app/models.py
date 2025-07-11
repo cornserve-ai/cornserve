@@ -27,12 +27,14 @@ class AppClasses:
         response_cls: The class that defines the app's response schema.
         config_cls: The class that specifies the app's configuration.
         serve_fn: The function that implements the app's logic.
+        is_streaming: Whether the app returns a streaming response.
     """
 
     request_cls: type[AppRequest]
     response_cls: type[AppResponse]
     config_cls: type[AppConfig]
     serve_fn: Callable[[AppRequest], Coroutine[None, None, AppResponse]]
+    is_streaming: bool
 
 
 @dataclass

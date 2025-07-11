@@ -6,8 +6,9 @@ import asyncio
 import importlib.util
 import uuid
 from collections import defaultdict
+from collections.abc import AsyncIterator
 from types import ModuleType
-from typing import Any, get_type_hints
+from typing import Any, get_args, get_origin, get_type_hints
 
 from opentelemetry import trace
 
@@ -71,13 +72,35 @@ def validate_app_module(module: ModuleType) -> AppClasses:
         errors.append("'serve' must be an async function")
 
     # Validate serve function signature
-    # Expectation is async def serve([ANYTHING]: Request) -> Response
+    # Expectation is async def serve([ANYTHING]: Request) -> Response | AsyncIterator[Response]
     serve_signature = get_type_hints(module.serve)
     return_type = serve_signature.pop("return", None)
+
+    is_streaming = False
     if return_type is None:
         errors.append("'serve' function must have a return type annotation")
-    elif not issubclass(return_type, module.Response):
-        errors.append("'serve' function must return an instance of 'Response' class")
+    else:
+        # Check if return type is AsyncIterator[Response]
+        origin = get_origin(return_type)
+        if origin is not None:
+            # Handle generic types like AsyncIterator[Response]
+            args = get_args(return_type)
+            if origin is AsyncIterator and len(args) == 1:
+                response_type = args[0]
+                if issubclass(response_type, module.Response):
+                    is_streaming = True
+                else:
+                    errors.append("'serve' function AsyncIterator must contain 'Response' class items")
+            else:
+                errors.append("'serve' function must return either 'Response' or 'AsyncIterator[Response]'")
+        elif issubclass(return_type, module.Response):
+            # Single Response return type (non-streaming)
+            is_streaming = False
+        else:
+            errors.append(
+                "'serve' function must return either an instance of 'Response' class or 'AsyncIterator[Response]'"
+            )
+
     if len(serve_signature) != 1:
         errors.append("'serve' function must have exactly one parameter of type 'Request'")
     request_type = next(iter(serve_signature.values()), None)
@@ -93,6 +116,7 @@ def validate_app_module(module: ModuleType) -> AppClasses:
         response_cls=module.Response,
         config_cls=module.Config,
         serve_fn=module.serve,  # type: ignore
+        is_streaming=is_streaming,
     )
 
 
@@ -235,7 +259,7 @@ class AppManager:
             request_data: Request data to pass to the application
 
         Returns:
-            Response from the application
+            Response from the application or AsyncIterator for streaming responses
 
         Raises:
             KeyError: If app_id doesn't exist
@@ -263,7 +287,12 @@ class AppManager:
 
             response = await app_driver
 
-            # Validate response
+            # For streaming apps, return the async iterator directly
+            if app_def.classes.is_streaming:
+                # Response should be an AsyncIterator[AppResponse]
+                return response
+
+            # For non-streaming apps, validate the single response
             if not isinstance(response, app_def.classes.response_cls):
                 raise ValueError(
                     f"App returned invalid response type. "
@@ -287,6 +316,23 @@ class AppManager:
             if app_driver:
                 async with self.app_lock:
                     self.app_driver_tasks[app_id].remove(app_driver)
+
+    async def is_app_streaming(self, app_id: str) -> bool:
+        """Check if an app is configured for streaming responses.
+
+        Args:
+            app_id: ID of the application to check
+
+        Returns:
+            bool: True if the app is streaming, False otherwise
+
+        Raises:
+            KeyError: If app_id doesn't exist
+        """
+        async with self.app_lock:
+            if app_id not in self.apps:
+                raise KeyError(f"App ID '{app_id}' does not exist")
+            return self.apps[app_id].classes.is_streaming
 
     async def list_apps(self) -> dict[str, AppState]:
         """List all registered applications and their states.

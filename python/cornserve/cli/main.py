@@ -13,6 +13,7 @@ import rich
 import tyro
 import yaml
 from rich import box
+from rich.live import Live
 from rich.panel import Panel
 from rich.status import Status
 from rich.table import Table
@@ -337,21 +338,98 @@ def invoke(
             return
 
     request = AppInvocationRequest(request_data=data)
-    raw_response = requests.post(
-        f"{GATEWAY_URL}/app/invoke/{app_id}",
-        json=request.model_dump(),
-    )
 
-    if raw_response.status_code == 404:
-        rich.print(Panel(f"App {app_id} not found.", style="red", expand=False))
-        return
+    try:
+        raw_response = requests.post(
+            f"{GATEWAY_URL}/app/invoke/{app_id}",
+            json=request.model_dump(),
+            stream=True,  # Always enable streaming to detect response type
+            timeout=(5, 300),  # Connection timeout and read timeout
+        )
 
-    raw_response.raise_for_status()
+        if raw_response.status_code == 404:
+            rich.print(Panel(f"App {app_id} not found.", style="red", expand=False))
+            return
 
+        raw_response.raise_for_status()
+
+        # Auto-detect if response is streaming based on content-type
+        content_type = raw_response.headers.get("content-type", "")
+
+        if "text/plain" in content_type:
+            # Streaming response
+            _handle_streaming_response(raw_response)
+        else:
+            # Non-streaming response - collect all data and parse as JSON
+            _handle_non_streaming_response(raw_response)
+
+    except Exception as e:
+        rich.print(Panel(f"Failed to invoke app: {e}", style="red", expand=False))
+
+
+def _create_response_table(data: dict[str, Any], fields: list[str] | None = None) -> Table:
+    """Create a table from the response data."""
     table = Table(box=box.ROUNDED, show_header=False)
-    for key, value in raw_response.json().items():
-        table.add_row(key, value)
-    rich.print(table)
+    for key in fields or data.keys():
+        table.add_row(key, str(data[key]))
+    return table
+
+
+def _handle_non_streaming_response(response: requests.Response) -> None:
+    """Handle non-streaming response."""
+    # Collect all data since we opened stream=True but it's actually not streaming
+    content = b"".join(response.iter_content())
+    data = json.loads(content.decode())
+    rich.print(_create_response_table(data))
+
+
+def _handle_streaming_response(response: requests.Response) -> None:
+    """Handle streaming response with live-updating table."""
+    console = rich.get_console()
+
+    accumulated_data: dict[str, str] = {}
+    field_order: list[str] = []
+
+    try:
+        with Live("Waiting for response...") as live:
+            for line_ in response.iter_lines(chunk_size=None, decode_unicode=True):
+                line = line_.strip()
+                if not line:
+                    continue
+
+                try:
+                    # Parse each JSON response
+                    response_data = json.loads(line)
+
+                    # Extract fields from the response
+                    for key, value in response_data.items():
+                        # Initialize field order on first response
+                        if key not in accumulated_data:
+                            accumulated_data[key] = ""
+                            field_order.append(key)
+
+                        # Append new value using + operator
+                        accumulated_data[key] += str(value)
+
+                    # Update the live table
+                    table = _create_response_table(accumulated_data, field_order)
+                    live.update(table)
+
+                except json.JSONDecodeError:
+                    # If not JSON, treat as raw text
+                    if "[raw text]" not in accumulated_data:
+                        accumulated_data["[raw text]"] = ""
+                        field_order.append("[raw text]")
+                    accumulated_data["[raw text]"] += line + "\n"
+
+                    table = _create_response_table(accumulated_data, field_order)
+                    live.update(table)
+
+        # Final newline after live display ends
+        console.print()
+
+    except Exception as e:
+        rich.print(Panel(f"Error processing streaming response: {e}", style="red", expand=False))
 
 
 def main() -> None:

@@ -111,8 +111,30 @@ async def invoke_app(app_id: str, request: AppInvocationRequest, raw_request: Re
     span.set_attributes(
         {f"gateway.invoke_app.request.{key}": str(value) for key, value in request.request_data.items()},
     )
+
+    async def stream_app_response(app_response_iter) -> AsyncGenerator[str]:
+        """Stream the response for a streaming app."""
+        # Stream each response item as JSON
+        async for response_item in app_response_iter:
+            # Convert AppResponse to JSON
+            response_json = response_item.model_dump_json()
+            yield response_json + "\n"
+
     try:
-        return await app_manager.invoke_app(app_id, request.request_data)
+        response = await app_manager.invoke_app(app_id, request.request_data)
+
+        # Check if response is an async iterator (streaming)
+        if hasattr(response, "__aiter__"):
+            # Return streaming response
+            return StreamingResponse(
+                stream_app_response(response),
+                media_type="text/plain",
+                headers={"Cache-Control": "no-cache"},
+            )
+        else:
+            # Return regular JSON response
+            return response
+
     except ValidationError as e:
         raise RequestValidationError(errors=e.errors()) from e
     except KeyError as e:
