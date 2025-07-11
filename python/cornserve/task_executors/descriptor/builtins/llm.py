@@ -130,7 +130,9 @@ class VLLMDescriptor(
             data_uri = f"data:{modality}/uuid;data_id={forward.id};url={data_url},"
             setattr(multimodal_content, multimodal_content.type, data_uri)
 
-        return task_input.model_dump(exclude={"cornserve_embeddings"})
+        request = task_input.model_dump(exclude={"cornserve_embeddings"})
+        request["stream"] = True
+        return request
 
     def from_response(
         self,

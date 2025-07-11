@@ -11,10 +11,11 @@ from types import ModuleType
 from typing import Any, get_args, get_origin, get_type_hints
 
 from opentelemetry import trace
+from pydantic import BaseModel
 
-from cornserve.app.base import AppConfig, AppRequest, AppResponse
+from cornserve.app.base import AppConfig
 from cornserve.logging import get_logger
-from cornserve.services.gateway.app.models import AppClasses, AppDefinition, AppState
+from cornserve.services.gateway.app.models import AppComponents, AppDefinition, AppState
 from cornserve.services.gateway.task_manager import TaskManager
 from cornserve.task.base import discover_unit_tasks
 
@@ -41,21 +42,21 @@ def load_module_from_source(source_code: str, module_name: str) -> ModuleType:
         raise ImportError(f"Failed to execute module code: {e}") from e
 
 
-def validate_app_module(module: ModuleType) -> AppClasses:
+def validate_app_module(module: ModuleType) -> AppComponents:
     """Validate that a module contains the required classes and function."""
     errors = []
 
     # Check Request class
     if not hasattr(module, "Request"):
         errors.append("Missing 'Request' class")
-    elif not issubclass(module.Request, AppRequest):
-        errors.append("'Request' class must inherit from cornserve.app.base.AppRequest")
+    elif not issubclass(module.Request, BaseModel):
+        errors.append("'Request' class must inherit from pydantic.BaseModel")
 
     # Check Response class
     if not hasattr(module, "Response"):
         errors.append("Missing 'Response' class")
-    elif not issubclass(module.Response, AppResponse):
-        errors.append("'Response' class must inherit from cornserve.app.base.AppResponse")
+    elif not issubclass(module.Response, BaseModel):
+        errors.append("'Response' class must inherit from pydantic.BaseModel")
 
     # Check Config class
     if not hasattr(module, "Config"):
@@ -111,7 +112,7 @@ def validate_app_module(module: ModuleType) -> AppClasses:
     if errors:
         raise ValueError("\n".join(errors))
 
-    return AppClasses(
+    return AppComponents(
         request_cls=module.Request,
         response_cls=module.Response,
         config_cls=module.Config,
@@ -159,8 +160,8 @@ class AppManager:
 
         try:
             module = load_module_from_source(source_code, app_id)
-            app_classes = validate_app_module(module)
-            tasks = discover_unit_tasks(app_classes.config_cls.tasks.values())
+            app_components = validate_app_module(module)
+            tasks = discover_unit_tasks(app_components.config_cls.tasks.values())
             task_names = [t.execution_descriptor.create_executor_name().lower() for t in tasks]
         except (ImportError, ValueError) as e:
             raise ValueError(f"App source code validation failed: {e}") from e
@@ -169,7 +170,7 @@ class AppManager:
             self.apps[app_id] = AppDefinition(
                 app_id=app_id,
                 module=module,
-                classes=app_classes,
+                components=app_components,
                 source_code=source_code,
                 tasks=tasks,
             )
@@ -240,7 +241,7 @@ class AppManager:
                 task.cancel()
 
         # Let the task manager know that this app no longer needs these tasks
-        tasks = discover_unit_tasks(app.classes.config_cls.tasks.values())
+        tasks = discover_unit_tasks(app.components.config_cls.tasks.values())
 
         try:
             await self.task_manager.declare_not_used(tasks)
@@ -273,14 +274,14 @@ class AppManager:
             app_def = self.apps[app_id]
 
         # Parse and validate request data
-        request = app_def.classes.request_cls(**request_data)
+        request = app_def.components.request_cls(**request_data)
 
         # Invoke the app
-        app_driver: asyncio.Task | None = None
+        app_driver: asyncio.Task[BaseModel | AsyncIterator[BaseModel]] | None = None
 
         try:
             # Create a task to run the app
-            app_driver = asyncio.create_task(app_def.classes.serve_fn(request))
+            app_driver = asyncio.create_task(app_def.components.serve_fn(request))
 
             async with self.app_lock:
                 self.app_driver_tasks[app_id].append(app_driver)
@@ -288,15 +289,15 @@ class AppManager:
             response = await app_driver
 
             # For streaming apps, return the async iterator directly
-            if app_def.classes.is_streaming:
-                # Response should be an AsyncIterator[AppResponse]
+            if app_def.components.is_streaming:
+                # Response should be an AsyncIterator[pydantic.BaseModel]
                 return response
 
             # For non-streaming apps, validate the single response
-            if not isinstance(response, app_def.classes.response_cls):
+            if not isinstance(response, app_def.components.response_cls):
                 raise ValueError(
                     f"App returned invalid response type. "
-                    f"Expected {app_def.classes.response_cls.__name__}, "
+                    f"Expected {app_def.components.response_cls.__name__}, "
                     f"got {type(response).__name__}"
                 )
 
@@ -332,7 +333,7 @@ class AppManager:
         async with self.app_lock:
             if app_id not in self.apps:
                 raise KeyError(f"App ID '{app_id}' does not exist")
-            return self.apps[app_id].classes.is_streaming
+            return self.apps[app_id].components.is_streaming
 
     async def list_apps(self) -> dict[str, AppState]:
         """List all registered applications and their states.

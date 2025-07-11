@@ -9,20 +9,6 @@ from pydantic import BaseModel, ConfigDict, Field
 from cornserve.task.base import Task
 
 
-class AppRequest(BaseModel):
-    """Base class for application requests.
-
-    All user-defined request classes must inherit from this.
-    """
-
-
-class AppResponse(BaseModel):
-    """Base class for application responses.
-
-    All user-defined response classes must inherit from this.
-    """
-
-
 class AppConfig(BaseModel):
     """Base class for application configuration.
 

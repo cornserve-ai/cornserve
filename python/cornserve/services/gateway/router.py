@@ -114,25 +114,20 @@ async def invoke_app(app_id: str, request: AppInvocationRequest, raw_request: Re
 
     async def stream_app_response(app_response_iter) -> AsyncGenerator[str]:
         """Stream the response for a streaming app."""
-        # Stream each response item as JSON
         async for response_item in app_response_iter:
-            # Convert AppResponse to JSON
             response_json = response_item.model_dump_json()
             yield response_json + "\n"
 
     try:
         response = await app_manager.invoke_app(app_id, request.request_data)
 
-        # Check if response is an async iterator (streaming)
         if isinstance(response, AsyncIterator):
-            # Return streaming response
             return StreamingResponse(
                 stream_app_response(response),
                 media_type="text/plain",
                 headers={"Cache-Control": "no-cache"},
             )
         else:
-            # Return regular JSON response
             return response
 
     except ValidationError as e:
