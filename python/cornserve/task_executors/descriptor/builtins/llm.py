@@ -25,7 +25,7 @@ logger = get_logger(__name__)
 
 async def parse_stream_to_completion_chunks(response: httpx.Response) -> AsyncGenerator[str]:
     """Parse the response stream to OpenAIChatCompletionChunk objects."""
-    aiter = response.aiter_text()
+    aiter = response.aiter_lines()
     try:
         async for line_ in aiter:
             line = line_.strip()
