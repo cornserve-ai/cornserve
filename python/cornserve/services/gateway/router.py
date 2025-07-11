@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import AsyncGenerator
 
 from fastapi import (
@@ -32,7 +33,7 @@ from cornserve.services.gateway.models import (
 )
 from cornserve.services.gateway.session import SessionManager
 from cornserve.services.gateway.task_manager import TaskManager
-from cornserve.task.base import TaskGraphDispatch, UnitTaskList, task_manager_context
+from cornserve.task.base import Stream, TaskGraphDispatch, UnitTaskList, task_manager_context
 
 router = APIRouter()
 logger = get_logger(__name__)
@@ -44,7 +45,7 @@ async def register_app(request: AppRegistrationRequest, raw_request: Request):
     """Register a new application with streaming response for deployment progress."""
     app_manager: AppManager = raw_request.app.state.app_manager
 
-    async def generate_registration_stream() -> AsyncGenerator[str, None]:
+    async def generate_registration_stream() -> AsyncGenerator[str]:
         """Generate Server-Sent Events (SSE) for the registration process.
 
         For SSE standards (e.g. the "data: " prefix),
@@ -256,8 +257,21 @@ async def invoke_tasks(request: TaskGraphDispatch, raw_request: Request):
     """Invoke a unit task graph."""
     task_manager: TaskManager = raw_request.app.state.task_manager
 
+    async def stream_response(results: list) -> AsyncGenerator[str]:
+        """Stream the response for a streaming task results."""
+        all_outputs = json.dumps(results)
+        yield all_outputs + "\n"
+
+        stream = results[-1]
+        assert isinstance(stream, Stream), "Last result must be a Stream"
+        async for chunk_ in stream.aiter_raw():
+            chunk = chunk_.strip()
+            if not chunk:
+                continue
+            yield chunk + "\n"
+
     try:
-        return await task_manager.invoke_tasks(request)
+        results = await task_manager.invoke_tasks(request)
     except KeyError as e:
         return Response(status_code=status.HTTP_404_NOT_FOUND, content=str(e))
     except ValueError as e:
@@ -269,6 +283,14 @@ async def invoke_tasks(request: TaskGraphDispatch, raw_request: Request):
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             content=str(e),
         )
+
+    if request.is_streaming:
+        return StreamingResponse(
+            stream_response(results),
+            media_type="text/plain",
+            headers={"Cache-Control": "no-cache"},
+        )
+    return results
 
 
 @router.get("/health")

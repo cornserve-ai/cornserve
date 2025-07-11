@@ -1,9 +1,8 @@
 from __future__ import annotations
 
 from cornserve.task.base import Task, TaskInput, TaskOutput
-from cornserve.task.builtins.encoder import EncoderInput, EncoderTask, Modality
-from cornserve.task.builtins.llm import LLMInput, LLMTask
-from cornserve.task.builtins.mllm import MLLMTask
+from cornserve.task.builtins.encoder import EncoderTask, Modality
+from cornserve.task.builtins.llm import LLMUnitTask, MLLMTask
 
 
 class ArenaInput(TaskInput):
@@ -60,7 +59,7 @@ class ArenaTask(Task[ArenaInput, ArenaOutput]):
         )
 
         for model_id in self.models.values():
-            LLMTask(model_id=model_id)
+            LLMUnitTask(model_id=model_id)
 
     def invoke(self, task_input: ArenaInput) -> ArenaOutput:
         """Invoke the Arena task with the given input."""
@@ -99,13 +98,13 @@ def test_arena_task_registration():
     assert mllm_encoder.modality == Modality.IMAGE
 
     mllm_llm = getattr(mllm, "__subtask_1__")
-    assert isinstance(mllm_llm, LLMTask)
+    assert isinstance(mllm_llm, LLMUnitTask)
     assert mllm_llm.model_id == "gemma-4B"
 
     llm0 = getattr(task, "__subtask_2__")
-    assert isinstance(llm0, LLMTask)
+    assert isinstance(llm0, LLMUnitTask)
     assert llm0.model_id == "llama-7B"
 
     llm1 = getattr(task, "__subtask_3__")
-    assert isinstance(llm1, LLMTask)
+    assert isinstance(llm1, LLMUnitTask)
     assert llm1.model_id == "gemma-4B"

@@ -1,95 +1,222 @@
-"""Build-in task for LLMs."""
+"""OpenAI-compatible LLM tasks.
+
+All tasks are OpenAI compatible and output is always streamed.
+
+- Encoder unit task: Single-modality encoder server
+   - Same as the old `builtins.encoder`.
+   - Task output is a list of embeddings (`DataForward[Tensor]` objects).
+   - `EricDescriptor` fishes out multimodal data URLs and IDs and forwards them to Eric.
+- LLM unit task
+   - Capable of handling both text-only or multimodal chat completion requests.
+   - Task input is OpenAI chat completion request + `cornserve_embeddings: list[DataForward[Tensor]]`.
+   - `VLLMDescriptor` looks at `cornserve_embeddings` and edits multimodal data URIs in the task input.
+   - Task has a field `receive_embeddings: bool`. If True, it should be connected with an `EncoderTask`.
+        If False, it will compute multimodal embeddings itself. Read by the `VLLMDescriptor`.
+- MLLM composite task
+   - Encoder unit task(s) + LLM unit task
+   - Task input and output are identical to OpenAI chat completion schema.
+   - `invoke` iterates through messages in the chat completion request to discover multimodal inputs,
+        and if any, constructs the `EncoderTask` input.
+"""
 
 from __future__ import annotations
 
-from typing import Generic, TypeVar
+from collections import defaultdict
+from typing import Literal, TypeAlias
 
-from cornserve.task.base import TaskInput, TaskOutput, UnitTask
+from openai.types.chat import ChatCompletionChunk
+from pydantic import BaseModel
+
+from cornserve.task.base import Stream, Task, TaskInput, TaskOutput, UnitTask
+from cornserve.task.builtins.encoder import EncoderInput, EncoderOutput, EncoderTask, Modality
 from cornserve.task.forward import DataForward, Tensor
 
 
-class LLMInput(TaskInput):
-    """Input model for LLM tasks.
+class StreamOptions(BaseModel):
+    """Streaming options for OpenAI Chat Completion.
 
     Attributes:
-        prompt: The prompt to send to the LLM.
-        multimodal_data: List of tuples (modality, data URL).
-            "image", "audio", "video", etc. for modality.
-        embeddings: Multimodal embeddings to send to the LLM.
+        include_usage: If set, the final chunk will include token usage statistics.
     """
 
-    prompt: str
-    multimodal_data: list[tuple[str, str]] = []
-    embeddings: list[DataForward[Tensor]] = []
+    include_usage: bool = True
+
+
+class ChatCompletionContentPartTextParam(BaseModel):
+    """Content part parameter for text content."""
+
+    type: Literal["text"] = "text"
+    text: str
+
+
+class ChatCompletionContentPartAudioParam(BaseModel):
+    """Content part parameter for audio content."""
+
+    type: Literal["audio_url"] = "audio_url"
+    audio_url: str
+
+
+class ChatCompletionContentPartImageParam(BaseModel):
+    """Content part parameter for image content."""
+
+    type: Literal["image_url"] = "image_url"
+    image_url: str
+
+
+class ChatCompletionContentPartVideoParam(BaseModel):
+    """Content part parameter for video content."""
+
+    type: Literal["video_url"] = "video_url"
+    video_url: str
+
+
+# Also supports ommitting the `type` field.
+ChatCompletionContentPartMultimodalParam: TypeAlias = (
+    ChatCompletionContentPartAudioParam | ChatCompletionContentPartImageParam | ChatCompletionContentPartVideoParam
+)
+
+ChatCompletionContentPartParam: TypeAlias = (
+    ChatCompletionContentPartTextParam | ChatCompletionContentPartMultimodalParam
+)
+
+
+class ChatCompletionMessageParam(BaseModel):
+    """Message parameter for OpenAI Chat Completion."""
+
+    role: str
+    content: str | list[ChatCompletionContentPartParam]
+
+
+class OpenAIChatCompletionRequest(TaskInput):
+    """Input model for OpenAI Chat Completion tasks."""
+
+    messages: list[ChatCompletionMessageParam]
+    model: str
+    frequency_penalty: float | None = 0.0
     max_completion_tokens: int | None = None
+    presence_penalty: float | None = 0.0
     seed: int | None = None
+    stream_options: StreamOptions | None = None
+    temperature: float | None = None
+    top_p: float | None = None
+
+    cornserve_embeddings: list[DataForward[Tensor]] = []
 
 
-class LLMOutputBase(TaskOutput):
-    """Base output model for LLM tasks."""
+def extract_multimodal_content(
+    messages: list[ChatCompletionMessageParam],
+) -> list[ChatCompletionContentPartMultimodalParam]:
+    """Extract multimodal contents from chat messages.
+
+    Args:
+        messages: List of chat messages.
+
+    Returns:
+        A list of tuples containing the modality and data URL.
+    """
+    multimodal_data: list[ChatCompletionContentPartMultimodalParam] = []
+    for message in messages:
+        for part in message.content:
+            if isinstance(part, (str, ChatCompletionContentPartTextParam)):
+                continue
+            multimodal_data.append(part)
+
+    return multimodal_data
 
 
-InputT = TypeVar("InputT", bound=TaskInput)
-OutputT = TypeVar("OutputT", bound=TaskOutput)
+class OpenAIChatCompletionChunk(TaskOutput, ChatCompletionChunk):
+    """Output model for streamed OpenAI Chat Completion tasks."""
 
 
-class LLMBaseTask(UnitTask[InputT, OutputT], Generic[InputT, OutputT]):
-    """A task that invokes an LLM.
+class LLMUnitTask(UnitTask[OpenAIChatCompletionRequest, Stream[OpenAIChatCompletionChunk]]):
+    """A task that invokes an LLM and returns a stream of chat completion chunks.
 
     Attributes:
         model_id: The ID of the model to use for the task.
+        receive_embeddings: Whether to receive multimodal embeddings from
+            a separate encoder task. If False, the task will compute them itself.
     """
 
     model_id: str
+    receive_embeddings: bool = True
 
     def make_name(self) -> str:
         """Create a concise string representation of the task."""
         return f"llm-{self.model_id.split('/')[-1].lower()}"
 
+    def make_record_output(
+        self,
+        task_input: OpenAIChatCompletionRequest,
+    ) -> Stream[OpenAIChatCompletionChunk]:
+        """Create a mock task output object for invocation recording."""
+        return Stream[OpenAIChatCompletionChunk]()
 
-class LLMOutput(LLMOutputBase):
-    """Output model for LLM tasks.
-
-    Attributes:
-        response: The response from the LLM.
-    """
-
-    response: str
-
-
-class LLMTask(LLMBaseTask[LLMInput, LLMOutput]):
-    """A task that invokes an LLM and returns the response.
-
-    Attributes:
-        model_id: The ID of the model to use for the task.
-    """
-
-    model_id: str
-
-    def make_record_output(self, task_input: LLMInput) -> LLMOutput:
-        """Create a task output for task invocation recording."""
-        return LLMOutput(response="")
+    def validate_input(self, task_input: OpenAIChatCompletionRequest) -> None:
+        """Validate the task input."""
+        if task_input.model != self.model_id:
+            raise ValueError(
+                f"Model ID in task input ({task_input.model}) does not match the task model ID ({self.model_id})."
+            )
 
 
-class LLMForwardOutput(LLMOutputBase):
-    """Output model for LLM tasks with the response forwarded.
-
-    Attributes:
-        response: The response from the LLM.
-    """
-
-    response: DataForward[str]
-
-
-class LLMForwardOutputTask(LLMBaseTask[LLMInput, LLMForwardOutput]):
-    """A task that invokes an LLM and forwards the response.
+class MLLMTask(Task[OpenAIChatCompletionRequest, Stream[OpenAIChatCompletionChunk]]):
+    """A task that invokes a Multimodal LLM.
 
     Attributes:
         model_id: The ID of the model to use for the task.
+        modalities: List of input modalities other than text.
+        adapter_model_ids: Some models support multiple adapters and allow the
+            base model to be shared (e.g., Gemma 3). This list specifies model IDs
+            from which to load adapters. Base model weights are loaded from `model_id`.
+        encoder_fission: If True, the task will use separate encoder tasks for computing
+            multimodal embeddings. If False, it will use the LLM server to compute them.
     """
 
     model_id: str
+    modalities: list[Modality] = []
+    adapter_model_ids: list[str] = []
+    encoder_fission: bool = True
 
-    def make_record_output(self, task_input: LLMInput) -> LLMForwardOutput:
-        """Create a task output for task invocation recording."""
-        return LLMForwardOutput(response=DataForward[str]())
+    def post_init(self) -> None:
+        """Initialize subtasks."""
+        if self.encoder_fission:
+            self.encoders = {
+                modality: EncoderTask(
+                    model_id=self.model_id,
+                    adapter_model_ids=self.adapter_model_ids,
+                    modality=modality,
+                )
+                for modality in self.modalities
+            }
+        self.llm = LLMUnitTask(model_id=self.model_id, receive_embeddings=self.encoder_fission)
+
+    def invoke(self, task_input: OpenAIChatCompletionRequest) -> Stream[OpenAIChatCompletionChunk]:
+        """Invoke the task."""
+        if self.encoder_fission:
+            encoder_input_urls: dict[Modality, list[str]] = defaultdict(list)
+            multimodal_contents = extract_multimodal_content(task_input.messages)
+            for multimodal_content in multimodal_contents:
+                modality = Modality(multimodal_content.type.split("_")[0])
+                data_url: str = getattr(multimodal_content, multimodal_content.type)
+                encoder_input_urls[modality].append(data_url)
+
+            # Invoke the encoder tasks for each modality
+            encoder_outputs: dict[Modality, EncoderOutput] = {}
+            for modality, encoder_task in self.encoders.items():
+                if modality not in encoder_input_urls:
+                    continue
+                encoder_input = EncoderInput(model_id=task_input.model, data_urls=encoder_input_urls[modality])
+                encoder_output = encoder_task.invoke(encoder_input)
+                encoder_outputs[modality] = encoder_output
+
+            # Retain the order of multimodal data in the task input
+            embeddings: list[DataForward[Tensor]] = []
+            for multimodal_content in multimodal_contents:
+                modality = Modality(multimodal_content.type.split("_")[0])
+                embeddings.append(encoder_outputs[modality].embeddings.pop(0))
+
+            # To be consumed by the LLM task.
+            task_input.cornserve_embeddings = embeddings
+
+        # Invoke the LLM task.
+        return self.llm.invoke(task_input)

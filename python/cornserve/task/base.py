@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import json
 import os
 import uuid
 from abc import ABC, abstractmethod
 from collections import defaultdict
-from collections.abc import Generator, Iterable
+from collections.abc import AsyncGenerator, AsyncIterator, Generator, Iterable
 from contextlib import contextmanager
 from contextvars import ContextVar
 from typing import TYPE_CHECKING, Any, ClassVar, Generic, Self, TypeVar, final
@@ -31,6 +32,9 @@ logger = get_logger(__name__)
 tracer = trace.get_tracer(__name__)
 
 TASK_TIMEOUT = 300
+
+# Global shared HTTP client used when we are outside of the Gateway service.
+CLIENT = httpx.AsyncClient(timeout=TASK_TIMEOUT)
 
 # This context variable is set inside the top-level task's `__call__` method
 # just before creating an `asyncio.Task` (`_call_impl`) to run the task.
@@ -58,6 +62,101 @@ class TaskOutput(BaseModel):
 
 InputT = TypeVar("InputT", bound=TaskInput)
 OutputT = TypeVar("OutputT", bound=TaskOutput)
+
+
+class Stream(TaskOutput, Generic[OutputT]):
+    """An asynchronous handle through which a task's output can be streamed from.
+
+    This class represents a stream of data (of type `OutputT`).
+    Consumers of this stream can treat it as an asynchronous generator.
+    """
+
+    # Each line in the stream should be a JSON string that can be parsed into an `OutputT` object.
+    async_iterator: AsyncIterator[str] | None = Field(default=None, exclude=True)
+    response: httpx.Response | None = Field(default=None, exclude=True)
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    @property
+    def item_type(self) -> type[OutputT]:
+        """The type of items in the stream, parsed from the generic type argument."""
+        if not hasattr(self, "_item_type"):
+            raise ValueError("Item type is not set. Ensure to call `_item_type` after initialization.")
+
+        metadata = self.__class__.__pydantic_generic_metadata__
+        if metadata["origin"] is None:
+            raise ValueError("Generic type argument is missing.")
+
+        args = metadata["args"]
+        assert len(args) == 1, "There should be exactly one generic type argument."
+        item_type = args[0]
+
+        if not issubclass(item_type, TaskOutput):
+            raise ValueError(f"Generic type argument {item_type} is not a subclass of TaskOutput.")
+
+        return item_type  # type: ignore
+
+    @model_validator(mode="after")
+    def _item_type(self) -> Self:
+        """Parse out the generic output type from the generic type argument."""
+        _ = self.item_type  # Access the property to trigger validation
+        return self
+
+    async def get_next(self) -> str | None:
+        """Get the next line from the stream.
+
+        This is a convenience method to get the next line from the stream.
+        It raises `StopAsyncIteration` when there are no more lines in the stream.
+        """
+        if self.async_iterator is None:
+            raise ValueError("Stream generator is not initialized.")
+
+        try:
+            return await anext(self.async_iterator)
+        except StopAsyncIteration:
+            # Close the connection at exit.
+            if self.response is not None:
+                try:
+                    await self.response.aclose()
+                except Exception as e:
+                    logger.warning("Failed to close stream response: %s", e)
+
+                self.response = None
+                self.async_iterator = None
+            return None
+
+    def __aiter__(self) -> Self:
+        """Return the asynchronous iterator for the stream."""
+        return self
+
+    async def __anext__(self) -> OutputT:
+        """Get the next item from the stream."""
+        item_type = self.item_type
+        assert item_type is not None
+        if self.async_iterator is None:
+            raise ValueError("Stream generator is not initialized.")
+
+        line = await self.get_next()
+        if line is None:
+            raise StopAsyncIteration
+
+        return self.item_type.model_validate_json(line.strip())
+
+    async def aiter_raw(self) -> AsyncGenerator[str]:
+        """Asynchronously iterate over the raw output of the stream without parsing."""
+        if self.async_iterator is None:
+            raise ValueError("Stream generator is not initialized.")
+
+        while True:
+            line = await self.get_next()
+            if line is None:
+                break
+
+            line = line.strip()
+            if not line:
+                continue
+
+            yield line
 
 
 class Task(BaseModel, ABC, Generic[InputT, OutputT]):
@@ -415,6 +514,66 @@ class TaskGraphDispatch(BaseModel):
     """
 
     invocations: list[TaskInvocation]
+    is_streaming: bool = False
+
+    def model_post_init(self, context: Any, /) -> None:
+        """Validate the task graph."""
+        if not self.invocations:
+            raise ValueError("Task graph must have at least one invocation.")
+
+        # If there's a `Stream` task output, it must be the last invocation.
+        if any(isinstance(inv.task_output, Stream) for inv in self.invocations[:-1]):
+            raise ValueError("Only the last task invocation can have a stream output.")
+
+        # If the last invocation is a stream, the whole task graph is streaming.
+        self.is_streaming = isinstance(self.invocations[-1].task_output, Stream)
+
+    @tracer.start_as_current_span("TaskGraphDispatch.dispatch")
+    async def dispatch(self, url: str, client: httpx.AsyncClient) -> list[Any]:
+        """Dispatch the task graph and wait for the response.
+
+        Returns a list of task outputs. Each task output is deserialized from JSON,
+        i.e., a dict that can be used to construct the task output object.
+        """
+        span = trace.get_current_span()
+        span.set_attributes(
+            {f"dispatch.invocation.{i}": invocation.model_dump_json() for i, invocation in enumerate(self.invocations)}
+        )
+
+        try:
+            if self.is_streaming:
+                ctx = client.stream("POST", url, json=self.model_dump())
+                response = await ctx.__aenter__()
+                response.raise_for_status()
+                ait = response.aiter_lines()
+
+                # First line is the task outputs of all invocations.
+                try:
+                    buffer = await anext(ait)
+                except StopAsyncIteration:
+                    raise RuntimeError("Received incomplete response from the server.") from None
+                dispatch_outputs = json.loads(buffer.strip())
+
+                # Following lines are all streamed outputs of the last invocation.
+                stream = self.invocations[-1].task_output.__class__.model_validate(dispatch_outputs[-1])
+                assert isinstance(stream, Stream), "Last invocation must be a Stream output."
+                stream.async_iterator = ait
+                stream.response = response
+                dispatch_outputs[-1] = stream.model_dump()
+            else:
+                response = await client.post(url, json=self.model_dump())
+                response.raise_for_status()
+                dispatch_outputs = response.json()
+        except httpx.RequestError as e:
+            logger.exception("Failed to send dispatch request to %s: %s", url, e)
+            raise RuntimeError(f"Failed to send dispatch request to {url}.") from e
+        except httpx.HTTPStatusError as e:
+            logger.exception("Received error response from %s: %s", url, e)
+            raise RuntimeError(f"Received error response from {url}.") from e
+
+        if not isinstance(dispatch_outputs, list):
+            raise RuntimeError(f"Expected a list of task outputs, but got {type(dispatch_outputs)}.")
+        return dispatch_outputs
 
 
 class TaskContext:
@@ -515,24 +674,14 @@ class TaskContext:
         # Get the Task Manager from the context variable.
         task_manager = task_manager_context.get()
 
-        # This means we're outside ot the Gateway service.
+        # This means we're outside of the Gateway service.
         if task_manager is None:
             # Figure out where to dispatch the tasks.
             gateway_url = os.getenv("CORNSERVE_GATEWAY_URL", K8S_GATEWAY_SERVICE_HTTP_URL)
 
             logger.info("Dispatching tasks to %s/tasks/invoke", gateway_url)
 
-            try:
-                async with httpx.AsyncClient(timeout=TASK_TIMEOUT) as client:
-                    response = await client.post(gateway_url + "/tasks/invoke", json=graph_dispatch.model_dump())
-                response.raise_for_status()
-                dispatch_outputs = response.json()
-            except httpx.RequestError as e:
-                logger.exception("Failed to send dispatch request to the Task Dispatcher: %s", e)
-                raise RuntimeError("Failed to send dispatch request to the Task Dispatcher.") from e
-            except httpx.HTTPStatusError as e:
-                logger.exception("Task Dispatcher returned an error: %s", e)
-                raise RuntimeError("Task Dispatcher returned an error") from e
+            dispatch_outputs = await graph_dispatch.dispatch(gateway_url + "/tasks/invoke", client=CLIENT)
 
         # We're inside the Gateway service.
         else:

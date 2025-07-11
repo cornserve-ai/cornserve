@@ -294,6 +294,6 @@ class TaskDispatcher:
         # JSON response from task executor -> `TaskOutput` -> dump
         task_output: TaskOutput = execution.invocation.task.execution_descriptor.from_response(
             task_output=execution.invocation.task_output,
-            response=response.json(),
+            response=response,
         )
         return task_output.model_dump()
