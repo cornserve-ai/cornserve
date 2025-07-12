@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-from cornserve.app.base import AppRequest, AppResponse, AppConfig
+from cornserve.app.base import AppConfig
 from cornserve.task.base import Task, TaskInput, TaskOutput
 from cornserve.task.builtins.llm import LLMInput, LLMTask
 from cornserve.task.builtins.encoder import EncoderInput, EncoderTask, Modality
 
 
-class ArenaInput(TaskInput, AppRequest):
+class ArenaInput(TaskInput):
     """App request model.
 
     Attributes:
@@ -25,7 +25,7 @@ class ArenaInput(TaskInput, AppRequest):
     seed: int | None = None
 
 
-class ArenaOutput(TaskOutput, AppResponse):
+class ArenaOutput(TaskOutput):
     """App response model.
 
     Attributes:

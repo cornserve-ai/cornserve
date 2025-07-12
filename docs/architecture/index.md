@@ -11,17 +11,19 @@ Cornserve is a disaggregated ML serving platform that allows you to implement an
 
 Applications are written by developers using the Cornserve frontend library in `cornserve.frontend`.
 Currently, a Cornserve app is a single Python file that implements three classes and an async function:
-- `Request` (inherits from `cornserve.app.base.AppRequest`): A single input request for the app.
-- `Response` (inherits from `cornserve.app.base.AppResponse`): A single output response for the app.
+- `Request` (inherits from `pydantic.BaseModel`): A single input request for the app.
+- `Response` (inherits from `pydantic.BaseModel`): A single output response for the app.
 - `Config` (inherits from `cornserve.app.base.AppConfig`): Configuration parameters and task definitions for the app.
 - `async def serve(request: Request) -> Response`: The main function that handles the request and returns a response.
 
 ```python
-from cornserve.app.base import AppRequest, AppResponse, AppConfig
+from pydantic import BaseModel
+
+from cornserve.app.base import AppConfig
 from cornserve.task.builtins.mllm import MLLMInput, MLLMTask, Modality
 
 
-class Request(AppRequest):
+class Request(BaseModel):
     """App request model.
 
     Attributes:
@@ -33,7 +35,7 @@ class Request(AppRequest):
     multimodal_data: list[tuple[str, str]] = []
 
 
-class Response(AppResponse):
+class Response(BaseModel):
     """App response model.
 
     Attributes:

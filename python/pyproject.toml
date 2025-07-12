@@ -31,6 +31,7 @@ dependencies = [
   "opentelemetry-sdk",
   "opentelemetry-exporter-otlp-proto-grpc",
   "websocket-client",
+  "openai",
 ]
 dynamic = ["version"]
 
@@ -124,11 +125,13 @@ exclude = [
 ]
 ignore = [
   "PLW0603",  # Global statement
+  "PLW2901",  # Overwritten loop variable
   "PLR2004",  # Magic value
   "PLR0912",  # Too many branches
   "PLR0913",  # Too many arguments
   "PLR0915",  # Too many statements
   "PLR0402",  # `import torch.nn as nn` is fine
+  "UP038",    # Deprecated and to be removed in Ruff 0.13
 ]
 
 [tool.ruff.lint.per-file-ignores]

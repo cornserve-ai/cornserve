@@ -16,7 +16,7 @@ from pydantic import BaseModel
 
 from cornserve.logging import get_logger
 from cornserve.services.pb import task_manager_pb2, task_manager_pb2_grpc
-from cornserve.task.base import TASK_TIMEOUT, TaskInvocation, TaskOutput, UnitTask
+from cornserve.task.base import TASK_TIMEOUT, Stream, TaskInvocation, TaskOutput, UnitTask
 from cornserve.task.forward import DataForward
 
 logger = get_logger(__name__)
@@ -55,6 +55,11 @@ class UnitTaskExecution:
     executor_url: str
     executor_sidecar_ranks: list[int]
 
+    @property
+    def is_streaming(self) -> bool:
+        """Check if the task streams its output."""
+        return isinstance(self.invocation.task_output, Stream)
+
 
 def iter_data_forwards(obj: object) -> Iterator[DataForward]:
     """Recursively find and iterate through all DataForward objects.
@@ -92,6 +97,7 @@ class TaskDispatcher:
 
         self.ongoing_task_lock = asyncio.Lock()
         self.ongoing_invokes: dict[str, list[asyncio.Task]] = defaultdict(list)
+        self.client = httpx.AsyncClient(timeout=TASK_TIMEOUT)
 
     async def notify_task_deployment(self, task: UnitTask, task_manager_url: str) -> None:
         """Register a newly deployed task and its task manager with the dispatcher."""
@@ -137,10 +143,12 @@ class TaskDispatcher:
             if isinstance(result, BaseException):
                 logger.error("Error occured while shutting down task dispatcher: %s", result)
 
+        await self.client.aclose()
+
         logger.info("Task dispatcher shutdown complete")
 
     @tracer.start_as_current_span("TaskDispatcher.invoke")
-    async def invoke(self, invocations: list[TaskInvocation]) -> list[Any]:
+    async def invoke(self, invocations: list[TaskInvocation]) -> list[TaskOutput]:
         """Dispatch a graph of task invocations to task managers.
 
         This method:
@@ -243,8 +251,7 @@ class TaskDispatcher:
             assert data_forward.dst_sidecar_ranks is not None
 
         # Dispatch all task invocations to task executors
-        dispatch_coros: list[asyncio.Task[Any]] = []
-        client = httpx.AsyncClient(timeout=TASK_TIMEOUT)
+        dispatch_coros: list[asyncio.Task[TaskOutput]] = []
         try:
             async with asyncio.TaskGroup() as tg:
                 for execution in task_executions:
@@ -253,19 +260,15 @@ class TaskDispatcher:
                         task_input=execution.invocation.task_input,
                         task_output=execution.invocation.task_output,
                     )
-                    dispatch_coros.append(tg.create_task(self._execute_unit_task(client, execution, request)))
+                    dispatch_coros.append(tg.create_task(self._execute_unit_task(execution, request)))
         except* Exception as e:
             logger.exception("Error while invoking task: %s", e.exceptions)
             raise RuntimeError(f"Task invocation failed: {e.exceptions}") from e
-        finally:
-            await client.aclose()
 
         # Collect responses from task executors
         return [task.result() for task in dispatch_coros]
 
-    async def _execute_unit_task(
-        self, client: httpx.AsyncClient, execution: UnitTaskExecution, request: dict[str, Any]
-    ) -> Any:
+    async def _execute_unit_task(self, execution: UnitTaskExecution, request: dict[str, Any]) -> TaskOutput:
         """Execute a single task by sending request to executor and processing response."""
         url = execution.invocation.task.execution_descriptor.get_api_url(execution.executor_url)
         logger.info(
@@ -273,8 +276,14 @@ class TaskDispatcher:
             execution.invocation.task.__class__.__name__,
             request,
         )
+        request_obj = self.client.build_request(method="POST", url=url, json=request)
         try:
-            response = await client.post(url=url, json=request)
+            if execution.is_streaming:
+                # response = await self.client.stream(method="POST", url=url, json=request).__aenter__()
+                response = await self.client.send(request_obj, stream=True)
+            else:
+                # response = await self.client.post(url=url, json=request)
+                response = await self.client.send(request_obj, stream=False)
             response.raise_for_status()
         except httpx.HTTPStatusError as e:
             logger.exception("Error while invoking task")
@@ -288,12 +297,13 @@ class TaskDispatcher:
         logger.info(
             "Task %s response: %s",
             execution.invocation.task.__class__.__name__,
-            response.content.decode(),
+            "[Stream]" if execution.is_streaming else response.content.decode(),
         )
 
-        # JSON response from task executor -> `TaskOutput` -> dump
+        # HTTP response from the Task Executor is converted to TaskOutput.
+        # For streaming tasks, `task_output` is a Stream object.
         task_output: TaskOutput = execution.invocation.task.execution_descriptor.from_response(
             task_output=execution.invocation.task_output,
-            response=response.json(),
+            response=response,
         )
-        return task_output.model_dump()
+        return task_output

@@ -8,11 +8,12 @@ The request can specify any of the following model IDs and the encoder will be s
 
 from __future__ import annotations
 
-from cornserve.app.base import AppRequest, AppResponse, AppConfig
-from cornserve.task.builtins.mllm import MLLMInput, MLLMTask, Modality
+from pydantic import BaseModel
+
+from cornserve.task.builtins.llm import MLLMInput, MLLMTask, Modality
 
 
-class Request(AppRequest):
+class Request(BaseModel):
     """App request model.
 
     Attributes:
@@ -31,7 +32,7 @@ class Request(AppRequest):
     seed: int | None = None
 
 
-class Response(AppResponse):
+class Response(BaseModel):
     """App response model.
 
     Attributes:

@@ -123,7 +123,7 @@ EOF
 ╰──────────┴───────────────────────────────────────────────────────────────────────────╯
 ```
 
-The invocation payload and response schema are defined by [the app itself](https://github.com/cornserve-ai/cornserve/blob/3fbf3c62dc7bd8019af29d1ae260b2cafc071ad8/examples/mllm/app.py) as a `AppRequest` and `AppResponse` subclass.
+The invocation payload and response schema are defined by [the app itself](https://github.com/cornserve-ai/cornserve/blob/3fbf3c62dc7bd8019af29d1ae260b2cafc071ad8/examples/mllm/app.py) as subclasses of `pydantic.BaseModel`.
 You can learn more about defining apps (and tasks) [in our guide](building_apps.md).
 
 Here's how to clean up:

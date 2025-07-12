@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
+import httpx
+
 from cornserve import constants
 from cornserve.services.resource_manager.resource import GPU
 from cornserve.task.builtins.encoder import EncoderInput, EncoderOutput, EncoderTask
@@ -72,9 +74,9 @@ class EricDescriptor(TaskExecutionDescriptor[EncoderTask, EncoderInput, EncoderO
         req = EmbeddingRequest(data=data)
         return req.model_dump()
 
-    def from_response(self, task_output: EncoderOutput, response: dict[str, Any]) -> EncoderOutput:
+    def from_response(self, task_output: EncoderOutput, response: httpx.Response) -> EncoderOutput:
         """Convert the task executor response to TaskOutput."""
-        resp = EmbeddingResponse.model_validate(response)
+        resp = EmbeddingResponse.model_validate(response.json())
         if resp.status == Status.SUCCESS:
             return EncoderOutput(embeddings=task_output.embeddings)
         else:

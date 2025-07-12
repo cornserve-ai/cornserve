@@ -20,7 +20,7 @@ First, let's see how to build a composite task out of built-in unit tasks for th
 from cornserve.task.base import Task, TaskInput, TaskOutput
 from cornserve.task.builtins.encoder import EncoderTask, Modality, EncoderInput
 from cornserve.task.builtins.llm import LLMTask, LLMInput
-from cornserve.app.base import AppRequest, AppResponse, AppConfig
+from cornserve.app.base import AppConfig
 
 
 class ImageChatInput(TaskInput):
@@ -68,17 +68,19 @@ It was a handful of code, so let's break it down:
 With `#!python ImageChatTask` defined, we can now use it in our app:
 
 ```python
-from cornserve.app.base import AppRequest, AppResponse, AppConfig
+from pydantic import BaseModel
+
+from cornserve.app.base import AppConfig
 
 image_chat = ImageChatTask(model_id="Qwen/Qwen2-VL-7B-Instruct")
 
 
-class Request(AppRequest):
+class Request(BaseModel):
     image_url: str
     prompt: str
 
 
-class Response(AppResponse):
+class Response(BaseModel):
     response: str
 
 
