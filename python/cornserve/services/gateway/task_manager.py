@@ -277,9 +277,7 @@ class TaskManager:
         if not isinstance(output, list):
             raise RuntimeError(f"Invalid response from task dispatcher: {output}")
         if len(output) != len(dispatch.invocations):
-            raise RuntimeError(
-                f"Invalid response from task dispatcher: {output} (expected {len(dispatch.invocations)} outputs)"
-            )
+            raise RuntimeError(f"Expected {len(dispatch.invocations)} outputs, got {len(output)}: {output}")
         return output
 
     async def shutdown(self) -> None:

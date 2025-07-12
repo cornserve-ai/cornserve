@@ -75,7 +75,7 @@ class Stream(TaskOutput, Generic[OutputT]):
     async_iterator: AsyncIterator[str] | None = Field(default=None, exclude=True)
     response: httpx.Response | None = Field(default=None, exclude=True)
 
-    model_config = ConfigDict(arbitrary_types_allowed=True)
+    model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid")
 
     @property
     def item_type(self) -> type[OutputT]:
@@ -521,7 +521,7 @@ class TaskGraphDispatch(BaseModel):
         if not self.invocations:
             raise ValueError("Task graph must have at least one invocation.")
 
-        # If there's a `Stream` task output, it must be the last invocation.
+        # `Stream` may only be used as the output of the last task invocation.
         if any(isinstance(inv.task_output, Stream) for inv in self.invocations[:-1]):
             raise ValueError("Only the last task invocation can have a stream output.")
 
@@ -542,8 +542,8 @@ class TaskGraphDispatch(BaseModel):
 
         try:
             if self.is_streaming:
-                ctx = client.stream("POST", url, json=self.model_dump())
-                response = await ctx.__aenter__()
+                request_obj = client.build_request(method="POST", url=url, json=self.model_dump())
+                response = await client.send(request_obj, stream=True)
                 response.raise_for_status()
                 ait = response.aiter_lines()
 
@@ -555,11 +555,11 @@ class TaskGraphDispatch(BaseModel):
                 dispatch_outputs = json.loads(buffer.strip())
 
                 # Following lines are all streamed outputs of the last invocation.
-                stream = self.invocations[-1].task_output.__class__.model_validate(dispatch_outputs[-1])
-                assert isinstance(stream, Stream), "Last invocation must be a Stream output."
-                stream.async_iterator = ait
-                stream.response = response
-                dispatch_outputs[-1] = stream.model_dump()
+                dispatch_outputs[-1]["async_iterator"] = ait
+                dispatch_outputs[-1]["response"] = response
+                stream_cls = self.invocations[-1].task_output.__class__
+                assert issubclass(stream_cls, Stream), "Last invocation output must be a Stream."
+                _ = stream_cls.model_validate(dispatch_outputs[-1])  # validation
             else:
                 response = await client.post(url, json=self.model_dump())
                 response.raise_for_status()

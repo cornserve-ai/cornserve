@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+from contextlib import suppress
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -320,6 +321,7 @@ def invoke(
         ),
         tyro.conf.Positional,
     ],
+    aggregate_key: str | None = None,
 ) -> None:
     """Invoke an app with the given data.
 
@@ -327,6 +329,8 @@ def invoke(
         app_id_or_alias: ID of the app to invoke or its alias.
         data: Input data for the app. This can be a literal JSON string,
             a path to either a JSON or YAML file, or a hyphen to read in from stdin.
+        aggregate_key: Opetional key to aggregate streaming responses by. If provided, the CLI will
+            fetch the value of each streamed response object by this key and aggregate them.
     """
     if app_id_or_alias.startswith("app-"):
         app_id = app_id_or_alias
@@ -358,7 +362,7 @@ def invoke(
 
         if "text/plain" in content_type:
             # Streaming response
-            _handle_streaming_response(raw_response)
+            _handle_streaming_response(raw_response, aggregate_key)
         else:
             # Non-streaming response - collect all data and parse as JSON
             _handle_non_streaming_response(raw_response)
@@ -383,7 +387,7 @@ def _handle_non_streaming_response(response: requests.Response) -> None:
     rich.print(_create_response_table(data))
 
 
-def _handle_streaming_response(response: requests.Response) -> None:
+def _handle_streaming_response(response: requests.Response, aggregate_key: str | None = None) -> None:
     """Handle streaming response with live-updating table."""
     console = rich.get_console()
 
@@ -392,8 +396,8 @@ def _handle_streaming_response(response: requests.Response) -> None:
 
     try:
         with Live("Waiting for response...") as live:
-            for line_ in response.iter_lines(chunk_size=None, decode_unicode=True):
-                line = line_.strip()
+            for line in response.iter_lines(chunk_size=None, decode_unicode=True):
+                line = line.strip()
                 if not line:
                     continue
 
@@ -402,17 +406,27 @@ def _handle_streaming_response(response: requests.Response) -> None:
                     response_data = json.loads(line)
 
                     # Extract fields from the response
-                    for key, value in response_data.items():
-                        # Initialize field order on first response
-                        if key not in accumulated_data:
-                            accumulated_data[key] = ""
-                            field_order.append(key)
+                    if aggregate_key is not None:
+                        parts = aggregate_key.split(".")
+                        value = response_data
+                        for part in parts:
+                            with suppress(ValueError):
+                                part = int(part)
+                            value = value[part]
+                        accumulated_data.setdefault(aggregate_key, "")
+                        accumulated_data[aggregate_key] += str(value)
+                    else:
+                        for key, value in response_data.items():
+                            # Initialize field order on first response
+                            if key not in accumulated_data:
+                                accumulated_data[key] = ""
+                                field_order.append(key)
 
-                        # Append new value using + operator
-                        accumulated_data[key] += str(value)
+                            # Append new value using + operator
+                            accumulated_data[key] += str(value)
 
                     # Update the live table
-                    table = _create_response_table(accumulated_data, field_order)
+                    table = _create_response_table(accumulated_data)
                     live.update(table)
 
                 except json.JSONDecodeError:
@@ -422,7 +436,7 @@ def _handle_streaming_response(response: requests.Response) -> None:
                         field_order.append("[raw text]")
                     accumulated_data["[raw text]"] += line + "\n"
 
-                    table = _create_response_table(accumulated_data, field_order)
+                    table = _create_response_table(accumulated_data)
                     live.update(table)
 
         # Final newline after live display ends

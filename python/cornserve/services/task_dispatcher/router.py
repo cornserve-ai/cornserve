@@ -11,7 +11,7 @@ from opentelemetry import trace
 
 from cornserve.logging import get_logger
 from cornserve.services.task_dispatcher.dispatcher import TaskDispatcher
-from cornserve.task.base import Stream, TaskGraphDispatch
+from cornserve.task.base import Stream, TaskGraphDispatch, TaskOutput
 
 router = APIRouter()
 logger = get_logger(__name__)
@@ -25,15 +25,17 @@ async def invoke_task(request: TaskGraphDispatch, raw_request: Request):
 
     logger.info("Task dispatch received: %s", request)
 
-    async def stream_response(results: list) -> AsyncGenerator[str]:
+    async def stream_response(results: list[TaskOutput]) -> AsyncGenerator[str]:
         """Stream the response for a streaming task results."""
-        all_outputs = json.dumps(results)
+        dumped_results = [result.model_dump() for result in results]
+        all_outputs = json.dumps(dumped_results)
+        print(f"{results=}, {dumped_results=}, {all_outputs=}")
         yield all_outputs + "\n"
 
         stream = results[-1]
         assert isinstance(stream, Stream), "Last result must be a Stream"
-        async for chunk_ in stream.aiter_raw():
-            chunk = chunk_.strip()
+        async for chunk in stream.aiter_raw():
+            chunk = chunk.strip()
             if not chunk:
                 continue
             yield chunk + "\n"

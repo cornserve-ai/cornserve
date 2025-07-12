@@ -7,6 +7,7 @@ import pytest
 from cornserve.task.base import Stream, TaskContext, TaskInvocation, task_context
 from cornserve.task.builtins.encoder import Modality
 from cornserve.task.builtins.llm import (
+    URL,
     ChatCompletionContentPartImageParam,
     ChatCompletionContentPartTextParam,
     ChatCompletionContentPartVideoParam,
@@ -29,7 +30,7 @@ def test_mllm_record():
                 role="user",
                 content=[
                     ChatCompletionContentPartTextParam(text="Hello, world!"),
-                    ChatCompletionContentPartImageParam(image_url="http://example.com/image.jpg"),
+                    ChatCompletionContentPartImageParam(image_url=URL(url="http://example.com/image.jpg")),
                 ],
             )
         ],
@@ -69,8 +70,8 @@ async def test_mllm_record_concurrent():
                 role="user",
                 content=[
                     ChatCompletionContentPartTextParam(text="Hello, world!"),
-                    ChatCompletionContentPartImageParam(image_url="http://example.com/image.jpg"),
-                    ChatCompletionContentPartVideoParam(video_url="http://example.com/video.mp4"),
+                    ChatCompletionContentPartImageParam(image_url=URL(url="http://example.com/image.jpg")),
+                    ChatCompletionContentPartVideoParam(video_url=URL(url="http://example.com/video.mp4")),
                 ],
             )
         ],

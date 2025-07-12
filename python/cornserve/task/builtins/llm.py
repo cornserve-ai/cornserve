@@ -49,25 +49,31 @@ class ChatCompletionContentPartTextParam(BaseModel):
     text: str
 
 
+class URL(BaseModel):
+    """A URL."""
+
+    url: str
+
+
 class ChatCompletionContentPartAudioParam(BaseModel):
     """Content part parameter for audio content."""
 
     type: Literal["audio_url"] = "audio_url"
-    audio_url: str
+    audio_url: URL
 
 
 class ChatCompletionContentPartImageParam(BaseModel):
     """Content part parameter for image content."""
 
     type: Literal["image_url"] = "image_url"
-    image_url: str
+    image_url: URL
 
 
 class ChatCompletionContentPartVideoParam(BaseModel):
     """Content part parameter for video content."""
 
     type: Literal["video_url"] = "video_url"
-    video_url: str
+    video_url: URL
 
 
 # Also supports ommitting the `type` field.
@@ -197,8 +203,8 @@ class MLLMTask(Task[OpenAIChatCompletionRequest, Stream[OpenAIChatCompletionChun
             multimodal_contents = extract_multimodal_content(task_input.messages)
             for multimodal_content in multimodal_contents:
                 modality = Modality(multimodal_content.type.split("_")[0])
-                data_url: str = getattr(multimodal_content, multimodal_content.type)
-                encoder_input_urls[modality].append(data_url)
+                data_url: URL = getattr(multimodal_content, multimodal_content.type)
+                encoder_input_urls[modality].append(data_url.url)
 
             # Check if modalities not specified in the task are present in the input.
             if diff := set(encoder_input_urls.keys()) - set(self.modalities):

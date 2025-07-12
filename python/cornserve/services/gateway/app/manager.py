@@ -46,18 +46,6 @@ def validate_app_module(module: ModuleType) -> AppComponents:
     """Validate that a module contains the required classes and function."""
     errors = []
 
-    # Check Request class
-    if not hasattr(module, "Request"):
-        errors.append("Missing 'Request' class")
-    elif not issubclass(module.Request, BaseModel):
-        errors.append("'Request' class must inherit from pydantic.BaseModel")
-
-    # Check Response class
-    if not hasattr(module, "Response"):
-        errors.append("Missing 'Response' class")
-    elif not issubclass(module.Response, BaseModel):
-        errors.append("'Response' class must inherit from pydantic.BaseModel")
-
     # Check Config class
     if not hasattr(module, "Config"):
         errors.append("Missing 'Config' class")
@@ -72,49 +60,46 @@ def validate_app_module(module: ModuleType) -> AppComponents:
     elif not asyncio.iscoroutinefunction(module.serve):
         errors.append("'serve' must be an async function")
 
-    # Validate serve function signature
+    # Extract request and response classes from serve function annotations
     # Expectation is async def serve([ANYTHING]: Request) -> Response | AsyncIterator[Response]
     serve_signature = get_type_hints(module.serve)
+    if len(serve_signature) != 2:
+        errors.append("'serve' function must have exactly one parameter and a return type annotation")
+        raise ValueError("\n".join(errors))
+    request_type = next(iter(serve_signature.values()), None)
     return_type = serve_signature.pop("return", None)
 
-    is_streaming = False
-    if return_type is None:
-        errors.append("'serve' function must have a return type annotation")
+    if request_type is None or return_type is None:
+        errors.append("'serve' function must have both parameter and return type annotations")
+        raise ValueError("\n".join(errors))
     else:
-        # Check if return type is AsyncIterator[Response]
-        origin = get_origin(return_type)
-        if origin is not None:
-            # Handle generic types like AsyncIterator[Response]
-            args = get_args(return_type)
-            if origin is AsyncIterator and len(args) == 1:
-                response_type = args[0]
-                if issubclass(response_type, module.Response):
-                    is_streaming = True
-                else:
-                    errors.append("'serve' function AsyncIterator must contain 'Response' class items")
-            else:
-                errors.append("'serve' function must return either 'Response' or 'AsyncIterator[Response]'")
-        elif issubclass(return_type, module.Response):
-            # Single Response return type (non-streaming)
-            is_streaming = False
-        else:
-            errors.append(
-                "'serve' function must return either an instance of 'Response' class or 'AsyncIterator[Response]'"
-            )
+        # Validate request class
+        if not hasattr(module, request_type.__name__):
+            errors.append(f"Request class '{request_type.__name__}' is not defined in the module")
+        elif not issubclass(request_type, BaseModel):
+            errors.append(f"Request class '{request_type.__name__}' must inherit from pydantic.BaseModel")
 
-    if len(serve_signature) != 1:
-        errors.append("'serve' function must have exactly one parameter of type 'Request'")
-    request_type = next(iter(serve_signature.values()), None)
-    assert request_type is not None
-    if not issubclass(request_type, module.Request):
-        errors.append("'serve' function must accept an instance of 'Request' class")
+        # Validate response class
+        response_type = None
+        origin = get_origin(return_type)
+        if origin is AsyncIterator:
+            response_type = get_args(return_type)[0]
+            is_streaming = True
+        else:
+            response_type = return_type
+            is_streaming = False
+
+        if not hasattr(module, response_type.__name__):
+            errors.append(f"Response class '{response_type.__name__}' is not defined in the module")
+        elif not issubclass(response_type, BaseModel):
+            errors.append(f"Response class '{response_type.__name__}' must inherit from pydantic.BaseModel")
 
     if errors:
         raise ValueError("\n".join(errors))
 
     return AppComponents(
-        request_cls=module.Request,
-        response_cls=module.Response,
+        request_cls=getattr(module, request_type.__name__),
+        response_cls=getattr(module, response_type.__name__),
         config_cls=module.Config,
         serve_fn=module.serve,  # type: ignore
         is_streaming=is_streaming,

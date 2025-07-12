@@ -12,6 +12,7 @@ from cornserve.logging import get_logger
 from cornserve.services.resource_manager.resource import GPU
 from cornserve.task.base import Stream
 from cornserve.task.builtins.llm import (
+    URL,
     LLMUnitTask,
     OpenAIChatCompletionChunk,
     OpenAIChatCompletionRequest,
@@ -25,10 +26,11 @@ logger = get_logger(__name__)
 
 async def parse_stream_to_completion_chunks(response: httpx.Response) -> AsyncGenerator[str]:
     """Parse the response stream to OpenAIChatCompletionChunk objects."""
+    assert not response.is_closed, "Response must not be closed when parsing."
     aiter = response.aiter_lines()
     try:
-        async for line_ in aiter:
-            line = line_.strip()
+        async for line in aiter:
+            line = line.strip()
             if not line:
                 continue
 
@@ -125,9 +127,8 @@ class VLLMDescriptor(
                 )
             for multimodal_content, forward in zip(multimodal_data, task_input.cornserve_embeddings, strict=True):
                 modality = multimodal_content.type.split("_")[0]  # e.g., "audio", "image", "video"
-                data_url = getattr(multimodal_content, multimodal_content.type)
-                data_uri = f"data:{modality}/uuid;data_id={forward.id};url={data_url},"
-                setattr(multimodal_content, multimodal_content.type, data_uri)
+                data_url: URL = getattr(multimodal_content, multimodal_content.type)
+                data_url.url = f"data:{modality}/uuid;data_id={forward.id};url={data_url.url},"
 
         request = task_input.model_dump(exclude={"cornserve_embeddings"})
         request["stream"] = True
