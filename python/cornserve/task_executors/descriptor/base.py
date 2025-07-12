@@ -5,6 +5,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from typing import Any, Generic, TypeVar
 
+import httpx
 from pydantic import BaseModel
 
 from cornserve import constants
@@ -66,7 +67,7 @@ class TaskExecutionDescriptor(BaseModel, ABC, Generic[TaskT, InputT, OutputT]):
         """
 
     @abstractmethod
-    def from_response(self, task_output: OutputT, response: dict[str, Any]) -> OutputT:
+    def from_response(self, task_output: OutputT, response: httpx.Response) -> OutputT:
         """Convert the task executor response to TaskOutput.
 
         In general, the `task_output` object will be deep-copied and concrete values

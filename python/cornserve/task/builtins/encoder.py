@@ -62,6 +62,9 @@ class EncoderTask(UnitTask[EncoderInput, EncoderOutput]):
 
     def validate_input(self, task_input: EncoderInput) -> None:
         """Validate the input for the encoder task."""
+        if not task_input.data_urls:
+            raise ValueError("Data URLs cannot be empty.")
+
         if task_input.model_id not in [self.model_id, *self.adapter_model_ids]:
             raise ValueError(
                 f"Model ID {task_input.model_id} does not match task model ID {self.model_id} "

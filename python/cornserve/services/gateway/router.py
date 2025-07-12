@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from collections.abc import AsyncGenerator
+import json
+from collections.abc import AsyncGenerator, AsyncIterator
 
 from fastapi import (
     APIRouter,
@@ -32,7 +33,7 @@ from cornserve.services.gateway.models import (
 )
 from cornserve.services.gateway.session import SessionManager
 from cornserve.services.gateway.task_manager import TaskManager
-from cornserve.task.base import TaskGraphDispatch, UnitTaskList, task_manager_context
+from cornserve.task.base import Stream, TaskGraphDispatch, TaskOutput, UnitTaskList, task_manager_context
 
 router = APIRouter()
 logger = get_logger(__name__)
@@ -44,7 +45,7 @@ async def register_app(request: AppRegistrationRequest, raw_request: Request):
     """Register a new application with streaming response for deployment progress."""
     app_manager: AppManager = raw_request.app.state.app_manager
 
-    async def generate_registration_stream() -> AsyncGenerator[str, None]:
+    async def generate_registration_stream() -> AsyncGenerator[str]:
         """Generate Server-Sent Events (SSE) for the registration process.
 
         For SSE standards (e.g. the "data: " prefix),
@@ -69,7 +70,7 @@ async def register_app(request: AppRegistrationRequest, raw_request: Request):
             yield f"data: {final_event.model_dump_json()}\n\n"
 
         except Exception as e:
-            logger.info("Error during app registration for app_id '%s': %s", app_id, e)
+            logger.exception("Error during app registration for app_id '%s'", app_id)
             error_event = RegistrationStatusEvent(event=RegistrationErrorResponse(message=str(e)))
             yield f"data: {error_event.model_dump_json()}\n\n"
 
@@ -110,8 +111,27 @@ async def invoke_app(app_id: str, request: AppInvocationRequest, raw_request: Re
     span.set_attributes(
         {f"gateway.invoke_app.request.{key}": str(value) for key, value in request.request_data.items()},
     )
+
+    async def stream_app_response(
+        app_response_iter: AsyncIterator[TaskOutput],
+    ) -> AsyncGenerator[str]:
+        """Stream the response for a streaming app."""
+        async for response_item in app_response_iter:
+            response_json = response_item.model_dump_json()
+            yield response_json + "\n"
+
     try:
-        return await app_manager.invoke_app(app_id, request.request_data)
+        response = await app_manager.invoke_app(app_id, request.request_data)
+
+        if isinstance(response, AsyncIterator):
+            return StreamingResponse(
+                stream_app_response(response),
+                media_type="text/plain",
+                headers={"Cache-Control": "no-cache"},
+            )
+        else:
+            return response
+
     except ValidationError as e:
         raise RequestValidationError(errors=e.errors()) from e
     except KeyError as e:
@@ -256,8 +276,21 @@ async def invoke_tasks(request: TaskGraphDispatch, raw_request: Request):
     """Invoke a unit task graph."""
     task_manager: TaskManager = raw_request.app.state.task_manager
 
+    async def stream_response(results: list) -> AsyncGenerator[str]:
+        """Stream the response for a streaming task results."""
+        all_outputs = json.dumps(results)
+        yield all_outputs + "\n"
+
+        stream = results[-1]
+        assert isinstance(stream, Stream), "Last result must be a Stream"
+        async for chunk in stream.aiter_raw():
+            chunk = chunk.strip()
+            if not chunk:
+                continue
+            yield chunk + "\n"
+
     try:
-        return await task_manager.invoke_tasks(request)
+        results = await task_manager.invoke_tasks(request)
     except KeyError as e:
         return Response(status_code=status.HTTP_404_NOT_FOUND, content=str(e))
     except ValueError as e:
@@ -269,6 +302,14 @@ async def invoke_tasks(request: TaskGraphDispatch, raw_request: Request):
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             content=str(e),
         )
+
+    if request.is_streaming:
+        return StreamingResponse(
+            stream_response(results),
+            media_type="text/plain",
+            headers={"Cache-Control": "no-cache"},
+        )
+    return results
 
 
 @router.get("/health")

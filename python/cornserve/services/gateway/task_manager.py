@@ -52,6 +52,9 @@ class TaskManager:
         # A big lock to protect all task states
         self.task_lock = asyncio.Lock()
 
+        # HTTP client
+        self.client = httpx.AsyncClient(timeout=TASK_TIMEOUT)
+
         # Task-related state. Key is the task ID.
         self.tasks: dict[str, UnitTask] = {}
         self.task_states: dict[str, TaskState] = {}  # Can be read without holding lock.
@@ -253,38 +256,28 @@ class TaskManager:
             assert len(running_task_ids) == len(dispatch.invocations)
 
         # Dispatch to the Task Dispatcher
-        async with httpx.AsyncClient(timeout=TASK_TIMEOUT) as client:
-            invocation_task = asyncio.create_task(
-                client.post(K8S_TASK_DISPATCHER_HTTP_URL + "/task", json=dispatch.model_dump())
-            )
-            # Store the invocation task under the task IDs of all running tasks.
-            # If any of the unit tasks are unregistered, the whole thing will be cancelled.
+        invocation_task = asyncio.create_task(dispatch.dispatch(K8S_TASK_DISPATCHER_HTTP_URL + "/task", self.client))
+        # Store the invocation task under the task IDs of all running tasks.
+        # If any of the unit tasks are unregistered, the whole thing will be cancelled.
+        for task_id in running_task_ids:
+            self.task_invocation_tasks[task_id].append(invocation_task)
+        try:
+            output = await invocation_task
+        except asyncio.CancelledError:
+            logger.info("Invocation task was cancelled: %s", dispatch)
+            raise RuntimeError(
+                "Invocation task was cancelled. This is likely because one or more "
+                "constituent unit tasks were unregistered.",
+            ) from None
+        finally:
+            # Remove the invocation task from all task IDs
             for task_id in running_task_ids:
-                self.task_invocation_tasks[task_id].append(invocation_task)
-            try:
-                response = await invocation_task
-                response.raise_for_status()
-            except asyncio.CancelledError:
-                logger.info("Invocation task was cancelled: %s", dispatch)
-                raise RuntimeError(
-                    "Invocation task was cancelled. This is likely because one or more "
-                    "constituent unit tasks were unregistered.",
-                ) from None
-            except httpx.RequestError as e:
-                logger.error("Error while invoking tasks: %s", e)
-                raise RuntimeError(f"Error while invoking tasks: {e}") from e
-            finally:
-                # Remove the invocation task from all task IDs
-                for task_id in running_task_ids:
-                    self.task_invocation_tasks[task_id].remove(invocation_task)
+                self.task_invocation_tasks[task_id].remove(invocation_task)
 
-        output = response.json()
         if not isinstance(output, list):
             raise RuntimeError(f"Invalid response from task dispatcher: {output}")
         if len(output) != len(dispatch.invocations):
-            raise RuntimeError(
-                f"Invalid response from task dispatcher: {output} (expected {len(dispatch.invocations)} outputs)"
-            )
+            raise RuntimeError(f"Expected {len(dispatch.invocations)} outputs, got {len(output)}: {output}")
         return output
 
     async def shutdown(self) -> None:
