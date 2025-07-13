@@ -263,7 +263,7 @@ class TaskManager:
         pod_name = f"te-{executor_id}"
         service_name = to_strict_k8s_name(f"te-{executor_id}")
         additional_service_ports = self.descriptor.get_service_ports(gpus)
-        additional_envs = self.descriptor.get_container_envs(service_name, gpus)
+        additional_envs = self.descriptor.get_container_envs(gpus)
         port = 8000
 
         # Task-specific environment variables for downward API
