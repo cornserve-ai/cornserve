@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import enum
 
+from pydantic import field_validator
+
 from cornserve.task.base import TaskInput, TaskOutput, UnitTask
 from cornserve.task.forward import DataForward, Tensor
 
@@ -44,17 +46,23 @@ class EncoderTask(UnitTask[EncoderInput, EncoderOutput]):
 
     Attributes:
         modality: Modality of data this encoder can embed.
-        model_id: The ID of the model to use for the task.
-        adapter_model_ids: Some models support multiple adapters and allow the
-            base model to be shared (e.g., Gemma 3). This list specifies model IDs
-            from which to load adapters. Base model weights are loaded from `model_id`.
+        model_ids: The IDs of models to use for the task. When more than one is provided,
+            the first model is used to load the base model weights, and the rest are used
+            to load in extra adapters (e.g., Gemma 3 multimodal projectors).
         max_batch_size: Maximum batch size to use for the serving system.
     """
 
     modality: Modality
-    model_id: str
-    adapter_model_ids: list[str] = []
+    model_ids: set[str]
     max_batch_size: int = 1
+
+    @field_validator("model_ids")
+    @classmethod
+    def _validate_model_ids(cls, model_ids: set[str]) -> set[str]:
+        """Ensure at least one model ID is provided."""
+        if not model_ids:
+            raise ValueError("At least one model ID must be provided.")
+        return model_ids
 
     def make_record_output(self, task_input: EncoderInput) -> EncoderOutput:
         """Create a task output for task invocation recording."""
@@ -65,12 +73,12 @@ class EncoderTask(UnitTask[EncoderInput, EncoderOutput]):
         if not task_input.data_urls:
             raise ValueError("Data URLs cannot be empty.")
 
-        if task_input.model_id not in [self.model_id, *self.adapter_model_ids]:
+        if task_input.model_id not in self.model_ids:
             raise ValueError(
-                f"Model ID {task_input.model_id} does not match task model ID {self.model_id} "
-                f"or any adapter model IDs {self.adapter_model_ids}."
+                f"Model ID {task_input.model_id} does not match any of the supported model IDs: {self.model_ids}."
             )
 
     def make_name(self) -> str:
         """Create a concise string representation of the task."""
-        return f"encoder-{self.modality.lower()}-{self.model_id.split('/')[-1].lower()}"
+        first_model_name = next(iter(self.model_ids)).split("/")[-1].lower()
+        return f"encoder-{self.modality.lower()}-{first_model_name}"

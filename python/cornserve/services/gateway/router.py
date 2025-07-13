@@ -281,7 +281,7 @@ async def invoke_tasks(request: TaskGraphDispatch, raw_request: Request):
         all_outputs = json.dumps(results)
         yield all_outputs + "\n"
 
-        stream = results[-1]
+        stream = request.invocations[-1].task_output.__class__.model_validate(results[-1])
         assert isinstance(stream, Stream), "Last result must be a Stream"
         async for chunk in stream.aiter_raw():
             chunk = chunk.strip()

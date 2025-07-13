@@ -29,7 +29,6 @@ async def invoke_task(request: TaskGraphDispatch, raw_request: Request):
         """Stream the response for a streaming task results."""
         dumped_results = [result.model_dump() for result in results]
         all_outputs = json.dumps(dumped_results)
-        print(f"{results=}, {dumped_results=}, {all_outputs=}")
         yield all_outputs + "\n"
 
         stream = results[-1]

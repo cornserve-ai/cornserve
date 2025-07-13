@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from pydantic import BaseModel
 
+from cornserve.app.base import AppConfig
 from cornserve.task.builtins.llm import MLLMInput, MLLMTask, Modality
 
 
@@ -47,6 +48,9 @@ mllm = MLLMTask(
     model_id="google/gemma-3-4b-it",
     adapter_model_ids=["google/gemma-3-12b-it", "google/gemma-3-27b-it"],
 )
+# XXX: MLLMTask does not support encoder sharing natively, and it probebly shouldn't.
+#      I think EncoderTask should take model_ids: list[str], and then users should
+#      instantiate multiple LLMUnitTasks with each model ID.
 
 
 class Config(AppConfig):
