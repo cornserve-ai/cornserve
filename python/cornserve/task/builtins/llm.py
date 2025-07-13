@@ -171,27 +171,23 @@ class MLLMTask(Task[OpenAIChatCompletionRequest, Stream[OpenAIChatCompletionChun
     Attributes:
         model_id: The ID of the model to use for the task.
         modalities: List of input modalities other than text.
-        adapter_model_ids: Some models support multiple adapters and allow the
-            base model to be shared (e.g., Gemma 3). This list specifies model IDs
-            from which to load adapters. Base model weights are loaded from `model_id`.
         encoder_fission: If True, the task will use separate encoder tasks for computing
             multimodal embeddings. If False, it will use the LLM server to compute them.
+        encoder_model_ids: Encoders can take multiple model IDs when the architecture
+            supports adapters (e.g., Gemma 3 multimodal projectors). Only used when
+            `encoder_fission` is True.
     """
 
     model_id: str
     modalities: list[Modality] = []
-    adapter_model_ids: list[str] = []
     encoder_fission: bool = True
+    encoder_model_ids: set[str] | None = None
 
     def post_init(self) -> None:
         """Initialize subtasks."""
         if self.encoder_fission:
             self.encoders = {
-                modality: EncoderTask(
-                    model_id=self.model_id,
-                    adapter_model_ids=self.adapter_model_ids,
-                    modality=modality,
-                )
+                modality: EncoderTask(model_ids=self.encoder_model_ids or {self.model_id}, modality=modality)
                 for modality in self.modalities
             }
         self.llm = LLMUnitTask(model_id=self.model_id, receive_embeddings=self.encoder_fission)

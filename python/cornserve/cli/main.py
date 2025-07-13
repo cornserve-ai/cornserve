@@ -321,7 +321,7 @@ def invoke(
         ),
         tyro.conf.Positional,
     ],
-    aggregate_key: str | None = None,
+    aggregate_keys: list[str] | None = None,
 ) -> None:
     """Invoke an app with the given data.
 
@@ -329,8 +329,12 @@ def invoke(
         app_id_or_alias: ID of the app to invoke or its alias.
         data: Input data for the app. This can be a literal JSON string,
             a path to either a JSON or YAML file, or a hyphen to read in from stdin.
-        aggregate_key: Opetional key to aggregate streaming responses by. If provided, the CLI will
-            fetch the value of each streamed response object by this key and aggregate them.
+        aggregate_keys: Optional list of keys to aggregate streaming responses by. If provided,
+            the CLI will fetch the value of each streamed response object by these keys, treat
+            values as strings, and accumulate (concatenate) them across all streamed objects.
+            Keys can use dot notation to access nested fields (e.g., "choices.0.delta.content").
+            Pure numbers will be cast to integers to index into lists. If not specified, each
+            response chunk (likely JSON) will be displayed as a new row in the table.
     """
     if app_id_or_alias.startswith("app-"):
         app_id = app_id_or_alias
@@ -357,14 +361,9 @@ def invoke(
 
         raw_response.raise_for_status()
 
-        # Auto-detect if response is streaming based on content-type
-        content_type = raw_response.headers.get("content-type", "")
-
-        if "text/plain" in content_type:
-            # Streaming response
-            _handle_streaming_response(raw_response, aggregate_key)
+        if "text/plain" in raw_response.headers.get("content-type", ""):
+            _handle_streaming_response(raw_response, aggregate_keys)
         else:
-            # Non-streaming response - collect all data and parse as JSON
             _handle_non_streaming_response(raw_response)
 
     except Exception as e:
@@ -387,63 +386,82 @@ def _handle_non_streaming_response(response: requests.Response) -> None:
     rich.print(_create_response_table(data))
 
 
-def _handle_streaming_response(response: requests.Response, aggregate_key: str | None = None) -> None:
-    """Handle streaming response with live-updating table."""
+def _handle_streaming_response(
+    response: requests.Response,
+    aggregate_keys: list[str] | None = None,
+) -> None:
+    """Handle streaming response with live-updating table.
+
+    If aggregate_keys is provided, accumulates values for those keys across all streaming responses.
+    Keys support dot notation (e.g., "choices.0.delta.content") and pure numbers are cast to integers.
+
+    If aggregate_keys is None, displays each JSON response as a new table row with an incremented index.
+    """
     console = rich.get_console()
 
-    accumulated_data: dict[str, str] = {}
-    field_order: list[str] = []
+    if aggregate_keys:
+        # Aggregation mode: accumulate values for specified keys
+        accumulated_data: dict[str, str] = {key: "" for key in aggregate_keys}
 
-    try:
-        with Live("Waiting for response...") as live:
-            for line in response.iter_lines(chunk_size=None, decode_unicode=True):
-                line = line.strip()
-                if not line:
-                    continue
+        try:
+            with Live("Waiting for response...") as live:
+                for line in response.iter_lines(chunk_size=None, decode_unicode=True):
+                    line = line.strip()
+                    if not line:
+                        continue
 
-                try:
-                    # Parse each JSON response
-                    response_data = json.loads(line)
+                    try:
+                        # Parse each JSON response
+                        response_data = json.loads(line)
 
-                    # Extract fields from the response
-                    if aggregate_key is not None:
-                        parts = aggregate_key.split(".")
-                        value = response_data
-                        for part in parts:
-                            with suppress(ValueError):
-                                part = int(part)
-                            value = value[part]
-                        accumulated_data.setdefault(aggregate_key, "")
-                        accumulated_data[aggregate_key] += str(value)
-                    else:
-                        for key, value in response_data.items():
-                            # Initialize field order on first response
-                            if key not in accumulated_data:
-                                accumulated_data[key] = ""
-                                field_order.append(key)
+                        # Extract and accumulate values for each aggregate key
+                        for key in aggregate_keys:
+                            parts = key.split(".")
+                            value = response_data
+                            try:
+                                for part in parts:
+                                    # Try to convert to int for list indexing
+                                    with suppress(ValueError):
+                                        part = int(part)
+                                    value = value[part]
+                                accumulated_data[key] += str(value)
+                            except (KeyError, IndexError, TypeError):
+                                # Key doesn't exist in this response, skip
+                                pass
 
-                            # Append new value using + operator
-                            accumulated_data[key] += str(value)
+                        # Update the live table
+                        table = _create_response_table(accumulated_data, aggregate_keys)
+                        live.update(table, refresh=True)
 
-                    # Update the live table
+                    except json.JSONDecodeError as e:
+                        rich.print(Panel(f"Failed to parse JSON response: {e}", style="red", expand=False))
+                        break
+
+            # Final newline after live display ends
+            console.print()
+
+        except Exception as e:
+            rich.print(Panel(f"Error processing streaming response: {e}", style="red", expand=False))
+    else:
+        # Default mode: show each line as a new row
+        accumulated_data: dict[str, str] = {}
+
+        try:
+            with Live("Waiting for response...") as live:
+                for line_idx, line in enumerate(response.iter_lines(chunk_size=None, decode_unicode=True)):
+                    line = line.strip()
+                    if not line:
+                        continue
+
+                    accumulated_data[str(line_idx)] = line
                     table = _create_response_table(accumulated_data)
-                    live.update(table)
+                    live.update(table, refresh=True)
 
-                except json.JSONDecodeError:
-                    # If not JSON, treat as raw text
-                    if "[raw text]" not in accumulated_data:
-                        accumulated_data["[raw text]"] = ""
-                        field_order.append("[raw text]")
-                    accumulated_data["[raw text]"] += line + "\n"
+            # Final newline after live display ends
+            console.print()
 
-                    table = _create_response_table(accumulated_data)
-                    live.update(table)
-
-        # Final newline after live display ends
-        console.print()
-
-    except Exception as e:
-        rich.print(Panel(f"Error processing streaming response: {e}", style="red", expand=False))
+        except Exception as e:
+            rich.print(Panel(f"Error processing streaming response: {e}", style="red", expand=False))
 
 
 def main() -> None:
