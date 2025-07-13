@@ -6,6 +6,7 @@ from collections.abc import AsyncGenerator
 from typing import Any, ClassVar
 
 import httpx
+import kubernetes_asyncio.client as kclient
 
 from cornserve import constants
 from cornserve.logging import get_logger
@@ -13,7 +14,6 @@ from cornserve.services.resource_manager.resource import GPU
 from cornserve.task.base import Stream
 from cornserve.task.builtins.llm import (
     URL,
-    DecodeChatCompletionRequest,
     DecodeLLMUnitTask,
     LLMUnitTask,
     OpenAIChatCompletionChunk,
@@ -85,19 +85,9 @@ class VLLMDescriptor(
             str(len(gpus)),
             "--port",
             str(port),
+            "--cornserve-sidecar-ranks",
+            *[str(gpu.global_rank) for gpu in gpus],
         ]
-
-        # If `receive_embeddings` is True, this task will be connected to an
-        # `EncoderTask` to offload multimodal embedding computation and receive
-        # embeddings through sidecars.
-        if self.task.receive_embeddings:
-            args.extend(
-                [
-                    "--cornserve-sidecar-ranks",
-                    *[str(gpu.global_rank) for gpu in gpus],
-                ]
-            )
-
         return args
 
     def get_api_url(self, base: str) -> str:
@@ -184,11 +174,22 @@ class PrefillVLLMDescriptor(
             ("UCX_TLS", "cuda,rc,ib,tcp"),
             # ("UCX_TLS", "cuda,rc,ib"),
             ("UCX_NET_DEVICES", "mlx5_0:1"),
-            ("UCX_LOG_LEVEL", "debug"),
+            # ("UCX_LOG_LEVEL", "debug"),
             ("CUDA_VISIBLE_DEVICES", ",".join(str(gpu.local_rank) for gpu in gpus)),
-            ("VLLM_LOGGING_LEVEL", "DEBUG"),
+            # ("VLLM_LOGGING_LEVEL", "DEBUG"),
             ("VLLM_NIXL_SIDE_CHANNEL_PORT", str(self.NIXL_BASE_PORT + gpus[0].global_rank)),
         ]
+
+    def get_kubernetes_envs(self, gpus: list[GPU]) -> list[kclient.V1EnvVar]:
+        """Get the kubernetes environment variables for the task executor."""
+        envs = [kclient.V1EnvVar(name=n, value=v) for n, v in self.get_container_envs(gpus)]
+        envs.append(
+            kclient.V1EnvVar(
+                name="VLLM_NIXL_SIDE_CHANNEL_HOST",
+                value_from=kclient.V1EnvVarSource(field_ref=kclient.V1ObjectFieldSelector(field_path="status.podIP")),
+            )
+        )
+        return envs
 
     def get_container_args(self, gpus: list[GPU], port: int) -> list[str]:
         """Get the container command for the task executor."""
@@ -198,7 +199,6 @@ class PrefillVLLMDescriptor(
             str(len(gpus)),
             "--port",
             str(port),
-            "--enforce-eager",
             "--kv-transfer-config",
             '{"kv_connector":"NixlConnector","kv_role":"kv_producer"}',
             # need to forward KV transfer parameters to a decode instance
@@ -288,7 +288,7 @@ DESCRIPTOR_REGISTRY.register(PrefillLLMUnitTask, PrefillVLLMDescriptor, default=
 
 
 class DecodeVLLMDescriptor(
-    TaskExecutionDescriptor[DecodeLLMUnitTask, DecodeChatCompletionRequest, Stream[OpenAIChatCompletionChunk]]
+    TaskExecutionDescriptor[DecodeLLMUnitTask, OpenAIChatCompletionRequest, Stream[OpenAIChatCompletionChunk]]
 ):
     """Task execution descriptor using vLLM in decode mode."""
 
@@ -320,6 +320,17 @@ class DecodeVLLMDescriptor(
             ("VLLM_NIXL_SIDE_CHANNEL_PORT", str(self.NIXL_BASE_PORT + gpus[0].global_rank)),
         ]
 
+    def get_kubernetes_envs(self, gpus: list[GPU]) -> list[kclient.V1EnvVar]:
+        """Get the kubernetes environment variables for the task executor."""
+        envs = [kclient.V1EnvVar(name=n, value=v) for n, v in self.get_container_envs(gpus)]
+        envs.append(
+            kclient.V1EnvVar(
+                name="VLLM_NIXL_SIDE_CHANNEL_HOST",
+                value_from=kclient.V1EnvVarSource(field_ref=kclient.V1ObjectFieldSelector(field_path="status.podIP")),
+            )
+        )
+        return envs
+
     def get_container_args(self, gpus: list[GPU], port: int) -> list[str]:
         """Get the container command for the task executor."""
         args = [
@@ -328,7 +339,6 @@ class DecodeVLLMDescriptor(
             str(len(gpus)),
             "--port",
             str(port),
-            "--enforce-eager",
             "--kv-transfer-config",
             '{"kv_connector":"NixlConnector","kv_role":"kv_consumer"}',
             # need to receive KV transfer parameters from a decode instance
@@ -357,7 +367,7 @@ class DecodeVLLMDescriptor(
 
     def to_request(
         self,
-        task_input: DecodeChatCompletionRequest,
+        task_input: OpenAIChatCompletionRequest,
         task_output: Stream[OpenAIChatCompletionChunk],
     ) -> dict[str, Any]:
         """Convert TaskInput to a request object for the task executor."""
@@ -381,6 +391,8 @@ class DecodeVLLMDescriptor(
                 data_url.url = f"data:{modality}/uuid;data_id={forward.id};url={data_url.url},"
 
         request = task_input.model_dump(exclude={"cornserve_embeddings", "cornserve_kv_transfer_params"})
+        if task_input.cornserve_kv_transfer_params is None:
+            raise ValueError("Task input must contain cornserve_kv_transfer_params for decode tasks.")
         request["cornserve_kv_transfer_recv_params"] = {
             "id": task_input.cornserve_kv_transfer_params.id,
         }

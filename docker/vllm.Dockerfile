@@ -45,9 +45,6 @@ ENV VLLM_USE_V1=1
 ENV HF_HOME="/root/.cache/huggingface"
 ENTRYPOINT ["vllm", "serve"]
 
-ENV UCX_TLS=cuda,rc,ib
-ENV UCX_LOG_LEVEL=debug
-
 # Default final stage with audio support
 FROM vllm AS vllm-audio
 RUN uv pip install -e .[audio] && uv cache clean

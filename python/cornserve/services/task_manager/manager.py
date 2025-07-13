@@ -16,7 +16,6 @@ from cornserve.logging import get_logger
 from cornserve.services.resource_manager.resource import GPU
 from cornserve.services.utils import to_strict_k8s_name
 from cornserve.task.base import UnitTask
-from cornserve.task.builtins.llm import DecodeLLMUnitTask, PrefillLLMUnitTask
 
 logger = get_logger(__name__)
 
@@ -263,23 +262,7 @@ class TaskManager:
         pod_name = f"te-{executor_id}"
         service_name = to_strict_k8s_name(f"te-{executor_id}")
         additional_service_ports = self.descriptor.get_service_ports(gpus)
-        additional_envs = self.descriptor.get_container_envs(gpus)
         port = 8000
-
-        # Task-specific environment variables for downward API
-        # to avoid importing kclient in task execution descriptors.
-        downward_envs = []
-        logger.info("Setting downward API environment variables for task %s", self.task.root_unit_task_cls)
-        if self.task.root_unit_task_cls in (PrefillLLMUnitTask, DecodeLLMUnitTask):
-            downward_envs.append(
-                kclient.V1EnvVar(
-                    name="VLLM_NIXL_SIDE_CHANNEL_HOST",
-                    value_from=kclient.V1EnvVarSource(
-                        field_ref=kclient.V1ObjectFieldSelector(field_path="status.podIP")
-                    ),
-                )
-            )
-            logger.info("Setting VLLM_NIXL_SIDE_CHANNEL_HOST to pod IP for task %s", self.task.id)
 
         # Kubernetes labels cannot be longer than 63 characters, but the generated
         # executor ID could be longer than that. Therefore, we use a UUID4 label.
@@ -331,8 +314,7 @@ class TaskManager:
                                 ),
                             ),
                         ]
-                        + downward_envs
-                        + [kclient.V1EnvVar(name=n, value=v) for n, v in additional_envs],
+                        + self.descriptor.get_kubernetes_envs(gpus),
                         volume_mounts=[
                             kclient.V1VolumeMount(
                                 name=name,

@@ -108,7 +108,9 @@ class OpenAIChatCompletionRequest(TaskInput):
     top_p: float | None = None
     request_id: str = Field(default_factory=lambda: uuid.uuid4().hex)
 
+    # Cornserve-specific fields
     cornserve_embeddings: list[DataForward[Tensor]] = []
+    cornserve_kv_transfer_params: DataForward[dict] | None = None
 
 
 def extract_multimodal_content(
@@ -265,26 +267,7 @@ class PrefillLLMUnitTask(UnitTask[OpenAIChatCompletionRequest, PrefillChatComple
             )
 
 
-class DecodeChatCompletionRequest(TaskInput):
-    """Input model for decode vLLM Chat Completion tasks."""
-
-    messages: list[ChatCompletionMessageParam]
-    model: str
-    frequency_penalty: float | None = 0.0
-    max_completion_tokens: int | None = None
-    presence_penalty: float | None = 0.0
-    seed: int | None = None
-    stream_options: StreamOptions | None = None
-    temperature: float | None = None
-    top_p: float | None = None
-    # the request_id must be the same as the one used in the prefill request
-    request_id: str
-
-    cornserve_embeddings: list[DataForward[Tensor]] = []
-    cornserve_kv_transfer_params: DataForward[dict]
-
-
-class DecodeLLMUnitTask(UnitTask[DecodeChatCompletionRequest, Stream[OpenAIChatCompletionChunk]]):
+class DecodeLLMUnitTask(UnitTask[OpenAIChatCompletionRequest, Stream[OpenAIChatCompletionChunk]]):
     """A task that invokes a vLLM decoder and returns a stream of chat completion chunks."""
 
     model_id: str
@@ -294,11 +277,11 @@ class DecodeLLMUnitTask(UnitTask[DecodeChatCompletionRequest, Stream[OpenAIChatC
         """Create a concise string representation of the task."""
         return f"decode-{self.model_id.split('/')[-1].lower()}"
 
-    def make_record_output(self, task_input: DecodeChatCompletionRequest) -> Stream[OpenAIChatCompletionChunk]:
+    def make_record_output(self, task_input: OpenAIChatCompletionRequest) -> Stream[OpenAIChatCompletionChunk]:
         """Create a mock task output object for invocation recording."""
         return Stream[OpenAIChatCompletionChunk]()
 
-    def validate_input(self, task_input: DecodeChatCompletionRequest) -> None:
+    def validate_input(self, task_input: OpenAIChatCompletionRequest) -> None:
         """Validate the task input."""
         if task_input.model != self.model_id:
             raise ValueError(
@@ -376,13 +359,11 @@ class DisaggregatedMLLMTask(Task[OpenAIChatCompletionRequest, Stream[OpenAIChatC
             task_input.cornserve_embeddings = embeddings
 
         prefill_output = self.prefill.invoke(task_input)
-        decode_input = DecodeChatCompletionRequest(
-            # ideally we want to exclude and remove `cornserve_embeddings`
-            # but sometimes the decode instance needs the image embeddings
-            # due to a potential bug in vLLM
-            **task_input.model_dump(),
-            cornserve_kv_transfer_params=prefill_output.kv_transfer_params,
-        )
+        # ideally we want to exclude and remove `cornserve_embeddings`
+        # but sometimes the decode instance needs the image embeddings
+        # due to a potential bug in vLLM
+        decode_input = task_input.model_copy(deep=True)
+        decode_input.cornserve_kv_transfer_params = prefill_output.kv_transfer_params
 
         # Invoke the LLM task.
         return self.decode.invoke(decode_input)
