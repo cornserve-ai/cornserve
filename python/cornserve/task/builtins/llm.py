@@ -377,19 +377,11 @@ class DisaggregatedMLLMTask(Task[OpenAIChatCompletionRequest, Stream[OpenAIChatC
 
         prefill_output = self.prefill.invoke(task_input)
         decode_input = DecodeChatCompletionRequest(
-            messages=task_input.messages,
-            model=task_input.model,
-            frequency_penalty=task_input.frequency_penalty,
-            max_completion_tokens=task_input.max_completion_tokens,
-            presence_penalty=task_input.presence_penalty,
-            seed=task_input.seed,
-            stream_options=task_input.stream_options,
-            temperature=task_input.temperature,
-            top_p=task_input.top_p,
-            request_id=task_input.request_id,
+            # ideally we want to exclude and remove `cornserve_embeddings`
+            # but sometimes the decode instance needs the image embeddings
+            # due to a potential bug in vLLM
+            **task_input.model_dump(),
             cornserve_kv_transfer_params=prefill_output.kv_transfer_params,
-            # enable below bc sometimes the decode instance also needs the image embeddings
-            cornserve_embeddings=task_input.cornserve_embeddings,
         )
 
         # Invoke the LLM task.

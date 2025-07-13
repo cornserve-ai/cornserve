@@ -176,7 +176,6 @@ class PrefillVLLMDescriptor(
         """Get the additional service ports for the task executor."""
         return [
             ("nixl", self.NIXL_BASE_PORT + gpus[0].global_rank),
-            ("test", 5000),
         ]
 
     def get_container_envs(self, gpus: list[GPU]) -> list[tuple[str, str]]:
@@ -307,7 +306,6 @@ class DecodeVLLMDescriptor(
         """Get the additional service ports for the task executor."""
         return [
             ("nixl", self.NIXL_BASE_PORT + gpus[0].global_rank),
-            ("test", 5000),
         ]
 
     def get_container_envs(self, gpus: list[GPU]) -> list[tuple[str, str]]:
