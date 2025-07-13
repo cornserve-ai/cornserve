@@ -49,6 +49,16 @@ class TaskExecutionDescriptor(BaseModel, ABC, Generic[TaskT, InputT, OutputT]):
             ("shm", constants.VOLUME_SHM, "/dev/shm"),
         ]
 
+    def get_service_ports(self, gpus: list[GPU]) -> list[tuple[str, int]]:
+        """Get the additional service ports for the task executor."""
+        return []
+
+    def get_container_envs(self, gpus: list[GPU]) -> list[tuple[str, str]]:
+        """Get the additional environment variables for the task executor."""
+        return [
+            ("CUDA_VISIBLE_DEVICES", ",".join(str(gpu.local_rank) for gpu in gpus)),
+        ]
+
     @abstractmethod
     def get_api_url(self, base: str) -> str:
         """Get the task executor's base URL for API calls.

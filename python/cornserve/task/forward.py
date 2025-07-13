@@ -22,6 +22,7 @@ class ForwardableType(enum.StrEnum):
     FLOAT = "float"
     BOOL = "bool"
     TENSOR = "Tensor"
+    DICT = "dict"
 
 
 DataT = TypeVar("DataT")

@@ -112,7 +112,7 @@ class SidecarLaunchInfo:
     def get_container_volumes() -> list[tuple[str, str, str]]:
         """Get the container volumes for the sidecar."""
         return [
-            ("shm-volume", constants.VOLUME_SHM, "/dev/shm"),
+            ("shm", constants.VOLUME_SHM, "/dev/shm"),
             ("infiniband-class", "/sys/class/infiniband", "/sys/class/infiniband"),
             ("infiniband-dev", "/dev/infiniband", "/dev/infiniband"),
         ]
