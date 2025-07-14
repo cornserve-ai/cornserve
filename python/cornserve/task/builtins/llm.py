@@ -1,22 +1,6 @@
 """OpenAI-compatible LLM tasks.
 
 All tasks are OpenAI compatible and output is always streamed.
-
-- Encoder unit task: Single-modality encoder server
-   - Same as the old `builtins.encoder`.
-   - Task output is a list of embeddings (`DataForward[Tensor]` objects).
-   - `EricDescriptor` fishes out multimodal data URLs and IDs and forwards them to Eric.
-- LLM unit task
-   - Capable of handling both text-only or multimodal chat completion requests.
-   - Task input is OpenAI chat completion request + `cornserve_embeddings: list[DataForward[Tensor]]`.
-   - `VLLMDescriptor` looks at `cornserve_embeddings` and edits multimodal data URIs in the task input.
-   - Task has a field `receive_embeddings: bool`. If True, it should be connected with an `EncoderTask`.
-        If False, it will compute multimodal embeddings itself. Read by the `VLLMDescriptor`.
-- MLLM composite task
-   - Encoder unit task(s) + LLM unit task
-   - Task input and output are identical to OpenAI chat completion schema.
-   - `invoke` iterates through messages in the chat completion request to discover multimodal inputs,
-        and if any, constructs the `EncoderTask` input.
 """
 
 from __future__ import annotations
@@ -293,27 +277,23 @@ class DisaggregatedMLLMTask(Task[OpenAIChatCompletionRequest, Stream[OpenAIChatC
     Attributes:
         model_id: The ID of the model to use for the task.
         modalities: List of input modalities other than text.
-        adapter_model_ids: Some models support multiple adapters and allow the
-            base model to be shared (e.g., Gemma 3). This list specifies model IDs
-            from which to load adapters. Base model weights are loaded from `model_id`.
         encoder_fission: If True, the task will use separate encoder tasks for computing
             multimodal embeddings. If False, it will use the LLM server to compute them.
+        encoder_model_ids: Encoders can take multiple model IDs when the architecture
+            supports adapters (e.g., Gemma 3 multimodal projectors). Only used when
+            `encoder_fission` is True.
     """
 
     model_id: str
     modalities: list[Modality] = []
-    adapter_model_ids: list[str] = []
     encoder_fission: bool = True
+    encoder_model_ids: set[str] | None = None
 
     def post_init(self) -> None:
         """Initialize subtasks."""
         if self.encoder_fission:
             self.encoders = {
-                modality: EncoderTask(
-                    model_id=self.model_id,
-                    adapter_model_ids=self.adapter_model_ids,
-                    modality=modality,
-                )
+                modality: EncoderTask(model_ids=self.encoder_model_ids or {self.model_id}, modality=modality)
                 for modality in self.modalities
             }
         self.prefill = PrefillLLMUnitTask(model_id=self.model_id, receive_embeddings=self.encoder_fission)
