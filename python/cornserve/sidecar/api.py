@@ -42,7 +42,7 @@ ThreadingInstrumentor().instrument()
 class Sidecar:
     """The sidecar client to send or receive data to/from other sidecars."""
 
-    supported_classes = [str, bytes, int, float, bool, torch.Tensor]
+    supported_classes = [str, bytes, int, float, bool, torch.Tensor, dict]
 
     def __init__(
         self,
@@ -207,6 +207,7 @@ class Sidecar:
         if isinstance(obj, SharedTensorHandle):
             cbuf = (ctypes.c_byte * obj.numel * self.dtype.itemsize).from_address(self.base_ptr + obj.offset)
             tensor = torch.frombuffer(cbuf, dtype=self.dtype, count=obj.numel)
+            logger.info("Received shard %d of chunk %d in req %s successfully", self.shard_rank, chunk_id, id)
             return tensor.view(self.config.get_recv_tensor_shape())
         else:
             return obj
@@ -234,6 +235,7 @@ class Sidecar:
         if isinstance(obj, SharedTensorHandle):
             cbuf = (ctypes.c_byte * obj.numel * self.dtype.itemsize).from_address(self.base_ptr + obj.offset)
             tensor = torch.frombuffer(cbuf, dtype=self.dtype, count=obj.numel)
+            logger.info("Sync read shard %d of chunk %d in req %s successfully", self.shard_rank, chunk_id, id)
             return tensor.view(self.config.get_recv_tensor_shape())
         else:
             return obj
