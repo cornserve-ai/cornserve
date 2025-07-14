@@ -148,7 +148,6 @@ class LogStreamer:
                 name=pod_name,
                 namespace=K8S_NAMESPACE,
                 follow=True,
-                tail_lines=5,
                 _preload_content=False,
             )
 
