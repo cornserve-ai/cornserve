@@ -76,7 +76,8 @@ class Stream(TaskOutput, Generic[OutputT]):
     async_iterator: AsyncIterator[str] | None = Field(default=None, exclude=True)
     response: httpx.Response | None = Field(default=None, exclude=True)
 
-    _transform_func: Callable | None = Field(default=None, exclude=True)
+    _prev_type: type[TaskOutput] | None = None
+    _transform_func: Callable[[TaskOutput], OutputT] | None = None
 
     model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid")
 
@@ -109,7 +110,8 @@ class Stream(TaskOutput, Generic[OutputT]):
             async_iterator=self.async_iterator,
             response=self.response,
         )
-        new_stream._transform_func = transform_func
+        new_stream._prev_type = self.item_type
+        new_stream._transform_func = transform_func  # type: ignore
         self.async_iterator = None
         self.response = None
         return new_stream
@@ -157,6 +159,13 @@ class Stream(TaskOutput, Generic[OutputT]):
         line = await self.get_next()
         if line is None:
             raise StopAsyncIteration
+
+        # If a transformation function is set, first parse the line into the previous type,
+        # then apply the transformation function to it.
+        if self._transform_func is not None:
+            assert self._prev_type is not None, "Previous type must be set for transformation."
+            item_prev_type = self._prev_type.model_validate_json(line.strip())
+            return self._transform_func(item_prev_type)
 
         return self.item_type.model_validate_json(line.strip())
 

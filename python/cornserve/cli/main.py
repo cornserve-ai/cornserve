@@ -319,7 +319,6 @@ def invoke(
             is_instance=lambda x: isinstance(x, dict),
             str_from_instance=lambda d: [json.dumps(d)],
         ),
-        tyro.conf.Positional,
     ],
     aggregate_keys: list[str] | None = None,
 ) -> None:
@@ -372,7 +371,7 @@ def invoke(
 
 def _create_response_table(data: dict[str, Any], fields: list[str] | None = None) -> Table:
     """Create a table from the response data."""
-    table = Table(box=box.ROUNDED, show_header=False)
+    table = Table(box=box.ROUNDED, show_header=False, show_lines=True)
     for key in fields or data.keys():
         table.add_row(key, str(data[key]))
     return table
@@ -424,7 +423,9 @@ def _handle_streaming_response(
                                     with suppress(ValueError):
                                         part = int(part)
                                     value = value[part]
-                                accumulated_data[key] += str(value)
+                                # If the final value is None, skip
+                                if value is not None:
+                                    accumulated_data[key] += str(value)
                             except (KeyError, IndexError, TypeError):
                                 # Key doesn't exist in this response, skip
                                 pass

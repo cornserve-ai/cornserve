@@ -1,4 +1,41 @@
-"""An app that runs a Multimodal LLM task."""
+"""An app that runs a Multimodal LLM task.
+
+```console
+$ cornserve register examples/mllm.py
+
+$ cornserve invoke mllm --aggregate-keys choices.0.delta.content --data - <<EOF
+model: "Qwen/Qwen2-VL-7B-Instruct"
+messages:
+- role: "user"
+  content:
+  - type: text
+    text: "Write a poem about the images you see."
+  - type: image_url
+    image_url:
+      url: "https://picsum.photos/id/12/480/560"
+  - type: image_url
+    image_url:
+      url: "https://picsum.photos/id/234/960/960"
+EOF
+
+$ cornserve invoke mllm --aggregate-keys choices.0.delta.content usage --data - <<EOF
+model: "Qwen/Qwen2-VL-7B-Instruct"
+messages:
+- role: "user"
+  content:
+  - type: text
+    text: "Write a poem about the images you see."
+  - type: image_url
+    image_url:
+      url: "https://picsum.photos/id/12/480/560"
+  - type: image_url
+    image_url:
+      url: "https://picsum.photos/id/234/960/960"
+stream_options:
+  include_usage: true
+EOF
+```
+"""
 
 from __future__ import annotations
 

@@ -23,7 +23,7 @@ class EricDescriptor(TaskExecutionDescriptor[EncoderTask, EncoderInput, EncoderO
 
     def create_executor_name(self) -> str:
         """Create a name for the task executor."""
-        first_model_name = next(iter(self.task.model_ids)).split("/")[-1].lower()
+        first_model_name = sorted(self.task.model_ids)[0].split("/")[-1].lower()
         name = "-".join(["eric", self.task.modality, first_model_name]).lower()
         return name
 
@@ -33,10 +33,10 @@ class EricDescriptor(TaskExecutionDescriptor[EncoderTask, EncoderInput, EncoderO
 
     def get_container_args(self, gpus: list[GPU], port: int) -> list[str]:
         """Get the container command for the task executor."""
-        first_model_name = next(iter(self.task.model_ids)).split("/")[-1].lower()
+        model_ids = sorted(self.task.model_ids)
         # fmt: off
         cmd = [
-            "--model.id", first_model_name,
+            "--model.id", model_ids.pop(0),
             "--model.tp-size", str(len(gpus)),
             "--model.modality", self.task.modality.value.upper(),
             "--server.port", str(port),
@@ -44,9 +44,8 @@ class EricDescriptor(TaskExecutionDescriptor[EncoderTask, EncoderInput, EncoderO
             "--sidecar.ranks", *[str(gpu.global_rank) for gpu in gpus],
         ]
         # fmt: on
-        if len(self.task.model_ids) > 1:
-            adapter_model_ids = list(self.task.model_ids - {first_model_name})
-            cmd.extend(["--model.adapter-model-ids", *adapter_model_ids])
+        if model_ids:
+            cmd.extend(["--model.adapter-model-ids", *model_ids])
         return cmd
 
     def get_api_url(self, base: str) -> str:
