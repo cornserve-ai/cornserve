@@ -261,6 +261,7 @@ class TaskManager:
         executor_id = "-".join([executor_id, *(f"{gpu.global_rank}" for gpu in gpus)])
         pod_name = f"te-{executor_id}"
         service_name = to_strict_k8s_name(f"te-{executor_id}")
+        additional_service_ports = self.descriptor.get_service_ports(gpus)
         port = 8000
 
         # Kubernetes labels cannot be longer than 63 characters, but the generated
@@ -285,7 +286,13 @@ class TaskManager:
                         image=self.descriptor.get_container_image(),
                         image_pull_policy=constants.CONTAINER_IMAGE_PULL_POLICY,
                         args=self.descriptor.get_container_args(gpus, port),
-                        ports=[kclient.V1ContainerPort(container_port=port, name="http")],
+                        ports=(
+                            [kclient.V1ContainerPort(container_port=port, name="http")]
+                            + [
+                                kclient.V1ContainerPort(container_port=p, name=f"{port_name}")
+                                for port_name, p in additional_service_ports
+                            ]
+                        ),
                         resources=kclient.V1ResourceRequirements(
                             limits={
                                 "nvidia.com/gpu": len(gpus),
@@ -306,7 +313,8 @@ class TaskManager:
                                     ),
                                 ),
                             ),
-                        ],
+                        ]
+                        + self.descriptor.get_kubernetes_envs(gpus),
                         volume_mounts=[
                             kclient.V1VolumeMount(
                                 name=name,
@@ -314,6 +322,9 @@ class TaskManager:
                             )
                             for name, _, container_path in self.descriptor.get_container_volumes()
                         ],
+                        security_context=kclient.V1SecurityContext(
+                            privileged=True, capabilities=kclient.V1Capabilities(add=["IPC_LOCK", "NET_ADMIN"])
+                        ),
                     )
                 ],
                 volumes=[
@@ -325,6 +336,7 @@ class TaskManager:
                 ],
                 node_name=node_name,
                 host_ipc=True,
+                host_pid=True,
             ),
         )
 
@@ -342,7 +354,13 @@ class TaskManager:
                     "app": "task-executor",
                     "executor-id": executor_id_label,
                 },
-                ports=[kclient.V1ServicePort(port=port, target_port="http")],
+                ports=(
+                    [kclient.V1ServicePort(port=port, target_port="http", name="http")]
+                    + [
+                        kclient.V1ServicePort(port=p, target_port=f"{port_name}", name=port_name)
+                        for port_name, p in additional_service_ports
+                    ]
+                ),
             ),
         )
 

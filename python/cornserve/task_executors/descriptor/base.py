@@ -6,6 +6,7 @@ from abc import ABC, abstractmethod
 from typing import Any, Generic, TypeVar
 
 import httpx
+import kubernetes_asyncio.client as kclient
 from pydantic import BaseModel
 
 from cornserve import constants
@@ -48,6 +49,21 @@ class TaskExecutionDescriptor(BaseModel, ABC, Generic[TaskT, InputT, OutputT]):
             ("hf-cache", constants.VOLUME_HF_CACHE, "/root/.cache/huggingface"),
             ("shm", constants.VOLUME_SHM, "/dev/shm"),
         ]
+
+    def get_service_ports(self, gpus: list[GPU]) -> list[tuple[str, int]]:
+        """Get the additional service ports for the task executor."""
+        return []
+
+    def get_container_envs(self, gpus: list[GPU]) -> list[tuple[str, str]]:
+        """Get the additional environment variables for the task executor."""
+        return [
+            ("CUDA_VISIBLE_DEVICES", ",".join(str(gpu.local_rank) for gpu in gpus)),
+        ]
+
+    def get_kubernetes_envs(self, gpus: list[GPU]) -> list[kclient.V1EnvVar]:
+        """Get the kubernetes environment variables for the task executor."""
+        envs = [kclient.V1EnvVar(name=n, value=v) for n, v in self.get_container_envs(gpus)]
+        return envs
 
     @abstractmethod
     def get_api_url(self, base: str) -> str:
