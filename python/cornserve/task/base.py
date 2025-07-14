@@ -9,7 +9,7 @@ import os
 import uuid
 from abc import ABC, abstractmethod
 from collections import defaultdict
-from collections.abc import AsyncGenerator, AsyncIterator, Generator, Iterable
+from collections.abc import AsyncGenerator, AsyncIterator, Callable, Generator, Iterable
 from contextlib import contextmanager
 from contextvars import ContextVar
 from typing import TYPE_CHECKING, Any, ClassVar, Generic, Self, TypeVar, final
@@ -62,6 +62,7 @@ class TaskOutput(BaseModel):
 
 InputT = TypeVar("InputT", bound=TaskInput)
 OutputT = TypeVar("OutputT", bound=TaskOutput)
+TransformT = TypeVar("TransformT", bound=TaskOutput)
 
 
 class Stream(TaskOutput, Generic[OutputT]):
@@ -74,6 +75,9 @@ class Stream(TaskOutput, Generic[OutputT]):
     # Each line in the stream should be a JSON string that can be parsed into an `OutputT` object.
     async_iterator: AsyncIterator[str] | None = Field(default=None, exclude=True)
     response: httpx.Response | None = Field(default=None, exclude=True)
+
+    _prev_type: type[TaskOutput] | None = None
+    _transform_func: Callable[[TaskOutput], OutputT] | None = None
 
     model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid")
 
@@ -95,6 +99,22 @@ class Stream(TaskOutput, Generic[OutputT]):
             raise ValueError(f"Generic type argument {item_type} is not a subclass of TaskOutput.")
 
         return item_type  # type: ignore
+
+    def transform(self, transform_func: Callable[[OutputT], TransformT]) -> Stream[TransformT]:
+        """Transform the stream's output items using a transformation function.
+
+        Args:
+            transform_func: A function that takes an `OutputT` item and returns a `TransformT` item.
+        """
+        new_stream = Stream[TransformT](
+            async_iterator=self.async_iterator,
+            response=self.response,
+        )
+        new_stream._prev_type = self.item_type
+        new_stream._transform_func = transform_func  # type: ignore
+        self.async_iterator = None
+        self.response = None
+        return new_stream
 
     @model_validator(mode="after")
     def _item_type(self) -> Self:
@@ -139,6 +159,13 @@ class Stream(TaskOutput, Generic[OutputT]):
         line = await self.get_next()
         if line is None:
             raise StopAsyncIteration
+
+        # If a transformation function is set, first parse the line into the previous type,
+        # then apply the transformation function to it.
+        if self._transform_func is not None:
+            assert self._prev_type is not None, "Previous type must be set for transformation."
+            item_prev_type = self._prev_type.model_validate_json(line.strip())
+            return self._transform_func(item_prev_type)
 
         return self.item_type.model_validate_json(line.strip())
 

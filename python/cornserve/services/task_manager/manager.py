@@ -396,6 +396,16 @@ class TaskManager:
                 if await self._do_healthcheck(executor_url, timeout=1.0):
                     break
 
+                # If the pod went into Failed state, it should be treated as a spawn failure
+                pod_status = await self.core_client.read_namespaced_pod(
+                    name=pod_name,
+                    namespace=constants.K8S_NAMESPACE,
+                )  # type: ignore
+                assert isinstance(pod_status, kclient.V1Pod)
+                if isinstance(pod_status.status, kclient.V1PodStatus) and pod_status.status.phase == "Failed":
+                    logger.error("Task executor pod %s is in Error state", pod_name)
+                    raise RuntimeError(f"Task executor pod {pod_name} is in Error state")
+
                 await asyncio.sleep(0.5)
 
         except Exception as e:

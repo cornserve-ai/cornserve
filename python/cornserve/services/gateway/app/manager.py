@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import importlib.util
+import inspect
 import uuid
-from collections import defaultdict
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator, AsyncIterator
 from types import ModuleType
 from typing import Any, get_args, get_origin, get_type_hints
 
@@ -57,8 +57,8 @@ def validate_app_module(module: ModuleType) -> AppComponents:
         errors.append("Missing 'serve' function")
     elif not callable(module.serve):
         errors.append("'serve' must be a callable")
-    elif not asyncio.iscoroutinefunction(module.serve):
-        errors.append("'serve' must be an async function")
+    elif not asyncio.iscoroutinefunction(module.serve) and not inspect.isasyncgenfunction(module.serve):
+        errors.append("'serve' must be either an async function or an async generator function")
 
     # Extract request and response classes from serve function annotations
     # Expectation is async def serve([ANYTHING]: Request) -> Response | AsyncIterator[Response]
@@ -117,7 +117,6 @@ class AppManager:
         self.app_lock = asyncio.Lock()
         self.apps: dict[str, AppDefinition] = {}
         self.app_states: dict[str, AppState] = {}
-        self.app_driver_tasks: dict[str, list[asyncio.Task]] = defaultdict(list)
 
     @tracer.start_as_current_span(name="AppManager.validate_and_create_app")
     async def validate_and_create_app(self, source_code: str) -> tuple[str, list[str]]:
@@ -147,9 +146,14 @@ class AppManager:
             module = load_module_from_source(source_code, app_id)
             app_components = validate_app_module(module)
             tasks = discover_unit_tasks(app_components.config_cls.tasks.values())
-            task_names = [t.execution_descriptor.create_executor_name().lower() for t in tasks]
         except (ImportError, ValueError) as e:
             raise ValueError(f"App source code validation failed: {e}") from e
+
+        # Deduplicate unit tasks
+        unique_tasks = []
+        for task in tasks:
+            if not any(unique_task.is_equivalent_to(task) for unique_task in unique_tasks):
+                unique_tasks.append(task)
 
         async with self.app_lock:
             self.apps[app_id] = AppDefinition(
@@ -157,9 +161,11 @@ class AppManager:
                 module=module,
                 components=app_components,
                 source_code=source_code,
-                tasks=tasks,
+                tasks=unique_tasks,
             )
             self.app_states[app_id] = AppState.NOT_READY
+
+        task_names = [t.execution_descriptor.create_executor_name().lower() for t in unique_tasks]
 
         return app_id, task_names
 
@@ -190,14 +196,13 @@ class AppManager:
             async with self.app_lock:
                 self.app_states[app_id] = AppState.READY
 
-            logger.info("Successfully deployed %s tasks for app '%s'.", len(tasks_to_deploy), app_id)
+            logger.info("Successfully deployed %d tasks for app '%s'.", len(tasks_to_deploy), app_id)
 
         except Exception as e:
-            logger.exception("Failed to deploy tasks (count: %s) for app '%s': %s", len(tasks_to_deploy), app_id, e)
+            logger.exception("Failed to deploy tasks (count: %d) for app '%s': %s", len(tasks_to_deploy), app_id, e)
             async with self.app_lock:
                 self.apps.pop(app_id, None)
                 self.app_states.pop(app_id, None)
-                self.app_driver_tasks.pop(app_id, None)
 
             # Re-raise as a runtime error to be caught by the router
             raise RuntimeError(f"Failed to deploy tasks: {e}") from e
@@ -221,15 +226,9 @@ class AppManager:
             app = self.apps.pop(app_id)
             self.app_states.pop(app_id, None)
 
-            # Cancel all running tasks
-            for task in self.app_driver_tasks.pop(app_id, []):
-                task.cancel()
-
         # Let the task manager know that this app no longer needs these tasks
-        tasks = discover_unit_tasks(app.components.config_cls.tasks.values())
-
         try:
-            await self.task_manager.declare_not_used(tasks)
+            await self.task_manager.declare_not_used(app.tasks)
         except Exception as e:
             logger.exception("Errors while unregistering app '%s': %s", app_id, e)
             raise RuntimeError(f"Errors while unregistering app '{app_id}': {e}") from e
@@ -262,26 +261,35 @@ class AppManager:
         request = app_def.components.request_cls(**request_data)
 
         # Invoke the app
+        agen: AsyncGenerator | None = None
         app_driver: asyncio.Task[BaseModel | AsyncIterator[BaseModel]] | None = None
 
         try:
-            # Create a task to run the app
+            # There are two types of apps:
+            # 1. Streaming apps (`is_streaming=True`)
+            # 2. Non-streaming apps (`is_streaming=False`)
+            #
+            # And 1. Streaming apps have two types of serve functions:
+            # 1.1. Async generator functions
+            # 1.2. Async functions that return an AsyncIterator
+            #
+            # 1.2 and 2 can be `await`ed, whereas 1.1 cannot be `await`ed.
+            # The only way to drive 1.1 is to asynchronously iterate over it.
+            # 1.1 can be identified by checking if `serve_fn` is an async generator function.
+            #
+            # After the app driver is returned out of this function, the values from 1.1 and 1.2
+            # can be asynchronously iterated, and the value from 2 is a concrete response object.
+
+            # Case 1.1: Async generator function
+            if inspect.isasyncgenfunction(app_def.components.serve_fn):
+                assert app_def.components.is_streaming
+                agen = app_def.components.serve_fn(request)
+                return agen
+
+            # Case 1.2 and 2: Async function that returns an AsyncIterator or a concrete response
             app_driver = asyncio.create_task(app_def.components.serve_fn(request))
 
-            async with self.app_lock:
-                self.app_driver_tasks[app_id].append(app_driver)
-
-            response = await app_driver
-
-            # For non-streaming apps, validate the single response.
-            if not app_def.components.is_streaming and not isinstance(response, app_def.components.response_cls):
-                raise ValueError(
-                    f"App returned invalid response type. "
-                    f"Expected {app_def.components.response_cls.__name__}, "
-                    f"got {type(response).__name__}"
-                )
-
-            return response
+            return await app_driver
 
         except asyncio.CancelledError:
             logger.info("App %s invocation cancelled", app_id)
@@ -292,28 +300,6 @@ class AppManager:
         except Exception as e:
             logger.exception("Error invoking app %s: %s", app_id, e)
             raise ValueError(f"Error invoking app {app_id}: {e}") from e
-
-        finally:
-            if app_driver:
-                async with self.app_lock:
-                    self.app_driver_tasks[app_id].remove(app_driver)
-
-    async def is_app_streaming(self, app_id: str) -> bool:
-        """Check if an app is configured for streaming responses.
-
-        Args:
-            app_id: ID of the application to check
-
-        Returns:
-            bool: True if the app is streaming, False otherwise
-
-        Raises:
-            KeyError: If app_id doesn't exist
-        """
-        async with self.app_lock:
-            if app_id not in self.apps:
-                raise KeyError(f"App ID '{app_id}' does not exist")
-            return self.apps[app_id].components.is_streaming
 
     async def list_apps(self) -> dict[str, AppState]:
         """List all registered applications and their states.

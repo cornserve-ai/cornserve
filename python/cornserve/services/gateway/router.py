@@ -278,12 +278,14 @@ async def invoke_tasks(request: TaskGraphDispatch, raw_request: Request):
 
     async def stream_response(results: list) -> AsyncGenerator[str]:
         """Stream the response for a streaming task results."""
-        all_outputs = json.dumps(results)
+        *results_with_empty_stream, stream = results
+        results_with_empty_stream.append({})
+        all_outputs = json.dumps(results_with_empty_stream)
         yield all_outputs + "\n"
 
-        stream = results[-1]
-        assert isinstance(stream, Stream), "Last result must be a Stream"
-        async for chunk in stream.aiter_raw():
+        stream_obj = request.invocations[-1].task_output.__class__.model_validate(stream)
+        assert isinstance(stream_obj, Stream), "Last result must be a Stream"
+        async for chunk in stream_obj.aiter_raw():
             chunk = chunk.strip()
             if not chunk:
                 continue

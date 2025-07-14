@@ -71,6 +71,8 @@ class TaskManager:
         If a task is already deployed, it will be skipped.
         An error raised during deployment will roll back the deployment of all tasks deployed.
         """
+        logger.info("Declaring tasks as used: %r", tasks)
+
         # Check task state to find out which tasks have to be deployed
         task_ids: list[str] = []
         to_deploy: list[str] = []

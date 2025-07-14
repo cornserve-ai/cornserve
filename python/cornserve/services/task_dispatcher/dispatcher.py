@@ -279,10 +279,8 @@ class TaskDispatcher:
         request_obj = self.client.build_request(method="POST", url=url, json=request)
         try:
             if execution.is_streaming:
-                # response = await self.client.stream(method="POST", url=url, json=request).__aenter__()
                 response = await self.client.send(request_obj, stream=True)
             else:
-                # response = await self.client.post(url=url, json=request)
                 response = await self.client.send(request_obj, stream=False)
             response.raise_for_status()
         except httpx.HTTPStatusError as e:

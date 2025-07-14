@@ -80,6 +80,12 @@ kubectl apply -k kubernetes/kustomize/cornserve-system/base
 kubectl apply -k kubernetes/kustomize/cornserve/overlays/prod
 ```
 
+If you'll be using gated models from Hugging Face Hub, you'll need to make the Hugging Face token available to Task Executors:
+
+```bash
+kubectl create -n cornserve secret generic cornserve-env --from-literal=hf-token=$HF_TOKEN
+```
+
 !!! Note
     The `cornserve` namespace is used for most of our control plane and data plane objects.
     On the other hand, the `cornserve-system` namespace is used for components that look over and manage the Cornserve system itself (under `cornserve`), like Jaeger and Prometheus.
