@@ -40,9 +40,9 @@ from cornserve.task.base import Task
 from cornserve.task.builtins.llm import MLLMTask, Modality, OpenAIChatCompletionChunk, OpenAIChatCompletionRequest
 
 gemma_model_ids = {
-    "Gemma 3 4B": "google/gemma-3-4b-it",
-    "Gemma 3 12B": "google/gemma-3-12b-it",
-    # "Gemma 3 27B": "google/gemma-3-27b-it",
+    "gemma3-4b": "google/gemma-3-4b-it",
+    "gemma3-12b": "google/gemma-3-12b-it",
+    # "gemma3-27b": "google/gemma-3-27b-it",
 }
 
 
@@ -67,11 +67,11 @@ async def serve(request: OpenAIChatCompletionRequest) -> AsyncIterator[OpenAICha
     """Main serve function for the app."""
     match request.model:
         case "google/gemma-3-4b-it":
-            return await gemma_tasks["Gemma 3 4B"](request)
+            return await gemma_tasks["gemma3-4b"](request)
         case "google/gemma-3-12b-it":
-            return await gemma_tasks["Gemma 3 12B"](request)
+            return await gemma_tasks["gemma3-12b"](request)
         case "google/gemma-3-27b-it":
-            return await gemma_tasks["Gemma 3 27B"](request)
+            return await gemma_tasks["gemma3-27b"](request)
         case default:
             raise ValueError(
                 f"Unsupported model ID: {default}. Supported models are: {gemma_model_ids}.",

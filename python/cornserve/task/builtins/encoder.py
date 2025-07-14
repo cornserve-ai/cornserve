@@ -80,5 +80,5 @@ class EncoderTask(UnitTask[EncoderInput, EncoderOutput]):
 
     def make_name(self) -> str:
         """Create a concise string representation of the task."""
-        first_model_name = next(iter(self.model_ids)).split("/")[-1].lower()
+        first_model_name = sorted(self.model_ids)[0].split("/")[-1].lower()
         return f"encoder-{self.modality.lower()}-{first_model_name}"
