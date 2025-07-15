@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-import subprocess
 import threading
 import time
+from pathlib import Path
 from typing import cast
 
 import rich
@@ -14,6 +14,8 @@ from kubernetes.client.rest import ApiException
 from kubernetes.config.config_exception import ConfigException
 from rich.console import Console
 from rich.text import Text
+from urllib3.exceptions import ProtocolError
+from urllib3.response import HTTPResponse
 
 from cornserve.constants import K8S_NAMESPACE
 
@@ -32,15 +34,19 @@ LOG_COLORS = [
 class LogStreamer:
     """Streams logs from Kubernetes pods related to unit tasks."""
 
-    def __init__(self, unit_task_names: list[str], console: Console | None = None) -> None:
+    def __init__(
+        self, unit_task_names: list[str], console: Console | None = None, kube_config_path: Path | None = None
+    ) -> None:
         """Initialize the LogStreamer.
 
         Args:
             unit_task_names: A list of unit task names to monitor.
             console: The console object to output the logs.
+            kube_config_path: Optional path to the Kubernetes config file.
         """
         self.unit_task_names = unit_task_names
         self.console = console or rich.get_console()
+        self.kube_config_path = kube_config_path
         self.k8s_available = self._check_k8s_access()
         if not self.k8s_available:
             return
@@ -50,13 +56,28 @@ class LogStreamer:
         self.color_index = 0
         self.stop_event = threading.Event()
         self.threads: list[threading.Thread] = []
-        self.subprocesses: list[subprocess.Popen] = []
+        self.streams: list[HTTPResponse] = []
         self.lock = threading.Lock()
 
     def _check_k8s_access(self) -> bool:
         self.console.print("[bold yellow]LogStreamer: Checking Kubernetes access...[/bold yellow]")
 
-        # List of config loading attempts
+        # If a specific kube config path is provided, use only that
+        if self.kube_config_path:
+            try:
+                config.load_kube_config(config_file=str(self.kube_config_path))
+                self.console.print("LogStreamer: Custom kube config loaded from user-provided config path")
+                client.CoreV1Api().get_api_resources()
+                self.console.print("LogStreamer: Kubernetes access confirmed. Going to stream executor logs ...")
+                return True
+            except (ConfigException, FileNotFoundError):
+                self.console.print("LogStreamer: Could not load kube config from user-provided config path.")
+                return False
+            except Exception as e:
+                self.console.print(f"LogStreamer: Unexpected error with user-provided config: {e}.")
+                return False
+
+        # Fallback to iterate through possible standard kube config paths.
         config_loaders = [
             ("default kube config (for standard k8s and Minikube)", lambda: config.load_kube_config()),
             ("K3s kube config", lambda: config.load_kube_config(config_file="/etc/rancher/k3s/k3s.yaml")),
@@ -144,33 +165,35 @@ class LogStreamer:
                         return
                     time.sleep(1)
 
-            proc = subprocess.Popen(
-                ["kubectl", "logs", "-f", "--tail=5", "-n", K8S_NAMESPACE, pod_name],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,  # Redirect stderr to stdout
-                text=True,
-                encoding="utf-8",
-                errors="replace",
+            # This worker don't need to close resp, the stop() shuts it down.
+            resp: HTTPResponse = api.read_namespaced_pod_log(
+                name=pod_name,
+                namespace=K8S_NAMESPACE,
+                follow=True,
+                _preload_content=False,
             )
-            self.subprocesses.append(proc)
 
-            assert proc.stdout is not None
-            for line in iter(proc.stdout.readline, ""):
+            with self.lock:
+                self.streams.append(resp)
+
+            for raw_line in resp:
                 if self.stop_event.is_set():
                     break
+
+                decoded_line = raw_line.decode("utf-8", "replace").rstrip()
+
                 with self.lock:
                     color = self.pod_colors.get(pod_name, "white")
-                    log_text = f"{pod_name: <40} | {line.strip()}"
+                    log_text = f"{pod_name: <40} | {decoded_line}"
                     log_message = Text(log_text, style=color)
                 self.console.print(log_message)
 
-            proc.stdout.close()
-            return_code = proc.wait()
-            if return_code != 0 and not self.stop_event.is_set():
-                self.console.print(Text(f"Pod {pod_name} exited with code {return_code}.", style="yellow"))
-
         except Exception as e:
-            self.console.print(Text(f"Error streaming logs for {pod_name}: {e}", style="red"))
+            if isinstance(e, ProtocolError) and self.stop_event.is_set():
+                # We only expect this ProtocolError when the response was shut down.
+                return
+
+            self.console.print(Text(f"Unexpected error streaming logs for {pod_name}: {e}", style="red"))
 
     def start(self) -> None:
         """Start the executor discovery and log streaming."""
@@ -187,12 +210,15 @@ class LogStreamer:
             return
 
         self.stop_event.set()
-        for proc in self.subprocesses:
-            proc.terminate()
+
+        # Responses of read_namespaced_pod_log with follow=True hangs forever for resp.close(),
+        # So we use the proper shutdown() to forcefully terminate resp connections.
+        with self.lock:
+            for resp in self.streams:
+                try:
+                    resp.shutdown()
+                except Exception:
+                    self.console.print(Text(f"Error closing stream for {resp}", style="red"))
+
         for thread in self.threads:
             thread.join(timeout=2)
-        for proc in self.subprocesses:
-            try:
-                proc.wait(timeout=1)
-            except subprocess.TimeoutExpired:
-                proc.kill()

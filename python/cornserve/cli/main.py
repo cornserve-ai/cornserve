@@ -118,12 +118,14 @@ class Alias:
 def register(
     path: Annotated[Path, tyro.conf.Positional],
     alias: str | None = None,
+    kube_config_path: Path | None = None,
 ) -> None:
     """Register an app with the Cornserve gateway.
 
     Args:
         path: Path to the app's source file.
         alias: Optional alias for the app.
+        kube_config_path: Optional path to the Kubernetes config file.
     """
     current_alias = alias or path.stem
     aliases = Alias()
@@ -193,7 +195,7 @@ def register(
                 rich.print(tasks_table)
 
                 # Start log streamer
-                log_streamer = LogStreamer(task_names, console=console)
+                log_streamer = LogStreamer(task_names, console=console, kube_config_path=kube_config_path)
                 if log_streamer.k8s_available:
                     log_streamer.start()
                 else:
