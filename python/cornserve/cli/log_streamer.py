@@ -188,11 +188,11 @@ class LogStreamer:
                     log_message = Text(log_text, style=color)
                 self.console.print(log_message)
 
-        except ProtocolError:
-            # We expect this ProtocolError when the response is shutdown.
-            if self.stop_event.is_set():
-                return
         except Exception as e:
+            if isinstance(e, ProtocolError) and self.stop_event.is_set():
+                # We only expect this ProtocolError when the response was shut down.
+                return
+
             self.console.print(
                 Text(
                     f"Unexpected error streaming logs for {pod_name}: {e}",
