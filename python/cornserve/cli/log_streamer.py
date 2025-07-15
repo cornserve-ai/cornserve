@@ -193,12 +193,7 @@ class LogStreamer:
                 # We only expect this ProtocolError when the response was shut down.
                 return
 
-            self.console.print(
-                Text(
-                    f"Unexpected error streaming logs for {pod_name}: {e}",
-                    style="red",
-                )
-            )
+            self.console.print(Text(f"Unexpected error streaming logs for {pod_name}: {e}", style="red"))
 
     def start(self) -> None:
         """Start the executor discovery and log streaming."""
