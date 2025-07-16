@@ -21,6 +21,7 @@ from cornserve.services.pb.resource_manager_pb2 import (
     TeardownUnitTaskRequest,
 )
 from cornserve.services.pb.resource_manager_pb2_grpc import ResourceManagerStub
+from cornserve.services.resource_manager.resource import NotEnoughGPUsError
 from cornserve.task.base import TASK_TIMEOUT, TaskGraphDispatch, UnitTask
 
 logger = get_logger(__name__)
@@ -212,6 +213,11 @@ class TaskManager:
             )
             if response.status != common_pb2.Status.STATUS_OK:
                 raise RuntimeError(f"Failed to scale task {task} to update {num_gpus} GPUs: {response.message}")
+        except grpc.aio.AioRpcError as err:
+            if err.code() == grpc.StatusCode.RESOURCE_EXHAUSTED:
+                msg = err.details() or "Not enough GPUs available for scaling unit task"
+                raise NotEnoughGPUsError(msg) from None
+            raise
         except Exception as e:
             logger.error("Error while scaling unit task %s", task_id)
             raise RuntimeError(f"Error while scaling unit task {task_id}: {e}") from e

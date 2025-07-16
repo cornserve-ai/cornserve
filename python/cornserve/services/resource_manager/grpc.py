@@ -7,6 +7,7 @@ import grpc
 from cornserve.logging import get_logger
 from cornserve.services.pb import common_pb2, resource_manager_pb2, resource_manager_pb2_grpc
 from cornserve.services.resource_manager.manager import ResourceManager
+from cornserve.services.resource_manager.resource import NotEnoughGPUsError
 from cornserve.task.base import UnitTask
 
 logger = get_logger(__name__)
@@ -43,13 +44,20 @@ class ResourceManagerServicer(resource_manager_pb2_grpc.ResourceManagerServicer)
         context: grpc.aio.ServicerContext,
     ) -> resource_manager_pb2.ScaleUnitTaskResponse:
         """Scale a unit task up or down."""
-        if request.num_gpus < 0:
-            await self.manager.scale_down_unit_task(UnitTask.from_pb(request.task), -request.num_gpus)
-        elif request.num_gpus > 0:
-            await self.manager.scale_up_unit_task(UnitTask.from_pb(request.task), request.num_gpus)
-        else:
-            raise ValueError("The number of GPUs should not be zero.")
-        return resource_manager_pb2.ScaleUnitTaskResponse(status=common_pb2.Status.STATUS_OK)
+        if request.num_gpus == 0:
+            await context.abort(grpc.StatusCode.INVALID_ARGUMENT, "The number of GPUs should not be zero.")
+        try:
+            if request.num_gpus < 0:
+                await self.manager.scale_down_unit_task(UnitTask.from_pb(request.task), -request.num_gpus)
+            elif request.num_gpus > 0:
+                await self.manager.scale_up_unit_task(UnitTask.from_pb(request.task), request.num_gpus)
+            return resource_manager_pb2.ScaleUnitTaskResponse(status=common_pb2.Status.STATUS_OK)
+        except NotEnoughGPUsError as e:
+            logger.warning("Not enough GPUs available for scaling unit task: %s", e)
+            await context.abort(grpc.StatusCode.RESOURCE_EXHAUSTED, str(e))
+        except Exception as e:
+            logger.exception("Failed to scale unit task: %s", e)
+            await context.abort(grpc.StatusCode.INTERNAL, str(e))
 
     async def Healthcheck(
         self,

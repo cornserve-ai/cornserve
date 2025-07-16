@@ -23,7 +23,7 @@ from cornserve.services.pb import (
     task_manager_pb2,
     task_manager_pb2_grpc,
 )
-from cornserve.services.resource_manager.resource import GPU, Resource
+from cornserve.services.resource_manager.resource import GPU, NotEnoughGPUsError, Resource
 from cornserve.services.sidecar.launch import SidecarLaunchInfo
 from cornserve.services.utils import to_strict_k8s_name
 from cornserve.sidecar.constants import grpc_url_from_rank
@@ -271,8 +271,12 @@ class ResourceManager:
                 logger.info("Task %s is not running, returning immediately", task)
                 return
 
-            # TODO: decide GPU placement strategy & preference
-            resources = self.resource.allocate(num_gpus=num_gpus, owner=task_state.id)
+            if num_gpus > self.resource.num_free_gpus():
+                raise NotEnoughGPUsError(
+                    f"Not enough GPUs available to scale up task {task} by {num_gpus}.",
+                )
+
+            resources = [self.resource.allocate(num_gpus=1, owner=task_state.id)[0] for _ in range(num_gpus)]
 
         assert task_state.stub is not None, "Task manager stub is not initialized"
         async with task_state.lock:

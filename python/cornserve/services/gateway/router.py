@@ -33,6 +33,7 @@ from cornserve.services.gateway.models import (
 )
 from cornserve.services.gateway.session import SessionManager
 from cornserve.services.gateway.task_manager import TaskManager
+from cornserve.services.resource_manager.resource import NotEnoughGPUsError
 from cornserve.task.base import Stream, TaskGraphDispatch, TaskOutput, UnitTaskList, task_manager_context
 
 router = APIRouter()
@@ -208,14 +209,13 @@ async def scale_task(request: ScaleTaskRequest, raw_request: Request):
     try:
         await task_manager.scale_unit_task(request.task_id, request.num_gpus)
         return Response(status_code=status.HTTP_200_OK)
+    except NotEnoughGPUsError as e:
+        return Response(status_code=status.HTTP_403_FORBIDDEN, content=str(e))
     except KeyError as e:
         return Response(status_code=status.HTTP_404_NOT_FOUND, content=str(e))
     except Exception as e:
         logger.exception("Unexpected error while scaling up task")
-        return Response(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            content=str(e),
-        )
+        return Response(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, content=str(e))
 
 
 @router.get("/tasks/list")
