@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import enum
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Callable
 
 from cornserve.services.gateway.models import AppInvocationRequest
@@ -16,20 +16,33 @@ class Backend(enum.StrEnum):
     ERIC = "eric"
     VLLM = "vllm"
 
+
 @dataclass
 class RequestInput:
     """Input for the benchmark request."""
-    backend: Backend
     url: str
-    payload: dict[str, Any]
+    model: str
+    prompt: str | Any
+    prompt_len: int
+    output_len: int
+    multi_modal_data: list[dict[str, Any]]
+    filenames: list[str] = field(default_factory=list)
+
 
 @dataclass
 class RequestOutput:
-    """Output for the benchmark request."""
+    generated_text: str = ""
     success: bool = False
     latency: float = 0.0
+    output_tokens: int = 0
+    ttft: float = 0.0  # Time to first token
+    itl: list[float] = field(default_factory=list)  # list of inter-token latencies
+    tpot: float = 0.0  # avg next-token latencies
+    prompt_len: int = 0
     error: str = ""
-    output: Any = None
+    # bookkeeping fields
+    input: RequestInput | None = None
+    usage: dict[str, Any] | None = None
 
 def build_cornserve_vlm_input(
     base_url: str,

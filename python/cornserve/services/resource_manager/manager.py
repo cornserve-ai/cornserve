@@ -332,7 +332,7 @@ class ResourceManager:
         assert task_state.stub is not None, "Task manager stub is not initialized"
         # check there are enough GPUs to scale down
         if task_state.resources is None or len(task_state.resources) < num_gpus:
-            raise RuntimeError(
+            raise NotEnoughGPUsError(
                 f"{task} has only "
                 f"{len(task_state.resources) if task_state.resources else 0} GPUs, "
                 f"cannot scale down by {num_gpus}"
@@ -552,7 +552,7 @@ class ResourceManager:
 
         try:
             # Allocate resource starter pack for the task manager
-            state.resources = self.resource.allocate(num_gpus=1, owner=state.id)
+            state.resources = self.resource.allocate(num_gpus=0, owner=state.id)
             span.set_attribute(
                 "resource_manager._spawn_task_manager.gpu_global_ranks",
                 [gpu.global_rank for gpu in state.resources],

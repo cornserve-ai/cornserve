@@ -29,3 +29,4 @@ configMapGenerator:
   - CORNSERVE_IMAGE_PREFIX=localhost:5000/cornserve
   - CORNSERVE_IMAGE_PULL_POLICY=Always
   - CORNSERVE_IMAGE_TAG=latest
+  - OTEL_SDK_DISABLED=true

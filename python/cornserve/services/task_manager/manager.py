@@ -293,6 +293,13 @@ class TaskManager:
                                 for port_name, p in additional_service_ports
                             ]
                         ),
+                        env_from=[
+                            kclient.V1EnvFromSource(
+                                config_map_ref=kclient.V1ConfigMapEnvSource(
+                                    name=constants.K8S_CORNSERVE_CONFIG_MAP_NAME,
+                                )
+                            ),
+                        ],
                         resources=kclient.V1ResourceRequirements(
                             limits={
                                 "nvidia.com/gpu": len(gpus),

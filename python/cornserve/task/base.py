@@ -59,10 +59,16 @@ class TaskInput(BaseModel):
 class TaskOutput(BaseModel):
     """Base class for task output."""
 
+class FieldType(BaseModel):
+    """Base class for field types."""
 
 InputT = TypeVar("InputT", bound=TaskInput)
 OutputT = TypeVar("OutputT", bound=TaskOutput)
 TransformT = TypeVar("TransformT", bound=TaskOutput)
+FieldTypeT = TypeVar("FieldTypeT", bound=FieldType)
+
+class IndifferentField(Generic[FieldTypeT]):
+    value: FieldTypeT
 
 
 class Stream(TaskOutput, Generic[OutputT]):
@@ -423,9 +429,13 @@ class UnitTask(Task, Generic[InputT, OutputT]):
             return False
 
         # Check if all fields defined by the root unit task class are the same.
-        for field_name in self.root_unit_task_cls.model_fields:
+        for field_name, info in self.root_unit_task_cls.model_fields.items():
             if field_name == "id":
                 # Skip the ID field; it can be different for different instances.
+                continue
+            extra_schema = info.json_schema_extra
+            if isinstance(extra_schema, dict) and extra_schema.get("skip_comparison"):
+                # Skip fields that are marked as not comparable.
                 continue
             try:
                 if getattr(self, field_name) != getattr(other, field_name):

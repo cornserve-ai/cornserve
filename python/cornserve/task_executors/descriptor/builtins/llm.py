@@ -85,10 +85,18 @@ class VLLMDescriptor(
             str(len(gpus)),
             "--port",
             str(port),
+            "--no-enable-prefix-caching",
+            "--disable-mm-preprocessor-cache",
             "--cornserve-sidecar-ranks",
             *[str(gpu.global_rank) for gpu in gpus],
         ]
         return args
+
+    def get_container_envs(self, gpus: list[GPU]) -> list[tuple[str, str]]:
+        return [
+            ("VLLM_IGNORE_STOP_TOKENS", "true"),
+            ("CUDA_VISIBLE_DEVICES", ",".join(str(gpu.local_rank) for gpu in gpus)),
+        ]
 
     def get_api_url(self, base: str) -> str:
         """Get the task executor's base URL for API calls."""
@@ -171,6 +179,7 @@ class PrefillVLLMDescriptor(
     def get_container_envs(self, gpus: list[GPU]) -> list[tuple[str, str]]:
         """Get the additional environment variables for the task executor."""
         return [
+            ("VLLM_IGNORE_STOP_TOKENS", "true"),
             ("UCX_TLS", "cuda,rc,ib,tcp"),
             # ("UCX_TLS", "cuda,rc,ib"),
             ("UCX_NET_DEVICES", "mlx5_0:1"),
@@ -199,6 +208,10 @@ class PrefillVLLMDescriptor(
             str(len(gpus)),
             "--port",
             str(port),
+            "--gpu-memory-utilization",
+            "0.8",
+            "--no-enable-prefix-caching",
+            "--disable-mm-preprocessor-cache",
             "--kv-transfer-config",
             '{"kv_connector":"NixlConnector","kv_role":"kv_producer"}',
             # need to forward KV transfer parameters to a decode instance
@@ -311,6 +324,7 @@ class DecodeVLLMDescriptor(
     def get_container_envs(self, gpus: list[GPU]) -> list[tuple[str, str]]:
         """Get the additional environment variables for the task executor."""
         return [
+            ("VLLM_IGNORE_STOP_TOKENS", "true"),
             ("UCX_TLS", "cuda,rc,ib,tcp"),
             # ("UCX_TLS", "cuda,rc,ib"),
             ("UCX_NET_DEVICES", "mlx5_0:1"),
@@ -339,6 +353,10 @@ class DecodeVLLMDescriptor(
             str(len(gpus)),
             "--port",
             str(port),
+            "--no-enable-prefix-caching",
+            "--disable-mm-preprocessor-cache",
+            "--gpu-memory-utilization",
+            "0.8",
             "--kv-transfer-config",
             '{"kv_connector":"NixlConnector","kv_role":"kv_consumer"}',
             # need to receive KV transfer parameters from a decode instance

@@ -12,7 +12,7 @@ from typing import Literal, TypeAlias
 from openai.types.chat import ChatCompletionChunk
 from pydantic import BaseModel, Field
 
-from cornserve.task.base import Stream, Task, TaskInput, TaskOutput, UnitTask
+from cornserve.task.base import Stream, Task, TaskInput, TaskOutput, UnitTask, IndifferentField
 from cornserve.task.builtins.encoder import EncoderInput, EncoderOutput, EncoderTask, Modality
 from cornserve.task.forward import DataForward, Tensor
 
@@ -132,7 +132,10 @@ class LLMUnitTask(UnitTask[OpenAIChatCompletionRequest, Stream[OpenAIChatComplet
     """
 
     model_id: str
-    receive_embeddings: bool = True
+    receive_embeddings: bool = Field(
+        True,
+        json_schema_extra={"skip_comparison": True},
+    )
 
     def make_name(self) -> str:
         """Create a concise string representation of the task."""
@@ -229,7 +232,10 @@ class PrefillLLMUnitTask(UnitTask[OpenAIChatCompletionRequest, PrefillChatComple
     """A task that invokes a vLLM to perform prefill."""
 
     model_id: str
-    receive_embeddings: bool = True
+    receive_embeddings: bool = Field(
+        True,
+        json_schema_extra={"skip_comparison": True},
+    )
 
     def make_name(self) -> str:
         """Create a concise string representation of the task."""
@@ -251,7 +257,10 @@ class DecodeLLMUnitTask(UnitTask[OpenAIChatCompletionRequest, Stream[OpenAIChatC
     """A task that invokes a vLLM decoder and returns a stream of chat completion chunks."""
 
     model_id: str
-    receive_embeddings: bool = True
+    receive_embeddings: bool = Field(
+        True,
+        json_schema_extra={"skip_comparison": True},
+    )
 
     def make_name(self) -> str:
         """Create a concise string representation of the task."""

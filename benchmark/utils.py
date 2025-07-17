@@ -1,5 +1,7 @@
 from concurrent.futures import ThreadPoolExecutor
 import os
+import mimetypes
+import base64
 import random
 import uuid
 
@@ -11,6 +13,21 @@ rd = random.Random()
 rd.seed(48105)
 # rd.seed(time.time())
 uuid.uuid4 = lambda: uuid.UUID(int=rd.getrandbits(128))
+
+def _file_to_data_uri(path: str) -> str:
+    """
+    Read a binary file and return a data-URI, e.g.
+        data:image/png;base64,iVBORw0KGgo…
+    """
+    mime, _ = mimetypes.guess_type(path)
+    mime = mime or "application/octet-stream"
+    with open(path, "rb") as f:
+        payload = base64.b64encode(f.read()).decode("ascii")
+    return f"data:{mime};base64,{payload}"
+
+def get_image_data_uris(filenames: list[str], root: str = "images") -> list[str]:
+    """Return list of data-URIs for image files."""
+    return [_file_to_data_uri(os.path.join(root, name)) for name in filenames]
 
 def create_dummy_video(
     height: int,
