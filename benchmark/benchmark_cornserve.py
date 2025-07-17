@@ -216,7 +216,7 @@ async def cornserve_invoke(
         payload = {"request_data": request_data}
 
         output = RequestOutput()
-        # output.input = request_input
+        output.input = request_input
         output.prompt_len = request_input.prompt_len
 
         generated_text = ""
