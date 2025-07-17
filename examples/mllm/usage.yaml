@@ -1,0 +1,16 @@
+model: "Qwen/Qwen2.5-VL-7B-Instruct"
+messages:
+- role: "user"
+  content:
+  - type: text
+    text: "How many images are there and what's in each one?"
+  - type: image_url
+    image_url:
+      url: "https://picsum.photos/id/12/480/560"
+  - type: image_url
+    image_url:
+      url: "https://picsum.photos/id/234/480/560"
+stream_options:
+  include_usage: true
+temperature: 0
+max_completion_tokens: 100
