@@ -4,6 +4,7 @@ from collections.abc import AsyncGenerator
 from typing import Generic, TypeVar
 
 import pytest
+from pydantic import RootModel
 from openai.types.chat.chat_completion_chunk import Choice, ChoiceDelta
 
 from cornserve.task.base import Stream, TaskGraphDispatch, TaskInput, TaskInvocation, TaskOutput, UnitTask
@@ -101,7 +102,7 @@ def test_serde_one():
 def test_serde_graph():
     """Tests whether task graph invocations can be serialized and deserialized."""
     encoder_invocation = TaskInvocation(
-        task=EncoderTask(model_id="clip", modality=Modality.IMAGE),
+        task=EncoderTask(model_ids={"clip"}, modality=Modality.IMAGE),
         task_input=EncoderInput(model_id="clip", data_urls=["https://example.com/image.jpg"]),
         task_output=EncoderOutput(embeddings=[DataForward[Tensor]()]),
     )
@@ -126,11 +127,11 @@ def test_task_equivalence():
     """Tests whether unit task equivalence is determined correctly."""
     assert LLMUnitTask(model_id="llama").is_equivalent_to(LLMUnitTask(model_id="llama"))
     assert not LLMUnitTask(model_id="llama").is_equivalent_to(LLMUnitTask(model_id="mistral"))
-    assert EncoderTask(model_id="clip", modality=Modality.IMAGE).is_equivalent_to(
-        EncoderTask(model_id="clip", modality=Modality.IMAGE)
+    assert EncoderTask(model_ids={"clip"}, modality=Modality.IMAGE).is_equivalent_to(
+        EncoderTask(model_ids={"clip"}, modality=Modality.IMAGE)
     )
-    assert not EncoderTask(model_id="clip", modality=Modality.IMAGE).is_equivalent_to(
-        EncoderTask(model_id="clip", modality=Modality.VIDEO)
+    assert not EncoderTask(model_ids={"clip"}, modality=Modality.IMAGE).is_equivalent_to(
+        EncoderTask(model_ids={"clip"}, modality=Modality.VIDEO)
     )
 
 
@@ -161,5 +162,42 @@ async def test_stream():
         assert chunk.model == "llama"
         assert chunk.object == "chat.completion.chunk"
         assert chunk.choices[0].delta.content == f"Chunk {i}"
+        i += 1
+    assert i == 3
+
+
+class DeltaOutput(TaskOutput, RootModel[str]):
+    """Just a string disguised as a TaskOutput."""
+
+
+def transform(chunk: OpenAIChatCompletionChunk) -> DeltaOutput:
+    return DeltaOutput.model_validate(chunk.choices[0].delta.content)
+
+
+@pytest.mark.asyncio
+async def test_stream_transform():
+    """Tests Stream transformation functionality."""
+
+    async def async_gen() -> AsyncGenerator[str]:
+        for i in range(3):
+            yield (
+                OpenAIChatCompletionChunk(
+                    id="chunk",
+                    choices=[Choice(index=i, delta=ChoiceDelta(content=f"Chunk {i}"))],
+                    created=1234567890,
+                    model="llama",
+                    object="chat.completion.chunk",
+                ).model_dump_json()
+                + "\n"
+            )
+
+    stream = Stream[OpenAIChatCompletionChunk](async_iterator=async_gen())
+
+    transformed_stream = stream.transform(transform)
+
+    i = 0
+    async for content in transformed_stream:
+        assert isinstance(content, DeltaOutput)
+        assert content.root == f"Chunk {i}"
         i += 1
     assert i == 3

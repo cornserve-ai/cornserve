@@ -12,7 +12,7 @@ from collections import defaultdict
 from collections.abc import AsyncGenerator, AsyncIterator, Callable, Generator, Iterable
 from contextlib import contextmanager
 from contextvars import ContextVar
-from typing import TYPE_CHECKING, Any, ClassVar, Generic, Self, TypeVar, final
+from typing import TYPE_CHECKING, Any, ClassVar, Generic, Self, TypeVar, final, get_type_hints
 
 import httpx
 from opentelemetry import trace
@@ -106,15 +106,29 @@ class Stream(TaskOutput, Generic[OutputT]):
         Args:
             transform_func: A function that takes an `OutputT` item and returns a `TransformT` item.
         """
-        new_stream = Stream[TransformT](
+        # Extract the return type from the transform function
+        type_hints = get_type_hints(transform_func)
+        return_type = type_hints.get('return', None)
+        
+        # If we can get the return type and it's a TaskOutput, use it
+        if return_type is None:
+            raise ValueError("Transform function must have a return type hint.")
+
+        if not issubclass(return_type, TaskOutput):
+            raise ValueError(f"Return type {return_type} is not a subclass of TaskOutput.")
+
+        # Create a properly typed Stream with the extracted return type
+        new_stream = Stream[return_type](
             async_iterator=self.async_iterator,
             response=self.response,
         )
         new_stream._prev_type = self.item_type
         new_stream._transform_func = transform_func  # type: ignore
+
+        # Clear the original stream's iterators
         self.async_iterator = None
         self.response = None
-        return new_stream
+        return new_stream  # type: ignore
 
     @model_validator(mode="after")
     def _item_type(self) -> Self:
