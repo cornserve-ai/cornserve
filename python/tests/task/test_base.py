@@ -4,8 +4,8 @@ from collections.abc import AsyncGenerator
 from typing import Generic, TypeVar
 
 import pytest
-from pydantic import RootModel
 from openai.types.chat.chat_completion_chunk import Choice, ChoiceDelta
+from pydantic import RootModel
 
 from cornserve.task.base import Stream, TaskGraphDispatch, TaskInput, TaskInvocation, TaskOutput, UnitTask
 from cornserve.task.builtins.encoder import EncoderInput, EncoderOutput, EncoderTask, Modality

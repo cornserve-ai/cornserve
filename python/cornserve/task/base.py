@@ -108,8 +108,8 @@ class Stream(TaskOutput, Generic[OutputT]):
         """
         # Extract the return type from the transform function
         type_hints = get_type_hints(transform_func)
-        return_type = type_hints.get('return', None)
-        
+        return_type = type_hints.get("return", None)
+
         # If we can get the return type and it's a TaskOutput, use it
         if return_type is None:
             raise ValueError("Transform function must have a return type hint.")
