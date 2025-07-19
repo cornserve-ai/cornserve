@@ -15,6 +15,7 @@ from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
 from cornserve.logging import get_logger
 from cornserve.services.gateway.router import create_app
 from cornserve.tracing import configure_otel
+from cornserve.utils import set_ulimit
 
 if TYPE_CHECKING:
     from cornserve.services.gateway.app.manager import AppManager
@@ -25,6 +26,8 @@ logger = get_logger("cornserve.services.gateway.entrypoint")
 async def serve() -> None:
     """Serve the Gateway as a FastAPI app."""
     logger.info("Starting Gateway service")
+
+    set_ulimit()
 
     configure_otel("gateway")
 

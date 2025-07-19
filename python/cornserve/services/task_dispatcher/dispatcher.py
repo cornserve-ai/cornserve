@@ -16,7 +16,7 @@ from pydantic import BaseModel
 
 from cornserve.logging import get_logger
 from cornserve.services.pb import task_manager_pb2, task_manager_pb2_grpc
-from cornserve.task.base import TASK_TIMEOUT, Stream, TaskInvocation, TaskOutput, UnitTask
+from cornserve.task.base import TASK_TIMEOUT, TIMEOUT, Stream, TaskInvocation, TaskOutput, UnitTask
 from cornserve.task.forward import DataForward
 
 logger = get_logger(__name__)
@@ -97,7 +97,10 @@ class TaskDispatcher:
 
         self.ongoing_task_lock = asyncio.Lock()
         self.ongoing_invokes: dict[str, list[asyncio.Task]] = defaultdict(list)
-        self.client = httpx.AsyncClient(timeout=TASK_TIMEOUT)
+        self.client = httpx.AsyncClient(
+            timeout=TIMEOUT,
+            limits=httpx.Limits(max_connections=65535, max_keepalive_connections=65535),
+        )
 
     async def notify_task_deployment(self, task: UnitTask, task_manager_url: str) -> None:
         """Register a newly deployed task and its task manager with the dispatcher."""

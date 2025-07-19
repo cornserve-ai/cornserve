@@ -185,7 +185,7 @@ class PrefillVLLMDescriptor(
             ("UCX_NET_DEVICES", "mlx5_0:1"),
             # ("UCX_LOG_LEVEL", "debug"),
             ("CUDA_VISIBLE_DEVICES", ",".join(str(gpu.local_rank) for gpu in gpus)),
-            # ("VLLM_LOGGING_LEVEL", "DEBUG"),
+            ("VLLM_LOGGING_LEVEL", "DEBUG"),
             ("VLLM_NIXL_SIDE_CHANNEL_PORT", str(self.NIXL_BASE_PORT + gpus[0].global_rank)),
         ]
 
@@ -231,6 +231,7 @@ class PrefillVLLMDescriptor(
             ("infiniband-dev", "/dev/infiniband", "/dev/infiniband"),
             ("hf-cache", constants.VOLUME_HF_CACHE, "/root/.cache/huggingface"),
             ("shm", constants.VOLUME_SHM, "/dev/shm"),
+            ("torch-compile-cache", constants.VOLUME_VLLM_EXECUTOR_CACHE, "/root/.cache/vllm/torch_compile_cache"),
         ]
 
     def get_api_url(self, base: str) -> str:
@@ -330,7 +331,7 @@ class DecodeVLLMDescriptor(
             ("UCX_NET_DEVICES", "mlx5_0:1"),
             # ("UCX_LOG_LEVEL", "debug"),
             ("CUDA_VISIBLE_DEVICES", ",".join(str(gpu.local_rank) for gpu in gpus)),
-            # ("VLLM_LOGGING_LEVEL", "DEBUG"),
+            ("VLLM_LOGGING_LEVEL", "DEBUG"),
             ("VLLM_NIXL_SIDE_CHANNEL_PORT", str(self.NIXL_BASE_PORT + gpus[0].global_rank)),
         ]
 
@@ -377,6 +378,7 @@ class DecodeVLLMDescriptor(
             ("infiniband-dev", "/dev/infiniband", "/dev/infiniband"),
             ("hf-cache", constants.VOLUME_HF_CACHE, "/root/.cache/huggingface"),
             ("shm", constants.VOLUME_SHM, "/dev/shm"),
+            ("torch-compile-cache", constants.VOLUME_VLLM_EXECUTOR_CACHE, "/root/.cache/vllm/torch_compile_cache"),
         ]
 
     def get_api_url(self, base: str) -> str:

@@ -11,12 +11,16 @@ from cornserve.logging import get_logger
 from cornserve.services.resource_manager.grpc import create_server
 from cornserve.services.resource_manager.manager import ResourceManager
 from cornserve.tracing import configure_otel
+from cornserve.utils import set_ulimit
 
 logger = get_logger("cornserve.services.resource_manager.entrypoint")
 
 
 async def serve() -> None:
     """Start the gRPC server."""
+
+    set_ulimit()
+
     configure_otel("resource_manager")
 
     GrpcAioInstrumentorServer().instrument()

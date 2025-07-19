@@ -6,6 +6,7 @@ import asyncio
 import signal
 
 from cornserve.logging import get_logger
+from cornserve.utils import set_ulimit
 from cornserve.services.task_manager.grpc import create_server
 
 logger = get_logger("cornserve.services.task_manager.entrypoint")
@@ -14,6 +15,8 @@ logger = get_logger("cornserve.services.task_manager.entrypoint")
 async def serve() -> None:
     """Serve the Task Manager service."""
     logger.info("Starting Task Manager service")
+
+    set_ulimit()
 
     server, servicer = create_server()
     await server.start()

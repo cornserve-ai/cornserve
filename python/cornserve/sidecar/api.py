@@ -30,6 +30,7 @@ from cornserve.sidecar.utils import (
     device_from_rank,
     init_shmem,
 )
+from cornserve.utils import set_ulimit
 
 logger = get_logger(__name__)
 tracer = trace.get_tracer(__name__)
@@ -53,6 +54,9 @@ class Sidecar:
         Args:
             config: The configuration for the sidecar.
         """
+
+        set_ulimit()
+
         self.config = config
         self.sidecar_rank = config.sidecar_rank
         self.group = config.group

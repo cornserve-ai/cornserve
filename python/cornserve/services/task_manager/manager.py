@@ -6,6 +6,7 @@ import asyncio
 import uuid
 from contextlib import suppress
 from dataclasses import dataclass
+from itertools import cycle
 
 import httpx
 import kubernetes_asyncio.client as kclient
@@ -57,6 +58,8 @@ class TaskManager:
 
         # Config variables
         self.task_executor_healthy_timeout = constants.K8S_TASK_EXECUTOR_HEALTHY_TIMEOUT
+        self.executor_backend_lock = asyncio.Lock()
+        self.executor_backends = cycle(self.executor_deployments.values())
 
     @classmethod
     async def init(cls, id: str, task: UnitTask, gpus: list[GPU]) -> TaskManager:
@@ -163,6 +166,9 @@ class TaskManager:
                 logger.error("Failed to spawn %d task executors.", failed)
                 raise RuntimeError("Failed to spawn task executors")
 
+            async with self.executor_backend_lock:
+                self.executor_backends = cycle(self.executor_deployments.values())
+
     async def get_route(self, request_id: str, routing_hint: str) -> tuple[str, list[int]]:
         """Get the URL to the task executor for a request.
 
@@ -180,13 +186,13 @@ class TaskManager:
         """
         logger.info("Routing request %s with routing hint %s", request_id, routing_hint)
 
-        index = hash(request_id) % len(self.executor_deployments)
-        deployment = list(self.executor_deployments.values())[index]
+        async with self.executor_backend_lock:
+            deployment = next(self.executor_backends)
 
         route = deployment.url
         sidecar_ranks = [gpu.global_rank for gpu in deployment.gpus]
 
-        logger.info("Routing request %s to %s (sidecars %s)", request_id, route, sidecar_ranks)
+        logger.info("Round-robin request %s to %s (sidecars %s)", request_id, route, sidecar_ranks)
 
         return (route, sidecar_ranks)
 

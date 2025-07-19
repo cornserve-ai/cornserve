@@ -1,19 +1,19 @@
 """Base class for tasks."""
 
 from __future__ import annotations
-
-import asyncio
-import inspect
-import json
-import os
-import uuid
 from abc import ABC, abstractmethod
+import asyncio
 from collections import defaultdict
 from collections.abc import AsyncGenerator, AsyncIterator, Callable, Generator, Iterable
 from contextlib import contextmanager
 from contextvars import ContextVar
-from typing import TYPE_CHECKING, Any, ClassVar, Generic, Self, TypeVar, final
+import inspect
+import json
+import os
+from typing import Any, ClassVar, Generic, Self, TYPE_CHECKING, TypeVar, final
+import uuid
 
+import httpcore
 import httpx
 from opentelemetry import trace
 from pydantic import BaseModel, ConfigDict, Field, model_serializer, model_validator
@@ -31,10 +31,20 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 tracer = trace.get_tracer(__name__)
 
-TASK_TIMEOUT = 300
+TASK_TIMEOUT = 30 * 60  # 30 minutes
+
+TIMEOUT = httpx.Timeout(
+    connect=TASK_TIMEOUT,
+    read=TASK_TIMEOUT,
+    write=TASK_TIMEOUT,
+    pool=None,
+)
 
 # Global shared HTTP client used when we are outside of the Gateway service.
-CLIENT = httpx.AsyncClient(timeout=TASK_TIMEOUT)
+CLIENT = httpx.AsyncClient(
+    timeout=TIMEOUT,
+    limits=httpx.Limits(max_connections=65535, max_keepalive_connections=65535),
+)
 
 # This context variable is set inside the top-level task's `__call__` method
 # just before creating an `asyncio.Task` (`_call_impl`) to run the task.
@@ -566,7 +576,7 @@ class TaskGraphDispatch(BaseModel):
         self.is_streaming = isinstance(self.invocations[-1].task_output, Stream)
 
     @tracer.start_as_current_span("TaskGraphDispatch.dispatch")
-    async def dispatch(self, url: str, client: httpx.AsyncClient) -> list[Any]:
+    async def dispatch(self, url: str, client: httpx.AsyncClient, retry: int = 3) -> list[Any]:
         """Dispatch the task graph and wait for the response.
 
         Returns a list of task outputs. Each task output is deserialized from JSON,
@@ -601,6 +611,12 @@ class TaskGraphDispatch(BaseModel):
                 response = await client.post(url, json=self.model_dump())
                 response.raise_for_status()
                 dispatch_outputs = response.json()
+        except httpcore.ReadError as e:
+            logger.exception("Failed to read response from %s: %s", url, e)
+            if retry > 0:
+                logger.info("Retrying dispatch request to %s (%d retries left)...", url, retry)
+                return await self.dispatch(url, client, retry - 1)
+            raise RuntimeError(f"Failed to read response from {url}.") from e
         except httpx.RequestError as e:
             logger.exception("Failed to send dispatch request to %s: %s", url, e)
             raise RuntimeError(f"Failed to send dispatch request to {url}.") from e

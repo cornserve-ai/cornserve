@@ -22,7 +22,7 @@ from cornserve.services.pb.resource_manager_pb2 import (
 )
 from cornserve.services.pb.resource_manager_pb2_grpc import ResourceManagerStub
 from cornserve.services.resource_manager.resource import NotEnoughGPUsError
-from cornserve.task.base import TASK_TIMEOUT, TaskGraphDispatch, UnitTask
+from cornserve.task.base import TASK_TIMEOUT, TIMEOUT, TaskGraphDispatch, UnitTask
 
 logger = get_logger(__name__)
 tracer = trace.get_tracer(__name__)
@@ -54,7 +54,10 @@ class TaskManager:
         self.task_lock = asyncio.Lock()
 
         # HTTP client
-        self.client = httpx.AsyncClient(timeout=TASK_TIMEOUT)
+        self.client = httpx.AsyncClient(
+            timeout=TIMEOUT,
+            limits=httpx.Limits(max_connections=65535, max_keepalive_connections=65535),
+        )
 
         # Task-related state. Key is the task ID.
         self.tasks: dict[str, UnitTask] = {}
@@ -264,7 +267,7 @@ class TaskManager:
             assert len(running_task_ids) == len(dispatch.invocations)
 
         # Dispatch to the Task Dispatcher
-        invocation_task = asyncio.create_task(dispatch.dispatch(K8S_TASK_DISPATCHER_HTTP_URL + "/task", self.client))
+            invocation_task = asyncio.create_task(dispatch.dispatch(K8S_TASK_DISPATCHER_HTTP_URL + "/task", self.client))
         # Store the invocation task under the task IDs of all running tasks.
         # If any of the unit tasks are unregistered, the whole thing will be cancelled.
         for task_id in running_task_ids:

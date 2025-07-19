@@ -23,7 +23,7 @@ async def invoke_task(request: TaskGraphDispatch, raw_request: Request):
     """Invoke a task with the given request data."""
     dispatcher: TaskDispatcher = raw_request.app.state.dispatcher
 
-    logger.info("Task dispatch received: %s", request)
+    logger.info("Task dispatch received")
 
     async def stream_response(results: list[TaskOutput]) -> AsyncGenerator[str]:
         """Stream the response for a streaming task results."""

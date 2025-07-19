@@ -27,6 +27,7 @@ from pydantic import ValidationError
 from ucxx._lib_async.endpoint import Endpoint  # type: ignore
 
 from cornserve.logging import SidcarAdapter, get_logger
+from cornserve.utils import set_ulimit
 from cornserve.services.pb import common_pb2, sidecar_pb2, sidecar_pb2_grpc
 from cornserve.services.sidecar.receiver import SidecarReceiver
 from cornserve.services.sidecar.schema import SidecarNodeInfo, SidecarServerConfig
@@ -400,6 +401,8 @@ async def main(
     peers = list(map(int, peer_ranks_str.split(",")))
     assert len(peers) > 0, "Invalid SIDECAR_LOCAL_PEER_RANKS"
     assert sidecar_rank in peers, "Sidecar rank not in local peers"
+
+    set_ulimit()
 
     # OpenTelemetry setup
     configure_otel(name=f"sidecar[{sidecar_rank}]")
