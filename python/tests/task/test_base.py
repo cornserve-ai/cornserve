@@ -207,6 +207,46 @@ async def test_stream_transform():
         async for _ in stream:
             pass
 
+    with pytest.raises(ValueError, match="Cannot transform a stream more than once."):
+        transformed_stream.transform(lambda x: x, output_type=OpenAIChatCompletionChunk)
+
+    i = 0
+    async for content in transformed_stream:
+        assert isinstance(content, DeltaOutput)
+        assert content.root == f"wow chunk {i}"
+        i += 1
+    assert i == 3
+
+
+@pytest.mark.asyncio
+async def test_stream_transform_with_lambda():
+    """Tests Stream transformation functionality with a lambda function."""
+
+    async def async_gen() -> AsyncGenerator[str]:
+        for i in range(3):
+            yield (
+                OpenAIChatCompletionChunk(
+                    id="chunk",
+                    choices=[Choice(index=i, delta=ChoiceDelta(content=f"Chunk {i}"))],
+                    created=1234567890,
+                    model="llama",
+                    object="chat.completion.chunk",
+                ).model_dump_json()
+                + "\n"
+            )
+
+    stream = Stream[OpenAIChatCompletionChunk](async_iterator=async_gen())
+
+    transformed_stream = stream.transform(
+        lambda chunk: DeltaOutput.model_validate("wow " + (chunk.choices[0].delta.content or "").lower()),
+        output_type=DeltaOutput,
+    )
+
+    assert isinstance(transformed_stream, Stream)
+    assert type(transformed_stream) is Stream[DeltaOutput]
+    assert transformed_stream._prev_type is OpenAIChatCompletionChunk
+    assert transformed_stream.item_type is DeltaOutput
+
     i = 0
     async for content in transformed_stream:
         assert isinstance(content, DeltaOutput)

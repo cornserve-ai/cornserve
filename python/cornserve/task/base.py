@@ -100,19 +100,31 @@ class Stream(TaskOutput, Generic[OutputT]):
 
         return item_type  # type: ignore
 
-    def transform(self, transform_func: Callable[[OutputT], TransformT]) -> Stream[TransformT]:
+    def transform(
+        self,
+        transform_func: Callable[[OutputT], TransformT],
+        output_type: type[TaskOutput] | None = None,
+    ) -> Stream[TransformT]:
         """Transform the stream's output items using a transformation function.
 
         Args:
             transform_func: A function that takes an `OutputT` item and returns a `TransformT` item.
+            output_type: If the transform function does not have a return type hint (e.g., Lambda functions),
+                you can specify the output type explicitly. This should be a subclass of `TaskOutput`.
+                If the transform function has a return type hint, this argument is ignored.
         """
+        if self._transform_func is not None:
+            raise ValueError("Cannot transform a stream more than once.")
+
         # Extract the return type from the transform function
         type_hints = get_type_hints(transform_func)
         return_type = type_hints.get("return", None)
 
         # If we can get the return type and it's a TaskOutput, use it
         if return_type is None:
-            raise ValueError("Transform function must have a return type hint.")
+            if output_type is None:
+                raise ValueError("Output type must be specified if the transform function has no return type hint.")
+            return_type = output_type
 
         if not issubclass(return_type, TaskOutput):
             raise ValueError(f"Return type {return_type} is not a subclass of TaskOutput.")
