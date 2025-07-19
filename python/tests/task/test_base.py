@@ -171,7 +171,9 @@ class DeltaOutput(TaskOutput, RootModel[str]):
 
 
 def transform(chunk: OpenAIChatCompletionChunk) -> DeltaOutput:
-    return DeltaOutput.model_validate(chunk.choices[0].delta.content)
+    content = chunk.choices[0].delta.content
+    assert isinstance(content, str)
+    return DeltaOutput.model_validate("wow " + content.lower())
 
 
 @pytest.mark.asyncio
@@ -195,9 +197,19 @@ async def test_stream_transform():
 
     transformed_stream = stream.transform(transform)
 
+    assert isinstance(transformed_stream, Stream)
+    assert type(transformed_stream) is Stream[DeltaOutput]
+    assert transformed_stream._prev_type is OpenAIChatCompletionChunk
+    assert transformed_stream.item_type is DeltaOutput
+
+    # Ownership is transferred to the transformed stream
+    with pytest.raises(ValueError, match="Stream generator is not initialized."):
+        async for _ in stream:
+            pass
+
     i = 0
     async for content in transformed_stream:
         assert isinstance(content, DeltaOutput)
-        assert content.root == f"Chunk {i}"
+        assert content.root == f"wow chunk {i}"
         i += 1
     assert i == 3
