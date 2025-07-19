@@ -26,6 +26,9 @@ from schema import (
     vLLMConfig,
 )
 from utils import create_dummy_image, get_image_data_uris
+from cornserve_utils import register_app
+
+from cornserve.utils import set_ulimit
 
 import logging
 
@@ -343,7 +346,7 @@ def transform_sampled_requests(
         else:
             mm_data_list = [request.multi_modal_data]
         request_input = RequestInput(
-            url=f"http://localhost:30080/app/invoke/{app_id}",
+            url=f"http://127.0.0.1:30080/app/invoke/{app_id}",
             model=config.model_id,
             prompt=request.prompt,
             prompt_len=request.prompt_len,
@@ -370,6 +373,8 @@ async def benchmark(
     warmup_pbar = tqdm(total=config.num_warmups, desc="Warmup")
     coros = [request_func(request_input, warmup_pbar) for request_input in request_inputs[:config.num_warmups]]
     await asyncio.gather(*coros)
+
+    print("=" * 50)
 
     pbar = tqdm(total=len(request_inputs))
     print(f"Starting benchmark with {len(request_inputs)} requests...")
@@ -473,7 +478,7 @@ async def check_apps(app_ids: list[str]) -> None:
     async with aiohttp.ClientSession(trust_env=True, timeout=AIOHTTP_TIMEOUT) as session:
         for app_id in app_ids:
             try:
-                async with session.get(f"http://localhost:30080/app/list") as response:
+                async with session.get(f"http://127.0.0.1:30080/app/list") as response:
                     response.raise_for_status()
                     app_states = await response.json()
                     for app_id in app_ids:
@@ -489,7 +494,7 @@ async def clear_task_executors() -> None:
     """ Clear all task executors in Cornserve. """
     async with aiohttp.ClientSession(trust_env=True, timeout=AIOHTTP_TIMEOUT) as session:
         try:
-            async with session.get("http://localhost:30080/tasks/list") as response:
+            async with session.get("http://127.0.0.1:30080/tasks/list") as response:
                 response.raise_for_status()
                 task_states = await response.json()
                 task_ids = [state[1] for state in task_states]
@@ -499,7 +504,7 @@ async def clear_task_executors() -> None:
             print(f"Scaling task {task_id} to zero replicas...")
             payload = {"task_id": task_id, "num_gpus": -1}
             while True:
-                async with session.post("http://localhost:30080/task/scale", json=payload) as response:
+                async with session.post("http://127.0.0.1:30080/task/scale", json=payload) as response:
                     if response.status == 403:
                         break
                     if response.status != 200:
@@ -511,7 +516,7 @@ async def clear_task_executors() -> None:
 async def get_task_ids() -> list[str]:
     async with aiohttp.ClientSession(trust_env=True, timeout=AIOHTTP_TIMEOUT) as session:
         try:
-            async with session.get("http://localhost:30080/tasks/list") as response:
+            async with session.get("http://127.0.0.1:30080/tasks/list") as response:
                 response.raise_for_status()
                 task_states = await response.json()
                 return [state[1] for state in task_states]
@@ -521,7 +526,7 @@ async def get_task_ids() -> list[str]:
 
 async def scale_task_with_num_replicas(task_id: str, num_replicas: int) -> None:
     print(f"Scaling task {task_id} with {num_replicas} replicas...")
-    scale_endpoint = "http://localhost:30080/task/scale"
+    scale_endpoint = "http://127.0.0.1:30080/task/scale"
     payload={"task_id": task_id, "num_gpus": num_replicas}
     async with aiohttp.ClientSession(trust_env=True, timeout=AIOHTTP_TIMEOUT) as session:
         try:
@@ -535,38 +540,75 @@ async def scale_task_with_num_replicas(task_id: str, num_replicas: int) -> None:
 
 
 async def main() -> None:
+
+    set_ulimit()
+
     configs: set[ExperimentConfig] = set()
     # epd_configs = EPDConfig.create_backend_configs(num_gpus=12)
     # pd_configs = PDConfig.create_backend_configs(num_gpus=12)
 
-    epd_id = "app-60d95848a1664aa78c086d655e9e19cd"
-    pd_id = "app-542b1c143d834f4ca32d80aeeb988575"
+    epd_id = register_app("epd.py")
+    pd_id = register_app("pd.py")
 
     backends: list[BackendConfig] = []
-    backends.append(PDConfig(num_prefills=2, num_decodes=2))
-    backends.append(PDConfig(num_prefills=3, num_decodes=1))
-    backends.append(EPDConfig(num_erics=2, num_prefills=1, num_decodes=1))
-    backends.append(EPDConfig(num_erics=1, num_prefills=2, num_decodes=1))
+    # backends.append(PDConfig(num_prefills=2, num_decodes=2))
+    # backends.append(PDConfig(num_prefills=3, num_decodes=1))
+    # backends.append(EPDConfig(num_erics=2, num_prefills=1, num_decodes=1))
+    # backends.append(EPDConfig(num_erics=1, num_prefills=2, num_decodes=1))
+    # for num_erics in range(2, 5):
+    #     for num_prefills in range(3, 7):
+    #         num_decodes = 12 - num_erics - num_prefills
+    #         if num_decodes < 1:
+    #             raise ValueError("This should never happen.")
+    #         backends.append(EPDConfig(
+    #             num_erics=num_erics,
+    #             num_prefills=num_prefills,
+    #             num_decodes=num_decodes,
+    #         ))
 
-    for backend_config in backends:
-        configs.add(ExperimentConfig(
-            backend_config=backend_config,
-            app_id=epd_id if isinstance(backend_config, EPDConfig) else pd_id,
-            num_prompts=200,
-            request_rate=10.0,
+    for num_decodes in range(3, 7):
+        num_prefills = 12 - num_decodes
+        if num_prefills < 1:
+            raise ValueError("This should never happen.")
+        backends.append(PDConfig(
+            num_prefills=num_prefills,
+            num_decodes=num_decodes,
         ))
 
+    # backends.extend(EPDConfig.create_backend_configs(num_gpus=12))
+    # backends.extend(PDConfig.create_backend_configs(num_gpus=12))
     # first group configs by batch
     batched_configs: list[list[ExperimentConfig]] = []
-    while len(configs):
-        cur = configs.pop()
-        batch = [cur]
-        batchable = {cfg for cfg in configs if cur.batchable_with(cfg)}
-        batch.extend(batchable)
-        configs -= batchable
+    for backend_config in backends:
+        batch = []
+        for r in range(5,6):
+            exp_config = ExperimentConfig(
+                backend_config=backend_config,
+                app_id=epd_id if isinstance(backend_config, EPDConfig) else pd_id,
+                request_rate=r,
+            )
+            configs.add(exp_config)
+            batch.append(exp_config)
         batched_configs.append(batch)
 
+    print("Total backend configurations:", len(backends))
+    print("Total experiment configurations:", len(configs))
+
+    # while len(configs):
+    #     cur = configs.pop()
+    #     batch = [cur]
+    #     batchable = {cfg for cfg in configs if cur.batchable_with(cfg)}
+    #     batch.extend(batchable)
+    #     configs -= batchable
+    #     batched_configs.append(batch)
+    # batched_configs.sort(
+    #     key=lambda batch: any(isinstance(cfg.backend_config, PDConfig) for cfg in batch)
+    # )
+
     for batch in batched_configs:
+        print("current batch:")
+        print([b.backend_config for b in batch])
+        print("=" * 50)
         await check_apps([cfg.app_id for cfg in batch])
         await clear_task_executors()
         shared_config = batch[0]
@@ -588,51 +630,57 @@ async def main() -> None:
                 enforced_prompt_len=shared_config.input_len,
             )
 
-        for cfg in batch:
-            task_ids = await get_task_ids()
-            if isinstance(cfg.backend_config, EPDConfig):
-                for task_id in task_ids:
-                    if "encodertask" in task_id:
-                        encoder_task_id = task_id
-                    elif "prefillllmunittask" in task_id:
-                        prefill_task_id = task_id
-                    elif "decodellmunittask" in task_id:
-                        decode_task_id = task_id
-                assert all([prefill_task_id, decode_task_id, encoder_task_id]), (
-                    "Not all tasks are running. Please check the task and app states."
-                )
-                await scale_task_with_num_replicas(
-                    task_id=encoder_task_id,
-                    num_replicas=cfg.backend_config.num_erics,
-                )
-                await scale_task_with_num_replicas(
-                    task_id=prefill_task_id,
-                    num_replicas=cfg.backend_config.num_prefills,
-                )
-                await scale_task_with_num_replicas(
-                    task_id=decode_task_id,
-                    num_replicas=cfg.backend_config.num_decodes,
-                )
-            elif isinstance(cfg.backend_config, PDConfig):
-                for task_id in task_ids:
-                    if "prefillllmunittask" in task_id:
-                        prefill_task_id = task_id
-                    elif "decodellmunittask" in task_id:
-                        decode_task_id = task_id
-                assert all([prefill_task_id, decode_task_id]), (
-                    "Not all tasks are running. Please check the task and app states."
-                )
-                await scale_task_with_num_replicas(
-                    task_id=prefill_task_id,
-                    num_replicas=cfg.backend_config.num_prefills,
-                )
-                await scale_task_with_num_replicas(
-                    task_id=decode_task_id,
-                    num_replicas=cfg.backend_config.num_decodes,
-                )
-            else:
-                raise NotImplementedError(f"Backend config {cfg.backend_config} is not supported.")
+        task_ids = await get_task_ids()
+        if isinstance(shared_config.backend_config, EPDConfig):
+            for task_id in task_ids:
+                if "encodertask" in task_id:
+                    encoder_task_id = task_id
+                elif "prefillllmunittask" in task_id:
+                    prefill_task_id = task_id
+                elif "decodellmunittask" in task_id:
+                    decode_task_id = task_id
+            assert all([prefill_task_id, decode_task_id, encoder_task_id]), (
+                "Not all tasks are running. Please check the task and app states."
+            )
+            await scale_task_with_num_replicas(
+                task_id=encoder_task_id,
+                num_replicas=shared_config.backend_config.num_erics,
+            )
+            await scale_task_with_num_replicas(
+                task_id=prefill_task_id,
+                num_replicas=shared_config.backend_config.num_prefills,
+            )
+            await scale_task_with_num_replicas(
+                task_id=decode_task_id,
+                num_replicas=shared_config.backend_config.num_decodes,
+            )
+        elif isinstance(shared_config.backend_config, PDConfig):
+            for task_id in task_ids:
+                if "prefillllmunittask" in task_id:
+                    prefill_task_id = task_id
+                elif "decodellmunittask" in task_id:
+                    decode_task_id = task_id
+            assert all([prefill_task_id, decode_task_id]), (
+                "Not all tasks are running. Please check the task and app states."
+            )
+            await scale_task_with_num_replicas(
+                task_id=prefill_task_id,
+                num_replicas=shared_config.backend_config.num_prefills,
+            )
+            await scale_task_with_num_replicas(
+                task_id=decode_task_id,
+                num_replicas=shared_config.backend_config.num_decodes,
+            )
+        else:
+            raise NotImplementedError(f"Backend config {shared_config.backend_config} is not supported.")
 
+        for cfg in batch:
+            # try:
+            #     _ = cfg.load()
+            #     print("Skipping benchmark for existing config:", cfg)
+            #     continue
+            # except FileNotFoundError:
+            #     print(f"Running new benchmark...")
             request_inputs = transform_sampled_requests(
                 app_id=cfg.app_id,
                 config=cfg,
@@ -644,9 +692,9 @@ async def main() -> None:
                 config=cfg,
             )
 
-            await clear_task_executors()
+        print("Benchmark completed for current batch. Cleaning up...")
+        await clear_task_executors()
 
-        print(batch)
         print("=" * 50)
 
 if __name__ == "__main__":

@@ -1,17 +1,17 @@
-from operator import mul
 from benchmark_cornserve import cornserve_invoke
 import asyncio
 from tqdm import tqdm
-from benchmark_backend import RequestInput, RequestOutput
+from benchmark_backend import RequestInput
 
 async def main():
+    n = 10
     pbar = tqdm(total=10)
 
     request_inputs =[] 
-    for i in range(10):
+    for _ in range(10):
         request_inputs.append(
             RequestInput(
-                url="http://localhost:30080/app/invoke/app-af828b42a72442b59127a82657ad1bfd",
+                url="http://localhost:30080/app/invoke/app-3c148691df554d1c90e48ff9aa45e338",
                 model="Qwen/Qwen2.5-VL-7B-Instruct",
                 prompt="What is the color of the sky?",
                 prompt_len=10,
@@ -23,10 +23,10 @@ async def main():
             )
         )
         
-    coros = [cornserve_invoke(request_input, pbar) for request_input in request_inputs]
+    coros = [asyncio.create_task(cornserve_invoke(request_input, pbar)) for request_input in request_inputs]
     await asyncio.gather(*coros)
     for output in coros:
-        print(output)
+        print(output.result())
 
 
 if __name__ == "__main__":

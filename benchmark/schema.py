@@ -67,6 +67,7 @@ class PDConfig(BackendConfig):
         for num_prefills in range(1, num_gpus):
             num_decodes = num_gpus - num_prefills
             configs.append(cls(num_prefills=num_prefills, num_decodes=num_decodes))
+        print(f"Created {len(configs)} PD configurations for {num_gpus} GPUs.")
         return configs
 
 class EPDConfig(BackendConfig):
@@ -94,6 +95,7 @@ class EPDConfig(BackendConfig):
                     num_prefills=num_prefills,
                     num_decodes=num_decodes,
                 ))
+        print(f"Created {len(configs)} EPD configurations for {num_gpus} GPUs.")
         return configs
 
 class ExperimentConfig(BaseModel):
@@ -248,7 +250,7 @@ class ExperimentConfig(BaseModel):
 
 if __name__ == "__main__":
     backend = CornserveConfig(num_erics=4, num_vllms=8)
-    config = ExperimentConfig(backend_config=backend)
+    config = ExperimentConfig(backend_config=backend, app_id="example_app_id")
     dummy_data = {
         "example_key": "example_value",
         "another_key": 123,
