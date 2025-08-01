@@ -164,10 +164,6 @@ def batch_builder(model_id: str, nickname: str, data: list[ModalityData]) -> Wor
     processed_data = {
         key: [item.processed(model_id)[key] for item in data] for key in data[0].processed(model_id).keys()
     }
-    # processed_data = {
-    #     key: [torch.from_numpy(item.processed(model_id)[key]) for item in data]
-    #     for key in data[0].processed(model_id).keys()
-    # }
     batch = WorkerBatch(
         modality=data[0].modality,
         adapter_name=model_id,
