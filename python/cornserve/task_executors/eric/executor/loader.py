@@ -104,10 +104,19 @@ def load_model(
         f"Model class {model_class} is not a subclass of EricModel. Registry entry: {registry_entry}"
     )
 
-    # Instantiate the model
-    torch_dtype = torch_dtype or hf_config.torch_dtype
+    # Determine dtype and device.
+    if torch_dtype is None:
+        hf_dtype = hf_config.torch_dtype
+        if not isinstance(hf_dtype, torch.dtype):
+            raise ValueError(
+                f"Expected torch_dtype to be a torch.dtype, but got {type(hf_dtype)}. "
+                "Please specify torch_dtype explicitly."
+            )
+        torch_dtype = hf_dtype
     assert isinstance(torch_dtype, torch.dtype), str(type(torch_dtype))
     torch_device = torch_device or torch.device("cuda", parallel.get_tensor_parallel_group().rank)
+
+    # Instantiate the model
     with set_default_torch_dtype(torch_dtype), torch_device:
         model = model_class(hf_config)
 

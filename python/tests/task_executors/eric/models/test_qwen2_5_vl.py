@@ -73,14 +73,14 @@ def test_hf_reference(test_images: list[ModalityData], test_videos: list[Modalit
     model = hf_model.model.cuda().eval()
 
     image1 = test_images[0].processed(model_id)
-    pixel_values = torch.asarray(image1["pixel_values"]).cuda()
-    image_grid_thw = torch.asarray(image1["image_grid_thw"]).cuda()
-    output1 = model.get_image_features(pixel_values=pixel_values, image_grid_thw=image_grid_thw).cpu()
+    pixel_values = image1["pixel_values"].cuda()
+    image_grid_thw = image1["image_grid_thw"].cuda()
+    output1 = model.get_image_features(pixel_values=pixel_values, image_grid_thw=image_grid_thw)[0].cpu()
 
     image2 = test_images[1].processed(model_id)
-    pixel_values = torch.asarray(image2["pixel_values"]).cuda()
-    image_grid_thw = torch.asarray(image2["image_grid_thw"]).cuda()
-    output2 = model.get_image_features(pixel_values=pixel_values, image_grid_thw=image_grid_thw).cpu()
+    pixel_values = image2["pixel_values"].cuda()
+    image_grid_thw = image2["image_grid_thw"].cuda()
+    output2 = model.get_image_features(pixel_values=pixel_values, image_grid_thw=image_grid_thw)[0].cpu()
 
     for tp_degree in TP_SIZES:
         output = torch.load(f"{dump_tensors}/{model_shorthand}-image-tp{tp_degree}.pt")
@@ -89,14 +89,14 @@ def test_hf_reference(test_images: list[ModalityData], test_videos: list[Modalit
     del output1, output2
 
     video1 = test_videos[0].processed(model_id)
-    pixel_values_video = torch.asarray(video1["pixel_values_videos"]).cuda()
-    video_grid_thw = torch.asarray(video1["video_grid_thw"]).cuda()
-    output1 = model.get_video_features(pixel_values_videos=pixel_values_video, video_grid_thw=video_grid_thw).cpu()
+    pixel_values_video = video1["pixel_values_videos"].cuda()
+    video_grid_thw = video1["video_grid_thw"].cuda()
+    output1 = model.get_video_features(pixel_values_videos=pixel_values_video, video_grid_thw=video_grid_thw)[0].cpu()
 
     video2 = test_videos[1].processed(model_id)
-    pixel_values_video2 = torch.asarray(video2["pixel_values_videos"]).cuda()
-    video_grid_thw2 = torch.asarray(video2["video_grid_thw"]).cuda()
-    output2 = model.get_video_features(pixel_values_videos=pixel_values_video2, video_grid_thw=video_grid_thw2).cpu()
+    pixel_values_video2 = video2["pixel_values_videos"].cuda()
+    video_grid_thw2 = video2["video_grid_thw"].cuda()
+    output2 = model.get_video_features(pixel_values_videos=pixel_values_video2, video_grid_thw=video_grid_thw2)[0].cpu()
 
     for tp_degree in TP_SIZES:
         output = torch.load(f"{dump_tensors}/{model_shorthand}-video-tp{tp_degree}.pt")

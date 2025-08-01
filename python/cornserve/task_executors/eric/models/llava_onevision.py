@@ -298,21 +298,21 @@ class ModalityProcessor(BaseModalityProcessor):
     def get_image_processor(self) -> Callable | None:
         """Return the image processor."""
 
-        def processor(image: npt.NDArray) -> dict[str, npt.NDArray]:
+        def processor(image: npt.NDArray) -> dict[str, torch.Tensor]:
             """Invoke the HF processor and convert to dict."""
             out = self.image_processor.preprocess(images=[image], return_tensors="pt")
             # Batch size is going to be 1, so squeeze it out
-            return {k: v.numpy().squeeze(0) for k, v in out.data.items()}
+            return {k: v.squeeze(0) for k, v in out.data.items()}
 
         return processor
 
     def get_video_processor(self) -> Callable | None:
         """Return the video processor."""
 
-        def processor(video: npt.NDArray) -> dict[str, npt.NDArray]:
+        def processor(video: npt.NDArray) -> dict[str, torch.Tensor]:
             """Invoke the HF processor and convert to dict."""
             out = self.video_processor.preprocess(videos=[video], return_tensors="pt")
             # Batch size is going to be 1, so squeeze it out
-            return {k: v.numpy().squeeze(0) for k, v in out.data.items()}
+            return {k: v.squeeze(0) for k, v in out.data.items()}
 
         return processor
