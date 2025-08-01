@@ -443,16 +443,16 @@ class ModalityProcessor(BaseModalityProcessor):
     def get_image_processor(self) -> Callable | None:
         """Return the image processor."""
 
-        def processor(image: npt.NDArray) -> dict[str, npt.NDArray]:
+        def processor(image: npt.NDArray) -> dict[str, torch.Tensor]:
             """Invoke the HF processor and convert to dict."""
-            return self.hf_processor.image_processor(images=[image], videos=None, return_tensors="np").data
+            return self.hf_processor.image_processor(images=[image], videos=None, return_tensors="pt").data
 
         return processor
 
     def get_audio_processor(self) -> Callable | None:
         """Return the audio processor."""
 
-        def processor(audio: npt.NDArray) -> dict[str, npt.NDArray]:
+        def processor(audio: npt.NDArray) -> dict[str, torch.Tensor]:
             """Invoke the HF processor and convert to dict."""
             data = self.hf_processor.feature_extractor(
                 [audio],
@@ -466,9 +466,9 @@ class ModalityProcessor(BaseModalityProcessor):
             attention_mask = data.pop("attention_mask")
             input_features = input_features.permute(0, 2, 1)[attention_mask.bool()].permute(1, 0)
             return dict(
-                input_audio_features=input_features.numpy(),
-                audio_feature_lengths=attention_mask.sum(-1).numpy(),
-                feature_attention_mask=attention_mask.numpy(),
+                input_audio_features=input_features,
+                audio_feature_lengths=attention_mask.sum(-1),
+                feature_attention_mask=attention_mask,
             )
 
         return processor
@@ -476,19 +476,19 @@ class ModalityProcessor(BaseModalityProcessor):
     def get_video_processor(self) -> Callable | None:
         """Return the video processor."""
 
-        def processor(video: npt.NDArray) -> dict[str, npt.NDArray]:
+        def processor(video: npt.NDArray) -> dict[str, torch.Tensor]:
             """Invoke the HF processor and convert to dict."""
             # TODO: Some models (e.g., Qwen 2 VL, QWen 2.5 VL, Qwen 2.5 Omni) support passing `min_pixels` and
             #       `max_pixel` to the imgae and video processors. See vLLM's VLM offline inference example.
             #       In general, we should be able to pass in arbitrary processor-specific kwargs via requests
             #       and fallback to model-specific defaults if not provided.
             #       The defaults below were taken from HF Transformers `Qwen2_5OmniProcessorKwargs_defaults`.
-            data = self.hf_processor.video_processor(
+            out = self.hf_processor.video_processor(
                 videos=[video],
                 min_pixels=128 * 28 * 28,
                 max_pixels=768 * 28 * 28,
                 return_tensors="pt",
-            ).data
-            return {k: v.numpy() for k, v in data.items()}
+            )
+            return out.data
 
         return processor

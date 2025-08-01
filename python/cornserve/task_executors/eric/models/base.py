@@ -126,7 +126,7 @@ class BaseModalityProcessor:
         """
         return None
 
-    def process(self, modality: Modality, data: npt.NDArray) -> dict[str, npt.NDArray]:
+    def process(self, modality: Modality, data: npt.NDArray) -> dict[str, torch.Tensor]:
         """Process the input data for the given modality."""
         match modality:
             case Modality.IMAGE:

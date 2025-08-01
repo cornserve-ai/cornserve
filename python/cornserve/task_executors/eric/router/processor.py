@@ -17,6 +17,7 @@ import cv2.videoio_registry as vr
 import numpy as np
 import numpy.typing as npt
 import requests
+import torch
 from opentelemetry import trace
 from PIL import Image
 from transformers.models.auto.configuration_auto import AutoConfig
@@ -113,7 +114,7 @@ class Processor:
         return processed
 
     @tracer.start_as_current_span(name="Processor._do_process")
-    def _do_process(self, modality: Modality, url: str) -> dict[str, npt.NDArray]:
+    def _do_process(self, modality: Modality, url: str) -> dict[str, torch.Tensor]:
         """Run processing on input data."""
         loader: ModalityDataLoader = thread_local.loader
         processor: BaseModalityProcessor = thread_local.processor
@@ -126,8 +127,8 @@ class Processor:
         for item in processed:
             if not isinstance(item.data, dict):
                 raise ValueError(f"Processed data should be a dict; got {type(item.data)}.")
-            if not all(isinstance(v, np.ndarray) for v in item.data.values()):
-                raise ValueError(f"All processed data should be numpy arrays; got {item.data}")
+            if not all(isinstance(v, torch.Tensor) for v in item.data.values()):
+                raise ValueError(f"All processed data should be PyTorch tensors; got {item.data}")
 
 
 class BaseLoader(ABC):

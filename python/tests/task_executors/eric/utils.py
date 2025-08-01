@@ -73,7 +73,7 @@ class ModalityData:
         self.loader = ModalityDataLoader(self.modality_config)
 
     @cache
-    def processed(self, model_id: str) -> dict[str, npt.NDArray]:
+    def processed(self, model_id: str) -> dict[str, torch.Tensor]:
         """Process the data for the given model."""
         processor = Processor(model_id, self.modality_config)
         return processor._do_process(self.modality, self.url)
@@ -162,9 +162,12 @@ def batch_builder(model_id: str, nickname: str, data: list[ModalityData]) -> Wor
     assert all(item.modality == modality for item in data)
 
     processed_data = {
-        key: [torch.from_numpy(item.processed(model_id)[key]) for item in data]
-        for key in data[0].processed(model_id).keys()
+        key: [item.processed(model_id)[key] for item in data] for key in data[0].processed(model_id).keys()
     }
+    # processed_data = {
+    #     key: [torch.from_numpy(item.processed(model_id)[key]) for item in data]
+    #     for key in data[0].processed(model_id).keys()
+    # }
     batch = WorkerBatch(
         modality=data[0].modality,
         adapter_name=model_id,

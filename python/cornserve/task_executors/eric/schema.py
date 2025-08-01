@@ -6,7 +6,6 @@ import enum
 from dataclasses import dataclass, field
 
 import msgspec
-import numpy as np
 import torch
 from opentelemetry import propagate, trace
 from opentelemetry.context import Context
@@ -33,7 +32,7 @@ class ProcessedEmbeddingData(msgspec.Struct, array_like=True, omit_defaults=True
     id: ID
     modality: Modality
     model_id: str
-    data: dict[str, np.ndarray]
+    data: dict[str, torch.Tensor]
     receiver_sidecar_ranks: list[list[int]] | None = None
 
 
@@ -208,7 +207,7 @@ class SchedulerBatch(WorkerBatch):
             for key, value in item.data.items():
                 if key not in self.data:
                     self.data[key] = []
-                self.data[key].append(torch.from_numpy(value))
+                self.data[key].append(value)
 
         # Sanity check
         for key in self.data:

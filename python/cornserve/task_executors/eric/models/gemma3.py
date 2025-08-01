@@ -148,9 +148,9 @@ class ModalityProcessor(BaseModalityProcessor):
     def get_image_processor(self) -> Callable | None:
         """Return the image processor."""
 
-        def processor(image: npt.NDArray) -> dict[str, npt.NDArray]:
+        def processor(image: npt.NDArray) -> dict[str, torch.Tensor]:
             """Invoke the HF processor and convert to dict."""
             # If we enable Pan & Scan, the batch dimension (0) may be larger than 1.
-            return self.image_processor(images=[image], return_tensors="np").data
+            return self.image_processor(images=[image], return_tensors="pt").data
 
         return processor
