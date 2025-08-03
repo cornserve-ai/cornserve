@@ -72,6 +72,9 @@ K8S_TASK_EXECUTOR_HEALTHY_TIMEOUT = 20 * 60.0
 VOLUME_HF_CACHE = "/data/hfcache"
 VOLUME_SHM = "/dev/shm"
 
+# Unit task profiles mounted here with a ConfigMap.
+UNIT_TASK_PROFILES_DIR = "/etc/cornserve/profiles"
+
 # Container images name construction.
 if TYPE_CHECKING:
     CONTAINER_IMAGE_TASK_MANAGER: str

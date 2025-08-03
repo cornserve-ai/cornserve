@@ -28,6 +28,7 @@ from cornserve.services.sidecar.launch import SidecarLaunchInfo
 from cornserve.services.utils import to_strict_k8s_name
 from cornserve.sidecar.constants import grpc_url_from_rank
 from cornserve.task.base import UnitTask
+from cornserve.task_executors.profile import UnitTaskProfileManager
 
 logger = get_logger(__name__)
 tracer = trace.get_tracer(__name__)
@@ -128,6 +129,9 @@ class ResourceManager:
         # Task state
         self.task_states: dict[str, TaskManagerState] = {}
         self.task_states_lock = asyncio.Lock()
+
+        # Profile manager for GPU allocation
+        self.profile_manager = UnitTaskProfileManager()
 
     @staticmethod
     async def init() -> ResourceManager:
@@ -547,8 +551,15 @@ class ResourceManager:
         span.set_attribute("resource_manager._spawn_task_manager.task_manager_id", state.id)
 
         try:
+            # Get GPU requirements from profile
+            profile = self.profile_manager.get_profile(task)
+            # Use the minimum GPU count as the initial allocation
+            num_gpus = min(profile.keys())
+
+            logger.info("Allocating %d GPUs for task %s based on profile", num_gpus, task)
+
             # Allocate resource starter pack for the task manager
-            state.resources = self.resource.allocate(num_gpus=1, owner=state.id)
+            state.resources = self.resource.allocate(num_gpus=num_gpus, owner=state.id)
             span.set_attribute(
                 "resource_manager._spawn_task_manager.gpu_global_ranks",
                 [gpu.global_rank for gpu in state.resources],

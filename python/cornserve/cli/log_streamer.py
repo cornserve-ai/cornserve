@@ -11,12 +11,12 @@ import rich
 from kubernetes import client, config
 from kubernetes.client import V1Pod
 from kubernetes.client.rest import ApiException
-from kubernetes.config.config_exception import ConfigException
 from rich.console import Console
 from rich.text import Text
 from urllib3.exceptions import ProtocolError
 from urllib3.response import HTTPResponse
 
+from cornserve.cli.utils.k8s import load_k8s_config
 from cornserve.constants import K8S_NAMESPACE
 
 # A list of visually distinct colors from rich.
@@ -62,45 +62,22 @@ class LogStreamer:
     def _check_k8s_access(self) -> bool:
         self.console.print("[bold yellow]LogStreamer: Checking Kubernetes access...[/bold yellow]")
 
-        # If a specific kube config path is provided, use only that
-        if self.kube_config_path:
-            try:
-                config.load_kube_config(config_file=str(self.kube_config_path))
-                self.console.print("LogStreamer: Custom kube config loaded from user-provided config path")
-                client.CoreV1Api().get_api_resources()
-                self.console.print("LogStreamer: Kubernetes access confirmed. Going to stream executor logs ...")
-                return True
-            except (ConfigException, FileNotFoundError):
-                self.console.print("LogStreamer: Could not load kube config from user-provided config path.")
-                return False
-            except Exception as e:
-                self.console.print(f"LogStreamer: Unexpected error with user-provided config: {e}.")
-                return False
-
-        # Fallback to iterate through possible standard kube config paths.
-        config_loaders = [
-            ("default kube config (for standard k8s and Minikube)", lambda: config.load_kube_config()),
-            ("K3s kube config", lambda: config.load_kube_config(config_file="/etc/rancher/k3s/k3s.yaml")),
-        ]
-
-        for description, loader in config_loaders:
-            try:
-                loader()
-                # If loaded, try to access the API
-                self.console.print(f"LogStreamer: {description.capitalize()} loaded successfully.")
-                client.CoreV1Api().get_api_resources()
-                self.console.print("LogStreamer: Kubernetes access confirmed. Going to stream executor logs ...")
-                return True
-            except (ConfigException, FileNotFoundError):
-                self.console.print(f"LogStreamer: Could not load {description}. Trying next option...")
-                continue
-            except ApiException as e:
-                self.console.print(f"LogStreamer: API error with {description}: {e}. Check aborted.")
-                return False
-            except Exception as e:
-                # Catch all other unexpected errors during loading or API call.
-                self.console.print(f"LogStreamer: Unexpected error with {description}: {e}. Trying next option...")
-                continue
+        try:
+            load_k8s_config(self.kube_config_path)
+            # Test API access
+            client.CoreV1Api().get_api_resources()
+            self.console.print("LogStreamer: Kubernetes access confirmed. Going to stream executor logs ...")
+            return True
+        except Exception:
+            # Try K3s fallback if standard config loading failed
+            if not self.kube_config_path:
+                try:
+                    config.load_kube_config(config_file="/etc/rancher/k3s/k3s.yaml")
+                    client.CoreV1Api().get_api_resources()
+                    self.console.print("LogStreamer: K3s config loaded successfully. Going to stream executor logs ...")
+                    return True
+                except Exception:
+                    pass
 
         self.console.print("LogStreamer: Kubernetes access failed. No executor log will be streamed.")
         return False

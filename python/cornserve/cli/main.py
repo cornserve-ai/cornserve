@@ -13,6 +13,8 @@ import requests
 import rich
 import tyro
 import yaml
+from kubernetes import client
+from kubernetes.client.rest import ApiException
 from rich import box
 from rich.live import Live
 from rich.panel import Panel
@@ -22,6 +24,8 @@ from rich.text import Text
 from tyro.constructors import PrimitiveConstructorSpec
 
 from cornserve.cli.log_streamer import LogStreamer
+from cornserve.cli.utils.k8s import load_k8s_config
+from cornserve.constants import K8S_NAMESPACE
 from cornserve.services.gateway.models import (
     AppInvocationRequest,
     AppRegistrationRequest,
@@ -465,6 +469,113 @@ def _handle_streaming_response(
 
         except Exception as e:
             rich.print(Panel(f"Error processing streaming response: {e}", style="red", expand=False))
+
+
+@app.command(name="profile")
+def profile_deploy(
+    profiles_dir: Annotated[Path, tyro.conf.Positional] = Path("profiles"),
+    kube_config_path: Path | None = None,
+    dry_run: bool = False,
+) -> None:
+    """Deploy UnitTask profiles to Kubernetes as a ConfigMap.
+
+    Args:
+        profiles_dir: Directory containing profile JSON files (default: ./profiles).
+        kube_config_path: Optional path to the Kubernetes config file.
+        dry_run: Show what would be deployed without actually deploying.
+    """
+    if not profiles_dir.exists():
+        rich.print(Panel(f"Profiles directory {profiles_dir} does not exist.", style="red", expand=False))
+        return
+
+    # Load Kubernetes config
+    try:
+        load_k8s_config(kube_config_path)
+    except Exception as e:
+        rich.print(Panel(f"Failed to load Kubernetes config: {e}", style="red", expand=False))
+        return
+
+    # Collect all profile JSON files
+    profile_files = list(profiles_dir.glob("*.json"))
+    if not profile_files:
+        rich.print(Panel(f"No JSON files found in {profiles_dir}.", style="yellow", expand=False))
+        return
+
+    # Validate and load profile files
+    config_data = {}
+    validation_errors = []
+
+    for file_path in profile_files:
+        try:
+            with open(file_path) as f:
+                # Validate JSON format
+                profile_data = json.load(f)
+                # Store relative filename as key
+                config_data[file_path.name] = json.dumps(profile_data, indent=2)
+        except Exception as e:
+            validation_errors.append(f"{file_path.name}: {e}")
+
+    if validation_errors:
+        rich.print(Panel("Profile validation errors:\n" + "\n".join(validation_errors), style="red", expand=False))
+        return
+
+    # Display what will be deployed
+    table = Table(box=box.ROUNDED)
+    table.add_column("Profile File")
+    table.add_column("Size")
+    for filename, content in config_data.items():
+        table.add_row(filename, f"{len(content)} chars")
+
+    rich.print(f"Found {len(config_data)} profile(s) to deploy:")
+    rich.print(table)
+
+    if dry_run:
+        rich.print(Panel("Dry run completed. No changes made.", style="yellow", expand=False))
+        return
+
+    # Create or update ConfigMap
+    try:
+        v1 = client.CoreV1Api()
+        map_name = "cornserve-profiles"
+
+        configmap = client.V1ConfigMap(
+            metadata=client.V1ObjectMeta(
+                name=map_name,
+                namespace=K8S_NAMESPACE,
+            ),
+            data=config_data,
+        )
+
+        # Try to get existing ConfigMap
+        try:
+            v1.read_namespaced_config_map(name=map_name, namespace=K8S_NAMESPACE)
+            # ConfigMap exists, update it
+            v1.patch_namespaced_config_map(name=map_name, namespace=K8S_NAMESPACE, body=configmap)
+            rich.print(
+                Panel(
+                    f"Updated ConfigMap '{map_name}' in namespace '{K8S_NAMESPACE}' with {len(config_data)} profiles.",
+                    style="green",
+                    expand=False,
+                )
+            )
+        except ApiException as e:
+            if e.status != 404:
+                raise
+
+            # ConfigMap doesn't exist, create it
+            v1.create_namespaced_config_map(namespace=K8S_NAMESPACE, body=configmap)
+            rich.print(
+                Panel(
+                    f"Created ConfigMap '{map_name}' in namespace '{K8S_NAMESPACE}' with {len(config_data)} profiles.",
+                    style="green",
+                    expand=False,
+                )
+            )
+
+    except ApiException as e:
+        rich.print(Panel(f"Kubernetes API error: {e.status} {e.reason}\n{e.body}", style="red", expand=False))
+    except Exception as e:
+        rich.print(Panel(f"Failed to deploy profiles: {e}", style="red", expand=False))
 
 
 def main() -> None:
