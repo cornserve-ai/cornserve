@@ -290,8 +290,26 @@ class ResourceManager:
                 logger.info("Task %s is not running, returning immediately", task)
                 return
 
-            # TODO: decide GPU placement strategy & preference
-            resources = self.resource.allocate(num_gpus=num_gpus, owner=task_state.id)
+            resources = []
+            allocate_granularity = min(profile.keys())
+            remaining_gpus = num_gpus % allocate_granularity
+            # sanity check
+            if remaining_gpus != 0 and remaining_gpus not in profile:
+                raise ValueError(
+                    f"Cannot scale up task {task} by {num_gpus} GPUs. "
+                    f"There will be {remaining_gpus} GPUs left unallocated "
+                    f"according to the profile: {profile.keys()}. ",
+                )
+            for _ in range(num_gpus // allocate_granularity):
+                # here we make sure the colocation
+                batched_resources = self.resource.allocate(
+                    num_gpus=allocate_granularity,
+                    owner=task_state.id,
+                )
+                resources.extend(batched_resources)
+            for _ in range(remaining_gpus):
+                # allocate the remaining GPUs one by one
+                resources.append(self.resource.allocate(num_gpus=1, owner=task_state.id)[0])
 
         assert task_state.stub is not None, "Task manager stub is not initialized"
         async with task_state.lock:
