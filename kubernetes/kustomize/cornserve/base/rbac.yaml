@@ -1,5 +1,5 @@
 ---
-# ServiceAccount for cornserve services to access CRs
+# ServiceAccount for cornserve services to access CRs and create pods
 apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -23,7 +23,7 @@ rules:
   verbs: ["create", "update", "patch", "get", "list", "watch", "delete"]
 
 ---
-# Single RoleBinding for all Cornserve services
+# RoleBinding for all Cornserve services
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:

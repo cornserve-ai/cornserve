@@ -83,4 +83,5 @@ if TYPE_CHECKING:
 
 # CRD constants.
 CRD_GROUP = "cornserve.ai"
+# Note this is the version of CRD definition, where we only define v1
 CRD_VERSION = "v1"

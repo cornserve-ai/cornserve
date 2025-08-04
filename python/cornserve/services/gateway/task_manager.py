@@ -61,6 +61,7 @@ class TaskManager:
         self.tasks: dict[str, UnitTask] = {}
         self.task_states: dict[str, TaskState] = {}  # Can be read without holding lock.
         self.task_cr_names: dict[str, str] = {}  # Map task_id -> UnitTaskInstance CR name
+        self.task_uuids: dict[str, str] = {}  # Map task_id -> UUID, used to generate CR names
         self.task_invocation_tasks: dict[str, list[asyncio.Task]] = defaultdict(list)
         self.task_usage_counter: dict[str, int] = defaultdict(int)
 
@@ -96,7 +97,8 @@ class TaskManager:
 
                     # Generate a unique ID for the task
                     while True:
-                        task_id = f"{task.__class__.__name__.lower()}-{uuid.uuid4().hex}"
+                        task_uuid = uuid.uuid4().hex
+                        task_id = f"{task.__class__.__name__.lower()}-{task_uuid}"
                         if task_id not in self.tasks:
                             break
 
@@ -104,6 +106,8 @@ class TaskManager:
                     self.task_states[task_id] = TaskState.DEPLOYING
                     task_ids.append(task_id)
                     to_deploy.append(task_id)
+                    # Store the UUID for CR creation
+                    self.task_uuids[task_id] = task_uuid
 
                 # Whether or not it was already deployed, increment the usage counter
                 self.task_usage_counter[task_id] += 1
@@ -116,7 +120,8 @@ class TaskManager:
                 task = self.tasks[task_id]
                 
                 # Create UnitTaskInstance CR for this task
-                _, cr_name = await self.cr_manager.create_unit_task_instance_from_task(task)
+                task_uuid = self.task_uuids[task_id]
+                cr_name = await self.cr_manager.create_unit_task_instance_from_task(task, task_uuid)
                 task_cr_names[task_id] = cr_name
                 self.task_cr_names[task_id] = cr_name  # Store for future teardown
                 
@@ -147,8 +152,8 @@ class TaskManager:
                     )
                     del self.tasks[task_id]
                     del self.task_states[task_id]
-                    if task_id in self.task_cr_names:
-                        del self.task_cr_names[task_id]
+                    del self.task_cr_names[task_id]
+                    del self.task_uuids[task_id]
                     self.task_usage_counter[task_id] -= 1
                     if self.task_usage_counter[task_id] == 0:
                         del self.task_usage_counter[task_id]
@@ -214,8 +219,8 @@ class TaskManager:
                 else:
                     del self.tasks[task_id]
                     del self.task_states[task_id]
-                    if task_id in self.task_cr_names:
-                        del self.task_cr_names[task_id]
+                    del self.task_cr_names[task_id]
+                    del self.task_uuids[task_id]
                     del self.task_usage_counter[task_id]
                     logger.info("Teardown complete: %r", task_id)
 

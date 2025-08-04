@@ -4,16 +4,17 @@ from __future__ import annotations
 
 import asyncio
 import base64
-import json
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-import yaml
 from kubernetes_asyncio import client, config
 from kubernetes_asyncio.watch import Watch
 
 from cornserve.constants import CRD_GROUP, CRD_VERSION, K8S_NAMESPACE
 from cornserve.logging import get_logger
 from cornserve.task.registry import TASK_REGISTRY
+
+if TYPE_CHECKING:
+    from cornserve.task.base import UnitTask
 
 logger = get_logger(__name__)
 
@@ -98,27 +99,27 @@ class CRManager:
 
     async def create_unit_task_instance_from_task(
         self,
-        task: Any,  # UnitTask object - using Any to avoid circular import
+        task: UnitTask,
+        task_uuid: str,
         namespace: str = K8S_NAMESPACE
-    ) -> tuple[dict[str, Any], str]:
+    ) -> str:
         """Create a UnitTaskInstance custom resource from a UnitTask object.
         
         
         Args:
             task: The UnitTask object to serialize into a CR
+            task_uuid: UUID to use for CR name generation. Must be provided for consistent naming.
             namespace: Kubernetes namespace to create the resource in
             
         Returns:
-            Tuple of (created CR object, CR name) 
+            The CR name
         """
         await self._load_config()
         assert self._custom_api is not None
 
         # Generate CR name: resource type + UUID (e.g., "encodertask-abc123")
-        import uuid
         task_type = task.__class__.__name__.lower()
-        unique_id = uuid.uuid4().hex[:8]  # Short UUID for readability
-        cr_name = f"{task_type}-{unique_id}"
+        cr_name = f"{task_type}-{task_uuid}"
 
         # Create CR body with correct schema fields
         cr_body = {
@@ -144,7 +145,7 @@ class CRManager:
                 body=cr_body
             )
             logger.info("Created UnitTaskInstance CR: %s for task: %s", cr_name, task.__class__.__name__)
-            return result, cr_name
+            return cr_name
         except client.ApiException as e:
             if e.status == 409:
                 logger.info("UnitTaskInstance %s already exists", cr_name)
@@ -155,7 +156,7 @@ class CRManager:
         self,
         cr_name: str,
         namespace: str = K8S_NAMESPACE
-    ) -> Any:  # Returns UnitTask object - using Any to avoid circular import
+    ) -> UnitTask:
         """Reconstruct a UnitTask object from a UnitTaskInstance CR."""
         await self._load_config()
         assert self._custom_api is not None
