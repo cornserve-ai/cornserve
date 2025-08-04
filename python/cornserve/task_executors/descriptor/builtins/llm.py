@@ -10,7 +10,7 @@ import kubernetes_asyncio.client as kclient
 
 from cornserve import constants
 from cornserve.logging import get_logger
-from cornserve.services.resource_manager.resource import GPU
+from cornserve.services.resource import GPU
 from cornserve.task.base import Stream
 from cornserve.task.builtins.llm import (
     URL,

@@ -6,7 +6,7 @@ import grpc
 
 from cornserve.logging import get_logger
 from cornserve.services.pb import common_pb2, task_manager_pb2, task_manager_pb2_grpc
-from cornserve.services.resource_manager.resource import GPU
+from cornserve.services.resource import GPU
 from cornserve.services.task_manager.manager import TaskManager
 from cornserve.task.base import UnitTask
 
