@@ -290,6 +290,7 @@ class ResourceManager:
                 logger.info("Task %s is not running, returning immediately", task)
                 return
 
+            # TODO: decide GPU placement strategy & preference
             resources = []
             allocate_granularity = min(profile.keys())
             remaining_gpus = num_gpus % allocate_granularity
