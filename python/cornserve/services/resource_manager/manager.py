@@ -23,7 +23,7 @@ from cornserve.services.pb import (
     task_manager_pb2,
     task_manager_pb2_grpc,
 )
-from cornserve.services.resource_manager.resource import GPU, Resource
+from cornserve.services.resource import GPU, Resource
 from cornserve.services.sidecar.launch import SidecarLaunchInfo
 from cornserve.services.utils import to_strict_k8s_name
 from cornserve.sidecar.constants import grpc_url_from_rank
@@ -263,6 +263,21 @@ class ResourceManager:
         span = trace.get_current_span()
         span.set_attribute("resource_manager.scale_up_unit_task.task", str(task))
         span.set_attribute("resource_manager.scale_up_unit_task.num_gpus", num_gpus)
+
+        # Check if the number of GPUs to scale up is valid
+        profile = self.profile_manager.get_profile(task)
+        if num_gpus < min(profile.keys()):
+            logger.warning(
+                "Requested %d GPUs to scale up task %s, but minimum required is %d GPUs according to the profile: %s",
+                num_gpus,
+                task,
+                min(profile.keys()),
+                profile,
+            )
+            raise ValueError(
+                f"Cannot scale up task {task} by {num_gpus} GPUs. "
+                f"Minimum required is {min(profile.keys())} GPUs according to the profile."
+            )
 
         # Find the task manager state for this task
         task_state = None
@@ -553,7 +568,8 @@ class ResourceManager:
         try:
             # Get GPU requirements from profile
             profile = self.profile_manager.get_profile(task)
-            # Use the minimum GPU count as the initial allocation
+
+            # Start off the task manager with the minimum number of GPUs required
             num_gpus = min(profile.keys())
 
             logger.info("Allocating %d GPUs for task %s based on profile", num_gpus, task)
@@ -579,6 +595,7 @@ class ResourceManager:
                     },
                 ),
                 spec=kclient.V1PodSpec(
+                    service_account_name="task-manager",
                     containers=[
                         kclient.V1Container(
                             name="task-manager",
@@ -592,9 +609,24 @@ class ResourceManager:
                                     )
                                 ),
                             ],
+                            volume_mounts=[
+                                kclient.V1VolumeMount(
+                                    name="cornserve-profiles",
+                                    mount_path=constants.UNIT_TASK_PROFILES_DIR,
+                                    read_only=True,
+                                ),
+                            ],
                         )
                     ],
-                    service_account_name="task-manager",
+                    volumes=[
+                        kclient.V1Volume(
+                            name="cornserve-profiles",
+                            config_map=kclient.V1ConfigMapVolumeSource(
+                                name=constants.K8S_UNIT_TASK_PROFILES_CONFIG_MAP_NAME,
+                                optional=True,
+                            ),
+                        ),
+                    ],
                 ),
             )
             service = kclient.V1Service(

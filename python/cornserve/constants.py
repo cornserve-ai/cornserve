@@ -74,6 +74,7 @@ VOLUME_SHM = "/dev/shm"
 
 # Unit task profiles mounted here with a ConfigMap.
 UNIT_TASK_PROFILES_DIR = "/etc/cornserve/profiles"
+K8S_UNIT_TASK_PROFILES_CONFIG_MAP_NAME = "cornserve-profiles"
 
 # Container images name construction.
 if TYPE_CHECKING:

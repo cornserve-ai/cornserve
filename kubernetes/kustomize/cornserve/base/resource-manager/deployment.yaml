@@ -29,11 +29,11 @@ spec:
         - configMapRef:
             name: cornserve-config
         volumeMounts:
-        - name: profiles
+        - name: cornserve-profiles
           mountPath: /etc/cornserve/profiles
           readOnly: true
       volumes:
-      - name: profiles
+      - name: cornserve-profiles
         configMap:
           name: cornserve-profiles
           optional: true

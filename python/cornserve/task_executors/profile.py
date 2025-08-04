@@ -24,23 +24,23 @@ class ProfileInfo(BaseModel):
     """Profile information for a specific GPU count.
 
     This class is currently empty but can be extended in the future to include
-    additional metadata such as memory requirements, performance characteristics,
-    or other resource constraints.
+    additional metadata such as performance characteristics given a specific
+    number of GPUs.
     """
 
-    pass
 
+class UnitTaskProfile:
+    """Profile mapping GPU counts to profile information for a UnitTask."""
 
-class UnitTaskProfile(BaseModel):
-    """Profile mapping GPU counts to profile information for a UnitTask.
+    def __init__(self, task: UnitTask, num_gpus_to_profile: dict[int, ProfileInfo]) -> None:
+        """Initialize the UnitTaskProfile.
 
-    Attributes:
-        task: The UnitTask instance this profile applies to
-        gpu_requirements: Mapping from GPU count to ProfileInfo
-    """
-
-    task: UnitTask
-    gpu_requirements: dict[int, ProfileInfo]
+        Args:
+            task: The UnitTask instance this profile applies to
+            num_gpus_to_profile: Mapping from GPU count to ProfileInfo
+        """
+        self.task = task
+        self.num_gpus_to_profile = num_gpus_to_profile
 
     @classmethod
     def from_json_file(cls, file_path: Path) -> UnitTaskProfile:
@@ -65,13 +65,13 @@ class UnitTaskProfile(BaseModel):
             task_cls, _, _ = TASK_REGISTRY.get(task_class_name)
             task = task_cls.model_validate_json(json.dumps(data["task"]))
 
-            # Parse GPU requirements
-            gpu_requirements = {}
-            for gpu_count_str, profile_data in data["gpu_requirements"].items():
+            # Parse GPU profile information
+            num_gpus_to_profile = {}
+            for gpu_count_str, profile_data in data["num_gpus_to_profile"].items():
                 gpu_count = int(gpu_count_str)
-                gpu_requirements[gpu_count] = ProfileInfo(**profile_data)
+                num_gpus_to_profile[gpu_count] = ProfileInfo(**profile_data)
 
-            return cls(task=task, gpu_requirements=gpu_requirements)
+            return cls(task=task, num_gpus_to_profile=num_gpus_to_profile)
 
         except (KeyError, json.JSONDecodeError, ValueError) as e:
             raise ValueError(f"Invalid profile file format in {file_path}: {e}") from e
@@ -88,8 +88,9 @@ class UnitTaskProfile(BaseModel):
 
         data = {
             "task": task_data,
-            "gpu_requirements": {
-                str(gpu_count): profile_info.model_dump() for gpu_count, profile_info in self.gpu_requirements.items()
+            "num_gpus_to_profile": {
+                str(gpu_count): profile_info.model_dump()
+                for gpu_count, profile_info in self.num_gpus_to_profile.items()
             },
         }
 
@@ -127,7 +128,7 @@ class UnitTaskProfileManager:
         """
         try:
             profile = UnitTaskProfile.from_json_file(file_path)
-            logger.debug("Loaded profile from %s for task %s", file_path, profile.task)
+            logger.info("Loaded profile from %s for task %s", file_path, profile.task)
             return profile
         except Exception as e:
             logger.warning("Failed to load profile from %s: %s", file_path, e)
@@ -147,24 +148,26 @@ class UnitTaskProfileManager:
             Dictionary mapping GPU count to ProfileInfo
         """
         if not self.profile_dir.exists():
-            logger.debug("Profile directory %s does not exist", self.profile_dir)
+            logger.info("Profile directory %s does not exist", self.profile_dir)
             return self.get_default_profile()
 
         # Iterate through all JSON files in the profile directory
         for file_path in self.profile_dir.glob("*.json"):
             profile = self._load_profile_from_file(file_path)
             if profile is not None and profile.task.is_equivalent_to(task):
-                logger.debug("Found profile for task %s in %s", task, file_path)
-                return profile.gpu_requirements
+                logger.info("Found profile for task %s in %s", task, file_path)
+                if not profile.num_gpus_to_profile:
+                    raise ValueError(f"Profile for task {task} in {file_path} has no GPU profiles defined")
+                return profile.num_gpus_to_profile
 
-        # No profile found, return default (1 GPU)
-        logger.debug("No profile found for task %s, using default (1 GPU)", task)
+        # No profile found, return default profile
+        logger.info("No profile found for task %s, using default (1 GPU)", task)
         return self.get_default_profile()
 
     def get_default_profile(self) -> dict[int, ProfileInfo]:
         """Get the default profile for tasks without specific profiles.
 
         Returns:
-            Default profile with 1 GPU requirement
+            Default profile that can only run with 1 GPU
         """
         return {1: ProfileInfo()}

@@ -7,7 +7,7 @@ from typing import Any
 import httpx
 
 from cornserve import constants
-from cornserve.services.resource_manager.resource import GPU
+from cornserve.services.resource import GPU
 from cornserve.task.builtins.encoder import EncoderInput, EncoderOutput, EncoderTask
 from cornserve.task_executors.descriptor.base import TaskExecutionDescriptor
 from cornserve.task_executors.descriptor.registry import DESCRIPTOR_REGISTRY

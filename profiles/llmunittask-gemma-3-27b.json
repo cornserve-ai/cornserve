@@ -1,12 +1,11 @@
 {
   "task": {
     "__class__": "LLMUnitTask",
-    "model_id": "google/gemma-2-27b-it",
+    "model_id": "google/gemma-3-27b-it",
     "receive_embeddings": true,
-    "execution_descriptor_name": null,
-    "id": "example-id-for-gemma3-27b"
+    "execution_descriptor_name": null
   },
-  "gpu_requirements": {
+  "num_gpus_to_profile": {
     "2": {},
     "4": {}
   }

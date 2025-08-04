@@ -4,11 +4,10 @@ from __future__ import annotations
 
 import threading
 import time
-from pathlib import Path
 from typing import cast
 
 import rich
-from kubernetes import client, config
+from kubernetes import client
 from kubernetes.client import V1Pod
 from kubernetes.client.rest import ApiException
 from rich.console import Console
@@ -35,7 +34,7 @@ class LogStreamer:
     """Streams logs from Kubernetes pods related to unit tasks."""
 
     def __init__(
-        self, unit_task_names: list[str], console: Console | None = None, kube_config_path: Path | None = None
+        self, unit_task_names: list[str], console: Console | None = None, kube_config_path: str | None = None
     ) -> None:
         """Initialize the LogStreamer.
 
@@ -63,23 +62,17 @@ class LogStreamer:
         self.console.print("[bold yellow]LogStreamer: Checking Kubernetes access...[/bold yellow]")
 
         try:
-            load_k8s_config(self.kube_config_path)
+            load_k8s_config(self.kube_config_path, ["/etc/rancher/k3s/k3s.yaml"])
             # Test API access
             client.CoreV1Api().get_api_resources()
-            self.console.print("LogStreamer: Kubernetes access confirmed. Going to stream executor logs ...")
+            self.console.print("LogStreamer: Kubernetes access confirmed. Executor logs will be streamed.")
             return True
-        except Exception:
-            # Try K3s fallback if standard config loading failed
-            if not self.kube_config_path:
-                try:
-                    config.load_kube_config(config_file="/etc/rancher/k3s/k3s.yaml")
-                    client.CoreV1Api().get_api_resources()
-                    self.console.print("LogStreamer: K3s config loaded successfully. Going to stream executor logs ...")
-                    return True
-                except Exception:
-                    pass
+        except Exception as e:
+            self.console.print(
+                "LogStreamer: Failed to configure Kubernetes access. Executor logs will not be streamed.",
+            )
+            self.console.print(f"Error: '{e}'")
 
-        self.console.print("LogStreamer: Kubernetes access failed. No executor log will be streamed.")
         return False
 
     def _assign_color(self, pod_name: str) -> None:

@@ -25,7 +25,7 @@ from tyro.constructors import PrimitiveConstructorSpec
 
 from cornserve.cli.log_streamer import LogStreamer
 from cornserve.cli.utils.k8s import load_k8s_config
-from cornserve.constants import K8S_NAMESPACE
+from cornserve.constants import K8S_NAMESPACE, K8S_UNIT_TASK_PROFILES_CONFIG_MAP_NAME
 from cornserve.services.gateway.models import (
     AppInvocationRequest,
     AppRegistrationRequest,
@@ -122,7 +122,7 @@ class Alias:
 def register(
     path: Annotated[Path, tyro.conf.Positional],
     alias: str | None = None,
-    kube_config_path: Path | None = None,
+    kube_config_path: str | None = None,
 ) -> None:
     """Register an app with the Cornserve gateway.
 
@@ -471,10 +471,10 @@ def _handle_streaming_response(
             rich.print(Panel(f"Error processing streaming response: {e}", style="red", expand=False))
 
 
-@app.command(name="profile")
+@app.command(name="deploy_profiles")
 def profile_deploy(
     profiles_dir: Annotated[Path, tyro.conf.Positional] = Path("profiles"),
-    kube_config_path: Path | None = None,
+    kube_config_path: str | None = None,
     dry_run: bool = False,
 ) -> None:
     """Deploy UnitTask profiles to Kubernetes as a ConfigMap.
@@ -490,7 +490,7 @@ def profile_deploy(
 
     # Load Kubernetes config
     try:
-        load_k8s_config(kube_config_path)
+        load_k8s_config(kube_config_path, ["/etc/rancher/k3s/k3s.yaml"])
     except Exception as e:
         rich.print(Panel(f"Failed to load Kubernetes config: {e}", style="red", expand=False))
         return
@@ -522,9 +522,9 @@ def profile_deploy(
     # Display what will be deployed
     table = Table(box=box.ROUNDED)
     table.add_column("Profile File")
-    table.add_column("Size")
+    table.add_column("Content")
     for filename, content in config_data.items():
-        table.add_row(filename, f"{len(content)} chars")
+        table.add_row(filename, content)
 
     rich.print(f"Found {len(config_data)} profile(s) to deploy:")
     rich.print(table)
@@ -536,7 +536,7 @@ def profile_deploy(
     # Create or update ConfigMap
     try:
         v1 = client.CoreV1Api()
-        map_name = "cornserve-profiles"
+        map_name = K8S_UNIT_TASK_PROFILES_CONFIG_MAP_NAME
 
         configmap = client.V1ConfigMap(
             metadata=client.V1ObjectMeta(

@@ -10,7 +10,7 @@ import kubernetes_asyncio.client as kclient
 from pydantic import BaseModel
 
 from cornserve import constants
-from cornserve.services.resource_manager.resource import GPU
+from cornserve.services.resource import GPU
 from cornserve.task.base import TaskInput, TaskOutput, UnitTask
 
 TaskT = TypeVar("TaskT", bound=UnitTask)
