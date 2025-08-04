@@ -298,7 +298,7 @@ class ResourceManager:
             if remaining_gpus != 0 and remaining_gpus not in profile:
                 raise ValueError(
                     f"Cannot scale up task {task} by {num_gpus} GPUs. "
-                    f"There will be {remaining_gpus} GPUs left unallocated "
+                    f"There will be {remaining_gpus} GPUs left unused "
                     f"according to the profile: {profile.keys()}. ",
                 )
             for _ in range(num_gpus // allocate_granularity):
