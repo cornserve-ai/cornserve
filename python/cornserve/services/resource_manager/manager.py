@@ -306,7 +306,7 @@ class ResourceManager:
                 gpus_to_allocate %= chunk_size
             if gpus_to_allocate > 0:
                 logger.warning(
-                    "Requested %d GPUs to scale up task %s, but only %d GPUs will be used based on the profile: %s",
+                    "Requested %d GPUs to scale up task %s, but only allocated %d GPUs based on the profile: %s",
                     num_gpus,
                     task,
                     len(resources),
