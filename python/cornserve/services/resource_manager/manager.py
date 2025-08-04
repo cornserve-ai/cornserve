@@ -292,25 +292,26 @@ class ResourceManager:
 
             # TODO: decide GPU placement strategy & preference
             resources = []
-            allocate_granularity = min(profile.keys())
-            remaining_gpus = num_gpus % allocate_granularity
-            # sanity check
-            if remaining_gpus != 0 and remaining_gpus not in profile:
-                raise ValueError(
-                    f"Cannot scale up task {task} by {num_gpus} GPUs. "
-                    f"There will be {remaining_gpus} GPUs left unused "
-                    f"according to the profile: {profile.keys()}. ",
+            gpus_to_allocate = num_gpus
+            for chunk_size in sorted(profile.keys(), reverse=True):
+                num_chunks = gpus_to_allocate // chunk_size
+                if num_chunks == 0:
+                    continue
+                for _ in range(num_chunks):
+                    batched_resources = self.resource.allocate(
+                        num_gpus=chunk_size,
+                        owner=task_state.id,
+                    )
+                    resources.extend(batched_resources)
+                gpus_to_allocate %= chunk_size
+            if gpus_to_allocate > 0:
+                logger.warning(
+                    "Requested %d GPUs to scale up task %s, but only %d GPUs will be used based on the profile: %s",
+                    num_gpus,
+                    task,
+                    len(resources),
+                    profile,
                 )
-            for _ in range(num_gpus // allocate_granularity):
-                # here we make sure colocation
-                batched_resources = self.resource.allocate(
-                    num_gpus=allocate_granularity,
-                    owner=task_state.id,
-                )
-                resources.extend(batched_resources)
-            for _ in range(remaining_gpus):
-                # allocate the remaining GPUs one by one
-                resources.append(self.resource.allocate(num_gpus=1, owner=task_state.id)[0])
 
         assert task_state.stub is not None, "Task manager stub is not initialized"
         async with task_state.lock:
