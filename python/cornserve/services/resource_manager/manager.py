@@ -301,7 +301,7 @@ class ResourceManager:
                     f"according to the profile: {profile.keys()}. ",
                 )
             for _ in range(num_gpus // allocate_granularity):
-                # here we make sure the colocation
+                # here we make sure colocation
                 batched_resources = self.resource.allocate(
                     num_gpus=allocate_granularity,
                     owner=task_state.id,
