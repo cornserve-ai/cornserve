@@ -30,8 +30,17 @@ def load_k8s_config(
     except ConfigException:
         pass
 
-    for path in fallback_config_paths or [None]:
+    errors = []
+    config_paths = fallback_config_paths or []
+    for path in config_paths + [None]:
         try:
             config.load_kube_config(path)
+            return
         except Exception as e:
-            raise RuntimeError(f"Failed to load Kubernetes config: {e}") from e
+            errors.append(e)
+
+    raise RuntimeError(
+        "Failed to load Kubernetes configuration from all provided paths. "
+        "Please ensure at least one valid kubeconfig file is available.\n"
+        f"Errors encountered: {', '.join(str(e) for e in errors)}"
+    )

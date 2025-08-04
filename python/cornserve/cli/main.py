@@ -550,7 +550,7 @@ def profile_deploy(
         try:
             v1.read_namespaced_config_map(name=map_name, namespace=K8S_NAMESPACE)
             # ConfigMap exists, update it
-            v1.patch_namespaced_config_map(name=map_name, namespace=K8S_NAMESPACE, body=configmap)
+            v1.replace_namespaced_config_map(name=map_name, namespace=K8S_NAMESPACE, body=configmap)
             rich.print(
                 Panel(
                     f"Updated ConfigMap '{map_name}' in namespace '{K8S_NAMESPACE}' with {len(config_data)} profiles.",

@@ -185,17 +185,20 @@ class TaskManager:
                 gpus = sorted(gpus, key=lambda gpu: gpu.global_rank)
 
                 # Try to allocate task executors with the largest number of GPUs first
+                node_executor_resources = []
                 for num_gpus in feasible_num_gpus:
                     while len(gpus) >= num_gpus:
                         alloc_gpus, gpus = gpus[:num_gpus], gpus[num_gpus:]
-                        executor_resources.append(alloc_gpus)
+                        node_executor_resources.append(alloc_gpus)
+
+                executor_resources.extend(node_executor_resources)
 
                 logger.info(
                     "Node %s has %d GPUs. Spawning %d task executors with resources: %s",
                     node,
                     len(node_gpus[node]),
-                    len(executor_resources),
-                    [f"{len(gpus)} GPUs" for gpus in executor_resources],
+                    len(node_executor_resources),
+                    [f"{len(gpus)} GPUs" for gpus in node_executor_resources],
                 )
                 if gpus:
                     logger.warning(
