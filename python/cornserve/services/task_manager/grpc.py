@@ -8,6 +8,7 @@ from cornserve.logging import get_logger
 from cornserve.services.pb import common_pb2, task_manager_pb2, task_manager_pb2_grpc
 from cornserve.services.resource_manager.resource import GPU
 from cornserve.services.task_manager.manager import TaskManager
+from cornserve.services.cr_manager.manager import CRManager
 from cornserve.task.base import UnitTask
 
 logger = get_logger(__name__)
@@ -17,9 +18,10 @@ cleanup_coroutines = []
 class TaskManagerServicer(task_manager_pb2_grpc.TaskManagerServicer):
     """Task Manager gRPC service implementation."""
 
-    def __init__(self) -> None:
+    def __init__(self, cr_manager: CRManager) -> None:
         """Initialize the TaskManagerServicer."""
         self.manager: TaskManager | None = None
+        self.cr_manager = cr_manager
 
     async def RegisterTask(
         self,
@@ -28,10 +30,9 @@ class TaskManagerServicer(task_manager_pb2_grpc.TaskManagerServicer):
     ) -> task_manager_pb2.RegisterTaskResponse:
         """Become a task manager for a new task."""
         logger.info(
-            "Registering task manager %s with task class %s and config %s with %d GPUs",
+            "Registering task manager %s with task CR name %s and %d GPUs",
             request.task_manager_id,
-            request.task.task_class_name,
-            request.task.task_config,
+            request.task_cr_name,
             len(request.gpus),
         )
 
@@ -41,7 +42,8 @@ class TaskManagerServicer(task_manager_pb2_grpc.TaskManagerServicer):
                 "When initializing the task manager, all resources actions must be ADD",
             )
 
-        task = UnitTask.from_pb(request.task)
+        # Reconstruct UnitTask from UnitTaskInstance CR instead of protobuf
+        task = await self.cr_manager.get_unit_task_from_instance_cr(request.task_cr_name)
         gpus = [GPU(node=gpu.node_id, global_rank=gpu.global_rank, local_rank=gpu.local_rank) for gpu in request.gpus]
 
         self.manager = await TaskManager.init(id=request.task_manager_id, task=task, gpus=gpus)
@@ -105,9 +107,9 @@ class TaskManagerServicer(task_manager_pb2_grpc.TaskManagerServicer):
         )
 
 
-def create_server() -> tuple[grpc.aio.Server, TaskManagerServicer]:
+def create_server(cr_manager: CRManager) -> tuple[grpc.aio.Server, TaskManagerServicer]:
     """Create the gRPC server for the Task Manager."""
-    servicer = TaskManagerServicer()
+    servicer = TaskManagerServicer(cr_manager)
     server = grpc.aio.server()
     task_manager_pb2_grpc.add_TaskManagerServicer_to_server(servicer, server)
     listen_addr = "[::]:50051"

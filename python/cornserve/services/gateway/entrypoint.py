@@ -28,6 +28,21 @@ async def serve() -> None:
 
     configure_otel("gateway")
 
+    # Start CR watcher to load tasks from Custom Resources BEFORE starting FastAPI
+    from cornserve.services.cr_manager.manager import CRManager
+    logger.info("Starting CR watcher for Gateway service")
+    cr_manager = CRManager()
+    
+    # Deploy built-in task definitions as Custom Resources
+    from cornserve.services.gateway.router import deploy_builtin_task_crds
+    logger.info("Deploying built-in task definitions")
+    await deploy_builtin_task_crds()
+    
+    cr_watcher_task = asyncio.create_task(
+        cr_manager.watch_cr_updates(),
+        name="gateway_cr_watcher"
+    )
+
     app = create_app()
     FastAPIInstrumentor.instrument_app(app)
     GrpcAioInstrumentorClient().instrument()
@@ -67,6 +82,19 @@ async def serve() -> None:
         await server_task
     except asyncio.CancelledError:
         logger.info("Shutting down Gateway service")
+        
+        # Cancel CR watcher task
+        if not cr_watcher_task.done():
+            logger.info("Cancelling CR watcher task")
+            cr_watcher_task.cancel()
+            try:
+                await cr_watcher_task
+            except asyncio.CancelledError:
+                logger.info("CR watcher task cancelled successfully")
+        
+        # Close CR manager
+        await cr_manager.close()
+        
         await app_manager.shutdown()
         await server.shutdown()
 

@@ -5,7 +5,8 @@ metadata:
   namespace: cornserve
 subjects:
 - kind: ServiceAccount
-  name: task-manager
+  name: cornserve-sa
+  namespace: cornserve
 roleRef:
   kind: Role
   name: task-manager-role

@@ -21,6 +21,7 @@ from pydantic import ValidationError
 
 from cornserve.constants import K8S_RESOURCE_MANAGER_GRPC_URL
 from cornserve.logging import get_logger
+from cornserve.services.cr_manager.manager import CRManager
 from cornserve.services.gateway.app.manager import AppManager
 from cornserve.services.gateway.models import (
     AppInvocationRequest,
@@ -38,6 +39,132 @@ from cornserve.task.base import Stream, TaskGraphDispatch, TaskOutput, UnitTaskL
 router = APIRouter()
 logger = get_logger(__name__)
 tracer = trace.get_tracer(__name__)
+
+
+async def deploy_builtin_task_crds() -> None:
+    """Deploy built-in task definitions as Custom Resources.
+    
+    Note: This function deploys Custom Resource instances (CRs), not Custom Resource 
+    Definitions (CRDs). CRDs are deployed at the cluster level via Kubernetes manifests.
+    """
+    try:
+        logger.info("Deploying built-in task definitions as Custom Resources")
+        cr_manager = CRManager()
+        
+        # Read the LLM task source code
+        import inspect
+        from cornserve.tasklib.task.builtins import llm, encoder
+        
+        llm_source = inspect.getsource(llm)
+        encoder_source = inspect.getsource(encoder)
+        
+        # Deploy UnitTask definitions from llm.py as Custom Resources
+        llm_tasks = [
+            ("LLMUnitTask", "llm-unit-task", "cornserve.tasklib.task.builtins.llm"),
+            ("PrefillLLMUnitTask", "prefill-llm-unit-task", "cornserve.tasklib.task.builtins.llm"), 
+            ("DecodeLLMUnitTask", "decode-llm-unit-task", "cornserve.tasklib.task.builtins.llm"),
+        ]
+        
+        # Deploy UnitTask definitions from encoder.py as Custom Resources
+        encoder_tasks = [
+            ("EncoderTask", "encoder-task", "cornserve.tasklib.task.builtins.encoder"),
+        ]
+        
+        # Deploy LLM tasks
+        for task_class_name, cr_name, module_name in llm_tasks:
+            try:
+                await cr_manager.create_unit_task_definition(
+                    name=cr_name,
+                    task_class_name=task_class_name,
+                    module_name=module_name,
+                    source_code=llm_source
+                )
+                logger.info("Successfully deployed UnitTaskDefinition CR: %s", cr_name)
+            except ValueError as e:
+                if "already exists" in str(e):
+                    logger.info("UnitTaskDefinition CR already exists: %s", cr_name)
+                else:
+                    raise
+        
+        # Deploy Encoder tasks
+        for task_class_name, cr_name, module_name in encoder_tasks:
+            try:
+                await cr_manager.create_unit_task_definition(
+                    name=cr_name,
+                    task_class_name=task_class_name,
+                    module_name=module_name,
+                    source_code=encoder_source
+                )
+                logger.info("Successfully deployed UnitTaskDefinition CR: %s", cr_name)
+            except ValueError as e:
+                if "already exists" in str(e):
+                    logger.info("UnitTaskDefinition CR already exists: %s", cr_name)
+                else:
+                    raise
+        
+        # Deploy ExecutionDescriptor definitions from built-in descriptors as Custom Resources
+        logger.info("Deploying built-in execution descriptors as Custom Resources")
+        
+        # Read the descriptor source code
+        from cornserve.tasklib.task_executors.descriptor.builtins import llm as llm_descriptors, encoder as encoder_descriptors
+        
+        llm_descriptors_source = inspect.getsource(llm_descriptors)
+        encoder_descriptors_source = inspect.getsource(encoder_descriptors)
+        
+        # Deploy ExecutionDescriptor definitions from llm descriptors
+        llm_descriptors_list = [
+            ("VLLMDescriptor", "vllm-descriptor", "cornserve.tasklib.task_executors.descriptor.builtins.llm", "LLMUnitTask"),
+            ("PrefillVLLMDescriptor", "prefill-vllm-descriptor", "cornserve.tasklib.task_executors.descriptor.builtins.llm", "PrefillLLMUnitTask"),
+            ("DecodeVLLMDescriptor", "decode-vllm-descriptor", "cornserve.tasklib.task_executors.descriptor.builtins.llm", "DecodeLLMUnitTask"),
+        ]
+        
+        # Deploy ExecutionDescriptor definitions from encoder descriptors
+        encoder_descriptors_list = [
+            ("EricDescriptor", "eric-descriptor", "cornserve.tasklib.task_executors.descriptor.builtins.encoder", "EncoderTask"),
+        ]
+        
+        # Deploy LLM descriptors
+        for descriptor_class_name, cr_name, module_name, task_class_name in llm_descriptors_list:
+            try:
+                await cr_manager.create_execution_descriptor(
+                    name=cr_name,
+                    task_class_name=task_class_name,
+                    descriptor_class_name=descriptor_class_name,
+                    module_name=module_name,
+                    source_code=llm_descriptors_source,
+                    is_default=True
+                )
+                logger.info("Successfully deployed ExecutionDescriptor CR: %s", cr_name)
+            except ValueError as e:
+                if "already exists" in str(e):
+                    logger.info("ExecutionDescriptor CR already exists: %s", cr_name)
+                else:
+                    raise
+        
+        # Deploy Encoder descriptors
+        for descriptor_class_name, cr_name, module_name, task_class_name in encoder_descriptors_list:
+            try:
+                await cr_manager.create_execution_descriptor(
+                    name=cr_name,
+                    task_class_name=task_class_name,
+                    descriptor_class_name=descriptor_class_name,
+                    module_name=module_name,
+                    source_code=encoder_descriptors_source,
+                    is_default=True
+                )
+                logger.info("Successfully deployed ExecutionDescriptor CR: %s", cr_name)
+            except ValueError as e:
+                if "already exists" in str(e):
+                    logger.info("ExecutionDescriptor CR already exists: %s", cr_name)
+                else:
+                    raise
+        
+        await cr_manager.close()
+        logger.info("Completed deploying built-in task definitions and execution descriptors as Custom Resources")
+        
+    except Exception as e:
+        logger.error("Failed to deploy built-in task Custom Resources: %s", e)
+        # Don't fail the service startup, just log the error
 
 
 @router.post("/app/register")
@@ -322,7 +449,11 @@ async def health_check():
 
 def init_app_state(app: FastAPI) -> None:
     """Initialize the app state with required components."""
-    app.state.task_manager = TaskManager(K8S_RESOURCE_MANAGER_GRPC_URL)
+    # Create CRManager for handling unit task instance CRs
+    app.state.cr_manager = CRManager()
+    
+    # Pass CRManager to TaskManager for CR-based task deployment
+    app.state.task_manager = TaskManager(K8S_RESOURCE_MANAGER_GRPC_URL, app.state.cr_manager)
     app.state.app_manager = AppManager(app.state.task_manager)
     app.state.session_manager = SessionManager(app.state.task_manager)
 

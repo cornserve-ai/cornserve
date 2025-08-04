@@ -7,6 +7,10 @@ resources:
 - task-dispatcher
 - task-manager
 - namespace.yaml
+- crds/unit-task-definition-crd.yaml
+- crds/unit-task-instance-crd.yaml
+- crds/execution-descriptor-crd.yaml
+- rbac.yaml
 images:
 - name: cornserve/gateway
   newName: cornserve/gateway

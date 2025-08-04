@@ -1,0 +1,30 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: unittaskinstances.cornserve.ai
+spec:
+  group: cornserve.ai
+  scope: Namespaced
+  names:
+    plural: unittaskinstances
+    singular: unittaskinstance
+    kind: UnitTaskInstance
+  versions:
+    - name: v1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              properties:
+                definitionRef:
+                  type: string
+                executionDescriptorName:
+                  type: string
+                config:
+                  type: object
+                  x-kubernetes-preserve-unknown-fields: true
+              required: ["definitionRef", "config"] 

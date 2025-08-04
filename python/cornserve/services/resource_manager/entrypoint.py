@@ -22,9 +22,18 @@ async def serve() -> None:
     GrpcAioInstrumentorServer().instrument()
     GrpcAioInstrumentorClient().instrument()
 
+    # Start CR watcher to load tasks from Custom Resources
+    from cornserve.services.cr_manager.manager import CRManager
+    logger.info("Starting CR watcher for Resource Manager service")
+    cr_manager = CRManager()
+    cr_watcher_task = asyncio.create_task(
+        cr_manager.watch_cr_updates(),
+        name="resource_manager_cr_watcher"
+    )
+
     resource_manager = await ResourceManager.init()
 
-    server = create_server(resource_manager)
+    server = create_server(resource_manager, cr_manager)
     await server.start()
 
     logger.info("gRPC server started")
@@ -42,6 +51,19 @@ async def serve() -> None:
         await server_task
     except asyncio.CancelledError:
         logger.info("Shutting down Resource Manager service")
+        
+        # Cancel CR watcher task
+        if not cr_watcher_task.done():
+            logger.info("Cancelling CR watcher task")
+            cr_watcher_task.cancel()
+            try:
+                await cr_watcher_task
+            except asyncio.CancelledError:
+                logger.info("CR watcher task cancelled successfully")
+        
+        # Close CR manager
+        await cr_manager.close()
+        
         await server.stop(5)
         logger.info("Shutting down resource manager...")
         await resource_manager.shutdown()

@@ -79,3 +79,8 @@ if TYPE_CHECKING:
     CONTAINER_IMAGE_ERIC: str
     CONTAINER_IMAGE_VLLM: str
     CONTAINER_IMAGE_PULL_POLICY: str
+
+
+# CRD constants.
+CRD_GROUP = "cornserve.ai"
+CRD_VERSION = "v1"

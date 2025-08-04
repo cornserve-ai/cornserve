@@ -19,8 +19,8 @@ message TaskManagerDeployment {
 }
 
 message NotifyUnitTaskDeploymentRequest {
-  // Task that was deployed
-  common.UnitTask task = 1;
+  // Name of the UnitTaskInstance CR that was deployed
+  string task_cr_name = 1;
 
   // Task manager deployment info
   TaskManagerDeployment task_manager = 2;
@@ -32,7 +32,8 @@ message NotifyUnitTaskDeploymentResponse {
 
 // Existing unit task removed
 message NotifyUnitTaskTeardownRequest {
-  common.UnitTask task = 1;
+  // Name of the UnitTaskInstance CR that was torn down
+  string task_cr_name = 1;
 }
 
 message NotifyUnitTaskTeardownResponse {

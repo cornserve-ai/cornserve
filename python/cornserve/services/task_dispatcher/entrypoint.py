@@ -28,6 +28,15 @@ async def serve() -> None:
 
     configure_otel("task_dispatcher")
 
+    # Start CR watcher to load tasks from Custom Resources
+    from cornserve.services.cr_manager.manager import CRManager
+    logger.info("Starting CR watcher for Task Dispatcher service")
+    cr_manager = CRManager()
+    cr_watcher_task = asyncio.create_task(
+        cr_manager.watch_cr_updates(),
+        name="task_dispatcher_cr_watcher"
+    )
+
     # FastAPI server
     app = create_app()
 
@@ -55,7 +64,7 @@ async def serve() -> None:
     dispatcher: TaskDispatcher = app.state.dispatcher
 
     # gRPC server
-    grpc_server = create_server(dispatcher)
+    grpc_server = create_server(dispatcher, cr_manager)
 
     loop = asyncio.get_running_loop()
     uvicorn_server_task = loop.create_task(uvicorn_server.serve())
@@ -71,6 +80,19 @@ async def serve() -> None:
         await uvicorn_server_task
     except asyncio.CancelledError:
         logger.info("Shutting down Task Dispatcher service")
+        
+        # Cancel CR watcher task
+        if not cr_watcher_task.done():
+            logger.info("Cancelling CR watcher task")
+            cr_watcher_task.cancel()
+            try:
+                await cr_watcher_task
+            except asyncio.CancelledError:
+                logger.info("CR watcher task cancelled successfully")
+        
+        # Close CR manager
+        await cr_manager.close()
+        
         await dispatcher.shutdown()
         await uvicorn_server.shutdown()
         await grpc_server.stop(5)

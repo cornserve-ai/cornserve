@@ -8,7 +8,7 @@ import httpx
 
 from cornserve import constants
 from cornserve.services.resource_manager.resource import GPU
-from cornserve.task.builtins.encoder import EncoderInput, EncoderOutput, EncoderTask
+from cornserve.tasklib.task.builtins.encoder import EncoderInput, EncoderOutput, EncoderTask
 from cornserve.task_executors.descriptor.base import TaskExecutionDescriptor
 from cornserve.task_executors.descriptor.registry import DESCRIPTOR_REGISTRY
 from cornserve.task_executors.eric.api import EmbeddingData, EmbeddingRequest, EmbeddingResponse, Modality, Status
@@ -79,4 +79,3 @@ class EricDescriptor(TaskExecutionDescriptor[EncoderTask, EncoderInput, EncoderO
             raise RuntimeError(f"Error in encoder task: {resp.error_message}")
 
 
-DESCRIPTOR_REGISTRY.register(EncoderTask, EricDescriptor, default=True)

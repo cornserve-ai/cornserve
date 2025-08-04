@@ -34,8 +34,8 @@ from collections.abc import AsyncIterator
 from pydantic import RootModel
 
 from cornserve.app.base import AppConfig
-from cornserve.task.base import Stream
-from cornserve.task.builtins.llm import MLLMTask, Modality, OpenAIChatCompletionChunk, OpenAIChatCompletionRequest
+from cornserve.tasklib.task.base import Stream
+from cornserve.tasklib.task.builtins.llm import MLLMTask, Modality, OpenAIChatCompletionChunk, OpenAIChatCompletionRequest
 
 gemma_model_ids = {
     "gemma3-4b": "google/gemma-3-4b-it",

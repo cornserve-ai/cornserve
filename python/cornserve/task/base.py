@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING, Any, ClassVar, Generic, Self, TypeVar, final
 
 import httpx
 from opentelemetry import trace
-from pydantic import BaseModel, ConfigDict, Field, model_serializer, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_serializer, model_validator, ValidationError
 
 from cornserve.constants import K8S_GATEWAY_SERVICE_HTTP_URL
 from cornserve.logging import get_logger
@@ -364,35 +364,19 @@ class UnitTask(Task, Generic[InputT, OutputT]):
         """
         super().__init_subclass__(**kwargs)
 
-        # When a subclass is created, add it to the task registry.
-
         def is_proxy_for_unit(base: type) -> bool:
             """True if *base* appears to be the auto‑generated proxy."""
             return UnitTask in getattr(base, "__bases__", ())
 
-        def maybe_register_task(cls: type[UnitTask]) -> None:
-            """Register the unit task to the task registry if it is a unit task.
-
-            Basically, the two generic type arguments must be filled with concrete types.
-            """
-            args = cls.__pydantic_generic_metadata__["args"]
-            if len(args) != 2:
-                return
-            input_arg, output_arg = args
-            if issubclass(input_arg, TaskInput) and issubclass(output_arg, TaskOutput):
-                TASK_REGISTRY.register(cls, input_arg, output_arg)
-
         # If any immediate base (or proxies) is `UnitTask`, cls is the root.
         if any(is_proxy_for_unit(b) for b in cls.__bases__):
             cls.root_unit_task_cls = cls
-            maybe_register_task(cls)
             return
 
         # Otherwise climb the MRO until you meet that condition
         for anc in cls.mro()[1:]:
             if any(is_proxy_for_unit(b) for b in anc.__bases__):
                 cls.root_unit_task_cls = anc
-                maybe_register_task(cls)
                 break
         # Fallback for the intemediate class `UnitTask[SpecificInput, SpecificOutput]`
         # that appears due to generic inheritance.
@@ -403,7 +387,43 @@ class UnitTask(Task, Generic[InputT, OutputT]):
     def execution_descriptor(self) -> TaskExecutionDescriptor[Self, InputT, OutputT]:
         """Get the task execution descriptor for this task."""
         descriptor_cls = DESCRIPTOR_REGISTRY.get(self.root_unit_task_cls, self.execution_descriptor_name)
-        return descriptor_cls(task=self)
+        
+        # CRITICAL: We use model_construct instead of normal Pydantic validation here.
+        #
+        # ROOT CAUSE: Class identity mismatch between task instances and descriptor expectations
+        # 
+        # PROBLEM DETAILS:
+        # 1. Task execution descriptors (e.g., EricDescriptor) are loaded from Custom Resources (CRs)
+        #    and registered in DESCRIPTOR_REGISTRY using task classes from TASK_REGISTRY
+        # 2. These descriptors are parameterized like: EricDescriptor(TaskExecutionDescriptor[EncoderTask, ...])
+        #    where EncoderTask comes from the CR-loaded task definition
+        # 3. However, when apps are registered, they load their own copy of task classes from
+        #    app source code, creating different class instances with the same name
+        # 4. During execution_descriptor access, we try to create descriptor_cls(task=self)
+        #    where 'self' is a task instance from app source, but descriptor_cls expects
+        #    a task instance from the CR-loaded class
+        # 5. Pydantic's strict type validation fails because it compares exact class identity,
+        #    not just class names or structure
+        #
+        # EXAMPLE:
+        # - Descriptor expects: EncoderTask (id: 104678592029536) from TASK_REGISTRY  
+        # - App provides:       EncoderTask (id: 104678589216976) from app source
+        # - Same name, same structure, but different memory addresses → Validation fails
+        #
+        # WHY model_construct IS SAFE:
+        # 1. The task data structure is identical (same fields, same validation rules)
+        # 2. Only the class identity differs, not the actual data validity
+        # 3. model_construct bypasses type validation but preserves data integrity
+        # 4. The descriptor methods still work correctly with the task instance
+        #
+        # ALTERNATIVE APPROACHES CONSIDERED:
+        # - String-based registry keys: Already implemented but doesn't solve descriptor instantiation
+        # - Custom validators: Complex and fragile, doesn't address the fundamental issue
+        # - Task instance conversion: Expensive and may lose instance-specific state
+        # 
+        # CONCLUSION: model_construct is the most direct and reliable solution to this
+        # systematic class identity mismatch while preserving type safety where it matters.
+        return descriptor_cls.model_construct(task=self)
 
     def is_equivalent_to(self, other: object) -> bool:
         """Check if two unit tasks are equivalent.

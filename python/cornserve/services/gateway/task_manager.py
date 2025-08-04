@@ -21,6 +21,7 @@ from cornserve.services.pb.resource_manager_pb2 import (
     TeardownUnitTaskRequest,
 )
 from cornserve.services.pb.resource_manager_pb2_grpc import ResourceManagerStub
+from cornserve.services.cr_manager.manager import CRManager
 from cornserve.task.base import TASK_TIMEOUT, TaskGraphDispatch, UnitTask
 
 logger = get_logger(__name__)
@@ -43,11 +44,12 @@ class TaskState(enum.StrEnum):
 class TaskManager:
     """Manages registered and deployed tasks."""
 
-    def __init__(self, resource_manager_grpc_url: str) -> None:
+    def __init__(self, resource_manager_grpc_url: str, cr_manager: CRManager) -> None:
         """Initialize the task manager.
 
         Args:
             resource_manager_grpc_url: The gRPC URL of the resource manager.
+            cr_manager: The CRManager for handling unit task instance CRs.
         """
         # A big lock to protect all task states
         self.task_lock = asyncio.Lock()
@@ -58,8 +60,12 @@ class TaskManager:
         # Task-related state. Key is the task ID.
         self.tasks: dict[str, UnitTask] = {}
         self.task_states: dict[str, TaskState] = {}  # Can be read without holding lock.
+        self.task_cr_names: dict[str, str] = {}  # Map task_id -> UnitTaskInstance CR name
         self.task_invocation_tasks: dict[str, list[asyncio.Task]] = defaultdict(list)
         self.task_usage_counter: dict[str, int] = defaultdict(int)
+
+        # CR Manager for creating/managing unit task instance CRs
+        self.cr_manager = cr_manager
 
         # gRPC client for resource manager
         self.resource_manager_channel = grpc.aio.insecure_channel(resource_manager_grpc_url)
@@ -102,11 +108,21 @@ class TaskManager:
                 # Whether or not it was already deployed, increment the usage counter
                 self.task_usage_counter[task_id] += 1
 
-            # Deploy tasks
+            # Deploy tasks by creating CRs and passing CR names to resource manager
             coros = []
+            task_cr_names = {}  # Map task_id -> CR name for cleanup if needed
+            
             for task_id in to_deploy:
                 task = self.tasks[task_id]
-                coros.append(self.resource_manager.DeployUnitTask(DeployUnitTaskRequest(task=task.to_pb())))
+                
+                # Create UnitTaskInstance CR for this task
+                _, cr_name = await self.cr_manager.create_unit_task_instance_from_task(task)
+                task_cr_names[task_id] = cr_name
+                self.task_cr_names[task_id] = cr_name  # Store for future teardown
+                
+                # Deploy via resource manager with CR name instead of protobuf
+                coros.append(self.resource_manager.DeployUnitTask(DeployUnitTaskRequest(task_cr_name=cr_name)))
+                
             responses = await asyncio.gather(*coros, return_exceptions=True)
 
             # Check for errors
@@ -124,12 +140,15 @@ class TaskManager:
             if errors:
                 cleanup_coros = []
                 for task_id in to_deploy:
-                    task = self.tasks[task_id]
+                    # Use the CR name for teardown instead of protobuf
+                    cr_name = task_cr_names[task_id]
                     cleanup_coros.append(
-                        self.resource_manager.TeardownUnitTask(TeardownUnitTaskRequest(task=task.to_pb()))
+                        self.resource_manager.TeardownUnitTask(TeardownUnitTaskRequest(task_cr_name=cr_name))
                     )
                     del self.tasks[task_id]
                     del self.task_states[task_id]
+                    if task_id in self.task_cr_names:
+                        del self.task_cr_names[task_id]
                     self.task_usage_counter[task_id] -= 1
                     if self.task_usage_counter[task_id] == 0:
                         del self.task_usage_counter[task_id]
@@ -176,11 +195,14 @@ class TaskManager:
                     logger.warning("Cannot find task, skipping teardown: %r", task)
                     continue
 
-            # Teardown tasks
+            # Teardown tasks using stored CR names
             coros = []
             for task_id in to_teardown:
-                task = self.tasks[task_id]
-                coros.append(self.resource_manager.TeardownUnitTask(TeardownUnitTaskRequest(task=task.to_pb())))
+                if task_id in self.task_cr_names:
+                    cr_name = self.task_cr_names[task_id]
+                    coros.append(self.resource_manager.TeardownUnitTask(TeardownUnitTaskRequest(task_cr_name=cr_name)))
+                else:
+                    logger.error("No CR name found for task %s during teardown", task_id)
             responses = await asyncio.gather(*coros, return_exceptions=True)
 
             # Check for errors and update task states
@@ -192,6 +214,8 @@ class TaskManager:
                 else:
                     del self.tasks[task_id]
                     del self.task_states[task_id]
+                    if task_id in self.task_cr_names:
+                        del self.task_cr_names[task_id]
                     del self.task_usage_counter[task_id]
                     logger.info("Teardown complete: %r", task_id)
 
@@ -206,9 +230,12 @@ class TaskManager:
                 raise KeyError(f"Unit Task with task_id {task_id} is not deployed")
             if self.task_states[task_id] != TaskState.READY:
                 raise RuntimeError(f"Unit Task {task_id} is not ready yet. Retry when it's ready.")
-            task = self.tasks[task_id]
+            if task_id not in self.task_cr_names:
+                raise RuntimeError(f"No CR name found for task {task_id}")
+            
+            cr_name = self.task_cr_names[task_id]
             response = await self.resource_manager.ScaleUnitTask(
-                ScaleUnitTaskRequest(task=task.to_pb(), num_gpus=num_gpus)
+                ScaleUnitTaskRequest(task_cr_name=cr_name, num_gpus=num_gpus)
             )
             if response.status != common_pb2.Status.STATUS_OK:
                 raise RuntimeError(f"Failed to scale task {task} to update {num_gpus} GPUs: {response.message}")

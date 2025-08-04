@@ -13,7 +13,7 @@ from openai.types.chat import ChatCompletionChunk
 from pydantic import BaseModel, Field
 
 from cornserve.task.base import Stream, Task, TaskInput, TaskOutput, UnitTask
-from cornserve.task.builtins.encoder import EncoderInput, EncoderOutput, EncoderTask, Modality
+from cornserve.tasklib.task.builtins.encoder import EncoderInput, EncoderOutput, EncoderTask, Modality
 from cornserve.task.forward import DataForward, Tensor
 
 

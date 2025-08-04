@@ -4,7 +4,7 @@ metadata:
   name: resource-manager-binding
 subjects:
 - kind: ServiceAccount
-  name: resource-manager
+  name: cornserve-sa
   namespace: cornserve
 roleRef:
   kind: ClusterRole

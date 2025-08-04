@@ -1,0 +1,29 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: unittaskdefinitions.cornserve.ai
+spec:
+  group: cornserve.ai
+  scope: Namespaced
+  names:
+    plural: unittaskdefinitions
+    singular: unittaskdefinition
+    kind: UnitTaskDefinition
+  versions:
+    - name: v1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              properties:
+                taskClassName:
+                  type: string
+                moduleName:
+                  type: string
+                sourceCode:
+                  type: string
+              required: ["taskClassName", "moduleName", "sourceCode"] 
