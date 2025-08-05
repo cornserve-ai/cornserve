@@ -101,7 +101,7 @@ def test_serde_one():
 def test_serde_graph():
     """Tests whether task graph invocations can be serialized and deserialized."""
     encoder_invocation = TaskInvocation(
-        task=EncoderTask(model_id="clip", modality=Modality.IMAGE),
+        task=EncoderTask(model_ids={"clip"}, modality=Modality.IMAGE),
         task_input=EncoderInput(model_id="clip", data_urls=["https://example.com/image.jpg"]),
         task_output=EncoderOutput(embeddings=[DataForward[Tensor]()]),
     )
@@ -126,11 +126,11 @@ def test_task_equivalence():
     """Tests whether unit task equivalence is determined correctly."""
     assert LLMUnitTask(model_id="llama").is_equivalent_to(LLMUnitTask(model_id="llama"))
     assert not LLMUnitTask(model_id="llama").is_equivalent_to(LLMUnitTask(model_id="mistral"))
-    assert EncoderTask(model_id="clip", modality=Modality.IMAGE).is_equivalent_to(
-        EncoderTask(model_id="clip", modality=Modality.IMAGE)
+    assert EncoderTask(model_ids={"clip"}, modality=Modality.IMAGE).is_equivalent_to(
+        EncoderTask(model_ids={"clip"}, modality=Modality.IMAGE)
     )
-    assert not EncoderTask(model_id="clip", modality=Modality.IMAGE).is_equivalent_to(
-        EncoderTask(model_id="clip", modality=Modality.VIDEO)
+    assert not EncoderTask(model_ids={"clip"}, modality=Modality.IMAGE).is_equivalent_to(
+        EncoderTask(model_ids={"clip"}, modality=Modality.VIDEO)
     )
 
 
