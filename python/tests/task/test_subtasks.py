@@ -49,8 +49,7 @@ class ArenaTask(Task[ArenaInput, ArenaOutput]):
         """
         EncoderTask(
             modality=self.modality,
-            model_id=list(self.models.values())[0],
-            adapter_model_ids=list(self.models.values())[1:],
+            model_ids=set(self.models.values()),
         )
 
         MLLMTask(
@@ -81,7 +80,7 @@ def test_arena_task_registration():
 
     encoder = getattr(task, "__subtask_0__")
     assert isinstance(encoder, EncoderTask)
-    assert encoder.model_id == "llama-7B"
+    assert encoder.model_ids == {"llama-7B", "gemma-4B"}
     assert encoder.modality == Modality.IMAGE
 
     mllm = getattr(task, "__subtask_1__")
@@ -94,7 +93,7 @@ def test_arena_task_registration():
 
     mllm_encoder = getattr(mllm, "__subtask_0__")
     assert isinstance(mllm_encoder, EncoderTask)
-    assert mllm_encoder.model_id == "gemma-4B"
+    assert mllm_encoder.model_ids == {"gemma-4B"}
     assert mllm_encoder.modality == Modality.IMAGE
 
     mllm_llm = getattr(mllm, "__subtask_1__")
