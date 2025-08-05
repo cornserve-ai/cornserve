@@ -297,7 +297,6 @@ class ResourceManager:
                 num_chunks, gpus_to_allocate = divmod(gpus_to_allocate, chunk_size)
                 if num_chunks == 0:
                     continue
-                
                 for chunk_allocated in range(num_chunks):
                     try:
                         batched_resources = self.resource.allocate(
@@ -305,7 +304,7 @@ class ResourceManager:
                             owner=task_state.id,
                         )
                         resources.extend(batched_resources)
-                    except CannotColocateError as e:
+                    except CannotColocateError:
                         # If we cannot colocate anymore, try next chunk size
                         # add back unallocated GPUs
                         gpus_to_allocate += chunk_size * (num_chunks - chunk_allocated)
