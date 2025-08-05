@@ -164,7 +164,6 @@ def test_mllm_mixed_modalities_coalesce():
     )
 
     assert ctx.invocations[1].task == task.encoders[Modality.VIDEO]
-    assert ctx.invocations[1].task == task.encoders[Modality.VIDEO]
     assert ctx.invocations[1].task_input.data_urls == ["http://example.com/video.mp4"]
     assert len(ctx.invocations[1].task_output.embeddings) == 1
     assert (
