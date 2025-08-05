@@ -63,6 +63,9 @@ class TaskManager:
         # Load the unit task profile
         self.task_profile = UnitTaskProfileManager(profile_dir=constants.UNIT_TASK_PROFILES_DIR).get_profile(task)
 
+        # Round robin routing
+        self.rr_counter = 0
+
     @classmethod
     async def init(cls, id: str, task: UnitTask, gpus: list[GPU]) -> TaskManager:
         """Initialize the designated task manager.
@@ -244,7 +247,10 @@ class TaskManager:
         """
         logger.info("Routing request %s with routing hint %s", request_id, routing_hint)
 
-        index = hash(request_id) % len(self.executor_deployments)
+        # index = hash(request_id) % len(self.executor_deployments)
+        # Round robin routing
+        index = self.rr_counter % len(self.executor_deployments)
+        self.rr_counter += 1
         deployment = list(self.executor_deployments.values())[index]
 
         route = deployment.url
