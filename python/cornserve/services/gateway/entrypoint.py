@@ -13,6 +13,7 @@ from opentelemetry.instrumentation.grpc import GrpcAioInstrumentorClient
 from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
 
 from cornserve.logging import get_logger
+from cornserve.services.cr_manager.manager import CRManager
 from cornserve.services.gateway.router import create_app
 from cornserve.tracing import configure_otel
 
@@ -29,14 +30,13 @@ async def serve() -> None:
     configure_otel("gateway")
 
     # Start CR watcher to load tasks from Custom Resources BEFORE starting FastAPI
-    from cornserve.services.cr_manager.manager import CRManager
     logger.info("Starting CR watcher for Gateway service")
     cr_manager = CRManager()
     
     # Deploy built-in task definitions as Custom Resources
-    from cornserve.services.gateway.router import deploy_builtin_task_crds
+    from cornserve.services.gateway.router import deploy_builtin_task_crs
     logger.info("Deploying built-in task definitions")
-    await deploy_builtin_task_crds()
+    await deploy_builtin_task_crs()
     
     cr_watcher_task = asyncio.create_task(
         cr_manager.watch_cr_updates(),

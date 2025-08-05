@@ -200,7 +200,7 @@ class TaskManager:
                     logger.warning("Cannot find task, skipping teardown: %r", task)
                     continue
 
-            # Teardown tasks using stored CR names
+            # Teardown tasks
             coros = []
             for task_id in to_teardown:
                 if task_id in self.task_cr_names:

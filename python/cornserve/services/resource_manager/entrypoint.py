@@ -8,6 +8,7 @@ import signal
 from opentelemetry.instrumentation.grpc import GrpcAioInstrumentorClient, GrpcAioInstrumentorServer
 
 from cornserve.logging import get_logger
+from cornserve.services.cr_manager.manager import CRManager
 from cornserve.services.resource_manager.grpc import create_server
 from cornserve.services.resource_manager.manager import ResourceManager
 from cornserve.tracing import configure_otel
@@ -22,8 +23,7 @@ async def serve() -> None:
     GrpcAioInstrumentorServer().instrument()
     GrpcAioInstrumentorClient().instrument()
 
-    # Start CR watcher to load tasks from Custom Resources
-    from cornserve.services.cr_manager.manager import CRManager
+    # Start CR watcher to load tasks/executors from CRs before gRPC server starts
     logger.info("Starting CR watcher for Resource Manager service")
     cr_manager = CRManager()
     cr_watcher_task = asyncio.create_task(

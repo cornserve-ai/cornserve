@@ -41,7 +41,7 @@ logger = get_logger(__name__)
 tracer = trace.get_tracer(__name__)
 
 
-async def deploy_builtin_task_crds() -> None:
+async def deploy_builtin_task_crs() -> None:
     """Deploy built-in task definitions as Custom Resources.
     
     Note: This function deploys Custom Resource instances (CRs), not Custom Resource 

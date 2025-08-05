@@ -12,6 +12,7 @@ from opentelemetry.instrumentation.grpc import GrpcInstrumentorClient, GrpcInstr
 from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
 
 from cornserve.logging import get_logger
+from cornserve.services.cr_manager.manager import CRManager
 from cornserve.services.task_dispatcher.grpc import create_server
 from cornserve.services.task_dispatcher.router import create_app
 from cornserve.tracing import configure_otel
@@ -28,8 +29,7 @@ async def serve() -> None:
 
     configure_otel("task_dispatcher")
 
-    # Start CR watcher to load tasks from Custom Resources
-    from cornserve.services.cr_manager.manager import CRManager
+    # Start CR watcher to load tasks/executors from CRs before the server starts
     logger.info("Starting CR watcher for Task Dispatcher service")
     cr_manager = CRManager()
     cr_watcher_task = asyncio.create_task(

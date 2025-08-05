@@ -6,6 +6,7 @@ import asyncio
 import signal
 
 from cornserve.logging import get_logger
+from cornserve.services.cr_manager.manager import CRManager
 from cornserve.services.task_manager.grpc import create_server
 
 logger = get_logger("cornserve.services.task_manager.entrypoint")
@@ -15,8 +16,7 @@ async def serve() -> None:
     """Serve the Task Manager service."""
     logger.info("Starting Task Manager service")
 
-    # Start CR watcher to load tasks from Custom Resources BEFORE starting gRPC server
-    from cornserve.services.cr_manager.manager import CRManager
+    # Start CR watcher to load tasks/executors from CRs before gRPC server starts
     logger.info("Starting CR watcher for Task Manager service")
     cr_manager = CRManager()
     cr_watcher_task = asyncio.create_task(
