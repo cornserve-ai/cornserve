@@ -23,7 +23,7 @@ from cornserve.services.pb import (
     task_manager_pb2,
     task_manager_pb2_grpc,
 )
-from cornserve.services.resource import GPU, Resource
+from cornserve.services.resource import GPU, CannotColocateError, Resource
 from cornserve.services.sidecar.launch import SidecarLaunchInfo
 from cornserve.services.utils import to_strict_k8s_name
 from cornserve.sidecar.constants import grpc_url_from_rank
@@ -291,7 +291,32 @@ class ResourceManager:
                 return
 
             # TODO: decide GPU placement strategy & preference
-            resources = self.resource.allocate(num_gpus=num_gpus, owner=task_state.id)
+            resources = []
+            gpus_to_allocate = num_gpus
+            for chunk_size in sorted(profile.keys(), reverse=True):
+                num_chunks, gpus_to_allocate = divmod(gpus_to_allocate, chunk_size)
+                if num_chunks == 0:
+                    continue
+                for chunk_allocated in range(num_chunks):
+                    try:
+                        batched_resources = self.resource.allocate(
+                            num_gpus=chunk_size,
+                            owner=task_state.id,
+                        )
+                        resources.extend(batched_resources)
+                    except CannotColocateError:
+                        # If we cannot colocate anymore, try next chunk size
+                        # add back unallocated GPUs
+                        gpus_to_allocate += chunk_size * (num_chunks - chunk_allocated)
+                        continue
+            if gpus_to_allocate > 0:
+                logger.warning(
+                    "Requested %d GPUs to scale up task %s, but only allocated %d GPUs based on the profile: %s",
+                    num_gpus,
+                    task,
+                    len(resources),
+                    profile,
+                )
 
         assert task_state.stub is not None, "Task manager stub is not initialized"
         async with task_state.lock:
