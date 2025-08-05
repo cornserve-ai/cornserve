@@ -7,8 +7,8 @@ import pytest
 from openai.types.chat.chat_completion_chunk import Choice, ChoiceDelta
 
 from cornserve.task.base import Stream, TaskGraphDispatch, TaskInput, TaskInvocation, TaskOutput, UnitTask
-from cornserve.task.builtins.encoder import EncoderInput, EncoderOutput, EncoderTask, Modality
-from cornserve.task.builtins.llm import (
+from cornserve.tasklib.task.builtins.encoder import EncoderInput, EncoderOutput, EncoderTask, Modality
+from cornserve.tasklib.task.builtins.llm import (
     ChatCompletionContentPartTextParam,
     ChatCompletionMessageParam,
     LLMUnitTask,
