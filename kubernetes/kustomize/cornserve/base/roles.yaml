@@ -1,5 +1,5 @@
 ---
-# Role for Custom Resource (CR) access - needed by gateway, resource-manager, task-dispatcher, task-manager
+# Role for Custom Resource access
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
@@ -11,7 +11,7 @@ rules:
   verbs: ["create", "update", "patch", "get", "list", "watch", "delete"]
 
 ---
-# Role for pod and service management - needed by resource-manager and task-manager
+# Role for pod and service management
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
@@ -23,7 +23,7 @@ rules:
   verbs: ["create", "update", "patch", "get", "list", "watch", "delete"]
 
 ---
-# ClusterRole for resource-manager to access nodes only (nodes are cluster-scoped)
+# ClusterRole for resource-manager to access nodes
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:

@@ -36,7 +36,7 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 
 from cornserve.app.base import AppConfig
-from cornserve.tasklib.task.base import Task
+from cornserve.task.base import Task
 from cornserve.tasklib.task.builtins.llm import MLLMTask, Modality, OpenAIChatCompletionChunk, OpenAIChatCompletionRequest
 
 gemma_model_ids = {
