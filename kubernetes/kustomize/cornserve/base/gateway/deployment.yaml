@@ -15,7 +15,7 @@ spec:
       labels:
         app: gateway
     spec:
-      serviceAccountName: cornserve-sa
+      serviceAccountName: gateway-sa
       nodeSelector:
         node-role.kubernetes.io/control-plane: "true"
       containers:

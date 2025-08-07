@@ -1,0 +1,34 @@
+---
+# Role for Custom Resource (CR) access - needed by gateway, resource-manager, task-dispatcher, task-manager
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  namespace: cornserve
+  name: cr-access-role
+rules:
+- apiGroups: ["cornserve.ai"]
+  resources: ["unittaskdefinitions", "unittaskinstances", "executiondescriptors"]
+  verbs: ["create", "update", "patch", "get", "list", "watch", "delete"]
+
+---
+# Role for pod and service management - needed by resource-manager and task-manager
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  namespace: cornserve
+  name: pod-service-management-role
+rules:
+- apiGroups: [""]
+  resources: ["pods", "services"]
+  verbs: ["create", "update", "patch", "get", "list", "watch", "delete"]
+
+---
+# ClusterRole for resource-manager to access nodes only (nodes are cluster-scoped)
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: resource-manager-nodes-role
+rules:
+- apiGroups: [""]
+  resources: ["nodes"]
+  verbs: ["list"]

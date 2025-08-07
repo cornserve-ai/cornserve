@@ -1,0 +1,109 @@
+---
+# Gateway: CR access
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: gateway-cr-access
+  namespace: cornserve
+subjects:
+- kind: ServiceAccount
+  name: gateway-sa
+  namespace: cornserve
+roleRef:
+  kind: Role
+  name: cr-access-role
+  apiGroup: rbac.authorization.k8s.io
+
+---
+# Resource Manager: both CR access and pod/service management
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: resource-manager-cr-access
+  namespace: cornserve
+subjects:
+- kind: ServiceAccount
+  name: resource-manager-sa
+  namespace: cornserve
+roleRef:
+  kind: Role
+  name: cr-access-role
+  apiGroup: rbac.authorization.k8s.io
+
+---
+# Resource Manager: pod/service management
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: resource-manager-pod-service-access
+  namespace: cornserve
+subjects:
+- kind: ServiceAccount
+  name: resource-manager-sa
+  namespace: cornserve
+roleRef:
+  kind: Role
+  name: pod-service-management-role
+  apiGroup: rbac.authorization.k8s.io
+
+---
+# Resource Manager: for listing nodes
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: resource-manager-nodes-access
+subjects:
+- kind: ServiceAccount
+  name: resource-manager-sa
+  namespace: cornserve
+roleRef:
+  kind: ClusterRole
+  name: resource-manager-nodes-role
+  apiGroup: rbac.authorization.k8s.io
+
+---
+# Task Dispatcher: CR access
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: task-dispatcher-cr-access
+  namespace: cornserve
+subjects:
+- kind: ServiceAccount
+  name: task-dispatcher-sa
+  namespace: cornserve
+roleRef:
+  kind: Role
+  name: cr-access-role
+  apiGroup: rbac.authorization.k8s.io
+
+---
+# Task Manager: both CR access and pod/service management
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: task-manager-cr-access
+  namespace: cornserve
+subjects:
+- kind: ServiceAccount
+  name: task-manager-sa
+  namespace: cornserve
+roleRef:
+  kind: Role
+  name: cr-access-role
+  apiGroup: rbac.authorization.k8s.io
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: task-manager-pod-service-access
+  namespace: cornserve
+subjects:
+- kind: ServiceAccount
+  name: task-manager-sa
+  namespace: cornserve
+roleRef:
+  kind: Role
+  name: pod-service-management-role
+  apiGroup: rbac.authorization.k8s.io

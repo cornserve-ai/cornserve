@@ -31,4 +31,4 @@ spec:
                 isDefault:
                   type: boolean
                   default: true
-              required: ["taskClassName", "descriptorClassName", "moduleName", "sourceCode"] 
+              required: ["taskClassName", "descriptorClassName", "moduleName", "sourceCode"]

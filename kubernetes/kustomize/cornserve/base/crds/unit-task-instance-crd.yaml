@@ -27,4 +27,4 @@ spec:
                 config:
                   type: object
                   x-kubernetes-preserve-unknown-fields: true
-              required: ["definitionRef", "config"] 
+              required: ["definitionRef", "config"]

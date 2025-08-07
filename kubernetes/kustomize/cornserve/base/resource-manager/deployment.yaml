@@ -17,7 +17,7 @@ spec:
     spec:
       nodeSelector:
         node-role.kubernetes.io/control-plane: "true"
-      serviceAccountName: cornserve-sa
+      serviceAccountName: resource-manager-sa
       containers:
       - name: resource-manager
         image: cornserve/resource-manager:latest

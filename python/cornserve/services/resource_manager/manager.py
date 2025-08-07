@@ -600,7 +600,7 @@ class ResourceManager:
                             ],
                         )
                     ],
-                    service_account_name="cornserve-sa",
+                    service_account_name="task-manager-sa",
                 ),
             )
             service = kclient.V1Service(
