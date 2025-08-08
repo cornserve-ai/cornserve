@@ -20,15 +20,6 @@ Refer to their [Documentation](https://docs.k3s.io/quick-start/) for more detail
     If you're deploying on-premise with k3s, make sure you have plenty of disk space under `/var/lib/rancher` because `containerd` stores images there.
     If not, you can create a directory in a secondary storage (e.g., `/mnt/data/rancher`) and symlink it to `/var/lib/rancher` prior to starting k3s.
 
-### NVIDIA Device Plugin
-
-The [NVIDIA GPU Device Plugin](https://github.com/NVIDIA/k8s-device-plugin) is required to expose GPUs to the Kubernetes cluster as resources.
-You can deploy a specific version like this:
-
-```bash
-kubectl create -f https://raw.githubusercontent.com/NVIDIA/k8s-device-plugin/v0.17.2/deployments/static/nvidia-device-plugin.yml
-```
-
 ### Clone the Repository
 
 ```bash
@@ -63,6 +54,16 @@ sudo mkdir -p /etc/rancher/k3s
 sudo cp k3s/agent-config.yaml /etc/rancher/k3s/config.yaml
 sudo systemctl start k3s-agent
 ```
+
+### NVIDIA Device Plugin
+
+The [NVIDIA GPU Device Plugin](https://github.com/NVIDIA/k8s-device-plugin) is required to expose GPUs to the Kubernetes cluster as resources.
+You can deploy a specific version like this:
+
+```bash
+kubectl create -f https://raw.githubusercontent.com/NVIDIA/k8s-device-plugin/v0.17.3/nvidia-device-plugin.yml
+```
+
 
 ## Deploying Cornserve
 
