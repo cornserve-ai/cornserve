@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-import httpx
+import aiohttp
 
 from cornserve import constants
 from cornserve.services.resource import GPU
@@ -70,9 +70,10 @@ class EricDescriptor(TaskExecutionDescriptor[EncoderTask, EncoderInput, EncoderO
         req = EmbeddingRequest(data=data)
         return req.model_dump()
 
-    def from_response(self, task_output: EncoderOutput, response: httpx.Response) -> EncoderOutput:
+    async def from_response(self, task_output: EncoderOutput, response: aiohttp.ClientResponse) -> EncoderOutput:
         """Convert the task executor response to TaskOutput."""
-        resp = EmbeddingResponse.model_validate(response.json())
+        response_data = await response.json()
+        resp = EmbeddingResponse.model_validate(response_data)
         if resp.status == Status.SUCCESS:
             return EncoderOutput(embeddings=task_output.embeddings)
         else:

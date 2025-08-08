@@ -8,8 +8,8 @@ import uuid
 from collections import defaultdict
 from typing import Any
 
+import aiohttp
 import grpc
-import httpx
 from opentelemetry import trace
 
 from cornserve.constants import K8S_TASK_DISPATCHER_HTTP_URL
@@ -53,7 +53,7 @@ class TaskManager:
         self.task_lock = asyncio.Lock()
 
         # HTTP client
-        self.client = httpx.AsyncClient(timeout=TASK_TIMEOUT)
+        self.client = aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=TASK_TIMEOUT))
 
         # Task-related state. Key is the task ID.
         self.tasks: dict[str, UnitTask] = {}

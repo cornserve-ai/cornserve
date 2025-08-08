@@ -8,7 +8,7 @@ from collections import defaultdict
 from contextlib import suppress
 from dataclasses import dataclass
 
-import httpx
+import aiohttp
 import kubernetes_asyncio.client as kclient
 import kubernetes_asyncio.config as kconfig
 
@@ -51,7 +51,7 @@ class TaskManager:
         self.executor_pod_names: dict[str, str] = {}
         self.executor_service_names: dict[str, str] = {}
 
-        self.http_client = httpx.AsyncClient()
+        self.http_client = aiohttp.ClientSession()
 
         kconfig.load_incluster_config()
         self.k8s_client = kclient.ApiClient()
@@ -266,11 +266,13 @@ class TaskManager:
         This method assumes that the healthcheck endpoint is `GET /health`.
         """
         try:
-            response = await self.http_client.get(f"{executor_url}/health", timeout=timeout)
+            async with self.http_client.get(
+                f"{executor_url}/health", timeout=aiohttp.ClientTimeout(total=timeout)
+            ) as response:
+                return response.status == 200
         except Exception as e:
             logger.error("Failed to healthcheck %s: %s", executor_url, e)
             return False
-        return response.status_code == 200
 
     async def healthcheck(self) -> dict[str, bool]:
         """Perform healthcheck on all task executors.
@@ -304,7 +306,7 @@ class TaskManager:
                 [r for r in kill_results if r is not None],
             )
 
-        await self.http_client.aclose()
+        await self.http_client.close()
         await self.k8s_client.close()
 
         logger.info("Task manager %s shut down", self.id)

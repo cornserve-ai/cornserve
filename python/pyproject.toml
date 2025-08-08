@@ -25,7 +25,7 @@ dependencies = [
   "tyro",
   "kubernetes",
   "kubernetes_asyncio",
-  "httpx",
+  "aiohttp",
   "pydantic>=2.11",
   "opentelemetry-api",
   "opentelemetry-sdk",
@@ -55,7 +55,7 @@ gateway = [
   "uvicorn[standard]",
   "opentelemetry-instrumentation-fastapi",
   "opentelemetry-instrumentation-grpc",
-  "opentelemetry-instrumentation-httpx",
+  "opentelemetry-instrumentation-aiohttp-client",
   "websocket-client",
 ]
 resource-manager = [
@@ -66,7 +66,7 @@ task-dispatcher = [
   "fastapi",
   "uvicorn[standard]",
   "opentelemetry-instrumentation-fastapi",
-  "opentelemetry-instrumentation-httpx",
+  "opentelemetry-instrumentation-aiohttp-client",
   "opentelemetry-instrumentation-grpc",
 ]
 audio = ["librosa"]
