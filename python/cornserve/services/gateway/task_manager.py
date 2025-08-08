@@ -289,4 +289,7 @@ class TaskManager:
         # Close the gRPC channel to the resource manager
         await self.resource_manager_channel.close()
 
+        # Close the HTTP client session
+        await self.client.close()
+
         logger.info("Gateway task manager has been shut down")
