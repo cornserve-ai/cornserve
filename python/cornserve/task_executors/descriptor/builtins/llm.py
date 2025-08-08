@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import AsyncGenerator
 from typing import Any, ClassVar
 
-import httpx
+import aiohttp
 import kubernetes_asyncio.client as kclient
 
 from cornserve import constants
@@ -28,13 +28,12 @@ from cornserve.task_executors.descriptor.registry import DESCRIPTOR_REGISTRY
 logger = get_logger(__name__)
 
 
-async def parse_stream_to_completion_chunks(response: httpx.Response) -> AsyncGenerator[str]:
+async def parse_stream_to_completion_chunks(response: aiohttp.ClientResponse) -> AsyncGenerator[str]:
     """Parse the response stream to OpenAIChatCompletionChunk objects."""
-    assert not response.is_closed, "Response must not be closed when parsing."
-    aiter = response.aiter_lines()
+    assert not response.closed, "Response must not be closed when parsing."
     try:
-        async for line in aiter:
-            line = line.strip()
+        async for line in response.content:
+            line = line.decode().strip()
             if not line:
                 continue
 
@@ -58,10 +57,7 @@ async def parse_stream_to_completion_chunks(response: httpx.Response) -> AsyncGe
             yield line
 
     finally:
-        # Ensure the iterator has been fully consumed
-        async for _ in aiter:
-            pass
-        await response.aclose()
+        response.close()
 
 
 class VLLMDescriptor(
@@ -128,10 +124,10 @@ class VLLMDescriptor(
         request["stream"] = True
         return request
 
-    def from_response(
+    async def from_response(
         self,
         task_output: Stream[OpenAIChatCompletionChunk],
-        response: httpx.Response,
+        response: aiohttp.ClientResponse,
     ) -> Stream[OpenAIChatCompletionChunk]:
         """Convert the response from the task executor to TaskOutput."""
         return Stream[OpenAIChatCompletionChunk](
@@ -272,14 +268,14 @@ class PrefillVLLMDescriptor(
         }
         return request
 
-    def from_response(
+    async def from_response(
         self,
         task_output: PrefillChatCompletionResponse,
-        response: httpx.Response,
+        response: aiohttp.ClientResponse,
     ) -> PrefillChatCompletionResponse:
         """Convert the response from the task executor to TaskOutput."""
-        resp = response.json()
-        if "kv_transfer_params" not in resp:
+        resp_data = await response.json()
+        if "kv_transfer_params" not in resp_data:
             raise ValueError("Response does not contain kv_transfer_params.")
         return PrefillChatCompletionResponse(kv_transfer_params=task_output.kv_transfer_params)
 
@@ -399,10 +395,10 @@ class DecodeVLLMDescriptor(
         request["stream"] = True
         return request
 
-    def from_response(
+    async def from_response(
         self,
         task_output: Stream[OpenAIChatCompletionChunk],
-        response: httpx.Response,
+        response: aiohttp.ClientResponse,
     ) -> Stream[OpenAIChatCompletionChunk]:
         """Convert the response from the task executor to TaskOutput."""
         return Stream[OpenAIChatCompletionChunk](

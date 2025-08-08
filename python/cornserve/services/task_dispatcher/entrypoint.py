@@ -7,9 +7,9 @@ import signal
 from typing import TYPE_CHECKING
 
 import uvicorn
+from opentelemetry.instrumentation.aiohttp_client import AioHttpClientInstrumentor
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 from opentelemetry.instrumentation.grpc import GrpcInstrumentorClient, GrpcInstrumentorServer
-from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
 
 from cornserve.logging import get_logger
 from cornserve.services.task_dispatcher.grpc import create_server
@@ -32,7 +32,7 @@ async def serve() -> None:
     app = create_app()
 
     FastAPIInstrumentor.instrument_app(app)
-    HTTPXClientInstrumentor().instrument()
+    AioHttpClientInstrumentor().instrument()
     GrpcInstrumentorClient().instrument()
     GrpcInstrumentorServer().instrument()
 
