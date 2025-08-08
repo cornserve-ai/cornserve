@@ -34,6 +34,52 @@ logger = get_logger(__name__)
 tracer = trace.get_tracer(__name__)
 
 
+async def discover_task_dispatcher_replicas(kube_client: kclient.CoreV1Api) -> list[str]:
+    """Discover all Task Dispatcher replica endpoints via headless service.
+
+    Uses Kubernetes service discovery to find all Task Dispatcher pod IPs
+    and return their gRPC endpoints for broadcasting notifications.
+
+    Args:
+        kube_client: Kubernetes API client for service discovery
+
+    Returns:
+        List of Task Dispatcher gRPC URLs (e.g., ["10.1.2.3:50051", "10.1.2.4:50051"])
+
+    Raises:
+        RuntimeError: If Task Dispatcher replicas cannot be discovered.
+    """
+    try:
+        # Query the headless service to get all Task Dispatcher pod endpoints
+        endpoints = await kube_client.list_namespaced_endpoints(
+            namespace=constants.K8S_NAMESPACE,
+            field_selector=f"metadata.name={constants.K8S_TASK_DISPATCHER_HEADLESS_SERVICE}",
+        )
+
+        task_dispatcher_urls = []
+        for endpoint in endpoints.items:
+            if endpoint.subsets:
+                for subset in endpoint.subsets:
+                    if subset.addresses and subset.ports:
+                        for address in subset.addresses:
+                            for port in subset.ports:
+                                if port.name == "grpc":
+                                    task_dispatcher_urls.append(f"{address.ip}:{port.port}")
+
+        if not task_dispatcher_urls:
+            raise RuntimeError(
+                f"No Task Dispatcher replicas found in headless service "
+                f"{constants.K8S_TASK_DISPATCHER_HEADLESS_SERVICE}. "
+                "Ensure Task Dispatcher pods are running and healthy."
+            )
+
+        logger.info("Discovered %d Task Dispatcher replicas: %s", len(task_dispatcher_urls), task_dispatcher_urls)
+        return task_dispatcher_urls
+
+    except Exception as e:
+        raise RuntimeError(f"Failed to discover Task Dispatcher replicas: {e}") from e
+
+
 @dataclass
 class UnitTaskDeployment:
     """Information about a deployed unit task and its task manager.
@@ -114,17 +160,40 @@ class TaskManagerState:
 class ResourceManager:
     """The Resource Manager allocates resources for Task Managers."""
 
-    def __init__(self, api_client: kclient.ApiClient, resource: Resource, sidecar_names: list[str]) -> None:
-        """Initialize the ResourceManager."""
+    def __init__(
+        self,
+        api_client: kclient.ApiClient,
+        resource: Resource,
+        sidecar_names: list[str],
+        task_dispatcher_urls: list[str],
+    ) -> None:
+        """Initialize the ResourceManager.
+
+        Args:
+            api_client: Kubernetes API client
+            resource: Resource allocation manager
+            sidecar_names: Names of sidecar pods
+            task_dispatcher_urls: List of Task Dispatcher gRPC URLs for broadcasting notifications
+        """
         self.api_client = api_client
         self.resource = resource
 
         self.kube_core_client = kclient.CoreV1Api(api_client)
         self.sidecar_names = sidecar_names
 
-        # Task dispatcher gRPC handles
-        self.task_dispatcher_channel = grpc.aio.insecure_channel(constants.K8S_TASK_DISPATCHER_GRPC_URL)
-        self.task_dispatcher_stub = task_dispatcher_pb2_grpc.TaskDispatcherStub(self.task_dispatcher_channel)
+        # Task dispatcher gRPC handles (multiple replicas for horizontal scaling)
+        # We broadcast deployment/teardown notifications to ALL Task Dispatcher replicas
+        # to ensure each replica has consistent task registry state. Task invocation
+        # routing is handled by the load balancer service at the HTTP layer.
+        self.task_dispatcher_channels: list[grpc.aio.Channel] = []
+        self.task_dispatcher_stubs: list[task_dispatcher_pb2_grpc.TaskDispatcherStub] = []
+
+        # Create gRPC channels and stubs for all Task Dispatcher replicas
+        for url in task_dispatcher_urls:
+            channel = grpc.aio.insecure_channel(url)
+            stub = task_dispatcher_pb2_grpc.TaskDispatcherStub(channel)
+            self.task_dispatcher_channels.append(channel)
+            self.task_dispatcher_stubs.append(stub)
 
         # Task state
         self.task_states: dict[str, TaskManagerState] = {}
@@ -245,10 +314,15 @@ class ResourceManager:
                 logger.info("All sidecars are online")
 
             resource = Resource(gpus=gpus)
+
+            # Discover all Task Dispatcher replica endpoints
+            task_dispatcher_urls = await discover_task_dispatcher_replicas(core_api)
+
             return ResourceManager(
                 api_client=api_client,
                 resource=resource,
                 sidecar_names=[pod.metadata.name for pod in created_pods],
+                task_dispatcher_urls=task_dispatcher_urls,
             )
         except Exception as e:
             logger.error("Error during resource initialization: %s", str(e))
@@ -450,21 +524,38 @@ class ResourceManager:
                 url=deployment.url,
             ),
         )
-        try:
-            await self.task_dispatcher_stub.NotifyUnitTaskDeployment(task_manager_info)
-        except grpc.aio.AioRpcError as e:
-            logger.error(
-                "Failed to notify task dispatcher of new task %s and task manager %s: %s",
-                task,
-                deployment,
-                e,
-            )
-            # Clean up the task manager since notification failed
+        # Broadcast to ALL Task Dispatcher replicas in parallel
+        results = await asyncio.gather(
+            *[stub.NotifyUnitTaskDeployment(task_manager_info) for stub in self.task_dispatcher_stubs],
+            return_exceptions=True,
+        )
+
+        # Check for any failures
+        failed_notifications = []
+        for i, result in enumerate(results):
+            if isinstance(result, Exception):
+                logger.error(
+                    "Failed to notify Task Dispatcher replica %d of new task %s: %s",
+                    i,
+                    task,
+                    result,
+                )
+                failed_notifications.append((i, result))
+
+        if failed_notifications:
+            # Clean up the task manager since Task Dispatcher notification failed
             async with self.task_states_lock:
                 if task_state := self.task_states.pop(task_manager_id, None):
-                    logger.info("Cleaning up task manager %s", task_state.id)
+                    logger.info(
+                        "Cleaning up task manager %s due to %d Task Dispatcher notification failures",
+                        task_state.id,
+                        len(failed_notifications),
+                    )
                     await task_state.tear_down(self.kube_core_client)
-            raise RuntimeError(f"Failed to notify task dispatcher of new task {task}: {e}") from e
+            raise RuntimeError(
+                f"Failed to notify {len(failed_notifications)}/{len(self.task_dispatcher_stubs)} "
+                f"Task Dispatcher replicas of new task {task}: {failed_notifications}"
+            )
 
     @tracer.start_as_current_span("ResourceManager.teardown_unit_task")
     async def teardown_unit_task(self, task: UnitTask) -> None:
@@ -494,13 +585,31 @@ class ResourceManager:
                 logger.info("Task %s is not running, returning immediately", task)
                 return
 
-        # First notify the task dispatcher of the removed task
+        # First notify ALL Task Dispatcher replicas of the removed task
         task_info = task_dispatcher_pb2.NotifyUnitTaskTeardownRequest(task=task.to_pb())
-        try:
-            await self.task_dispatcher_stub.NotifyUnitTaskTeardown(task_info)
-        except Exception as e:
-            # Do not re-raise the exception but rather continue with the shutdown
-            logger.exception("Failed to notify task dispatcher of removed task %s: %s", task, e)
+        results = await asyncio.gather(
+            *[stub.NotifyUnitTaskTeardown(task_info) for stub in self.task_dispatcher_stubs], return_exceptions=True
+        )
+
+        # Log any failures but continue with teardown (don't re-raise)
+        failed_notifications = []
+        for i, result in enumerate(results):
+            if isinstance(result, Exception):
+                logger.error(
+                    "Failed to notify Task Dispatcher replica %d of removed task %s: %s",
+                    i,
+                    task,
+                    result,
+                )
+                failed_notifications.append((i, result))
+
+        if failed_notifications:
+            logger.warning(
+                "Failed to notify %d/%d Task Dispatcher replicas of removed task %s, continuing with teardown",
+                len(failed_notifications),
+                len(self.task_dispatcher_stubs),
+                task,
+            )
 
         # Clean up the task manager state with its individual lock
         async with task_state.lock:
@@ -574,7 +683,9 @@ class ResourceManager:
                 logger.error("Error occured during shutdown: %s", result)
 
         await self.api_client.close()
-        await self.task_dispatcher_channel.close()
+
+        # Close all Task Dispatcher channels
+        await asyncio.gather(*[channel.close() for channel in self.task_dispatcher_channels], return_exceptions=True)
 
     @tracer.start_as_current_span("ResourceManager._spawn_task_manager")
     async def _spawn_task_manager(self, task: UnitTask, state: TaskManagerState) -> UnitTaskDeployment:

@@ -409,7 +409,7 @@ def _handle_streaming_response(
         accumulated_data: dict[str, str] = {key: "" for key in aggregate_keys}
 
         try:
-            with Live("Waiting for response...") as live:
+            with Live("Waiting for response...", vertical_overflow="visible") as live:
                 for line in response.iter_lines(chunk_size=None, decode_unicode=True):
                     line = line.strip()
                     if not line:
