@@ -409,7 +409,7 @@ def _handle_streaming_response(
         accumulated_data: dict[str, str] = {key: "" for key in aggregate_keys}
 
         try:
-            with Live("Waiting for response...", refresh_per_second=5, vertical_overflow="visible") as live:
+            with Live("Waiting for response...", vertical_overflow="visible") as live:
                 for line in response.iter_lines(chunk_size=None, decode_unicode=True):
                     line = line.strip()
                     if not line:
@@ -438,7 +438,7 @@ def _handle_streaming_response(
 
                         # Update the live table
                         table = _create_response_table(accumulated_data, aggregate_keys)
-                        live.update(table)
+                        live.update(table, refresh=True)
 
                     except json.JSONDecodeError as e:
                         rich.print(Panel(f"Failed to parse JSON response: {e}", style="red", expand=False))
