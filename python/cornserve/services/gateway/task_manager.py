@@ -53,7 +53,10 @@ class TaskManager:
         self.task_lock = asyncio.Lock()
 
         # HTTP client
-        self.client = aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=TASK_TIMEOUT))
+        self.client = aiohttp.ClientSession(
+            timeout=aiohttp.ClientTimeout(total=TASK_TIMEOUT),
+            connector=aiohttp.TCPConnector(limit=0),
+        )
 
         # Task-related state. Key is the task ID.
         self.tasks: dict[str, UnitTask] = {}
