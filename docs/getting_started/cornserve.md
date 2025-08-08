@@ -61,7 +61,7 @@ The [NVIDIA GPU Device Plugin](https://github.com/NVIDIA/k8s-device-plugin) is r
 You can deploy a specific version like this:
 
 ```bash
-kubectl create -f https://raw.githubusercontent.com/NVIDIA/k8s-device-plugin/v0.17.3/nvidia-device-plugin.yml
+kubectl create -f https://raw.githubusercontent.com/NVIDIA/k8s-device-plugin/v0.17.3/deployments/static/nvidia-device-plugin.yml
 ```
 
 
