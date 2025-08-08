@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: task-dispatcher-headless
+  namespace: cornserve
+spec:
+  clusterIP: None
+  selector:
+    app: task-dispatcher
+  ports:
+  - name: grpc
+    port: 50051
+    targetPort: grpc
