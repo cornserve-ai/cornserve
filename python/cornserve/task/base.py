@@ -41,7 +41,10 @@ def get_client() -> aiohttp.ClientSession:
     """Get or create the global HTTP client."""
     global _CLIENT
     if _CLIENT is None or _CLIENT.closed:
-        _CLIENT = aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=TASK_TIMEOUT))
+        _CLIENT = aiohttp.ClientSession(
+            timeout=aiohttp.ClientTimeout(total=TASK_TIMEOUT),
+            connector=aiohttp.TCPConnector(limit=0),
+        )
     return _CLIENT
 
 

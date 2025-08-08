@@ -97,7 +97,10 @@ class TaskDispatcher:
 
         self.ongoing_task_lock = asyncio.Lock()
         self.ongoing_invokes: dict[str, list[asyncio.Task]] = defaultdict(list)
-        self.client = aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=TASK_TIMEOUT))
+        self.client = aiohttp.ClientSession(
+            timeout=aiohttp.ClientTimeout(total=TASK_TIMEOUT),
+            connector=aiohttp.TCPConnector(limit=0),
+        )
 
     async def notify_task_deployment(self, task: UnitTask, task_manager_url: str) -> None:
         """Register a newly deployed task and its task manager with the dispatcher."""
