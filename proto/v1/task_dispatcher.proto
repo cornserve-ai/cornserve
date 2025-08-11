@@ -20,7 +20,7 @@ message TaskManagerDeployment {
 
 message NotifyUnitTaskDeploymentRequest {
   // Name of the UnitTaskInstance CR that was deployed
-  string task_cr_name = 1;
+  string task_instance_name = 1;
 
   // Task manager deployment info
   TaskManagerDeployment task_manager = 2;
@@ -33,7 +33,7 @@ message NotifyUnitTaskDeploymentResponse {
 // Existing unit task removed
 message NotifyUnitTaskTeardownRequest {
   // Name of the UnitTaskInstance CR that was torn down
-  string task_cr_name = 1;
+  string task_instance_name = 1;
 }
 
 message NotifyUnitTaskTeardownResponse {

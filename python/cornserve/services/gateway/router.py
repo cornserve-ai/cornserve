@@ -21,7 +21,7 @@ from pydantic import ValidationError
 
 from cornserve.constants import K8S_RESOURCE_MANAGER_GRPC_URL
 from cornserve.logging import get_logger
-from cornserve.services.cr_manager.manager import CRManager
+from cornserve.services.task_registry import TaskRegistry
 from cornserve.services.gateway.app.manager import AppManager
 from cornserve.services.gateway.models import (
     AppInvocationRequest,
@@ -49,7 +49,7 @@ async def deploy_builtin_task_crs() -> None:
     """
     try:
         logger.info("Deploying built-in task definitions as Custom Resources")
-        cr_manager = CRManager()
+        task_registry = TaskRegistry()
         
         # Read the LLM task source code
         import inspect
@@ -73,7 +73,7 @@ async def deploy_builtin_task_crs() -> None:
         # Deploy LLM tasks
         for task_class_name, cr_name, module_name in llm_tasks:
             try:
-                await cr_manager.create_unit_task_definition(
+                await task_registry.create_task_definition(
                     name=cr_name,
                     task_class_name=task_class_name,
                     module_name=module_name,
@@ -89,7 +89,7 @@ async def deploy_builtin_task_crs() -> None:
         # Deploy Encoder tasks
         for task_class_name, cr_name, module_name in encoder_tasks:
             try:
-                await cr_manager.create_unit_task_definition(
+                await task_registry.create_task_definition(
                     name=cr_name,
                     task_class_name=task_class_name,
                     module_name=module_name,
@@ -126,7 +126,7 @@ async def deploy_builtin_task_crs() -> None:
         # Deploy LLM descriptors
         for descriptor_class_name, cr_name, module_name, task_class_name in llm_descriptors_list:
             try:
-                await cr_manager.create_execution_descriptor(
+                await task_registry.create_execution_descriptor(
                     name=cr_name,
                     task_class_name=task_class_name,
                     descriptor_class_name=descriptor_class_name,
@@ -144,7 +144,7 @@ async def deploy_builtin_task_crs() -> None:
         # Deploy Encoder descriptors
         for descriptor_class_name, cr_name, module_name, task_class_name in encoder_descriptors_list:
             try:
-                await cr_manager.create_execution_descriptor(
+                await task_registry.create_execution_descriptor(
                     name=cr_name,
                     task_class_name=task_class_name,
                     descriptor_class_name=descriptor_class_name,
@@ -159,7 +159,7 @@ async def deploy_builtin_task_crs() -> None:
                 else:
                     raise
         
-        await cr_manager.close()
+        await task_registry.shutdown()
         logger.info("Completed deploying built-in task definitions and execution descriptors as Custom Resources")
         
     except Exception as e:
@@ -449,11 +449,11 @@ async def health_check():
 
 def init_app_state(app: FastAPI) -> None:
     """Initialize the app state with required components."""
-    # Create CRManager for handling unit task instance CRs
-    app.state.cr_manager = CRManager()
+    # Create registry for handling unit task instance names
+    app.state.task_registry = TaskRegistry()
     
-    # Pass CRManager to TaskManager for CR-based task deployment
-    app.state.task_manager = TaskManager(K8S_RESOURCE_MANAGER_GRPC_URL, app.state.cr_manager)
+    # Pass registry to TaskManager for task-based deployment
+    app.state.task_manager = TaskManager(K8S_RESOURCE_MANAGER_GRPC_URL, app.state.task_registry)
     app.state.app_manager = AppManager(app.state.task_manager)
     app.state.session_manager = SessionManager(app.state.task_manager)
 

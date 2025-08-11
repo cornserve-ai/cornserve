@@ -1,10 +1,10 @@
 ---
-# Role for Custom Resource access
+# Role for CR access
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
   namespace: cornserve
-  name: cr-access-role
+  name: resource-manager-cr-access-role
 rules:
 - apiGroups: ["cornserve.ai"]
   resources: ["unittaskdefinitions", "unittaskinstances", "executiondescriptors"]
@@ -16,7 +16,7 @@ apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
   namespace: cornserve
-  name: pod-service-management-role
+  name: resource-manager-pod-service-management-role
 rules:
 - apiGroups: [""]
   resources: ["pods", "services"]

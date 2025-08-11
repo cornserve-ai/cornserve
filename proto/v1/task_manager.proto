@@ -52,7 +52,7 @@ message RegisterTaskRequest {
   string task_manager_id = 1;
 
   // Name of the UnitTaskInstance CR to register
-  string task_cr_name = 2;
+  string task_instance_name = 2;
 
   // Initial set of GPU resources
   repeated GPUResource gpus = 3;

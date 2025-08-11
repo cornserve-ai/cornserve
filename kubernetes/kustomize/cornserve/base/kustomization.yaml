@@ -9,8 +9,6 @@ resources:
 - namespace.yaml
 - crds
 - service-accounts.yaml
-- roles.yaml
-- role-bindings.yaml
 images:
 - name: cornserve/gateway
   newName: cornserve/gateway

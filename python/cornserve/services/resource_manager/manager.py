@@ -39,13 +39,13 @@ class UnitTaskDeployment:
 
     Attributes:
         task: The task being managed
-        task_cr_name: The UnitTaskInstance CR name for this task
+        task_instance_name: The instance name for this task
         id: Task manager ID
         url: Task manager URL
     """
 
     task: UnitTask
-    task_cr_name: str
+    task_instance_name: str
     id: str
     url: str
 
@@ -129,7 +129,7 @@ class ResourceManager:
 
         # Task state
         self.task_states: dict[str, TaskManagerState] = {}
-        self.task_cr_names: dict[str, str] = {}  # Map task_manager_id -> CR name
+        self.task_cr_names: dict[str, str] = {}  # Map task_manager_id -> instance name
         self.task_states_lock = asyncio.Lock()
 
     @staticmethod
@@ -256,7 +256,7 @@ class ResourceManager:
             raise
 
     @tracer.start_as_current_span("ResourceManager.scale_up_unit_task")
-    async def scale_up_unit_task(self, task: UnitTask, task_cr_name: str, num_gpus: int) -> None:
+    async def scale_up_unit_task(self, task: UnitTask, task_instance_name: str, num_gpus: int) -> None:
         """Scale up a unit task by allocating additional GPUs to the task manager."""
         assert num_gpus > 0, "Number of GPUs to scale up must be positive"
         logger.info("Scaling up unit task %s by %d GPUs", task, num_gpus)
@@ -310,7 +310,7 @@ class ResourceManager:
                 raise RuntimeError(f"Failed to scale up task {task} by {num_gpus} GPUs: {e}") from e
 
     @tracer.start_as_current_span("ResourceManager.scale_down_unit_task")
-    async def scale_down_unit_task(self, task: UnitTask, task_cr_name: str, num_gpus: int) -> None:
+    async def scale_down_unit_task(self, task: UnitTask, task_instance_name: str, num_gpus: int) -> None:
         """Scale down a unit task by removing GPUs from the task manager."""
         assert num_gpus > 0, "Number of GPUs to scale down must be positive"
         logger.info("Scaling down unit task %s by %d GPUs", task, num_gpus)
@@ -367,14 +367,14 @@ class ResourceManager:
                 raise RuntimeError(f"Failed to scale down task {task} by {num_gpus} GPUs: {e}") from e
 
     @tracer.start_as_current_span("ResourceManager.deploy_unit_task")
-    async def deploy_unit_task(self, task: UnitTask, task_cr_name: str) -> None:
+    async def deploy_unit_task(self, task: UnitTask, task_instance_name: str) -> None:
         """Deploy a unit task by spawning its task manager if needed.
 
         If this task is already running, this method is a no-op.
 
         Args:
             task: The task to be deployed.
-            task_cr_name: The UnitTaskInstance CR name for this task.
+            task_instance_name: The instance name for this task.
         """
         logger.info("Deploying unit task %s", task)
 
@@ -392,12 +392,12 @@ class ResourceManager:
             task_manager_id = f"{task.make_name()}-{uuid.uuid4().hex[:8]}"
             state = TaskManagerState(id=task_manager_id)
             self.task_states[task_manager_id] = state
-            self.task_cr_names[task_manager_id] = task_cr_name
+            self.task_cr_names[task_manager_id] = task_instance_name
 
         # Spawn task manager with state-specific lock
         async with state.lock:
             try:
-                deployment = await self._spawn_task_manager(task, task_cr_name, state)
+                deployment = await self._spawn_task_manager(task, task_instance_name, state)
                 state.deployment = deployment
                 logger.info("Successfully deployed unit task %s with task manager %s", task, deployment)
             except Exception as e:
@@ -408,9 +408,9 @@ class ResourceManager:
                         del self.task_cr_names[task_manager_id]
                 raise RuntimeError(f"Failed to spawn task manager for {task}: {e}") from e
 
-        # Notify the task dispatcher of the new task and task manager using CR name
+        # Notify the task dispatcher of the new task and task manager using instance name
         task_manager_info = task_dispatcher_pb2.NotifyUnitTaskDeploymentRequest(
-            task_cr_name=task_cr_name,
+            task_instance_name=task_instance_name,
             task_manager=task_dispatcher_pb2.TaskManagerDeployment(
                 url=deployment.url,
             ),
@@ -429,17 +429,17 @@ class ResourceManager:
                 if task_state := self.task_states.pop(task_manager_id, None):
                     logger.info("Cleaning up task manager %s", task_state.id)
                     await task_state.tear_down(self.kube_core_client)
-            raise RuntimeError(f"Failed to notify task dispatcher of new task {task_cr_name}: {e}") from e
+            raise RuntimeError(f"Failed to notify task dispatcher of new task {task_instance_name}: {e}") from e
 
     @tracer.start_as_current_span("ResourceManager.teardown_unit_task")
-    async def teardown_unit_task(self, task: UnitTask, task_cr_name: str) -> None:
+    async def teardown_unit_task(self, task: UnitTask, task_instance_name: str) -> None:
         """Tear down a unit task by shutting down its task manager if needed.
 
         If this task is not running, this method is a no-op.
 
         Args:
             task: The unit task to be torn down.
-            task_cr_name: The UnitTaskInstance CR name for this task.
+            task_instance_name: The instance name for this task.
         """
         logger.info("Tearing down unit task %s", task)
 
@@ -466,8 +466,8 @@ class ResourceManager:
 
         # First notify the task dispatcher of the removed task using CR name
         # Use the CR name from state if available, otherwise use the passed one
-        cr_name_to_use = task_cr_name_from_state if task_cr_name_from_state else task_cr_name
-        task_info = task_dispatcher_pb2.NotifyUnitTaskTeardownRequest(task_cr_name=cr_name_to_use)
+        cr_name_to_use = task_cr_name_from_state if task_cr_name_from_state else task_instance_name
+        task_info = task_dispatcher_pb2.NotifyUnitTaskTeardownRequest(task_instance_name=cr_name_to_use)
         try:
             await self.task_dispatcher_stub.NotifyUnitTaskTeardown(task_info)
         except Exception as e:
@@ -549,14 +549,14 @@ class ResourceManager:
         await self.task_dispatcher_channel.close()
 
     @tracer.start_as_current_span("ResourceManager._spawn_task_manager")
-    async def _spawn_task_manager(self, task: UnitTask, task_cr_name: str, state: TaskManagerState) -> UnitTaskDeployment:
+    async def _spawn_task_manager(self, task: UnitTask, task_instance_name: str, state: TaskManagerState) -> UnitTaskDeployment:
         """Spawn a new task manager.
 
         If anything goes wrong, side effects are cleaned up and an exception is raised.
 
         Args:
             task: The task to be deployed.
-            task_cr_name: The UnitTaskInstance CR name for this task.
+            task_instance_name: The instance name for this task.
             state: The TaskManagerState object to store the task manager's state.
         """
         logger.info("Spawning task manager %s for %s", state.id, task)
@@ -643,7 +643,7 @@ class ResourceManager:
             with tracer.start_as_current_span("ResourceManager._spawn_task_manager.register_task"):
                 register_task_req = task_manager_pb2.RegisterTaskRequest(
                     task_manager_id=state.id,
-                    task_cr_name=task_cr_name,
+                    task_instance_name=task_instance_name,
                     gpus=[
                         task_manager_pb2.GPUResource(
                             action=task_manager_pb2.ResourceAction.ADD,
@@ -665,4 +665,4 @@ class ResourceManager:
             await state.tear_down(self.kube_core_client)
             raise RuntimeError(f"Failed to initialize spawned task manager for {task}: {e}") from e
 
-        return UnitTaskDeployment(task=task, task_cr_name=task_cr_name, id=state.id, url=f"{state.service_name}:{port}")
+        return UnitTaskDeployment(task=task, task_instance_name=task_instance_name, id=state.id, url=f"{state.service_name}:{port}")

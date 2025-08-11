@@ -13,7 +13,7 @@ from opentelemetry.instrumentation.grpc import GrpcAioInstrumentorClient
 from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
 
 from cornserve.logging import get_logger
-from cornserve.services.cr_manager.manager import CRManager
+from cornserve.services.task_registry import TaskRegistry
 from cornserve.services.gateway.router import create_app
 from cornserve.tracing import configure_otel
 
@@ -31,7 +31,7 @@ async def serve() -> None:
 
     # Start CR watcher to load tasks from Custom Resources BEFORE starting FastAPI
     logger.info("Starting CR watcher for Gateway service")
-    cr_manager = CRManager()
+    task_registry = TaskRegistry()
     
     # Deploy built-in task definitions as Custom Resources
     from cornserve.services.gateway.router import deploy_builtin_task_crs
@@ -39,7 +39,7 @@ async def serve() -> None:
     await deploy_builtin_task_crs()
     
     cr_watcher_task = asyncio.create_task(
-        cr_manager.watch_cr_updates(),
+        task_registry.watch_updates(),
         name="gateway_cr_watcher"
     )
 
@@ -93,7 +93,7 @@ async def serve() -> None:
                 logger.info("CR watcher task cancelled successfully")
         
         # Close CR manager
-        await cr_manager.close()
+        await task_registry.shutdown()
         
         await app_manager.shutdown()
         await server.shutdown()

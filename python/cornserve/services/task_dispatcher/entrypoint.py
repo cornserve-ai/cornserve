@@ -12,7 +12,7 @@ from opentelemetry.instrumentation.grpc import GrpcInstrumentorClient, GrpcInstr
 from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
 
 from cornserve.logging import get_logger
-from cornserve.services.cr_manager.manager import CRManager
+from cornserve.services.task_registry import TaskRegistry
 from cornserve.services.task_dispatcher.grpc import create_server
 from cornserve.services.task_dispatcher.router import create_app
 from cornserve.tracing import configure_otel
@@ -31,9 +31,9 @@ async def serve() -> None:
 
     # Start CR watcher to load tasks/executors from CRs before the server starts
     logger.info("Starting CR watcher for Task Dispatcher service")
-    cr_manager = CRManager()
+    task_registry = TaskRegistry()
     cr_watcher_task = asyncio.create_task(
-        cr_manager.watch_cr_updates(),
+        task_registry.watch_updates(),
         name="task_dispatcher_cr_watcher"
     )
 
@@ -64,7 +64,7 @@ async def serve() -> None:
     dispatcher: TaskDispatcher = app.state.dispatcher
 
     # gRPC server
-    grpc_server = create_server(dispatcher, cr_manager)
+    grpc_server = create_server(dispatcher, task_registry)
 
     loop = asyncio.get_running_loop()
     uvicorn_server_task = loop.create_task(uvicorn_server.serve())
@@ -91,7 +91,7 @@ async def serve() -> None:
                 logger.info("CR watcher task cancelled successfully")
         
         # Close CR manager
-        await cr_manager.close()
+        await task_registry.shutdown()
         
         await dispatcher.shutdown()
         await uvicorn_server.shutdown()

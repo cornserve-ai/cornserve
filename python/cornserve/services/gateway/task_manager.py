@@ -21,7 +21,7 @@ from cornserve.services.pb.resource_manager_pb2 import (
     TeardownUnitTaskRequest,
 )
 from cornserve.services.pb.resource_manager_pb2_grpc import ResourceManagerStub
-from cornserve.services.cr_manager.manager import CRManager
+from cornserve.services.task_registry import TaskRegistry
 from cornserve.task.base import TASK_TIMEOUT, TaskGraphDispatch, UnitTask
 
 logger = get_logger(__name__)
@@ -44,12 +44,12 @@ class TaskState(enum.StrEnum):
 class TaskManager:
     """Manages registered and deployed tasks."""
 
-    def __init__(self, resource_manager_grpc_url: str, cr_manager: CRManager) -> None:
+    def __init__(self, resource_manager_grpc_url: str, task_registry: TaskRegistry) -> None:
         """Initialize the task manager.
 
         Args:
             resource_manager_grpc_url: The gRPC URL of the resource manager.
-            cr_manager: The CRManager for handling unit task instance CRs.
+            task_registry: Registry service for handling task instances by name.
         """
         # A big lock to protect all task states
         self.task_lock = asyncio.Lock()
@@ -60,13 +60,13 @@ class TaskManager:
         # Task-related state. Key is the task ID.
         self.tasks: dict[str, UnitTask] = {}
         self.task_states: dict[str, TaskState] = {}  # Can be read without holding lock.
-        self.task_cr_names: dict[str, str] = {}  # Map task_id -> UnitTaskInstance CR name
+        self.task_cr_names: dict[str, str] = {}  # Map task_id -> task instance name
         self.task_uuids: dict[str, str] = {}  # Map task_id -> UUID, used to generate CR names
         self.task_invocation_tasks: dict[str, list[asyncio.Task]] = defaultdict(list)
         self.task_usage_counter: dict[str, int] = defaultdict(int)
 
         # CR Manager for creating/managing unit task instance CRs
-        self.cr_manager = cr_manager
+        self.task_registry = task_registry
 
         # gRPC client for resource manager
         self.resource_manager_channel = grpc.aio.insecure_channel(resource_manager_grpc_url)
@@ -112,21 +112,20 @@ class TaskManager:
                 # Whether or not it was already deployed, increment the usage counter
                 self.task_usage_counter[task_id] += 1
 
-            # Deploy tasks by creating CRs and passing CR names to resource manager
+            # Deploy tasks by creating instances and passing names to resource manager
             coros = []
-            task_cr_names = {}  # Map task_id -> CR name for cleanup if needed
+            task_cr_names = {}  # Map task_id -> instance name for cleanup if needed
             
             for task_id in to_deploy:
                 task = self.tasks[task_id]
                 
-                # Create UnitTaskInstance CR for this task
+                # Create named task instance for this task
                 task_uuid = self.task_uuids[task_id]
-                cr_name = await self.cr_manager.create_unit_task_instance_from_task(task, task_uuid)
+                cr_name = await self.task_registry.create_task_instance_from_task(task, task_uuid)
                 task_cr_names[task_id] = cr_name
                 self.task_cr_names[task_id] = cr_name  # Store for future teardown
                 
-                # Deploy via resource manager with CR name instead of protobuf
-                coros.append(self.resource_manager.DeployUnitTask(DeployUnitTaskRequest(task_cr_name=cr_name)))
+                coros.append(self.resource_manager.DeployUnitTask(DeployUnitTaskRequest(task_instance_name=cr_name)))
                 
             responses = await asyncio.gather(*coros, return_exceptions=True)
 
@@ -145,11 +144,8 @@ class TaskManager:
             if errors:
                 cleanup_coros = []
                 for task_id in to_deploy:
-                    # Use the CR name for teardown instead of protobuf
                     cr_name = task_cr_names[task_id]
-                    cleanup_coros.append(
-                        self.resource_manager.TeardownUnitTask(TeardownUnitTaskRequest(task_cr_name=cr_name))
-                    )
+                    cleanup_coros.append(self.resource_manager.TeardownUnitTask(TeardownUnitTaskRequest(task_instance_name=cr_name)))
                     del self.tasks[task_id]
                     del self.task_states[task_id]
                     del self.task_cr_names[task_id]
@@ -205,7 +201,7 @@ class TaskManager:
             for task_id in to_teardown:
                 if task_id in self.task_cr_names:
                     cr_name = self.task_cr_names[task_id]
-                    coros.append(self.resource_manager.TeardownUnitTask(TeardownUnitTaskRequest(task_cr_name=cr_name)))
+                    coros.append(self.resource_manager.TeardownUnitTask(TeardownUnitTaskRequest(task_instance_name=cr_name)))
                 else:
                     logger.error("No CR name found for task %s during teardown", task_id)
             responses = await asyncio.gather(*coros, return_exceptions=True)
@@ -240,7 +236,7 @@ class TaskManager:
             
             cr_name = self.task_cr_names[task_id]
             response = await self.resource_manager.ScaleUnitTask(
-                ScaleUnitTaskRequest(task_cr_name=cr_name, num_gpus=num_gpus)
+                ScaleUnitTaskRequest(task_instance_name=cr_name, num_gpus=num_gpus)
             )
             if response.status != common_pb2.Status.STATUS_OK:
                 raise RuntimeError(f"Failed to scale task {task} to update {num_gpus} GPUs: {response.message}")

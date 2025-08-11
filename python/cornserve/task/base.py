@@ -21,8 +21,8 @@ from pydantic import BaseModel, ConfigDict, Field, model_serializer, model_valid
 from cornserve.constants import K8S_GATEWAY_SERVICE_HTTP_URL
 from cornserve.logging import get_logger
 from cornserve.services.pb.common_pb2 import UnitTask as UnitTaskProto
-from cornserve.task.registry import TASK_REGISTRY
-from cornserve.task_executors.descriptor.registry import DESCRIPTOR_REGISTRY
+from cornserve.services.task_registry.task_class_registry import TASK_CLASS_REGISTRY
+from cornserve.services.task_registry.descriptor_registry import DESCRIPTOR_REGISTRY
 
 if TYPE_CHECKING:
     from cornserve.services.gateway.task_manager import TaskManager
@@ -394,7 +394,7 @@ class UnitTask(Task, Generic[InputT, OutputT]):
         # 
         # PROBLEM DETAILS:
         # 1. Task execution descriptors (e.g., EricDescriptor) are loaded from Custom Resources (CRs)
-        #    and registered in DESCRIPTOR_REGISTRY using task classes from TASK_REGISTRY
+        #    and registered in DESCRIPTOR_REGISTRY using task classes from TASK_CLASS_REGISTRY
         # 2. These descriptors are parameterized like: EricDescriptor(TaskExecutionDescriptor[EncoderTask, ...])
         #    where EncoderTask comes from the CR-loaded task definition
         # 3. However, when apps are registered, they load their own copy of task classes from
@@ -406,7 +406,7 @@ class UnitTask(Task, Generic[InputT, OutputT]):
         #    not just class names or structure
         #
         # EXAMPLE:
-        # - Descriptor expects: EncoderTask (id: 104678592029536) from TASK_REGISTRY  
+        # - Descriptor expects: EncoderTask (id: 104678592029536) from TASK_CLASS_REGISTRY  
         # - App provides:       EncoderTask (id: 104678589216976) from app source
         # - Same name, same structure, but different memory addresses → Validation fails
         #
@@ -494,18 +494,8 @@ class UnitTask(Task, Generic[InputT, OutputT]):
 
         raise AssertionError("Task context is neither in recording nor replay mode.")
 
-    def to_pb(self) -> UnitTaskProto:
-        """Convert this unit task into the UnitTask protobuf message."""
-        return UnitTaskProto(
-            task_class_name=self.__class__.__name__,
-            task_config=self.model_dump_json(),
-        )
 
     @classmethod
-    def from_pb(cls, proto: UnitTaskProto) -> UnitTask:
-        """Create a unit task from the UnitTask protobuf message."""
-        task_cls, _, _ = TASK_REGISTRY.get(proto.task_class_name)
-        return task_cls.model_validate_json(proto.task_config)
 
     def make_name(self) -> str:
         """Create a concise string representation of the task."""
@@ -546,7 +536,7 @@ class TaskInvocation(BaseModel, Generic[InputT, OutputT]):
             return data
 
         # Now this is likely when we're deserializing the object from the serialized data.
-        task_cls, task_input_cls, task_output_cls = TASK_REGISTRY.get(data["class_name"])
+        task_cls, task_input_cls, task_output_cls = TASK_CLASS_REGISTRY.get(data["class_name"])
         task = task_cls.model_validate_json(data["body"]["task"])
         task_input = task_input_cls.model_validate_json(data["body"]["task_input"])
         task_output = task_output_cls.model_validate_json(data["body"]["task_output"])
@@ -808,7 +798,7 @@ class UnitTaskList(BaseModel):
         tasks = []
         for item in data["_task_list"]:
             task_data = item["task"]
-            task_class, _, _ = TASK_REGISTRY.get(item["class_name"])
+            task_class, _, _ = TASK_CLASS_REGISTRY.get(item["class_name"])
             task = task_class.model_validate_json(task_data)
             tasks.append(task)
         return {"tasks": tasks}

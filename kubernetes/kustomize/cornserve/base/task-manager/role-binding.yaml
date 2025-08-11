@@ -1,0 +1,31 @@
+---
+# Task Manager: both CR access and pod/service management
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: task-manager-cr-access
+  namespace: cornserve
+subjects:
+- kind: ServiceAccount
+  name: task-manager-sa
+  namespace: cornserve
+roleRef:
+  kind: Role
+  name: task-manager-cr-access-role
+  apiGroup: rbac.authorization.k8s.io
+
+---
+# Task Manager: pod/service management
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: task-manager-pod-service-access
+  namespace: cornserve
+subjects:
+- kind: ServiceAccount
+  name: task-manager-sa
+  namespace: cornserve
+roleRef:
+  kind: Role
+  name: task-manager-pod-service-management-role
+  apiGroup: rbac.authorization.k8s.io

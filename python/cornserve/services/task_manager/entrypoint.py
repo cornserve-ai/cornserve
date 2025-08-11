@@ -6,7 +6,7 @@ import asyncio
 import signal
 
 from cornserve.logging import get_logger
-from cornserve.services.cr_manager.manager import CRManager
+from cornserve.services.task_registry import TaskRegistry
 from cornserve.services.task_manager.grpc import create_server
 
 logger = get_logger("cornserve.services.task_manager.entrypoint")
@@ -16,15 +16,15 @@ async def serve() -> None:
     """Serve the Task Manager service."""
     logger.info("Starting Task Manager service")
 
-    # Start CR watcher to load tasks/executors from CRs before gRPC server starts
-    logger.info("Starting CR watcher for Task Manager service")
-    cr_manager = CRManager()
+    # Start registry watcher to load tasks/descriptors before gRPC server starts
+    logger.info("Starting registry watcher for Task Manager service")
+    task_registry = TaskRegistry()
     cr_watcher_task = asyncio.create_task(
-        cr_manager.watch_cr_updates(),
+        task_registry.watch_updates(),
         name="task_manager_entrypoint_cr_watcher"
     )
 
-    server, servicer = create_server(cr_manager)
+    server, servicer = create_server(task_registry)
     await server.start()
 
     logger.info("gRPC server started")
@@ -53,8 +53,8 @@ async def serve() -> None:
             except asyncio.CancelledError:
                 logger.info("CR watcher task cancelled successfully")
         
-        # Close CR manager
-        await cr_manager.close()
+        # Close registry
+        await task_registry.shutdown()
         
         await server.stop(5)
         if servicer.manager is not None:

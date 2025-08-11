@@ -2,13 +2,13 @@ from __future__ import annotations
 
 import pytest
 
-from cornserve.task.registry import TASK_REGISTRY
+from cornserve.services.task_registry import TASK_CLASS_REGISTRY
 
 
 def test_task_registry():
     """Tests whether the task registry is initialized correctly."""
-    llm_task = TASK_REGISTRY.get("LLMUnitTask")
-    encoder_task = TASK_REGISTRY.get("EncoderTask")
+    llm_task = TASK_CLASS_REGISTRY.get("LLMUnitTask")
+    encoder_task = TASK_CLASS_REGISTRY.get("EncoderTask")
 
     from cornserve.task.base import Stream
     from cornserve.tasklib.task.builtins.encoder import EncoderInput, EncoderOutput, EncoderTask
@@ -17,6 +17,6 @@ def test_task_registry():
     assert llm_task == (LLMUnitTask, OpenAIChatCompletionRequest, Stream[OpenAIChatCompletionChunk])
     assert encoder_task == (EncoderTask, EncoderInput, EncoderOutput)
 
-    assert "_NonExistentTask" not in TASK_REGISTRY
+    assert "_NonExistentTask" not in TASK_CLASS_REGISTRY
     with pytest.raises(KeyError):
-        TASK_REGISTRY.get("_NonEistentTask")
+        TASK_CLASS_REGISTRY.get("_NonEistentTask")

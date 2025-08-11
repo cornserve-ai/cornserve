@@ -10,7 +10,6 @@ from cornserve import constants
 from cornserve.services.resource_manager.resource import GPU
 from cornserve.tasklib.task.builtins.encoder import EncoderInput, EncoderOutput, EncoderTask
 from cornserve.task_executors.descriptor.base import TaskExecutionDescriptor
-from cornserve.task_executors.descriptor.registry import DESCRIPTOR_REGISTRY
 from cornserve.task_executors.eric.api import EmbeddingData, EmbeddingRequest, EmbeddingResponse, Modality, Status
 
 
