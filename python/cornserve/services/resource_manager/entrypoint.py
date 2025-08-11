@@ -23,8 +23,8 @@ async def serve() -> None:
     GrpcAioInstrumentorServer().instrument()
     GrpcAioInstrumentorClient().instrument()
 
-    # Start CR watcher to load tasks/executors from CRs before gRPC server starts
-    logger.info("Starting CR watcher for Resource Manager service")
+    # Start task watcher to load tasks/executors from CRs before gRPC server starts
+    logger.info("Starting task watcher for Resource Manager service")
     task_registry = TaskRegistry()
     cr_watcher_task = asyncio.create_task(
         task_registry.watch_updates(),
@@ -52,14 +52,14 @@ async def serve() -> None:
     except asyncio.CancelledError:
         logger.info("Shutting down Resource Manager service")
         
-        # Cancel CR watcher task
+        # Cancel task watcher task
         if not cr_watcher_task.done():
-            logger.info("Cancelling CR watcher task")
+            logger.info("Cancelling task watcher task")
             cr_watcher_task.cancel()
             try:
                 await cr_watcher_task
             except asyncio.CancelledError:
-                logger.info("CR watcher task cancelled successfully")
+                logger.info("task watcher task cancelled successfully")
         
         # Close CR manager
         await task_registry.shutdown()

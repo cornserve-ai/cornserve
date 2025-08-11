@@ -44,14 +44,14 @@ async def serve() -> None:
     except asyncio.CancelledError:
         logger.info("Shutting down Task Manager service")
         
-        # Cancel CR watcher
+        # Cancel task watcher
         if not cr_watcher_task.done():
-            logger.info("Cancelling CR watcher task")
+            logger.info("Cancelling task watcher task")
             cr_watcher_task.cancel()
             try:
                 await cr_watcher_task
             except asyncio.CancelledError:
-                logger.info("CR watcher task cancelled successfully")
+                logger.info("task watcher task cancelled successfully")
         
         # Close registry
         await task_registry.shutdown()

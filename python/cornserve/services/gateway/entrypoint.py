@@ -29,8 +29,8 @@ async def serve() -> None:
 
     configure_otel("gateway")
 
-    # Start CR watcher to load tasks from Custom Resources BEFORE starting FastAPI
-    logger.info("Starting CR watcher for Gateway service")
+    # Start task watcher to load tasks from Custom Resources BEFORE starting FastAPI
+    logger.info("Starting task watcher for Gateway service")
     task_registry = TaskRegistry()
     
     # Deploy built-in task definitions as Custom Resources
@@ -83,14 +83,14 @@ async def serve() -> None:
     except asyncio.CancelledError:
         logger.info("Shutting down Gateway service")
         
-        # Cancel CR watcher task
+        # Cancel task watcher task
         if not cr_watcher_task.done():
-            logger.info("Cancelling CR watcher task")
+            logger.info("Cancelling task watcher task")
             cr_watcher_task.cancel()
             try:
                 await cr_watcher_task
             except asyncio.CancelledError:
-                logger.info("CR watcher task cancelled successfully")
+                logger.info("task watcher task cancelled successfully")
         
         # Close CR manager
         await task_registry.shutdown()
