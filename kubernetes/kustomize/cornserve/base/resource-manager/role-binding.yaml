@@ -1,5 +1,4 @@
 ---
-# Resource Manager: CR access
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
@@ -15,7 +14,6 @@ roleRef:
   apiGroup: rbac.authorization.k8s.io
 
 ---
-# Resource Manager: pod/service management
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
@@ -31,7 +29,6 @@ roleRef:
   apiGroup: rbac.authorization.k8s.io
 
 ---
-# Resource Manager: for listing nodes
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:

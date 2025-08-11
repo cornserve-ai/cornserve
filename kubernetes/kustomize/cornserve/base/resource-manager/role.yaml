@@ -23,7 +23,7 @@ rules:
   verbs: ["create", "update", "patch", "get", "list", "watch", "delete"]
 
 ---
-# ClusterRole for resource-manager to access nodes
+# ClusterRole for nodes access
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:

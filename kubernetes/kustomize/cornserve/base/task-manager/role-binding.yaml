@@ -1,5 +1,5 @@
 ---
-# Task Manager: both CR access and pod/service management
+# CR access
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
@@ -15,7 +15,7 @@ roleRef:
   apiGroup: rbac.authorization.k8s.io
 
 ---
-# Task Manager: pod/service management
+# Pod/service management
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
