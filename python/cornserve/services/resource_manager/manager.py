@@ -29,6 +29,7 @@ from cornserve.services.utils import to_strict_k8s_name
 from cornserve.sidecar.constants import grpc_url_from_rank
 from cornserve.task.base import UnitTask
 from cornserve.task_executors.profile import UnitTaskProfileManager
+from cornserve.utils import format_grpc_error
 
 logger = get_logger(__name__)
 tracer = trace.get_tracer(__name__)
@@ -823,6 +824,13 @@ class ResourceManager:
                     raise RuntimeError(f"Failed to register task manager: {response}")
 
         except Exception as e:
+            if isinstance(e, grpc.aio.AioRpcError):
+                # pretty print gRPC erros
+                logger.error("gRPC error while spawning task manager: %s", format_grpc_error(e))
+                await state.tear_down(self.kube_core_client)
+                raise RuntimeError(
+                    f"Failed to initialize spawned task manager for {task}: {format_grpc_error(e)}"
+                ) from e
             logger.exception("Failed to spawn task manager: %s", e)
             await state.tear_down(self.kube_core_client)
             raise RuntimeError(f"Failed to initialize spawned task manager for {task}: {e}") from e

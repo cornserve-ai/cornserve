@@ -97,7 +97,7 @@ class SidecarSenderConfig:
     base_ptr: int
     shared_tensor: torch.Tensor
     slot_numel: int
-    concurrent_copy: bool = False
+    concurrent_copy: bool
 
 
 @dataclass

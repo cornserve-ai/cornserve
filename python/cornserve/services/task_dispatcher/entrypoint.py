@@ -15,6 +15,7 @@ from cornserve.logging import get_logger
 from cornserve.services.task_dispatcher.grpc import create_server
 from cornserve.services.task_dispatcher.router import create_app
 from cornserve.tracing import configure_otel
+from cornserve.utils import set_ulimit
 
 if TYPE_CHECKING:
     from cornserve.services.task_dispatcher.dispatcher import TaskDispatcher
@@ -26,6 +27,7 @@ async def serve() -> None:
     """Serve the Task Dispatcher service."""
     logger.info("Starting Gateway service")
 
+    set_ulimit()
     configure_otel("task_dispatcher")
 
     # FastAPI server
