@@ -91,6 +91,7 @@ class OpenAIChatCompletionRequest(TaskInput):
     temperature: float | None = None
     top_p: float | None = None
     request_id: str = Field(default_factory=lambda: uuid.uuid4().hex)
+    ignore_eos: bool = False
 
     # Cornserve-specific fields
     cornserve_embeddings: list[DataForward[Tensor]] = []

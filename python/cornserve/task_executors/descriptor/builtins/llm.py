@@ -167,12 +167,9 @@ class PrefillVLLMDescriptor(
     def get_container_envs(self, gpus: list[GPU]) -> list[tuple[str, str]]:
         """Get the additional environment variables for the task executor."""
         return [
-            ("UCX_TLS", "cuda,rc,ib,tcp"),
-            # ("UCX_TLS", "cuda,rc,ib"),
-            ("UCX_NET_DEVICES", "mlx5_0:1"),
             # ("UCX_LOG_LEVEL", "debug"),
-            ("CUDA_VISIBLE_DEVICES", ",".join(str(gpu.local_rank) for gpu in gpus)),
             # ("VLLM_LOGGING_LEVEL", "DEBUG"),
+            ("CUDA_VISIBLE_DEVICES", ",".join(str(gpu.local_rank) for gpu in gpus)),
             ("VLLM_NIXL_SIDE_CHANNEL_PORT", str(self.NIXL_BASE_PORT + gpus[0].global_rank)),
         ]
 
@@ -307,12 +304,9 @@ class DecodeVLLMDescriptor(
     def get_container_envs(self, gpus: list[GPU]) -> list[tuple[str, str]]:
         """Get the additional environment variables for the task executor."""
         return [
-            ("UCX_TLS", "cuda,rc,ib,tcp"),
-            # ("UCX_TLS", "cuda,rc,ib"),
-            ("UCX_NET_DEVICES", "mlx5_0:1"),
             # ("UCX_LOG_LEVEL", "debug"),
-            ("CUDA_VISIBLE_DEVICES", ",".join(str(gpu.local_rank) for gpu in gpus)),
             # ("VLLM_LOGGING_LEVEL", "DEBUG"),
+            ("CUDA_VISIBLE_DEVICES", ",".join(str(gpu.local_rank) for gpu in gpus)),
             ("VLLM_NIXL_SIDE_CHANNEL_PORT", str(self.NIXL_BASE_PORT + gpus[0].global_rank)),
         ]
 
