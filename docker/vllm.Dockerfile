@@ -1,3 +1,5 @@
+# UCX-cuda build requires the devel image
+# TODO: Use a multi-stage build to reduce image size
 FROM pytorch/pytorch:2.7.0-cuda12.6-cudnn9-devel AS base
 
 RUN apt-get update -y \
