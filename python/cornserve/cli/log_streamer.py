@@ -162,9 +162,6 @@ class LogStreamer:
             if isinstance(e, ProtocolError) and self.stop_event.is_set():
                 # We only expect this ProtocolError when the response was shut down.
                 return
-            if isinstance(e, AttributeError):
-                # This will happen if worker is blocked in IO and stop() is called.
-                return
             self.console.print(Text(f"Unexpected error streaming logs for {pod_name}: {e}", style="red"))
 
     def start(self) -> None:
@@ -188,7 +185,7 @@ class LogStreamer:
         with self.lock:
             for resp in self.streams:
                 try:
-                    resp.close()
+                    resp.shutdown()
                 except Exception:
                     self.console.print(Text(f"Error closing stream for {resp}", style="red"))
 
