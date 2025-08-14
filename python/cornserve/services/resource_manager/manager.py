@@ -733,8 +733,9 @@ class ResourceManager:
             logger.info("Allocating %d GPUs for task %s based on profile", num_gpus, task)
 
             # Allocate resource starter pack for the task manager
-            # state.resources = self.resource.allocate(num_gpus=num_gpus, owner=state.id)
-            state.resources = []
+            state.resources = self.resource.allocate(num_gpus=num_gpus, owner=state.id)
+            # uncomment below during benchmarking to speedup
+            # state.resources = []
             span.set_attribute(
                 "resource_manager._spawn_task_manager.gpu_global_ranks",
                 [gpu.global_rank for gpu in state.resources],
