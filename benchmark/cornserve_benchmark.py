@@ -1,73 +1,323 @@
-import argparse
 import asyncio
 import contextlib
+from dataclasses import asdict, dataclass, field, replace
 import json
+import sys
 import time
-from dataclasses import asdict
-from datetime import datetime
-from typing import Any, AsyncGenerator, Callable
+import traceback
+from typing import Any, AsyncGenerator
+import warnings
 
 import aiohttp
 import numpy as np
-from tqdm.asyncio import tqdm
+from tqdm import tqdm
 from transformers import AutoTokenizer
+from transformers.tokenization_utils_base import PreTrainedTokenizerBase
 
-from benchmark_backend import TRANSFORM_FUNCS, RequestInput, RequestOutput
-from benchmark_dataset import FILE_SERVER_URL, SampleRequest, VisionArenaDataset
-from utils import get_benchmark_filenames
+from benchmark_dataset import SampleRequest
+from image_utils import create_dummy_image, get_image_data_uris
+from schema import EricConfig, ExperimentConfig
 
-GATEWAY_URL = "http://localhost:30080"
-BACKEND_URLS = {
-    "cornserve": GATEWAY_URL,
-    "vllm": "http://localhost:8000",
-    "eric": "http://localhost:7999",
-}
 AIOHTTP_TIMEOUT = aiohttp.ClientTimeout(total=6 * 60 * 60)
-MAX_MM_COUNT = 40
+MILLISECONDS_TO_SECONDS_CONVERSION = 1000
 
-def sample_mm_count(max_count: int, distribution: str = "poisson") -> int:
-    """Sample number of multimedia items based on distribution."""
-    if max_count <= 0:
-        return 0
-    
-    if distribution == "uniform":
-        return np.random.randint(0, max_count + 1)
-    elif distribution == "poisson":
-        # Use max_count/2 as lambda to keep most values within range
-        lambda_val = max(0.5, max_count / 2.0)  # Ensure lambda is positive
-        sampled = np.random.poisson(lambda_val)
-        return min(sampled, max_count)
-    elif distribution == "geometric":
-        # Geometric with p = 0.3 to favor smaller numbers
-        sampled = np.random.geometric(0.3) - 1  # -1 because geometric starts at 1
-        return min(max(sampled, 0), max_count)  # Ensure non-negative
-    else:
-        return np.random.randint(0, max_count + 1)
+@dataclass
+class RequestInput:
+    """Input for the benchmark request."""
+    url: str
+    model: str
+    prompt: str | Any
+    prompt_len: int
+    output_len: int
+    multi_modal_data: list[dict[str, Any]]
+    filenames: list[str] = field(default_factory=list)
+    ignore_eos: bool = True
+
+    encoder_fission: bool = False
 
 
-async def post(
+@dataclass
+class RequestOutput:
+    generated_text: str = ""
+    success: bool = False
+    latency: float = 0.0
+    output_tokens: int = 0
+    ttft: float = 0.0  # Time to first token
+    itl: list[float] = field(default_factory=list)  # list of inter-token latencies
+    tpot: float = 0.0  # avg next-token latencies
+    prompt_len: int = 0
+    error: str = ""
+    # bookkeeping fields
+    input: RequestInput | None = None
+    usage: dict[str, Any] | None = None
+
+    completion_timestamp: float = 0.0  # Timestamp when the completion was generated
+
+@dataclass
+class BenchmarkMetrics:
+    completed: int
+    total_input: int
+    total_output: int
+    request_throughput: float
+    request_goodput: float
+    output_throughput: float
+    total_token_throughput: float
+    mean_ttft_ms: float
+    median_ttft_ms: float
+    std_ttft_ms: float
+    percentiles_ttft_ms: list[tuple[float, float]]
+    mean_tpot_ms: float
+    median_tpot_ms: float
+    std_tpot_ms: float
+    percentiles_tpot_ms: list[tuple[float, float]]
+    mean_itl_ms: float
+    median_itl_ms: float
+    std_itl_ms: float
+    percentiles_itl_ms: list[tuple[float, float]]
+    # E2EL stands for end-to-end latency per request.
+    # It is the time taken on the client side from sending
+    # a request to receiving a complete response.
+    mean_e2el_ms: float
+    median_e2el_ms: float
+    std_e2el_ms: float
+    percentiles_e2el_ms: list[tuple[float, float]]
+
+
+def calculate_metrics(
+    input_requests: list[RequestInput],
+    outputs: list[RequestOutput],
+    dur_s: float,
+    tokenizer: PreTrainedTokenizerBase,
+    selected_percentiles: list[float] = [90, 95, 99],
+    goodput_config_dict: dict[str, float] | None = None,
+) -> tuple[BenchmarkMetrics, list[int]]:
+    actual_output_lens: list[int] = []
+    total_input = 0
+    completed = 0
+    good_completed = 0
+    itls: list[float] = []
+    tpots: list[float] = []
+    all_tpots: list[float] = []
+    ttfts: list[float] = []
+    e2els: list[float] = []
+    for i in range(len(outputs)):
+        if outputs[i].success:
+            output_len = outputs[i].output_tokens
+
+            if not output_len:
+                # We use the tokenizer to count the number of output tokens
+                # for some serving backends instead of looking at
+                # len(outputs[i].itl) since multiple output tokens may be
+                # bundled together
+                # Note : this may inflate the output token count slightly
+                output_len = len(
+                    tokenizer(
+                        outputs[i].generated_text, add_special_tokens=False
+                    ).input_ids
+                )
+            actual_output_lens.append(output_len)
+            total_input += input_requests[i].prompt_len
+            tpot = 0
+            if output_len > 1:
+                latency_minus_ttft = outputs[i].latency - outputs[i].ttft
+                tpot = latency_minus_ttft / (output_len - 1)
+                tpots.append(tpot)
+            # Note: if output_len <= 1, we regard tpot as 0 for goodput
+            all_tpots.append(tpot)
+            itls += outputs[i].itl
+            ttfts.append(outputs[i].ttft)
+            e2els.append(outputs[i].latency)
+            completed += 1
+        else:
+            actual_output_lens.append(0)
+
+    if goodput_config_dict:
+        valid_metrics = []
+        slo_values = []
+
+        if "ttft" in goodput_config_dict:
+            valid_metrics.append(ttfts)
+            slo_values.append(
+                goodput_config_dict["ttft"] / MILLISECONDS_TO_SECONDS_CONVERSION
+            )
+        if "tpot" in goodput_config_dict:
+            valid_metrics.append(all_tpots)
+            slo_values.append(
+                goodput_config_dict["tpot"] / MILLISECONDS_TO_SECONDS_CONVERSION
+            )
+        if "e2el" in goodput_config_dict:
+            valid_metrics.append(e2els)
+            slo_values.append(
+                goodput_config_dict["e2el"] / MILLISECONDS_TO_SECONDS_CONVERSION
+            )
+
+        for req_metric in zip(*valid_metrics):
+            is_good_req = all([s >= r for s, r in zip(slo_values, req_metric)])
+            if is_good_req:
+                good_completed += 1
+
+    if completed == 0:
+        warnings.warn(
+            "All requests failed. This is likely due to a misconfiguration "
+            "on the benchmark arguments.",
+            stacklevel=2,
+        )
+    metrics = BenchmarkMetrics(
+        completed=completed,
+        total_input=total_input,
+        total_output=sum(actual_output_lens),
+        request_throughput=completed / dur_s,
+        request_goodput=good_completed / dur_s,
+        output_throughput=sum(actual_output_lens) / dur_s,
+        total_token_throughput=(total_input + sum(actual_output_lens)) / dur_s,
+        mean_ttft_ms=np.mean(ttfts or 0)  # type: ignore
+        * 1000,  # ttfts is empty if streaming is not supported by backend
+        std_ttft_ms=np.std(ttfts or 0) * 1000,  # type: ignore
+        median_ttft_ms=np.median(ttfts or 0) * 1000,  # type: ignore
+        percentiles_ttft_ms=[
+            (p, np.percentile(ttfts or 0, p) * 1000) for p in selected_percentiles  # type: ignore
+        ],
+        mean_tpot_ms=np.mean(tpots or 0) * 1000,  # type: ignore
+        std_tpot_ms=np.std(tpots or 0) * 1000,  # type: ignore
+        median_tpot_ms=np.median(tpots or 0) * 1000,  # type: ignore
+        percentiles_tpot_ms=[
+            (p, np.percentile(tpots or 0, p) * 1000) for p in selected_percentiles  # type: ignore
+        ],
+        mean_itl_ms=np.mean(itls or 0) * 1000,  # type: ignore
+        std_itl_ms=np.std(itls or 0) * 1000,  # type: ignore
+        median_itl_ms=np.median(itls or 0) * 1000,  # type: ignore
+        percentiles_itl_ms=[
+            (p, np.percentile(itls or 0, p) * 1000) for p in selected_percentiles  # type: ignore
+        ],
+        mean_e2el_ms=np.mean(e2els or 0) * 1000,  # type: ignore
+        std_e2el_ms=np.std(e2els or 0) * 1000,  # type: ignore
+        median_e2el_ms=np.median(e2els or 0) * 1000,  # type: ignore
+        percentiles_e2el_ms=[
+            (p, np.percentile(e2els or 0, p) * 1000) for p in selected_percentiles  # type: ignore
+        ],
+    )
+
+    return metrics, actual_output_lens
+
+async def cornserve_invoke_eric(
     request_input: RequestInput,
     pbar: tqdm | None,
 ) -> RequestOutput:
-    """Send a POST request to the specified URL with the given payload."""
-    result = RequestOutput()
-    start_time = time.perf_counter()
-    async with aiohttp.ClientSession(timeout=AIOHTTP_TIMEOUT) as session:
+    api_url = request_input.url
+    async with aiohttp.ClientSession(
+        trust_env=True, timeout=AIOHTTP_TIMEOUT
+    ) as session:
+        # only support images
+        image_urls = get_image_data_uris(request_input.filenames)
+        request_data = {
+            "model_id": request_input.model,
+            "data_urls": image_urls,
+        }
+
+        payload = {"request_data": request_data}
+
+        output = RequestOutput()
+        output.input = replace(request_input, multi_modal_data=[])
+        output.prompt_len = request_input.prompt_len
+
+        st = time.perf_counter()
         try:
-            async with session.post(request_input.url, json=request_input.payload) as response:
+            async with session.post( url=api_url, json=payload) as response:
                 if response.status == 200:
-                    content = await response.json()
-                    end_time = time.perf_counter()
-                    result.success = True
-                    result.latency = end_time - start_time
-                    result.output = content
+                    # iterate over lines
+                    timestamp = time.perf_counter()
+                    output.latency = timestamp - st
+                    output.completion_timestamp = timestamp
+                    output.success = True
                 else:
-                    result.error = f"Request failed with status {response.status}"
-        except Exception as e:
-            result.error = f"Request failed with exception: {str(e)}"
+                    output.error = response.reason or ""
+                    output.success = False
+        except Exception:
+            output.success = False
+            exc_info = sys.exc_info()
+            output.error = "".join(traceback.format_exception(*exc_info))
+
     if pbar:
         pbar.update(1)
-    return result
+    return output
+
+async def cornserve_invoke(
+    request_input: RequestInput,
+    pbar: tqdm | None,
+) -> RequestOutput:
+    api_url = request_input.url
+    async with aiohttp.ClientSession(
+        trust_env=True, timeout=AIOHTTP_TIMEOUT
+    ) as session:
+        content = [{"type": "text", "text": request_input.prompt}]
+        for mm_data in request_input.multi_modal_data:
+            content.append(mm_data)
+        request_data = {
+            "model": request_input.model,
+            "messages": [
+                {"role": "user", "content": content},
+            ],
+            "temperature": 0.0,
+            "max_completion_tokens": request_input.output_len,
+            "stream_options": {
+                "include_usage": True,
+            },
+            "encoder_fission": request_input.encoder_fission,
+            "ignore_eos": request_input.ignore_eos,
+        }
+
+        payload = {"request_data": request_data}
+
+        output = RequestOutput()
+        output.input = replace(request_input, multi_modal_data=[])
+        output.prompt_len = request_input.prompt_len
+
+        generated_text = ""
+        ttft = 0.0
+        st = time.perf_counter()
+        most_recent_timestamp = st
+        try:
+            async with session.post( url=api_url, json=payload) as response:
+                if response.status == 200:
+                    # iterate over lines
+                    async for raw_line in response.content:
+                        line = raw_line.decode("utf-8").strip()
+                        if not line:
+                            # empty lines for keep alive
+                            continue
+                        timestamp = time.perf_counter()
+                        data = json.loads(line)
+                        if choices := data.get("choices"):
+                            content = choices[0]["delta"].get("content")
+                            # First token
+                            if ttft == 0.0:
+                                ttft = timestamp - st
+                                output.ttft = ttft
+                            # Decoding phase
+                            else:
+                                output.itl.append(timestamp - most_recent_timestamp)
+                            generated_text += content or ""
+                        elif usage := data.get("usage"):
+                            output.output_tokens = usage.get("completion_tokens")
+                            output.usage = usage
+                        most_recent_timestamp = timestamp
+
+                    output.generated_text = generated_text
+                    output.success = True
+                    output.latency = most_recent_timestamp - st
+                    output.completion_timestamp = most_recent_timestamp
+                else:
+                    output.error = response.reason or ""
+                    output.success = False
+        except Exception:
+            output.success = False
+            exc_info = sys.exc_info()
+            output.error = "".join(traceback.format_exception(*exc_info))
+
+    if pbar:
+        pbar.update(1)
+    return output
+
 
 async def get_request(
     input_requests: list[RequestInput],
@@ -111,279 +361,190 @@ async def get_request(
         # The next request will be sent after the interval.
         await asyncio.sleep(interval)
 
+def transform_sampled_requests(
+    config: ExperimentConfig,
+    sampled_requests: list[SampleRequest],
+) -> list[RequestInput]:
+    """
+    Transforms the sampled requests from the dataset into
+    RequestInput objects for benchmarking.
+    """
+    # synthesize image_choices images
+    image_filenames = [create_dummy_image(
+        width=config.image_width,
+        height=config.image_height,
+        id=i,
+    ) for i in range(config.image_choices)]
+    np.random.seed(config.seed)
+    # first synthesize image_data
+    if config.use_synthesized_data:
+        print(f"Synthesizing image data with probability {config.image_probability}.")
+        for request in sampled_requests:
+            if np.random.rand() < config.image_probability:
+                # Synthesize image choices
+                chosen_image_filenames = list(np.random.choice(
+                    image_filenames,
+                    size=config.image_count,
+                    replace=False,
+                ))
+                request.filenames = chosen_image_filenames
+                request.image_urls = get_image_data_uris(chosen_image_filenames)
+            if np.random.rand() < config.encoder_fission_probability:
+                # encoder fission
+                request.encoder_fission = True
+        # print(f"Total fissioned requests: {sum(request.encoder_fission for request in sampled_requests)}")
+
+    request_inputs = []
+    app_id = config.app_id
+    for request in sampled_requests:
+        mm_data_list = []
+        if config.use_synthesized_data:
+            for image_uri in request.image_urls:
+                mm_data_list.append({"type": "image_url", "image_url": {"url": image_uri}})
+        else:
+            mm_data_list = [request.multi_modal_data]
+        request_input = RequestInput(
+            url=f"http://127.0.0.1:30080/app/invoke/{app_id}",
+            model=config.model_id,
+            prompt=request.prompt,
+            prompt_len=request.prompt_len,
+            output_len=config.output_len,
+            multi_modal_data=mm_data_list,
+            filenames=request.filenames,
+            encoder_fission=request.encoder_fission,
+        )
+        request_inputs.append(request_input)
+    return request_inputs
 
 async def benchmark(
     request_inputs: list[RequestInput],
-    backend: str,
-    num_prompts: int,
-    request_rate: float,
-    burstiness: float,
-    max_concurrency: int | None,
-    disable_tqdm: bool,
+    config: ExperimentConfig,
 ) -> dict[str, Any]:
-    pbar = None if disable_tqdm else tqdm(total=len(request_inputs))
+    # here we assume the cluster is scaled as needed
+    max_concurrency = config.max_concurrency
     semaphore = asyncio.Semaphore(max_concurrency) if max_concurrency else contextlib.nullcontext()
-    async def request_func(request_input: RequestInput, pbar: tqdm | None = None) -> RequestOutput:
+    async def request_func(request_input: RequestInput, pbar: tqdm) -> RequestOutput:
         async with semaphore:
-            return await post(request_input=request_input, pbar=pbar)
-    
-    """Run benchmark and collect statistics."""
-    
+            if isinstance(config.backend_config, EricConfig):
+                return await cornserve_invoke_eric(request_input, pbar)
+            return await cornserve_invoke(request_input, pbar)
+
+    # first test a request
+    print("Testing a single request to verify the setup...")
+    test_output = await request_func(request_inputs[0], tqdm(total=1, desc="Test"))
+    if not test_output.success:
+        print("Test request failed. Please check the setup.")
+        print(f"Error: {test_output.error}")
+        raise RuntimeError("Test request failed.")
+
+    # do warmup
+    print("Starting warmup phase...")
+    warmup_pbar = tqdm(total=config.num_warmups, desc="Warmup")
+    coros = [request_func(request_input, warmup_pbar) for request_input in request_inputs[:config.num_warmups]]
+    results = await asyncio.gather(*coros)
+    if any(not output.success for output in results):
+        print("Warmup requests failed. Please check the setup.")
+        for output in results:
+            if not output.success:
+                print(f"Error: {output.error}")
+        raise RuntimeError("Warmup requests failed.")
+
+    print("=" * 50)
+
+    pbar = tqdm(total=len(request_inputs))
     print(f"Starting benchmark with {len(request_inputs)} requests...")
-    distribution = "Poisson process" if burstiness == 1.0 else "Gamma distribution"
-    print(f"Traffic request rate: {request_rate}")
-    print(f"Burstiness factor: {burstiness} ({distribution})")
+    distribution = "Poisson process" if config.burstiness == 1.0 else "Gamma distribution"
+    print(f"Traffic request rate: {config.request_rate}")
+    print(f"Burstiness factor: {config.burstiness} ({distribution})")
     print(f"Maximum request concurrency: {max_concurrency}")
-    
+
     # Start time for overall benchmark
     benchmark_start_time = time.perf_counter()
     tasks = []
     # Generate requests and create tasks
-    async for request in get_request(request_inputs, request_rate, burstiness):
+    async for request in get_request(request_inputs, config.request_rate, config.burstiness):
         task = asyncio.create_task(request_func(request_input=request, pbar=pbar))
         tasks.append(task)
     
     # Wait for all tasks to complete
     results = await asyncio.gather(*tasks)
     
-    benchmark_end_time = time.perf_counter()
-    total_time = benchmark_end_time - benchmark_start_time
-    
-    successful_requests = [r for r in results if r.success]
-    failed_requests = [r for r in results if not r.success]
-    latencies = [r.latency for r in successful_requests if r.latency > 0]
-    
-    # Calculate statistics
-    stats = {
-        "total_requests": len(results),
-        "successful_requests": len(successful_requests),
-        "failed_requests": len(failed_requests),
-        "success_rate": len(successful_requests) / len(results) if results else 0,
-        "total_time": total_time,
-        "actual_request_rate": len(results) / total_time if total_time > 0 else 0,
-    }
-    
-    if latencies:
-        stats.update({
-            "latency_mean": np.mean(latencies),
-            "latency_median": np.median(latencies),
-            "latency_p95": np.percentile(latencies, 95),
-            "latency_p99": np.percentile(latencies, 99),
-            "latency_min": np.min(latencies),
-            "latency_max": np.max(latencies),
-        })
-    else:
-        stats.update({
-            "latency_mean": 0,
-            "latency_median": 0,
-            "latency_p95": 0,
-            "latency_p99": 0,
-            "latency_min": 0,
-            "latency_max": 0,
-        })
+    # to rule out Timeout errors, we use the latest completion time
+    benchmark_end_time = max([output.completion_timestamp for output in results if output.success])
+    benchmark_duration = benchmark_end_time - benchmark_start_time
+
+    metrics, actual_output_lens = calculate_metrics(
+        input_requests=request_inputs,
+        outputs=results,
+        dur_s=benchmark_duration,
+        tokenizer=AutoTokenizer.from_pretrained(config.model_id),
+    )
+
+    print("{s:{c}^{n}}".format(s=" Serving Benchmark Result ", n=50, c="="))
+    print("{:<40} {:<10}".format("Successful requests:", metrics.completed))
+    print("{:<40} {:<10.2f}".format("Benchmark duration (s):", benchmark_duration))
+    print("{:<40} {:<10}".format("Total input tokens:", metrics.total_input))
+    print("{:<40} {:<10}".format("Total generated tokens:", metrics.total_output))
+    print(
+        "{:<40} {:<10.4f}".format(
+            "Request throughput (req/s):", metrics.request_throughput
+        )
+    )
+    # if goodput_config_dict:
+    #     print(
+    #         "{:<40} {:<10.2f}".format(
+    #             "Request goodput (req/s):", metrics.request_goodput
+    #         )
+    #     )
+    print(
+        "{:<40} {:<10.2f}".format(
+            "Output token throughput (tok/s):", metrics.output_throughput
+        )
+    )
+    print(
+        "{:<40} {:<10.2f}".format(
+            "Total Token throughput (tok/s):", metrics.total_token_throughput
+        )
+    )
+    def process_one_metric(
+        # E.g., "ttft"
+        metric_attribute_name: str,
+        # E.g., "TTFT"
+        metric_name: str,
+        # E.g., "Time to First Token"
+        metric_header: str,
+    ):
+        # This function prints and adds statistics of the specified
+        # metric.
+        print("{s:{c}^{n}}".format(s=metric_header, n=50, c="-"))
+        print(
+            "{:<40} {:<10.2f}".format(
+                f"Mean {metric_name} (ms):",
+                getattr(metrics, f"mean_{metric_attribute_name}_ms"),
+            )
+        )
+        print(
+            "{:<40} {:<10.2f}".format(
+                f"Median {metric_name} (ms):",
+                getattr(metrics, f"median_{metric_attribute_name}_ms"),
+            )
+        )
+        for p, value in getattr(metrics, f"percentiles_{metric_attribute_name}_ms"):
+            p_word = str(int(p)) if int(p) == p else str(p)
+            print("{:<40} {:<10.2f}".format(f"P{p_word} {metric_name} (ms):", value))
+
+    process_one_metric("ttft", "TTFT", "Time to First Token")
+    process_one_metric("tpot", "TPOT", "Time per Output Token (excl. 1st token)")
+    process_one_metric("itl", "ITL", "Inter-token Latency")
+    process_one_metric("e2el", "E2EL", "End-to-end Latency")
+    print("=" * 50)
 
     output_data = {
-        "statistics": stats,
-        "detailed_results": [asdict(result) for result in results],
-        "benchmark_config": {
-            "request_rate": request_rate,
-            "burstiness": burstiness,
-            "num_prompts": num_prompts,
-        }
+        "results": [asdict(output) for output in results],
+        "metrics": asdict(metrics),
     }
 
+    config.save(output_data)
+
     return output_data
-    
 
-
-async def main(args: argparse.Namespace) -> None:
-    model_id = args.model_id
-    np.random.seed(args.seed)
-
-    tokenizer = AutoTokenizer.from_pretrained(model_id, tokenizer_mode = "auto", trust_remote_code=True)
-
-    # Currently default to the VisionArena dataset
-    sampled_requests: list[SampleRequest]= VisionArenaDataset(
-        dataset_path="lmarena-ai/VisionArena-Chat",
-        dataset_subset=None,
-        dataset_split="train",
-        random_seed=args.seed,
-        ).sample(
-            num_requests=args.num_prompts,
-            tokenizer=tokenizer,
-            output_len=args.hf_output_len,
-        )
-
-    # Add random multimedia URLs to each request
-    if args.synthesize_mm_data:
-        video_filenames, audio_filenames, image_filenames = get_benchmark_filenames(MAX_MM_COUNT)
-        video_urls = [f"{FILE_SERVER_URL}/videos/{filename}" for filename in video_filenames]
-        audio_urls = [f"{FILE_SERVER_URL}/audios/{filename}" for filename in audio_filenames]
-        image_urls = [f"{FILE_SERVER_URL}/images/{filename}" for filename in image_filenames]
-
-        for request in sampled_requests:
-            # Decide whether to include each media type
-            include_videos = np.random.random() < args.video_prob
-            include_audios = np.random.random() < args.audio_prob  
-            include_images = np.random.random() < args.image_prob
-        
-            # Sample number of each media type
-            if include_videos and args.max_videos_per_request > 0 and len(video_urls) > 0:
-                num_videos = sample_mm_count(args.max_videos_per_request, args.mm_distribution)
-                if num_videos > 0:
-                    request.video_urls = np.random.choice(
-                        video_urls,
-                        size=min(num_videos, len(video_urls)),
-                        replace=False,
-                    ).tolist()  # type: ignore
-            
-            if include_audios and args.max_audios_per_request > 0 and len(audio_urls) > 0:
-                num_audios = sample_mm_count(args.max_audios_per_request, args.mm_distribution)
-                if num_audios > 0:
-                    request.audio_urls = np.random.choice(
-                        audio_urls,
-                        size=min(num_audios, len(audio_urls)),
-                        replace=False,
-                    ).tolist()  # type: ignore
-                
-            if include_images and args.max_images_per_request > 0 and len(image_urls) > 0:
-                num_images = sample_mm_count(args.max_images_per_request, args.mm_distribution)
-                if num_images > 0:
-                    request.image_urls = np.random.choice(
-                        image_urls,
-                        size=min(num_images, len(image_urls)),
-                        replace=False,
-                    ).tolist()  # type: ignore
-
-    backend = args.backend.lower()
-    if backend not in TRANSFORM_FUNCS:
-        raise ValueError(f"Unsupported backend: {backend}")
-    transform_func: Callable = TRANSFORM_FUNCS[backend]
-
-    request_inputs = []
-    for req in sampled_requests:
-        request_input = transform_func(
-            base_url=BACKEND_URLS[backend] if args.backend_url is None else args.backend_url,
-            app_id=args.app_id,
-            model_id=model_id,
-            sampled_request=req,
-            use_sampled_mm_data=not args.synthesize_mm_data,
-            video_urls=req.video_urls,
-            audio_urls=req.audio_urls,
-            image_urls=req.image_urls,
-        )
-        request_inputs.append(request_input)
-
-    print("Sending test request...")
-    result = await post(request_input=request_inputs[0], pbar=None)
-    if not result.success:
-        print("Test request failed with error:", result.error)
-        exit(1)
-    if args.test_only:
-        exit(0)
-
-    benchmark_results = await benchmark(
-        request_inputs=request_inputs,
-        backend=args.backend,
-        num_prompts=args.num_prompts,
-        request_rate=args.request_rate,
-        burstiness=args.burstiness,
-        max_concurrency=args.max_concurrency,
-        disable_tqdm=args.disable_tqdm,
-    )
-    benchmark_results["args"] = vars(args)
-
-    output_filename = (f"benchmark_{args.backend}_{args.num_prompts}_"
-                       f"seed{args.seed}_request_rate{args.request_rate}_"
-                       f"burstiness{args.burstiness}_synthesize{args.synthesize_mm_data}_"
-                          f"{datetime.now().strftime('%Y%m%d_%H%M%S')}.json")
-    
-    with open(output_filename, 'w') as f:
-        json.dump(benchmark_results , f, indent=2)
-    
-    print("\nBenchmark completed!")
-    print(f"Results saved to: {output_filename}")
-    print("\n=== BENCHMARK STATISTICS ===")
-    print(f"Total requests: {benchmark_results['statistics']['total_requests']}")
-    print(f"Successful requests: {benchmark_results['statistics']['successful_requests']}")
-    print(f"Failed requests: {benchmark_results['statistics']['failed_requests']}")
-    print(f"Success rate: {benchmark_results['statistics']['success_rate']:.2%}")
-    print(f"Total time: {benchmark_results['statistics']['total_time']:.2f}s")
-    print(f"Actual request rate: {benchmark_results['statistics']['actual_request_rate']:.2f} req/s")
-    
-    if benchmark_results['statistics']['successful_requests'] > 0:
-        print("\n=== LATENCY STATISTICS ===")
-        print(f"Mean latency: {benchmark_results['statistics']['latency_mean']:.3f}s")
-        print(f"Median latency: {benchmark_results['statistics']['latency_median']:.3f}s")
-        print(f"95th percentile: {benchmark_results['statistics']['latency_p95']:.3f}s")
-        print(f"99th percentile: {benchmark_results['statistics']['latency_p99']:.3f}s")
-        print(f"Min latency: {benchmark_results['statistics']['latency_min']:.3f}s")
-        print(f"Max latency: {benchmark_results['statistics']['latency_max']:.3f}s")
-
-
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser("Cornserve e2e benchmark")
-    parser.add_argument("--backend", type=str, default="cornserve", choices=["cornserve", "eric", "vllm"], help="Backend to use for the benchmark.")
-    parser.add_argument("--disable-tqdm", action="store_true", help="Disable tqdm progress bar.")
-    parser.add_argument("--backend-url", type=str, help="URL of the backend service.")
-    parser.add_argument("--app-id", type=str, help="App ID to invoke")
-    parser.add_argument("--model-id", type=str, default="Qwen/Qwen2-VL-7B-Instruct", help="Model ID to use for the benchmark.")
-    parser.add_argument("--seed", type=int, default=0)
-    parser.add_argument("--request-rate", type=float, default=float("inf"),
-                        help="Request rate in requests per second.")
-    parser.add_argument("--burstiness", type=float, default=1.0, 
-                        help="Burstiness factor for request generation.")
-    parser.add_argument("--num-prompts", type=int, default=100, help="Number of prompts to process.")
-    parser.add_argument("--hf-subset",
-                          type=str,
-                          default=None,
-                          help="Subset of the HF dataset.")
-    parser.add_argument("--hf-split",
-                          type=str,
-                          default=None,
-                          help="Split of the HF dataset.")
-    parser.add_argument(
-        "--hf-output-len",
-        type=int,
-        default=None,
-        help="Output length for each request. Overrides the output lengths "
-        "from the sampled HF dataset.",
-    )
-    parser.add_argument("--video-prob", type=float, default=0, 
-                        help="Probability of including videos in a request.")
-    parser.add_argument("--audio-prob", type=float, default=0,
-                        help="Probability of including audios in a request.")
-    parser.add_argument("--image-prob", type=float, default=1,
-                        help="Probability of including images in a request.")
-    parser.add_argument("--max-videos-per-request", type=int, default=0,
-                        help="Maximum number of videos per request.")
-    parser.add_argument("--max-audios-per-request", type=int, default=0,
-                        help="Maximum number of audios per request.")
-    parser.add_argument("--max-images-per-request", type=int, default=3,
-                        help="Maximum number of images per request.")
-    parser.add_argument("--mm-distribution", type=str, default="poisson",
-                        choices=["uniform", "poisson", "geometric"],
-                        help="Distribution for number of multimedia items per request.")
-    parser.add_argument(
-        "--max-concurrency",
-        type=int,
-        default=None,
-        help="Maximum number of concurrent requests. This can be used "
-        "to help simulate an environment where a higher level component "
-        "is enforcing a maximum number of concurrent requests. While the "
-        "--request-rate argument controls the rate at which requests are "
-        "initiated, this argument will control how many are actually allowed "
-        "to execute at a time. This means that when used in combination, the "
-        "actual request rate may be lower than specified with --request-rate, "
-        "if the server is not processing requests fast enough to keep up.",
-    )
-    parser.add_argument("--test-only", action="store_true",
-                        help="If set, only test the connection to the backend without running the full benchmark.")
-    parser.add_argument("--synthesize-mm-data", action="store_true",
-                        help="If set, synthesize multimedia data for each request instead of using the image in VisionArena dataset.")
-    args = parser.parse_args()
-
-    if args.backend == "cornserve" and not args.app_id:
-        parser.error("--app-id is required when --backend is 'cornserve'")
-
-    asyncio.run(main(args))
