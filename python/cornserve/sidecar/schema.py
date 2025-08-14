@@ -37,7 +37,7 @@ class SidecarConfig:
     recv_tensor_dtype: torch.dtype | None = None
     recv_tensor_shape: tuple[int, ...] | int | None = None
 
-    concurrent_copy: bool = True
+    concurrent_copy: bool = False
 
     # read_only = False
 

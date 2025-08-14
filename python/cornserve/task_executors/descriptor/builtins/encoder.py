@@ -56,8 +56,9 @@ class EricDescriptor(TaskExecutionDescriptor[EncoderTask, EncoderInput, EncoderO
         """Convert TaskInput to a request object for the task executor."""
         data: list[EmbeddingData] = []
         for url, forward in zip(task_input.data_urls, task_output.embeddings, strict=True):
-            if forward.dst_sidecar_ranks is None:
-                raise ValueError("Destination sidecar ranks must be specified for each forward.")
+            # HACK: we skip this check to allow Eric only tasks
+            # if forward.dst_sidecar_ranks is None:
+            #     raise ValueError("Destination sidecar ranks must be specified for each forward.")
             data.append(
                 EmbeddingData(
                     id=forward.id,

@@ -81,6 +81,14 @@ class VLLMDescriptor(
             str(len(gpus)),
             "--port",
             str(port),
+            "--no-enable-prefix-caching",
+            "--disable-mm-preprocessor-cache",
+            # "--max-num-seqs",
+            # "60",
+            # "--max-model-len",
+            # "51200",
+            "--max-model-len",
+            "8192",
             "--cornserve-sidecar-ranks",
             *[str(gpu.global_rank) for gpu in gpus],
         ]
@@ -134,6 +142,18 @@ class VLLMDescriptor(
             async_iterator=parse_stream_to_completion_chunks(response),
             response=response,
         )
+
+    def get_container_volumes(self) -> list[tuple[str, str, str]]:
+        """Get the container volumes for the task manager.
+
+        Returns:
+            A list of tuples: name, host path, container path.
+        """
+        return [
+            ("hf-cache", constants.VOLUME_HF_CACHE, "/root/.cache/huggingface"),
+            ("shm", constants.VOLUME_SHM, "/dev/shm"),
+            ("torch-compile-cache", constants.VOLUME_VLLM_EXECUTOR_CACHE, "/root/.cache/vllm/torch_compile_cache"),
+        ]
 
 
 DESCRIPTOR_REGISTRY.register(LLMUnitTask, VLLMDescriptor, default=True)
@@ -211,6 +231,7 @@ class PrefillVLLMDescriptor(
             ("infiniband-dev", "/dev/infiniband", "/dev/infiniband"),
             ("hf-cache", constants.VOLUME_HF_CACHE, "/root/.cache/huggingface"),
             ("shm", constants.VOLUME_SHM, "/dev/shm"),
+            ("torch-compile-cache", constants.VOLUME_VLLM_EXECUTOR_CACHE, "/root/.cache/vllm/torch_compile_cache"),
         ]
 
     def get_api_url(self, base: str) -> str:
@@ -349,6 +370,7 @@ class DecodeVLLMDescriptor(
             ("infiniband-dev", "/dev/infiniband", "/dev/infiniband"),
             ("hf-cache", constants.VOLUME_HF_CACHE, "/root/.cache/huggingface"),
             ("shm", constants.VOLUME_SHM, "/dev/shm"),
+            ("torch-compile-cache", constants.VOLUME_VLLM_EXECUTOR_CACHE, "/root/.cache/vllm/torch_compile_cache"),
         ]
 
     def get_api_url(self, base: str) -> str:

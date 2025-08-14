@@ -40,10 +40,16 @@ class SampleRequest:
     prompt: str | Any
     prompt_len: int
     expected_output_len: int
+    # original image
     multi_modal_data: dict[str, Any]
-    video_urls: list[str] = field(default_factory=list)
-    audio_urls: list[str] = field(default_factory=list)
+    # synthetic data
     image_urls: list[str] = field(default_factory=list)
+    filenames: list[str] = field(default_factory=list)
+    encoder_fission: bool = False
+
+    # TODO:
+    # audio_urls: list[str] = field(default_factory=list)
+    # video_urls: list[str] = field(default_factory=list)
 
 
 # -----------------------------------------------------------------------------
@@ -337,6 +343,74 @@ class HuggingFaceDataset(BenchmarkDataset):
 # Vision Arena Dataset Implementation
 # -----------------------------------------------------------------------------
 
+# helper function
+def _enforce_input_len(
+    tokenizer,
+    text: str,
+    target_len: int,
+) -> str:
+    """Enforce the input text to have a specific length in tokens."""
+    # Use ONLY tokens from this text to pad up to target_len (vLLM counting).
+    base_ids = tokenizer(text, add_special_tokens=False).input_ids
+    # specials overhead for this prompt
+    with_special = tokenizer(text, add_special_tokens=True).input_ids
+    overhead = len(with_special) - len(base_ids)
+    target_base = max(0, target_len - overhead)
+
+    if len(base_ids) == 0:
+        # Degenerate case: empty prompt; nothing to reuse.
+        # Tiny fallback so we can build something to cycle.
+        base_ids = tokenizer(" ", add_special_tokens=False).input_ids
+
+    # If short, pad by cycling its own tokens
+    if len(base_ids) < target_base:
+        orig = base_ids[:]  # remember original tokens for cycling
+        need = target_base - len(base_ids)
+        while need > 0:
+            take = min(len(orig), need)
+            base_ids.extend(orig[:take])
+            need -= take
+
+    # If long, trim to target_base
+    elif len(base_ids) > target_base:
+        trunc_side = getattr(tokenizer, "truncation_side", "right")
+        base_ids = base_ids[:target_base] if trunc_side == "right" else base_ids[-target_base:]
+
+    # Decode once, then correct any decode→encode drift
+    text = tokenizer.decode(base_ids, skip_special_tokens=False, clean_up_tokenization_spaces=False)
+
+    # Small correction loop to land exactly on target_len with add_special_tokens=True
+    for _ in range(4):
+        cur = len(tokenizer(text, add_special_tokens=True).input_ids)
+        if cur == target_len:
+            break
+        if cur < target_len:
+            # top up by cycling original request tokens again
+            more_needed = target_len - cur
+            orig = tokenizer(text, add_special_tokens=False).input_ids  # current base after previous steps
+            if not orig:
+                # should not happen, but guard
+                orig = tokenizer(" ", add_special_tokens=False).input_ids
+            add_ids = []
+            while more_needed > 0:
+                take = min(len(orig), more_needed)
+                add_ids.extend(orig[:take])
+                more_needed -= take
+            # append and re-decode
+            base_ids = orig + add_ids
+            text = tokenizer.decode(base_ids, skip_special_tokens=False, clean_up_tokenization_spaces=False)
+        else:
+            # trim the excess from base tokens
+            over = cur - target_len
+            base_ids = tokenizer(text, add_special_tokens=False).input_ids
+            trunc_side = getattr(tokenizer, "truncation_side", "right")
+            if trunc_side == "right":
+                base_ids = base_ids[: max(0, len(base_ids) - over)]
+            else:
+                base_ids = base_ids[over:]
+            text = tokenizer.decode(base_ids, skip_special_tokens=False, clean_up_tokenization_spaces=False)
+
+    return text
 
 class VisionArenaDataset(HuggingFaceDataset):
     """
@@ -356,6 +430,7 @@ class VisionArenaDataset(HuggingFaceDataset):
         tokenizer: PreTrainedTokenizerBase,
         num_requests: int,
         output_len: int | None = None,
+        input_len: int | None = None,
     ) -> list:
         output_len = (output_len
                       if output_len is not None else self.DEFAULT_OUTPUT_LEN)
@@ -369,7 +444,15 @@ class VisionArenaDataset(HuggingFaceDataset):
                     f"Unsupported dataset path: {self.dataset_path}")
             prompt = parser_fn(item)
             mm_content = process_image(item["images"][0])  # type: ignore
-            prompt_len = len(tokenizer(prompt).input_ids)
+
+            # measure tokens without specials
+            prompt_input_ids = tokenizer(prompt).input_ids
+            prompt_len = len(prompt_input_ids)
+
+            if input_len is not None:
+                prompt = _enforce_input_len(tokenizer, prompt, input_len)
+                prompt_len = len(tokenizer(prompt).input_ids)
+
             sampled_requests.append(
                 SampleRequest(
                     prompt=prompt,
@@ -379,3 +462,35 @@ class VisionArenaDataset(HuggingFaceDataset):
                 ))
         self.maybe_oversample_requests(sampled_requests, num_requests)
         return sampled_requests
+
+if __name__ == "__main__":
+    from transformers import AutoTokenizer
+
+    model_id = "Qwen/Qwen2.5-VL-7B-Instruct"
+    tokenizer = AutoTokenizer.from_pretrained(
+        model_id,
+        tokenizer_mode="auto",
+        trust_remote_code=True,
+    )
+    sampled_requests: list[SampleRequest]= VisionArenaDataset(
+        dataset_path="lmarena-ai/VisionArena-Chat",
+        dataset_subset=None,
+        dataset_split="train",
+        random_seed=48105,
+        ).sample(
+            num_requests=2000,
+            tokenizer=tokenizer,
+            output_len=300,
+            input_len=500,
+        )
+
+    # calculate input len mean and std
+    print(f"Sampled {len(sampled_requests)} requests.")
+    input_lens = []
+    for req in sampled_requests:
+        input_ids = tokenizer(req.prompt)["input_ids"]
+        input_lens.append(len(input_ids))
+    input_len_mean = sum(input_lens) / len(input_lens)
+    input_len_std = (sum((x - input_len_mean) ** 2 for x in input_lens) /
+                     len(input_lens)) ** 0.5
+    print(f"Input length mean: {input_len_mean}, std: {input_len_std}")

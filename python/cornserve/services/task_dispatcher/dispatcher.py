@@ -246,12 +246,13 @@ class TaskDispatcher:
                 producer_forward.src_sidecar_ranks = execution.executor_sidecar_ranks
                 producer_forwards[producer_forward.id] = producer_forward
 
-        logger.info("Connected all DataForward objects in task invocations: %s", invocations)
+        logger.info("Connected all DataForward objects in task invocations")
 
         # Verify whether all `DataForward` objects are properly connected
-        for data_forward in producer_forwards.values():
-            assert data_forward.src_sidecar_ranks is not None
-            assert data_forward.dst_sidecar_ranks is not None
+        # HACK: we skip this check to allow Eric only tasks
+        # for data_forward in producer_forwards.values():
+        #     assert data_forward.src_sidecar_ranks is not None
+        #     assert data_forward.dst_sidecar_ranks is not None
 
         # Dispatch all task invocations to task executors
         dispatch_coros: list[asyncio.Task[TaskOutput]] = []
@@ -275,9 +276,8 @@ class TaskDispatcher:
         """Execute a single task by sending request to executor and processing response."""
         url = execution.invocation.task.execution_descriptor.get_api_url(execution.executor_url)
         logger.info(
-            "Invoking task %s with request: %s",
+            "Invoking task %s",
             execution.invocation.task.__class__.__name__,
-            request,
         )
         try:
             response = await self.client.post(url, json=request)

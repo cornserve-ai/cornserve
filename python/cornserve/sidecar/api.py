@@ -30,6 +30,7 @@ from cornserve.sidecar.utils import (
     device_from_rank,
     init_shmem,
 )
+from cornserve.utils import set_ulimit
 
 logger = get_logger(__name__)
 tracer = trace.get_tracer(__name__)
@@ -53,6 +54,8 @@ class Sidecar:
         Args:
             config: The configuration for the sidecar.
         """
+        set_ulimit()
+
         self.config = config
         self.sidecar_rank = config.sidecar_rank
         self.group = config.group
@@ -170,6 +173,7 @@ class Sidecar:
 
         data = self.msgpack_encoder.encode(obj)
         dst_ranks = [sidecar_pb2.RankGroup(ranks=group) for group in dst_sidecar_ranks]
+        logger.info("Sending shard %d of chunk %d in req %s to ranks %s", self.shard_rank, chunk_id, id, dst_ranks)
         request = sidecar_pb2.SendRequest(
             id=id,
             dst_ranks=dst_ranks,
@@ -181,6 +185,8 @@ class Sidecar:
         response = self.stub.Send(request)
         if response.status == common_pb2.Status.STATUS_OK:
             logger.info("Sent shard %d of chunk %d in req %s successfully", self.shard_rank, chunk_id, id)
+            if isinstance(obj, torch.Tensor):
+                torch.cuda.ipc_collect()
         else:
             logger.error("Failed to send data with id %s", id)
 
