@@ -249,10 +249,9 @@ class TaskDispatcher:
         logger.info("Connected all DataForward objects in task invocations")
 
         # Verify whether all `DataForward` objects are properly connected
-        # HACK: we skip this check to allow Eric only tasks
-        # for data_forward in producer_forwards.values():
-        #     assert data_forward.src_sidecar_ranks is not None
-        #     assert data_forward.dst_sidecar_ranks is not None
+        for data_forward in producer_forwards.values():
+            assert data_forward.src_sidecar_ranks is not None
+            assert data_forward.dst_sidecar_ranks is not None
 
         # Dispatch all task invocations to task executors
         dispatch_coros: list[asyncio.Task[TaskOutput]] = []

@@ -28,8 +28,7 @@ from cornserve.services.sidecar.launch import SidecarLaunchInfo
 from cornserve.services.utils import to_strict_k8s_name
 from cornserve.sidecar.constants import grpc_url_from_rank
 from cornserve.task.base import UnitTask
-from cornserve.task.builtins.encoder import EncoderTask
-from cornserve.task_executors.profile import ProfileInfo, UnitTaskProfileManager
+from cornserve.task_executors.profile import UnitTaskProfileManager
 from cornserve.utils import format_grpc_error
 
 logger = get_logger(__name__)
