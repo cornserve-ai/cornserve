@@ -64,6 +64,7 @@ def load_model(
         model_name_or_path,
         cache_dir=cache_dir,
         revision=revision,
+        trust_remote_code=True,
     )
 
     # Fetch the model class name from the registry
@@ -144,7 +145,10 @@ def load_model(
             if not any(key.startswith(prefix) for prefix in registry_entry.weight.ignored_prefixes):
                 actually_unexpected_keys.append(key)
         if actually_unexpected_keys:
-            raise ValueError(f"Unexpected weights in the model: {actually_unexpected_keys}")
+            raise ValueError(
+                f"Unexpected weights in the model: {actually_unexpected_keys}.\n\n"
+                f"Expected weights: {[name for name, _ in model.named_parameters()]}"
+            )
 
     # If there are no adapters for this module, return early.
     if not registry_entry.weight.adapter_prefixes:
@@ -240,12 +244,12 @@ def get_safetensors_weight_dict(
             # Maps weight names to the safetensors file they are stored in
             with open(index_file_path) as f:
                 weight_map = json.load(f)["weight_map"]
-            weight_files = []
+            weight_files_set: set[str] = set()
             for weight_name, weight_file in weight_map.items():
                 # Only keep weights that start with the prefix
                 if any(weight_name.startswith(p) for p in weight_prefixes):
-                    weight_files.append(weight_file)
-                    break
+                    weight_files_set.add(weight_file)
+            weight_files = sorted(weight_files_set)
             logger.info(
                 "Safetensors file to download (filtered by index): %s",
                 weight_files,
