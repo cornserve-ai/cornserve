@@ -393,7 +393,7 @@ async def main(
     sidecar_rank = int(os.environ.get("SIDECAR_RANK", "-1"))
     assert sidecar_rank >= 0, "Invalid sidecar rank"
     world_size = int(os.environ.get("SIDECAR_WORLD_SIZE", "1"))
-    shm_size = int(os.environ.get("SIDECAR_SHM_SIZE", str(1 << 34)))
+    shm_size = int(os.environ.get("SIDECAR_SHM_SIZE", str(1 << 35)))
     peer_ranks_str = os.environ.get("SIDECAR_LOCAL_PEER_RANKS")
     if not peer_ranks_str:
         raise ValueError("SIDECAR_LOCAL_PEER_RANKS not set")

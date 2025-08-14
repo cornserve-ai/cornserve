@@ -342,12 +342,6 @@ class ResourceManager:
 
         # Check if the number of GPUs to scale up is valid
         profile = self.profile_manager.get_profile(task)
-        if isinstance(
-            task,
-            EncoderTask,
-        ):
-            profile = {2: ProfileInfo()}
-            logger.warning("Overriding profile for EncoderTask %s to {2: ProfileInfo()}", task)
         if num_gpus < min(profile.keys()):
             logger.warning(
                 "Requested %d GPUs to scale up task %s, but minimum required is %d GPUs according to the profile: %s",

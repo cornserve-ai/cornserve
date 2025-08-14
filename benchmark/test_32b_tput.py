@@ -23,8 +23,8 @@ async def run_qwen2_5_vl_32b(
     cornserve_config = CornserveConfig(num_vllms=3, vllm_tp_size=2, num_erics=2)
 
     configs = []
-    image_width = 1920
-    image_height = 1080
+    image_width = 1280
+    image_height = 720
     input_len = 300
     output_len = 300
     image_count = 1

@@ -31,7 +31,7 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 tracer = trace.get_tracer(__name__)
 
-TASK_TIMEOUT = 300
+TASK_TIMEOUT = 30 * 60
 
 # Global shared HTTP client used when we are outside of the Gateway service.
 _CLIENT: aiohttp.ClientSession | None = None
