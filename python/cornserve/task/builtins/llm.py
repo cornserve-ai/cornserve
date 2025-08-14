@@ -136,7 +136,9 @@ class LLMUnitTask(UnitTask[OpenAIChatCompletionRequest, Stream[OpenAIChatComplet
     model_id: str
     receive_embeddings: bool = Field(
         True,
-        json_schema_extra={"skip_comparison": True},
+        json_schema_extra={"skip_comparison": False},
+        # setting this will allowing sharing the vLLM instance
+        # see is_equivalent_to in python/cornserve/task/base.py
     )
 
     def make_name(self) -> str:
@@ -251,7 +253,7 @@ class PrefillLLMUnitTask(UnitTask[OpenAIChatCompletionRequest, PrefillChatComple
     model_id: str
     receive_embeddings: bool = Field(
         True,
-        json_schema_extra={"skip_comparison": True},
+        json_schema_extra={"skip_comparison": False},
     )
 
     def make_name(self) -> str:
@@ -276,7 +278,7 @@ class DecodeLLMUnitTask(UnitTask[OpenAIChatCompletionRequest, Stream[OpenAIChatC
     model_id: str
     receive_embeddings: bool = Field(
         True,
-        json_schema_extra={"skip_comparison": True},
+        json_schema_extra={"skip_comparison": False},
     )
 
     def make_name(self) -> str:
