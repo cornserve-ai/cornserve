@@ -81,14 +81,13 @@ class VLLMDescriptor(
             str(len(gpus)),
             "--port",
             str(port),
-            "--no-enable-prefix-caching",
-            "--disable-mm-preprocessor-cache",
+            # These arguments will be hand tuned during benchmarking
+            # "--no-enable-prefix-caching",
+            # "--disable-mm-preprocessor-cache",
             # "--max-num-seqs",
             # "60",
             # "--max-model-len",
-            # "51200",
-            "--max-model-len",
-            "8192",
+            # "8192",
             "--cornserve-sidecar-ranks",
             *[str(gpu.global_rank) for gpu in gpus],
         ]
