@@ -1,13 +1,17 @@
+"""Schema definitions for benchmark configurations and data handling."""
+
 from __future__ import annotations
 
-from abc import abstractmethod
 import datetime
 import json
-from typing import Any, Literal
+from abc import abstractmethod
 from pathlib import Path
+from typing import Any, Literal
+
 from pydantic import BaseModel, Field, SerializeAsAny
 
 DATA_ROOT = "data"
+
 
 class BackendConfig(BaseModel):
     """Base class for backend configurations."""
@@ -17,8 +21,10 @@ class BackendConfig(BaseModel):
         """Return the file name for the backend configuration."""
         pass
 
+
 class EricConfig(BackendConfig):
     """Eric only backedend configuration."""
+
     num_replicas: int
     tp_size: int = 1
 
@@ -26,8 +32,10 @@ class EricConfig(BackendConfig):
         """Return the file name for the backend configuration."""
         return f"eric+replicas{self.num_replicas}+tp{self.tp_size}"
 
+
 class CornserveConfig(BackendConfig):
     """Configuration for the Cornserve backend with a specific number of erics and vLLMs."""
+
     num_erics: int
     eric_tp_size: int = 1
     num_vllms: int
@@ -35,8 +43,9 @@ class CornserveConfig(BackendConfig):
 
     def to_subdir_name(self) -> str:
         """Return the subdirectory name for the Cornserve configuration."""
-        return f"cornserve+erics{self.num_erics}+tp{self.eric_tp_size}" + \
-                f"+vllms{self.num_vllms}+tp{self.vllm_tp_size}"
+        return (
+            f"cornserve+erics{self.num_erics}+tp{self.eric_tp_size}" + f"+vllms{self.num_vllms}+tp{self.vllm_tp_size}"
+        )
 
     @classmethod
     def create_backend_configs(
@@ -50,8 +59,10 @@ class CornserveConfig(BackendConfig):
             configs.append(cls(num_erics=num_eric, num_vllms=num_vllm))
         return configs
 
-class vLLMConfig(BackendConfig):
+
+class VLLMConfig(BackendConfig):
     """Configuration for the vLLM backend with a specific number of replicas."""
+
     num_replicas: int = Field(
         default=8,
         description="Number of vLLM replicas to use for the benchmark.",
@@ -59,10 +70,13 @@ class vLLMConfig(BackendConfig):
     tp_size: int = 1
 
     def to_subdir_name(self) -> str:
+        """Return the subdirectory name for the vLLM configuration."""
         return f"vllm+replicas{self.num_replicas}+tp{self.tp_size}"
+
 
 class PDConfig(BackendConfig):
     """Configuration for the Cornserve backend with a specific number of erics and vLLMs."""
+
     num_prefills: int
     prefill_tp_size: int = 1
     num_decodes: int
@@ -70,8 +84,10 @@ class PDConfig(BackendConfig):
 
     def to_subdir_name(self) -> str:
         """Return the subdirectory name for the Cornserve configuration."""
-        return f"pd+prefills{self.num_prefills}+tp{self.prefill_tp_size}" + \
-            f"+decodes{self.num_decodes}+tp{self.decode_tp_size}"
+        return (
+            f"pd+prefills{self.num_prefills}+tp{self.prefill_tp_size}"
+            + f"+decodes{self.num_decodes}+tp{self.decode_tp_size}"
+        )
 
     @classmethod
     def create_backend_configs(
@@ -86,8 +102,10 @@ class PDConfig(BackendConfig):
         print(f"Created {len(configs)} PD configurations for {num_gpus} GPUs.")
         return configs
 
+
 class EPDConfig(BackendConfig):
     """Configuration for the Cornserve backend with a specific number of erics and vLLMs."""
+
     num_erics: int
     eric_tp_size: int = 1
     num_prefills: int
@@ -97,9 +115,11 @@ class EPDConfig(BackendConfig):
 
     def to_subdir_name(self) -> str:
         """Return the subdirectory name for the Cornserve configuration."""
-        return f"epd+erics{self.num_erics}+tp{self.eric_tp_size}" + \
-            f"prefills{self.num_prefills}+tp{self.prefill_tp_size}" + \
-            f"+decodes{self.num_decodes}+tp{self.decode_tp_size}"
+        return (
+            f"epd+erics{self.num_erics}+tp{self.eric_tp_size}"
+            + f"prefills{self.num_prefills}+tp{self.prefill_tp_size}"
+            + f"+decodes{self.num_decodes}+tp{self.decode_tp_size}"
+        )
 
     @classmethod
     def create_backend_configs(
@@ -111,16 +131,20 @@ class EPDConfig(BackendConfig):
         for num_erics in range(1, num_gpus - 1):
             for num_prefills in range(1, num_gpus - num_erics):
                 num_decodes = num_gpus - num_erics - num_prefills
-                configs.append(cls(
-                    num_erics=num_erics,
-                    num_prefills=num_prefills,
-                    num_decodes=num_decodes,
-                ))
+                configs.append(
+                    cls(
+                        num_erics=num_erics,
+                        num_prefills=num_prefills,
+                        num_decodes=num_decodes,
+                    )
+                )
         print(f"Created {len(configs)} EPD configurations for {num_gpus} GPUs.")
         return configs
 
+
 class ExperimentConfig(BaseModel):
     """Configuration for the a benchmark experiment."""
+
     # Backend config
     backend_config: SerializeAsAny[BackendConfig]
     app_id: str = Field(exclude=True)
@@ -133,7 +157,7 @@ class ExperimentConfig(BaseModel):
             "Random seed for reproducibility. The same seed is used for sampling requests from"
             "the given dataset; synthesizing multimodal data; synthesizing requests; and generating"
             "request arrival distribution."
-        )
+        ),
     )
     gpu_type: Literal["A40", "A100", "H100"] = "A40"
     num_gpus: int = Field(
@@ -144,9 +168,7 @@ class ExperimentConfig(BaseModel):
     # workload config
     dataset: Literal["lmarena-ai/VisionArena-Chat"] = Field(
         default="lmarena-ai/VisionArena-Chat",
-        description=(
-            "Dataset to use for the benchmark. Currently only supports lmarena-ai/VisionArena-Chat."
-        ),
+        description=("Dataset to use for the benchmark. Currently only supports lmarena-ai/VisionArena-Chat."),
     )
     num_prompts: int = 2000
     num_warmups: int = 50
@@ -155,14 +177,14 @@ class ExperimentConfig(BaseModel):
         description=(
             "Number of input text tokens in each request."
             # TODO: support variable input lengths in the future and original input len from dataset
-        )
+        ),
     )
     output_len: int = Field(
         default=500,
         description=(
             "Number of output tokens to generate for each request."
             # TODO: support variable output lengths in the future and original output len from dataset
-        )
+        ),
     )
     request_rate: float = Field(
         default=10.0,
@@ -191,9 +213,7 @@ class ExperimentConfig(BaseModel):
     )
     encoder_fission_probability: float = Field(
         default=1.0,
-        description=(
-            "Probability of using independent encoder fission during benchmark. "
-        ),
+        description=("Probability of using independent encoder fission during benchmark. "),
     )
 
     def _get_image_config_str(self) -> str:
@@ -220,7 +240,7 @@ class ExperimentConfig(BaseModel):
     def to_path(self) -> Path:
         """Return the path to the config file."""
         return Path(DATA_ROOT) / self.backend_config.to_subdir_name() / self.model_id / self._to_filename()
-    
+
     def exists(self) -> bool:
         """Check if the config file exists."""
         return self.to_path().exists()
@@ -260,23 +280,25 @@ class ExperimentConfig(BaseModel):
 
     def __hash__(self) -> int:
         """Return a hash of the config."""
-        return hash((
-            self.model_id,
-            self.gpu_type,
-            self.dataset,
-            self.num_prompts,
-            self.input_len,
-            self.output_len,
-            self.request_rate,
-            self.burstiness,
-            self.seed,
-            self.use_synthesized_data,
-            self.image_probability,
-            self.image_width,
-            self.image_height,
-            self.image_count,
-            self.image_choices,
-        ))
+        return hash(
+            (
+                self.model_id,
+                self.gpu_type,
+                self.dataset,
+                self.num_prompts,
+                self.input_len,
+                self.output_len,
+                self.request_rate,
+                self.burstiness,
+                self.seed,
+                self.use_synthesized_data,
+                self.image_probability,
+                self.image_width,
+                self.image_height,
+                self.image_count,
+                self.image_choices,
+            )
+        )
 
 
 if __name__ == "__main__":

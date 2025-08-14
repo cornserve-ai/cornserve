@@ -1,23 +1,26 @@
-import os
-import numpy as np
-import cv2
-import mimetypes
+"""Utility functions for handling images, including creating dummy images and converting files to data URIs."""
+
 import base64
+import mimetypes
+import os
+
+import cv2
+import numpy as np
+
 
 def _file_to_data_uri(path: str) -> str:
-    """
-    Read a binary file and return a data-URI, e.g.
-        data:image/png;base64,iVBORw0KGgo…
-    """
+    """Read a binary file and return a data-URI, e.g. data:image/png;base64,iVBORw0KGgo..."""
     mime, _ = mimetypes.guess_type(path)
     mime = mime or "application/octet-stream"
     with open(path, "rb") as f:
         payload = base64.b64encode(f.read()).decode("ascii")
     return f"data:{mime};base64,{payload}"
 
+
 def get_image_data_uris(filenames: list[str], root: str = "images") -> list[str]:
     """Return list of data-URIs for image files."""
     return [_file_to_data_uri(os.path.join(root, name)) for name in filenames]
+
 
 def create_dummy_image(
     height: int,
@@ -48,4 +51,3 @@ def create_dummy_image(
         raise RuntimeError(f"Failed to save image: {path}")
 
     return filename
-

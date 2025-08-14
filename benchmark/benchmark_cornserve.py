@@ -1,29 +1,32 @@
+"""Main benchmark script for Cornserve."""
+
 import asyncio
 import contextlib
-from dataclasses import asdict, dataclass, field, replace
 import json
 import sys
 import time
 import traceback
-from typing import Any, AsyncGenerator
 import warnings
+from collections.abc import Any, AsyncGenerator
+from dataclasses import asdict, dataclass, field, replace
 
 import aiohttp
 import numpy as np
+from benchmark_dataset import SampleRequest
+from image_utils import create_dummy_image, get_image_data_uris
+from schema import EricConfig, ExperimentConfig
 from tqdm import tqdm
 from transformers import AutoTokenizer
 from transformers.tokenization_utils_base import PreTrainedTokenizerBase
 
-from benchmark_dataset import SampleRequest
-from image_utils import create_dummy_image, get_image_data_uris
-from schema import EricConfig, ExperimentConfig
-
 AIOHTTP_TIMEOUT = aiohttp.ClientTimeout(total=6 * 60 * 60)
 MILLISECONDS_TO_SECONDS_CONVERSION = 1000
+
 
 @dataclass
 class RequestInput:
     """Input for the benchmark request."""
+
     url: str
     model: str
     prompt: str | Any
@@ -38,6 +41,8 @@ class RequestInput:
 
 @dataclass
 class RequestOutput:
+    """Output for the benchmark request."""
+
     generated_text: str = ""
     success: bool = False
     latency: float = 0.0
@@ -53,8 +58,11 @@ class RequestOutput:
 
     completion_timestamp: float = 0.0  # Timestamp when the completion was generated
 
+
 @dataclass
 class BenchmarkMetrics:
+    """Metrics for the benchmark results."""
+
     completed: int
     total_input: int
     total_output: int
@@ -88,9 +96,10 @@ def calculate_metrics(
     outputs: list[RequestOutput],
     dur_s: float,
     tokenizer: PreTrainedTokenizerBase,
-    selected_percentiles: list[float] = [90, 95, 99],
+    selected_percentiles: list[float] | None = None,
     goodput_config_dict: dict[str, float] | None = None,
 ) -> tuple[BenchmarkMetrics, list[int]]:
+    """Calculate the benchmark metrics based on the outputs."""
     actual_output_lens: list[int] = []
     total_input = 0
     completed = 0
@@ -100,6 +109,9 @@ def calculate_metrics(
     all_tpots: list[float] = []
     ttfts: list[float] = []
     e2els: list[float] = []
+    if selected_percentiles is None:
+        selected_percentiles = [90, 95, 99]
+
     for i in range(len(outputs)):
         if outputs[i].success:
             output_len = outputs[i].output_tokens
@@ -110,11 +122,7 @@ def calculate_metrics(
                 # len(outputs[i].itl) since multiple output tokens may be
                 # bundled together
                 # Note : this may inflate the output token count slightly
-                output_len = len(
-                    tokenizer(
-                        outputs[i].generated_text, add_special_tokens=False
-                    ).input_ids
-                )
+                output_len = len(tokenizer(outputs[i].generated_text, add_special_tokens=False).input_ids)
             actual_output_lens.append(output_len)
             total_input += input_requests[i].prompt_len
             tpot = 0
@@ -137,29 +145,22 @@ def calculate_metrics(
 
         if "ttft" in goodput_config_dict:
             valid_metrics.append(ttfts)
-            slo_values.append(
-                goodput_config_dict["ttft"] / MILLISECONDS_TO_SECONDS_CONVERSION
-            )
+            slo_values.append(goodput_config_dict["ttft"] / MILLISECONDS_TO_SECONDS_CONVERSION)
         if "tpot" in goodput_config_dict:
             valid_metrics.append(all_tpots)
-            slo_values.append(
-                goodput_config_dict["tpot"] / MILLISECONDS_TO_SECONDS_CONVERSION
-            )
+            slo_values.append(goodput_config_dict["tpot"] / MILLISECONDS_TO_SECONDS_CONVERSION)
         if "e2el" in goodput_config_dict:
             valid_metrics.append(e2els)
-            slo_values.append(
-                goodput_config_dict["e2el"] / MILLISECONDS_TO_SECONDS_CONVERSION
-            )
+            slo_values.append(goodput_config_dict["e2el"] / MILLISECONDS_TO_SECONDS_CONVERSION)
 
-        for req_metric in zip(*valid_metrics):
-            is_good_req = all([s >= r for s, r in zip(slo_values, req_metric)])
+        for req_metric in zip(*valid_metrics, strict=True):
+            is_good_req = all([s >= r for s, r in zip(slo_values, req_metric, strict=True)])
             if is_good_req:
                 good_completed += 1
 
     if completed == 0:
         warnings.warn(
-            "All requests failed. This is likely due to a misconfiguration "
-            "on the benchmark arguments.",
+            "All requests failed. This is likely due to a misconfiguration on the benchmark arguments.",
             stacklevel=2,
         )
     metrics = BenchmarkMetrics(
@@ -175,38 +176,42 @@ def calculate_metrics(
         std_ttft_ms=np.std(ttfts or 0) * 1000,  # type: ignore
         median_ttft_ms=np.median(ttfts or 0) * 1000,  # type: ignore
         percentiles_ttft_ms=[
-            (p, np.percentile(ttfts or 0, p) * 1000) for p in selected_percentiles  # type: ignore
+            (p, np.percentile(ttfts or 0, p) * 1000)
+            for p in selected_percentiles  # type: ignore
         ],
         mean_tpot_ms=np.mean(tpots or 0) * 1000,  # type: ignore
         std_tpot_ms=np.std(tpots or 0) * 1000,  # type: ignore
         median_tpot_ms=np.median(tpots or 0) * 1000,  # type: ignore
         percentiles_tpot_ms=[
-            (p, np.percentile(tpots or 0, p) * 1000) for p in selected_percentiles  # type: ignore
+            (p, np.percentile(tpots or 0, p) * 1000)
+            for p in selected_percentiles  # type: ignore
         ],
         mean_itl_ms=np.mean(itls or 0) * 1000,  # type: ignore
         std_itl_ms=np.std(itls or 0) * 1000,  # type: ignore
         median_itl_ms=np.median(itls or 0) * 1000,  # type: ignore
         percentiles_itl_ms=[
-            (p, np.percentile(itls or 0, p) * 1000) for p in selected_percentiles  # type: ignore
+            (p, np.percentile(itls or 0, p) * 1000)
+            for p in selected_percentiles  # type: ignore
         ],
         mean_e2el_ms=np.mean(e2els or 0) * 1000,  # type: ignore
         std_e2el_ms=np.std(e2els or 0) * 1000,  # type: ignore
         median_e2el_ms=np.median(e2els or 0) * 1000,  # type: ignore
         percentiles_e2el_ms=[
-            (p, np.percentile(e2els or 0, p) * 1000) for p in selected_percentiles  # type: ignore
+            (p, np.percentile(e2els or 0, p) * 1000)
+            for p in selected_percentiles  # type: ignore
         ],
     )
 
     return metrics, actual_output_lens
 
+
 async def cornserve_invoke_eric(
     request_input: RequestInput,
     pbar: tqdm | None,
 ) -> RequestOutput:
+    """Invoke an Eric app."""
     api_url = request_input.url
-    async with aiohttp.ClientSession(
-        trust_env=True, timeout=AIOHTTP_TIMEOUT
-    ) as session:
+    async with aiohttp.ClientSession(trust_env=True, timeout=AIOHTTP_TIMEOUT) as session:
         # only support images
         image_urls = get_image_data_uris(request_input.filenames)
         request_data = {
@@ -222,7 +227,7 @@ async def cornserve_invoke_eric(
 
         st = time.perf_counter()
         try:
-            async with session.post( url=api_url, json=payload) as response:
+            async with session.post(url=api_url, json=payload) as response:
                 if response.status == 200:
                     # iterate over lines
                     timestamp = time.perf_counter()
@@ -241,14 +246,14 @@ async def cornserve_invoke_eric(
         pbar.update(1)
     return output
 
+
 async def cornserve_invoke(
     request_input: RequestInput,
     pbar: tqdm | None,
 ) -> RequestOutput:
+    """Invoke an MLLM app."""
     api_url = request_input.url
-    async with aiohttp.ClientSession(
-        trust_env=True, timeout=AIOHTTP_TIMEOUT
-    ) as session:
+    async with aiohttp.ClientSession(trust_env=True, timeout=AIOHTTP_TIMEOUT) as session:
         content = [{"type": "text", "text": request_input.prompt}]
         for mm_data in request_input.multi_modal_data:
             content.append(mm_data)
@@ -277,7 +282,7 @@ async def cornserve_invoke(
         st = time.perf_counter()
         most_recent_timestamp = st
         try:
-            async with session.post( url=api_url, json=payload) as response:
+            async with session.post(url=api_url, json=payload) as response:
                 if response.status == 200:
                     # iterate over lines
                     async for raw_line in response.content:
@@ -324,9 +329,7 @@ async def get_request(
     request_rate: float,
     burstiness: float = 1.0,
 ) -> AsyncGenerator[RequestInput, None]:
-    """
-    Asynchronously generates requests at a specified rate
-    with OPTIONAL burstiness.
+    """Asynchronously generates requests at a specified rate with OPTIONAL burstiness.
 
     Args:
         input_requests:
@@ -342,10 +345,8 @@ async def get_request(
             in more bursty requests, while a higher burstiness value
             (burstiness > 1) results in a more uniform arrival of requests.
     """
-
     # Calculate scale parameter theta to maintain the desired request_rate.
-    assert burstiness > 0, (
-        f"A positive burstiness factor is expected, but given {burstiness}.")
+    assert burstiness > 0, f"A positive burstiness factor is expected, but given {burstiness}."
     theta = 1.0 / (request_rate * burstiness)
 
     for request in input_requests:
@@ -361,20 +362,21 @@ async def get_request(
         # The next request will be sent after the interval.
         await asyncio.sleep(interval)
 
+
 def transform_sampled_requests(
     config: ExperimentConfig,
     sampled_requests: list[SampleRequest],
 ) -> list[RequestInput]:
-    """
-    Transforms the sampled requests from the dataset into
-    RequestInput objects for benchmarking.
-    """
+    """Transforms the sampled requests from the dataset to RequestInput."""
     # synthesize image_choices images
-    image_filenames = [create_dummy_image(
-        width=config.image_width,
-        height=config.image_height,
-        id=i,
-    ) for i in range(config.image_choices)]
+    image_filenames = [
+        create_dummy_image(
+            width=config.image_width,
+            height=config.image_height,
+            id=i,
+        )
+        for i in range(config.image_choices)
+    ]
     np.random.seed(config.seed)
     # first synthesize image_data
     if config.use_synthesized_data:
@@ -382,11 +384,13 @@ def transform_sampled_requests(
         for request in sampled_requests:
             if np.random.rand() < config.image_probability:
                 # Synthesize image choices
-                chosen_image_filenames = list(np.random.choice(
-                    image_filenames,
-                    size=config.image_count,
-                    replace=False,
-                ))
+                chosen_image_filenames = list(
+                    np.random.choice(
+                        image_filenames,
+                        size=config.image_count,
+                        replace=False,
+                    )
+                )
                 request.filenames = chosen_image_filenames
                 request.image_urls = get_image_data_uris(chosen_image_filenames)
             if np.random.rand() < config.encoder_fission_probability:
@@ -416,13 +420,16 @@ def transform_sampled_requests(
         request_inputs.append(request_input)
     return request_inputs
 
+
 async def benchmark(
     request_inputs: list[RequestInput],
     config: ExperimentConfig,
 ) -> dict[str, Any]:
+    """Main benchmark function to run the Cornserve benchmark."""
     # here we assume the cluster is scaled as needed
     max_concurrency = config.max_concurrency
     semaphore = asyncio.Semaphore(max_concurrency) if max_concurrency else contextlib.nullcontext()
+
     async def request_func(request_input: RequestInput, pbar: tqdm) -> RequestOutput:
         async with semaphore:
             if isinstance(config.backend_config, EricConfig):
@@ -440,7 +447,7 @@ async def benchmark(
     # do warmup
     print("Starting warmup phase...")
     warmup_pbar = tqdm(total=config.num_warmups, desc="Warmup")
-    coros = [request_func(request_input, warmup_pbar) for request_input in request_inputs[:config.num_warmups]]
+    coros = [request_func(request_input, warmup_pbar) for request_input in request_inputs[: config.num_warmups]]
     results = await asyncio.gather(*coros)
     if any(not output.success for output in results):
         print("Warmup requests failed. Please check the setup.")
@@ -465,10 +472,10 @@ async def benchmark(
     async for request in get_request(request_inputs, config.request_rate, config.burstiness):
         task = asyncio.create_task(request_func(request_input=request, pbar=pbar))
         tasks.append(task)
-    
+
     # Wait for all tasks to complete
     results = await asyncio.gather(*tasks)
-    
+
     # to rule out Timeout errors, we use the latest completion time
     benchmark_end_time = max([output.completion_timestamp for output in results if output.success])
     benchmark_duration = benchmark_end_time - benchmark_start_time
@@ -485,27 +492,16 @@ async def benchmark(
     print("{:<40} {:<10.2f}".format("Benchmark duration (s):", benchmark_duration))
     print("{:<40} {:<10}".format("Total input tokens:", metrics.total_input))
     print("{:<40} {:<10}".format("Total generated tokens:", metrics.total_output))
-    print(
-        "{:<40} {:<10.4f}".format(
-            "Request throughput (req/s):", metrics.request_throughput
-        )
-    )
+    print("{:<40} {:<10.4f}".format("Request throughput (req/s):", metrics.request_throughput))
     # if goodput_config_dict:
     #     print(
     #         "{:<40} {:<10.2f}".format(
     #             "Request goodput (req/s):", metrics.request_goodput
     #         )
     #     )
-    print(
-        "{:<40} {:<10.2f}".format(
-            "Output token throughput (tok/s):", metrics.output_throughput
-        )
-    )
-    print(
-        "{:<40} {:<10.2f}".format(
-            "Total Token throughput (tok/s):", metrics.total_token_throughput
-        )
-    )
+    print("{:<40} {:<10.2f}".format("Output token throughput (tok/s):", metrics.output_throughput))
+    print("{:<40} {:<10.2f}".format("Total Token throughput (tok/s):", metrics.total_token_throughput))
+
     def process_one_metric(
         # E.g., "ttft"
         metric_attribute_name: str,
@@ -547,4 +543,3 @@ async def benchmark(
     config.save(output_data)
 
     return output_data
-

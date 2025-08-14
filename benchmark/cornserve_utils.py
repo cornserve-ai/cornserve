@@ -1,9 +1,22 @@
+"""Utilities for interacting with Cornserve gateway and managing apps and tasks."""
+
 from __future__ import annotations
+
 import asyncio
-from typing import Literal
-from typing import Any
+from typing import Any, Literal
 
 import aiohttp
+import requests
+from app_utils import create_eric_app, create_mllm_app
+from schema import (
+    CornserveConfig,
+    EPDConfig,
+    EricConfig,
+    ExperimentConfig,
+    PDConfig,
+    VLLMConfig,
+)
+
 from cornserve.services.gateway.models import (
     AppRegistrationRequest,
     RegistrationErrorResponse,
@@ -11,28 +24,16 @@ from cornserve.services.gateway.models import (
     RegistrationInitialResponse,
     RegistrationStatusEvent,
 )
-import requests
-
-from app_utils import create_mllm_app, create_eric_app
-from schema import (
-    CornserveConfig,
-    EPDConfig,
-    EricConfig,
-    ExperimentConfig,
-    PDConfig,
-    vLLMConfig,
-)
 
 AIOHTTP_TIMEOUT = aiohttp.ClientTimeout(total=6 * 60 * 60)
 GATEWAY_URL = "http://localhost:30080"
+
 
 def register_app(
     model_id: str,
     app_type: Literal["ev", "v", "e"],
 ) -> str:
-    """
-    Register an app with the CornServe gateway, and return the app ID.
-    """
+    """Register an app with the CornServe gateway, and return the app ID."""
     if app_type == "ev":
         source_code = create_mllm_app(
             model_id=model_id,
@@ -81,12 +82,13 @@ def register_app(
         raise RuntimeError("No app ID received during registration.")
     return app_id
 
+
 async def check_apps(app_ids: list[str]) -> None:
-    """ Check if the specified apps are running. """
+    """Check if the specified apps are running."""
     async with aiohttp.ClientSession(trust_env=True, timeout=AIOHTTP_TIMEOUT) as session:
         for app_id in app_ids:
             try:
-                async with session.get(f"http://127.0.0.1:30080/app/list") as response:
+                async with session.get("http://127.0.0.1:30080/app/list") as response:
                     response.raise_for_status()
                     app_states = await response.json()
                     for app_id in app_ids:
@@ -99,7 +101,7 @@ async def check_apps(app_ids: list[str]) -> None:
 
 
 async def clear_task_executors() -> None:
-    """ Clear all task executors in Cornserve. """
+    """Clear all task executors in Cornserve."""
     print("Clearing all task executors...")
     async with aiohttp.ClientSession(trust_env=True, timeout=AIOHTTP_TIMEOUT) as session:
         try:
@@ -109,6 +111,7 @@ async def clear_task_executors() -> None:
                 task_ids = [state[1] for state in task_states]
         except aiohttp.ClientError as e:
             raise ValueError("Failed to clear task executors.") from e
+
         async def scale_to_zero(task_id: str) -> None:
             print(f"Scaling task {task_id} to zero replicas...")
             payload = {"task_id": task_id, "num_gpus": -1}
@@ -121,11 +124,13 @@ async def clear_task_executors() -> None:
                     if response.status != 200:
                         raise ValueError(f"Unexpecged error while scaling task {task_id} to zero: {response}")
             print(f"Task {task_id} scaled to zero replicas.")
+
         coros = [scale_to_zero(task_id) for task_id in task_ids]
         await asyncio.gather(*coros)
 
+
 async def get_tasks() -> list[tuple[dict[str, Any], str, str]]:
-    """ Get all tasks in Cornserve. """
+    """Get all tasks in Cornserve."""
     async with aiohttp.ClientSession(trust_env=True, timeout=AIOHTTP_TIMEOUT) as session:
         try:
             async with session.get("http://127.0.0.1:30080/tasks/list") as response:
@@ -136,10 +141,10 @@ async def get_tasks() -> list[tuple[dict[str, Any], str, str]]:
 
 
 async def scale_task_with_num_gpus(task_id: str, num_gpus: int) -> None:
-    """ Scale a task to the specified number of GPUs. """
+    """Scale a task to the specified number of GPUs."""
     print(f"Scaling task {task_id} with {num_gpus} gpus...")
     scale_endpoint = "http://127.0.0.1:30080/task/scale"
-    payload={"task_id": task_id, "num_gpus": num_gpus}
+    payload = {"task_id": task_id, "num_gpus": num_gpus}
     async with aiohttp.ClientSession(trust_env=True, timeout=AIOHTTP_TIMEOUT) as session:
         try:
             async with session.post(scale_endpoint, json=payload) as response:
@@ -152,6 +157,7 @@ async def scale_task_with_num_gpus(task_id: str, num_gpus: int) -> None:
 
 
 async def scale(config: ExperimentConfig) -> None:
+    """Scale tasks based on the provided experiment configuration."""
     await clear_task_executors()
     tasks = await get_tasks()
     model_id = config.model_id
@@ -199,7 +205,7 @@ async def scale(config: ExperimentConfig) -> None:
             task_id=decode_task_id,
             num_gpus=config.backend_config.num_decodes * config.backend_config.decode_tp_size,
         )
-    elif isinstance(config.backend_config, vLLMConfig):
+    elif isinstance(config.backend_config, VLLMConfig):
         for task_def, task_id, state in tasks:
             if state != "ready":
                 continue
@@ -241,6 +247,7 @@ async def scale(config: ExperimentConfig) -> None:
     else:
         raise NotImplementedError(f"Backend config {config.backend_config} is not supported.")
 
+
 if __name__ == "__main__":
     app_id = register_app(
         model_id="Qwen/Qwen2.5-VL-7B-Instruct",
@@ -266,4 +273,3 @@ if __name__ == "__main__":
         image_height=224,
     )
     asyncio.run(scale(experiment_config))
-

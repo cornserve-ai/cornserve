@@ -1,16 +1,20 @@
-import asyncio
+"""Example script to benchmark Qwen2.5-VL-32B with Eric and vLLM."""
 
-from cornserve.utils import set_ulimit
-from transformers import AutoTokenizer
+import asyncio
 
 from benchmark_cornserve import benchmark, transform_sampled_requests
 from benchmark_dataset import SampleRequest, VisionArenaDataset
 from cornserve_utils import register_app, scale
-from schema import CornserveConfig, EricConfig, ExperimentConfig, vLLMConfig
+from schema import CornserveConfig, EricConfig, ExperimentConfig, VLLMConfig
+from transformers import AutoTokenizer
+
+from cornserve.utils import set_ulimit
+
 
 async def run_qwen2_5_vl_32b(
     overwrite: bool = False,
 ) -> None:
+    """Compare baseline vLLM with disaggregated vLLM and Eric."""
     model_id: str = "Qwen/Qwen2.5-VL-32B-Instruct"
     ev = register_app(model_id=model_id, app_type="ev")
     print(f"Registered Qwen2.5-VL-32B EV with ID: {ev}")
@@ -19,7 +23,7 @@ async def run_qwen2_5_vl_32b(
     vllm = register_app(model_id=model_id, app_type="v")
     print(f"Registered Qwen2.5-VL-32B V with ID: {vllm}")
 
-    vllm_config = vLLMConfig(num_replicas=1, tp_size=2)
+    vllm_config = VLLMConfig(num_replicas=1, tp_size=2)
     # we compare single vLLM with disaggregated vLLM, ignoring Eric cost
     cornserve_config = CornserveConfig(num_vllms=1, vllm_tp_size=2, num_erics=6)
     # isolate Eric
@@ -84,29 +88,29 @@ async def run_qwen2_5_vl_32b(
         configs = [cfg for cfg in configs if not cfg.exists()]
 
     # prioritize by request rate
-    configs.sort(key=lambda config: (-config.request_rate, ))
+    configs.sort(key=lambda config: (-config.request_rate,))
 
     print(f"Total configs: {len(configs)}")
 
     shared_config = next(iter(configs))
     tokenizer = AutoTokenizer.from_pretrained(
         shared_config.model_id,
-        tokenizer_mode = "auto",
+        tokenizer_mode="auto",
         trust_remote_code=True,
     )
 
-    print(f"Sampling reqeuests ...")
-    sampled_requests: list[SampleRequest]= VisionArenaDataset(
+    print("Sampling reqeuests ...")
+    sampled_requests: list[SampleRequest] = VisionArenaDataset(
         dataset_path="lmarena-ai/VisionArena-Chat",
         dataset_subset=None,
         dataset_split="train",
         random_seed=shared_config.seed,
-        ).sample(
-            num_requests=shared_config.num_prompts,
-            tokenizer=tokenizer,
-            output_len=shared_config.output_len,
-            input_len=shared_config.input_len,
-        )
+    ).sample(
+        num_requests=shared_config.num_prompts,
+        tokenizer=tokenizer,
+        output_len=shared_config.output_len,
+        input_len=shared_config.input_len,
+    )
 
     for cfg in configs:
         print(f"Current config: {cfg.backend_config} {cfg.model_id} with {cfg.request_rate} requests/s")
@@ -134,8 +138,10 @@ async def run_qwen2_5_vl_32b(
 
 
 async def main():
+    """Main function."""
     set_ulimit()
     await run_qwen2_5_vl_32b()
+
 
 if __name__ == "__main__":
     try:
