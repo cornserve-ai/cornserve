@@ -81,6 +81,7 @@ class VLLMDescriptor(
             str(len(gpus)),
             "--port",
             str(port),
+            "--trust-remote-code",
             "--cornserve-sidecar-ranks",
             *[str(gpu.global_rank) for gpu in gpus],
         ]

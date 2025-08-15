@@ -42,7 +42,7 @@ class ModelConfig(BaseModel):
         """Post-init hook to load the HF config."""
         # Load the HF config
         try:
-            self._hf_config = AutoConfig.from_pretrained(self.id)
+            self._hf_config = AutoConfig.from_pretrained(self.id, trust_remote_code=True)
         except Exception as e:
             raise ValueError(f"Failed to load HF config for model {self.id}") from e
 

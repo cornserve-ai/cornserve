@@ -286,7 +286,7 @@ class Qwen2_5_VisionAttention(nn.Module):
             total_num_heads=num_heads,
             total_num_kv_heads=num_heads,
             bias=True,
-            gather_from_names=("q", "k", "v"),
+            gather_from_name=("q", "k", "v"),
         )
         self.proj = RowParallelLinear(input_size=projection_size, output_size=embed_dim)
 

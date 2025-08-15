@@ -172,4 +172,18 @@ MODEL_REGISTRY: dict[str, RegistryEntry] = {
             Modality.IMAGE: ModalityEntry(),
         },
     ),
+    "internvl_chat": RegistryEntry(
+        module="internvl",
+        class_name="InternVLChatModel",
+        adapter_attr=None,
+        vit_resolution_type=ViTResolutionType.DYNAMIC,
+        weight=WeightInfo(
+            required_prefixes=["vision_model.", "mlp1."],
+            strip_prefixes=False,
+        ),
+        modality={
+            Modality.IMAGE: ModalityEntry(),
+            Modality.VIDEO: ModalityEntry(),
+        },
+    ),
 }
