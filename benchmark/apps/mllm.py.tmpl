@@ -1,0 +1,25 @@
+"""An app that runs a Multimodal LLM task."""
+
+from __future__ import annotations
+
+from collections.abc import AsyncIterator
+
+from cornserve.app.base import AppConfig
+from cornserve.task.builtins.encoder import Modality
+from cornserve.task.builtins.llm import $TASK_CLASS, OpenAIChatCompletionChunk, OpenAIChatCompletionRequest
+
+mllm = MLLMTask(
+    model_id="$MODEL_ID",
+    modalities=[Modality.IMAGE],
+    encoder_fission=$ENCODER_FISSION,
+)
+
+class Config(AppConfig):
+    """App configuration model."""
+
+    tasks = {"mllm": mllm}
+
+
+async def serve(request: OpenAIChatCompletionRequest) -> AsyncIterator[OpenAIChatCompletionChunk]:
+    """Main serve function for the app."""
+    return await mllm(request)

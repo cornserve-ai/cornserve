@@ -247,8 +247,6 @@ class TaskManager:
         Returns:
             The outputs of all tasks.
         """
-        logger.info("Invoking tasks: %s", dispatch)
-
         # Check if all tasks are deployed
         running_task_ids: list[str] = []
         async with self.task_lock:

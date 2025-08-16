@@ -1,0 +1,22 @@
+"""An app that runs an Eric task."""
+
+from __future__ import annotations
+
+from cornserve.app.base import AppConfig
+from cornserve.task.builtins.encoder import Modality
+from cornserve.task.builtins.encoder import DummyEncoderTask, EncoderInput, DummyEncoderOutput
+
+eric = DummyEncoderTask(
+    model_ids={"$MODEL_ID"},
+    modality=Modality.IMAGE,
+)
+
+class Config(AppConfig):
+    """App configuration model."""
+
+    tasks = {"eric": eric}
+
+
+async def serve(request: EncoderInput) -> DummyEncoderOutput:
+    """Main serve function for the app."""
+    return await eric(request)

@@ -96,6 +96,7 @@ class OpenAIChatCompletionRequest(TaskInput):
     # Cornserve-specific fields
     cornserve_embeddings: list[DataForward[Tensor]] = []
     cornserve_kv_transfer_params: DataForward[dict] | None = None
+    encoder_fission: bool = True  # not currently used
 
 
 def extract_multimodal_content(
@@ -133,7 +134,12 @@ class LLMUnitTask(UnitTask[OpenAIChatCompletionRequest, Stream[OpenAIChatComplet
     """
 
     model_id: str
-    receive_embeddings: bool = True
+    receive_embeddings: bool = Field(
+        True,
+        json_schema_extra={"skip_comparison": False},
+        # setting this will allowing sharing the vLLM instance
+        # see is_equivalent_to in python/cornserve/task/base.py
+    )
 
     def make_name(self) -> str:
         """Create a concise string representation of the task."""
@@ -245,7 +251,10 @@ class PrefillLLMUnitTask(UnitTask[OpenAIChatCompletionRequest, PrefillChatComple
     """A task that invokes a vLLM to perform prefill."""
 
     model_id: str
-    receive_embeddings: bool = True
+    receive_embeddings: bool = Field(
+        True,
+        json_schema_extra={"skip_comparison": False},
+    )
 
     def make_name(self) -> str:
         """Create a concise string representation of the task."""
@@ -267,7 +276,10 @@ class DecodeLLMUnitTask(UnitTask[OpenAIChatCompletionRequest, Stream[OpenAIChatC
     """A task that invokes a vLLM decoder and returns a stream of chat completion chunks."""
 
     model_id: str
-    receive_embeddings: bool = True
+    receive_embeddings: bool = Field(
+        True,
+        json_schema_extra={"skip_comparison": False},
+    )
 
     def make_name(self) -> str:
         """Create a concise string representation of the task."""

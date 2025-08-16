@@ -31,7 +31,7 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 tracer = trace.get_tracer(__name__)
 
-TASK_TIMEOUT = 300
+TASK_TIMEOUT = 30 * 60
 
 # Global shared HTTP client used when we are outside of the Gateway service.
 _CLIENT: aiohttp.ClientSession | None = None
@@ -435,9 +435,13 @@ class UnitTask(Task, Generic[InputT, OutputT]):
             return False
 
         # Check if all fields defined by the root unit task class are the same.
-        for field_name in self.root_unit_task_cls.model_fields:
+        for field_name, info in self.root_unit_task_cls.model_fields.items():
             if field_name == "id":
                 # Skip the ID field; it can be different for different instances.
+                continue
+            extra_schema = info.json_schema_extra
+            if isinstance(extra_schema, dict) and extra_schema.get("skip_comparison"):
+                # Skip fields that are marked as not comparable.
                 continue
             try:
                 if getattr(self, field_name) != getattr(other, field_name):

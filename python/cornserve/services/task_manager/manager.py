@@ -365,6 +365,13 @@ class TaskManager:
                                 for port_name, p in additional_service_ports
                             ]
                         ),
+                        env_from=[
+                            kclient.V1EnvFromSource(
+                                config_map_ref=kclient.V1ConfigMapEnvSource(
+                                    name=constants.K8S_CORNSERVE_CONFIG_MAP_NAME,
+                                )
+                            ),
+                        ],
                         resources=kclient.V1ResourceRequirements(
                             limits={
                                 "nvidia.com/gpu": len(gpus),
@@ -479,7 +486,7 @@ class TaskManager:
                         logs = await self.core_client.read_namespaced_pod_log(
                             name=pod_name,
                             namespace=constants.K8S_NAMESPACE,
-                            tail_lines=30,
+                            tail_lines=100,
                             timestamps=True,
                         )
                     except kclient.ApiException as e:
