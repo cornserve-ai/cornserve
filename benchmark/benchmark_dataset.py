@@ -15,7 +15,8 @@ import logging
 import os
 import random
 from abc import ABC, abstractmethod
-from collections.abc import Any, Callable
+from collections.abc import Callable
+from typing import Any
 from dataclasses import dataclass, field
 from io import BytesIO
 

@@ -141,6 +141,29 @@ class EPDConfig(BackendConfig):
         print(f"Created {len(configs)} EPD configurations for {num_gpus} GPUs.")
         return configs
 
+class WorkloadConfig(BaseModel):
+    """Base class for workload configurations."""
+
+    @abstractmethod
+    def to_suffix(self) -> str:
+        """Return the suffix for the workload configuration."""
+        pass
+
+class DutyCycleConfig(WorkloadConfig):
+    """Configuration for the duty cycle workload."""
+
+    request_rate: float
+    on_request_factor: float = 2.0
+    off_request_factor: float = 0.5
+    cycles: int = 20
+
+    def to_suffix(self) -> str:
+        """Return the suffix for the duty cycle workload configuration."""
+        return (
+            f"duty_cycle+rate{self.request_rate}+on_factor{self.on_request_factor}"
+            f"+off_factor{self.off_request_factor}+cycles{self.cycles}"
+        )
+
 
 class ExperimentConfig(BaseModel):
     """Configuration for the a benchmark experiment."""
@@ -216,6 +239,8 @@ class ExperimentConfig(BaseModel):
         description=("Probability of using independent encoder fission during benchmark. "),
     )
 
+    workload_config: SerializeAsAny[WorkloadConfig] | None = None
+
     def _get_image_config_str(self) -> str:
         """Get the image configuration as a string."""
         return (
@@ -234,6 +259,8 @@ class ExperimentConfig(BaseModel):
         if self.use_synthesized_data:
             filename += f"+{self._get_image_config_str()}"
         filename += f"+fission{self.encoder_fission_probability}"
+        if self.workload_config is not None:
+            filename += f"+{self.workload_config.to_suffix()}"
 
         return filename + ".json"
 

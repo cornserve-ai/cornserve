@@ -1,23 +1,26 @@
 """Main benchmark script for Cornserve."""
 
 import asyncio
+from collections.abc import AsyncGenerator
 import contextlib
+from dataclasses import asdict, dataclass, field, replace
 import json
+import math
 import sys
 import time
 import traceback
+from typing import Any
 import warnings
-from collections.abc import Any, AsyncGenerator
-from dataclasses import asdict, dataclass, field, replace
 
 import aiohttp
 import numpy as np
-from benchmark_dataset import SampleRequest
-from image_utils import create_dummy_image, get_image_data_uris
-from schema import EricConfig, ExperimentConfig
 from tqdm import tqdm
 from transformers import AutoTokenizer
 from transformers.tokenization_utils_base import PreTrainedTokenizerBase
+
+from benchmark_dataset import SampleRequest
+from image_utils import create_dummy_image, get_image_data_uris
+from schema import DutyCycleConfig, EricConfig, ExperimentConfig
 
 AIOHTTP_TIMEOUT = aiohttp.ClientTimeout(total=6 * 60 * 60)
 MILLISECONDS_TO_SECONDS_CONVERSION = 1000
@@ -56,6 +59,7 @@ class RequestOutput:
     input: RequestInput | None = None
     usage: dict[str, Any] | None = None
 
+    start_timestamp: float = 0.0  # Timestamp when the request was sent
     completion_timestamp: float = 0.0  # Timestamp when the completion was generated
 
 
@@ -226,6 +230,7 @@ async def cornserve_invoke_eric(
         output.prompt_len = request_input.prompt_len
 
         st = time.perf_counter()
+        output.start_timestamp = st
         try:
             async with session.post(url=api_url, json=payload) as response:
                 if response.status == 200:
@@ -280,6 +285,7 @@ async def cornserve_invoke(
         generated_text = ""
         ttft = 0.0
         st = time.perf_counter()
+        output.start_timestamp = st
         most_recent_timestamp = st
         try:
             async with session.post(url=api_url, json=payload) as response:
@@ -322,6 +328,69 @@ async def cornserve_invoke(
     if pbar:
         pbar.update(1)
     return output
+
+async def duty_cycle_get_request(
+    input_requests: list[RequestInput],
+    config: DutyCycleConfig,
+) -> AsyncGenerator[RequestInput, None]:
+    N = len(input_requests)
+    if N == 0:
+        return
+    cycles = config.cycles
+    if cycles < 1:
+        raise ValueError("cycles must be >= 1")
+
+    r = config.request_rate
+    if not (r > 0 and math.isfinite(r)):
+        raise ValueError("request_rate must be a finite, positive number")
+
+    f_on  = config.on_request_factor
+    f_off = config.off_request_factor
+
+    # ON time fraction p so p*f_on + (1-p)*f_off = 1
+    if math.isclose(f_on, f_off, rel_tol=1e-12, abs_tol=1e-12):
+        if not math.isclose(f_on, 1.0, rel_tol=1e-12):
+            raise ValueError("on/off factors equal but not 1.0 → cannot keep the base average")
+        p = 0.5
+    else:
+        p = (1.0 - f_off) / (f_on - f_off)
+        if not (0.0 <= p <= 1.0):
+            raise ValueError("factors produce invalid ON fraction (outside [0,1])")
+
+    # Total duration and cycle/window lengths
+    T = N / r
+    cycle = T / cycles
+    on_dur, off_dur = p * cycle, (1.0 - p) * cycle
+
+    # Requests per cycle (exactly N total)
+    per_cycle = [N // cycles + (1 if i < (N % cycles) else 0) for i in range(cycles)]
+    # Share within a cycle: ON gets fraction f_on * p; OFF gets f_off * (1-p)
+    frac_on = f_on * p
+
+    # Build relative send times (seconds since start)
+    send_times = []
+    base = 0.0
+    for total in per_cycle:
+        n_on = max(0, min(total, round(total * frac_on)))
+        n_off = total - n_on
+
+        if n_on > 0 and on_dur > 0.0:
+            step = on_dur / n_on
+            send_times.extend(base + (j + 0.5) * step for j in range(n_on))
+        if n_off > 0 and off_dur > 0.0:
+            step = off_dur / n_off
+            send_times.extend(base + on_dur + (j + 0.5) * step for j in range(n_off))
+
+        base += cycle
+
+    # Convert absolute-relative times to inter-arrival delays
+    prev = 0.0
+    for when, req in zip(send_times, input_requests):
+        delay = max(0.0, when - prev)
+        if delay > 0:
+            await asyncio.sleep(delay)
+        yield req
+        prev = when
 
 
 async def get_request(
@@ -438,7 +507,9 @@ async def benchmark(
 
     # first test a request
     print("Testing a single request to verify the setup...")
-    test_output = await request_func(request_inputs[0], tqdm(total=1, desc="Test"))
+    test_pbar = tqdm(total=1, desc="Test")
+    test_output = await request_func(request_inputs[0], test_pbar)
+    test_pbar.close()
     if not test_output.success:
         print("Test request failed. Please check the setup.")
         print(f"Error: {test_output.error}")
@@ -455,6 +526,7 @@ async def benchmark(
             if not output.success:
                 print(f"Error: {output.error}")
         raise RuntimeError("Warmup requests failed.")
+    warmup_pbar.close()
 
     print("=" * 50)
 
@@ -469,12 +541,21 @@ async def benchmark(
     benchmark_start_time = time.perf_counter()
     tasks = []
     # Generate requests and create tasks
-    async for request in get_request(request_inputs, config.request_rate, config.burstiness):
-        task = asyncio.create_task(request_func(request_input=request, pbar=pbar))
-        tasks.append(task)
+    
+    if config.workload_config is not None and isinstance(config.workload_config, DutyCycleConfig):
+        print("Using duty cycle request pattern.")
+        async for request in duty_cycle_get_request(request_inputs, config.workload_config):
+            task = asyncio.create_task(request_func(request_input=request, pbar=pbar))
+            tasks.append(task)
+    else:
+        print("Using standard request pattern.")
+        async for request in get_request(request_inputs, config.request_rate, config.burstiness):
+            task = asyncio.create_task(request_func(request_input=request, pbar=pbar))
+            tasks.append(task)
 
     # Wait for all tasks to complete
     results = await asyncio.gather(*tasks)
+    pbar.close()
 
     # to rule out Timeout errors, we use the latest completion time
     benchmark_end_time = max([output.completion_timestamp for output in results if output.success])
