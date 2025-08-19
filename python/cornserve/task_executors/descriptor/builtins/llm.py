@@ -76,7 +76,7 @@ class VLLMDescriptor(
     def get_container_envs(self, gpus: list[GPU]) -> list[tuple[str, str]]:
         """Get the container environment variables for the task executor."""
         envs = super().get_container_envs(gpus)
-        if not self.task.receive_embeddings:
+        if self.task.receive_embeddings:
             envs.append(
                 ("CORNSERVE_VLLM_DISABLE_MULTIMODAL", "1"),
             )
@@ -201,7 +201,7 @@ class PrefillVLLMDescriptor(
             ("CUDA_VISIBLE_DEVICES", ",".join(str(gpu.local_rank) for gpu in gpus)),
             ("VLLM_NIXL_SIDE_CHANNEL_PORT", str(self.NIXL_BASE_PORT + gpus[0].global_rank)),
         ]
-        if not self.task.receive_embeddings:
+        if self.task.receive_embeddings:
             envs.append(
                 ("CORNSERVE_VLLM_DISABLE_MULTIMODAL", "1"),
             )
@@ -344,7 +344,7 @@ class DecodeVLLMDescriptor(
             ("CUDA_VISIBLE_DEVICES", ",".join(str(gpu.local_rank) for gpu in gpus)),
             ("VLLM_NIXL_SIDE_CHANNEL_PORT", str(self.NIXL_BASE_PORT + gpus[0].global_rank)),
         ]
-        if not self.task.receive_embeddings:
+        if self.task.receive_embeddings:
             envs.append(
                 ("CORNSERVE_VLLM_DISABLE_MULTIMODAL", "1"),
             )
