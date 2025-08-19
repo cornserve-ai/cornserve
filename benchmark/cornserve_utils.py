@@ -167,9 +167,11 @@ async def scale(config: ExperimentConfig) -> None:
                 continue
             if "encodertask" in task_id and model_id in task_def["model_ids"]:
                 encoder_task_id = task_id
-            elif "prefillllmunittask" in task_id and model_id == task_def["model_id"]:
+            elif "prefillllmunittask" in task_id and model_id == task_def["model_id"] \
+                    and task_def["receive_embeddings"] == "true":
                 prefill_task_id = task_id
-            elif "decodellmunittask" in task_id and model_id == task_def["model_id"]:
+            elif "decodellmunittask" in task_id and model_id == task_def["model_id"] \
+                    and task_def["receive_embeddings"] == "true":
                 decode_task_id = task_id
         assert all([prefill_task_id, decode_task_id, encoder_task_id]), (
             "Not all tasks are running. Please check the task and app states."
@@ -190,9 +192,11 @@ async def scale(config: ExperimentConfig) -> None:
         for task_def, task_id, state in tasks:
             if state != "ready":
                 continue
-            if "prefillllmunittask" in task_id and model_id == task_def["model_id"]:
+            if "prefillllmunittask" in task_id and model_id == task_def["model_id"] \
+                    and task_def["receive_embeddings"] == "false":
                 prefill_task_id = task_id
-            elif "decodellmunittask" in task_id and model_id == task_def["model_id"]:
+            elif "decodellmunittask" in task_id and model_id == task_def["model_id"] \
+                    and task_def["receive_embeddings"] == "false":
                 decode_task_id = task_id
         assert all([prefill_task_id, decode_task_id]), (
             "Not all tasks are running. Please check the task and app states."
@@ -209,7 +213,8 @@ async def scale(config: ExperimentConfig) -> None:
         for task_def, task_id, state in tasks:
             if state != "ready":
                 continue
-            if "llmunittask" in task_id and model_id == task_def["model_id"]:
+            if "llmunittask" in task_id and model_id == task_def["model_id"] \
+                    and task_def["receive_embeddings"] == "false":
                 vllm_task_id = task_id
         assert vllm_task_id, "No vLLM task found. Please check the task and app states."
         await scale_task_with_num_gpus(
@@ -222,7 +227,8 @@ async def scale(config: ExperimentConfig) -> None:
                 continue
             if "encodertask" in task_id and model_id in task_def["model_ids"]:
                 eric_task_id = task_id
-            elif "llmunittask" in task_id and model_id == task_def["model_id"]:
+            elif "llmunittask" in task_id and model_id == task_def["model_id"] \
+                    and task_def["receive_embeddings"] == "true":
                 vllm_task_id = task_id
         assert all([eric_task_id, vllm_task_id]), "Not all tasks are running. Please check the task and app states."
         await scale_task_with_num_gpus(
