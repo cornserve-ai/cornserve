@@ -195,12 +195,14 @@ class PrefillVLLMDescriptor(
 
     def get_container_envs(self, gpus: list[GPU]) -> list[tuple[str, str]]:
         """Get the additional environment variables for the task executor."""
-        envs = [
-            # ("UCX_LOG_LEVEL", "debug"),
-            # ("VLLM_LOGGING_LEVEL", "DEBUG"),
-            ("CUDA_VISIBLE_DEVICES", ",".join(str(gpu.local_rank) for gpu in gpus)),
-            ("VLLM_NIXL_SIDE_CHANNEL_PORT", str(self.NIXL_BASE_PORT + gpus[0].global_rank)),
-        ]
+        envs = super().get_container_envs(gpus)
+        envs.extend(
+            [
+                # ("UCX_LOG_LEVEL", "debug"),
+                # ("VLLM_LOGGING_LEVEL", "DEBUG"),
+                ("VLLM_NIXL_SIDE_CHANNEL_PORT", str(self.NIXL_BASE_PORT + gpus[0].global_rank)),
+            ]
+        )
         if self.task.receive_embeddings:
             envs.append(
                 ("CORNSERVE_VLLM_DISABLE_MULTIMODAL", "1"),
@@ -338,12 +340,14 @@ class DecodeVLLMDescriptor(
 
     def get_container_envs(self, gpus: list[GPU]) -> list[tuple[str, str]]:
         """Get the additional environment variables for the task executor."""
-        envs = [
-            # ("UCX_LOG_LEVEL", "debug"),
-            # ("VLLM_LOGGING_LEVEL", "DEBUG"),
-            ("CUDA_VISIBLE_DEVICES", ",".join(str(gpu.local_rank) for gpu in gpus)),
-            ("VLLM_NIXL_SIDE_CHANNEL_PORT", str(self.NIXL_BASE_PORT + gpus[0].global_rank)),
-        ]
+        envs = super().get_container_envs(gpus)
+        envs.extend(
+            [
+                # ("UCX_LOG_LEVEL", "debug"),
+                # ("VLLM_LOGGING_LEVEL", "DEBUG"),
+                ("VLLM_NIXL_SIDE_CHANNEL_PORT", str(self.NIXL_BASE_PORT + gpus[0].global_rank)),
+            ]
+        )
         if self.task.receive_embeddings:
             envs.append(
                 ("CORNSERVE_VLLM_DISABLE_MULTIMODAL", "1"),
