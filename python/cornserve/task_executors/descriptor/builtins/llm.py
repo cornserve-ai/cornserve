@@ -195,12 +195,17 @@ class PrefillVLLMDescriptor(
 
     def get_container_envs(self, gpus: list[GPU]) -> list[tuple[str, str]]:
         """Get the additional environment variables for the task executor."""
-        return [
+        envs = [
             # ("UCX_LOG_LEVEL", "debug"),
             # ("VLLM_LOGGING_LEVEL", "DEBUG"),
             ("CUDA_VISIBLE_DEVICES", ",".join(str(gpu.local_rank) for gpu in gpus)),
             ("VLLM_NIXL_SIDE_CHANNEL_PORT", str(self.NIXL_BASE_PORT + gpus[0].global_rank)),
         ]
+        if not self.task.receive_embeddings:
+            envs.append(
+                ("CORNSERVE_VLLM_DISABLE_MULTIMODAL", "1"),
+            )
+        return envs
 
     def get_kubernetes_envs(self, gpus: list[GPU]) -> list[kclient.V1EnvVar]:
         """Get the kubernetes environment variables for the task executor."""
@@ -333,12 +338,17 @@ class DecodeVLLMDescriptor(
 
     def get_container_envs(self, gpus: list[GPU]) -> list[tuple[str, str]]:
         """Get the additional environment variables for the task executor."""
-        return [
+        envs = [
             # ("UCX_LOG_LEVEL", "debug"),
             # ("VLLM_LOGGING_LEVEL", "DEBUG"),
             ("CUDA_VISIBLE_DEVICES", ",".join(str(gpu.local_rank) for gpu in gpus)),
             ("VLLM_NIXL_SIDE_CHANNEL_PORT", str(self.NIXL_BASE_PORT + gpus[0].global_rank)),
         ]
+        if not self.task.receive_embeddings:
+            envs.append(
+                ("CORNSERVE_VLLM_DISABLE_MULTIMODAL", "1"),
+            )
+        return envs
 
     def get_kubernetes_envs(self, gpus: list[GPU]) -> list[kclient.V1EnvVar]:
         """Get the kubernetes environment variables for the task executor."""
