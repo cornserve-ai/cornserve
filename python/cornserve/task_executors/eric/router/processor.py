@@ -56,7 +56,7 @@ class Processor:
         self.model_id = model_id
 
         # Load the model config from HF and Eric model class
-        hf_config = AutoConfig.from_pretrained(model_id)
+        hf_config = AutoConfig.from_pretrained(model_id, trust_remote_code=True)
         try:
             registry_entry = MODEL_REGISTRY[hf_config.model_type]
         except KeyError as e:

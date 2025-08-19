@@ -81,6 +81,7 @@ class VLLMDescriptor(
             str(len(gpus)),
             "--port",
             str(port),
+            "--trust-remote-code",
             # These arguments will be hand tuned during benchmarking
             # "--no-enable-prefix-caching",
             # "--disable-mm-preprocessor-cache",
