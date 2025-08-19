@@ -73,6 +73,15 @@ class VLLMDescriptor(
         """Get the container image name for the task executor."""
         return constants.CONTAINER_IMAGE_VLLM
 
+    def get_container_envs(self, gpus: list[GPU]) -> list[tuple[str, str]]:
+        """Get the container environment variables for the task executor."""
+        envs = super().get_container_envs(gpus)
+        if not self.task.receive_embeddings:
+            envs.append(
+                ("CORNSERVE_VLLM_DISABLE_MULTIMODAL", "1"),
+            )
+        return envs
+
     def get_container_args(self, gpus: list[GPU], port: int) -> list[str]:
         """Get the container command for the task executor."""
         args = [
