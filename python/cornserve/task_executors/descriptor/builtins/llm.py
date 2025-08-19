@@ -82,6 +82,13 @@ class VLLMDescriptor(
             "--port",
             str(port),
             "--trust-remote-code",
+            # These arguments will be hand tuned during benchmarking
+            # "--no-enable-prefix-caching",
+            # "--disable-mm-preprocessor-cache",
+            # "--max-num-seqs",
+            # "60",
+            # "--max-model-len",
+            # "8192",
             "--cornserve-sidecar-ranks",
             *[str(gpu.global_rank) for gpu in gpus],
         ]
@@ -136,6 +143,18 @@ class VLLMDescriptor(
             response=response,
         )
 
+    def get_container_volumes(self) -> list[tuple[str, str, str]]:
+        """Get the container volumes for the task manager.
+
+        Returns:
+            A list of tuples: name, host path, container path.
+        """
+        return [
+            ("hf-cache", constants.VOLUME_HF_CACHE, "/root/.cache/huggingface"),
+            ("shm", constants.VOLUME_SHM, "/dev/shm"),
+            ("torch-compile-cache", constants.VOLUME_VLLM_EXECUTOR_CACHE, "/root/.cache/vllm/torch_compile_cache"),
+        ]
+
 
 DESCRIPTOR_REGISTRY.register(LLMUnitTask, VLLMDescriptor, default=True)
 
@@ -168,12 +187,9 @@ class PrefillVLLMDescriptor(
     def get_container_envs(self, gpus: list[GPU]) -> list[tuple[str, str]]:
         """Get the additional environment variables for the task executor."""
         return [
-            ("UCX_TLS", "cuda,rc,ib,tcp"),
-            # ("UCX_TLS", "cuda,rc,ib"),
-            ("UCX_NET_DEVICES", "mlx5_0:1"),
             # ("UCX_LOG_LEVEL", "debug"),
-            ("CUDA_VISIBLE_DEVICES", ",".join(str(gpu.local_rank) for gpu in gpus)),
             # ("VLLM_LOGGING_LEVEL", "DEBUG"),
+            ("CUDA_VISIBLE_DEVICES", ",".join(str(gpu.local_rank) for gpu in gpus)),
             ("VLLM_NIXL_SIDE_CHANNEL_PORT", str(self.NIXL_BASE_PORT + gpus[0].global_rank)),
         ]
 
@@ -215,6 +231,7 @@ class PrefillVLLMDescriptor(
             ("infiniband-dev", "/dev/infiniband", "/dev/infiniband"),
             ("hf-cache", constants.VOLUME_HF_CACHE, "/root/.cache/huggingface"),
             ("shm", constants.VOLUME_SHM, "/dev/shm"),
+            ("torch-compile-cache", constants.VOLUME_VLLM_EXECUTOR_CACHE, "/root/.cache/vllm/torch_compile_cache"),
         ]
 
     def get_api_url(self, base: str) -> str:
@@ -308,12 +325,9 @@ class DecodeVLLMDescriptor(
     def get_container_envs(self, gpus: list[GPU]) -> list[tuple[str, str]]:
         """Get the additional environment variables for the task executor."""
         return [
-            ("UCX_TLS", "cuda,rc,ib,tcp"),
-            # ("UCX_TLS", "cuda,rc,ib"),
-            ("UCX_NET_DEVICES", "mlx5_0:1"),
             # ("UCX_LOG_LEVEL", "debug"),
-            ("CUDA_VISIBLE_DEVICES", ",".join(str(gpu.local_rank) for gpu in gpus)),
             # ("VLLM_LOGGING_LEVEL", "DEBUG"),
+            ("CUDA_VISIBLE_DEVICES", ",".join(str(gpu.local_rank) for gpu in gpus)),
             ("VLLM_NIXL_SIDE_CHANNEL_PORT", str(self.NIXL_BASE_PORT + gpus[0].global_rank)),
         ]
 
@@ -356,6 +370,7 @@ class DecodeVLLMDescriptor(
             ("infiniband-dev", "/dev/infiniband", "/dev/infiniband"),
             ("hf-cache", constants.VOLUME_HF_CACHE, "/root/.cache/huggingface"),
             ("shm", constants.VOLUME_SHM, "/dev/shm"),
+            ("torch-compile-cache", constants.VOLUME_VLLM_EXECUTOR_CACHE, "/root/.cache/vllm/torch_compile_cache"),
         ]
 
     def get_api_url(self, base: str) -> str:

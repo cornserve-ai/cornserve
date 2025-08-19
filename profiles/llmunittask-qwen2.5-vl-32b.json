@@ -1,0 +1,11 @@
+{
+  "task": {
+    "__class__": "LLMUnitTask",
+    "model_id": "Qwen/Qwen2.5-VL-32B-Instruct",
+    "receive_embeddings": true,
+    "execution_descriptor_name": null
+  },
+  "num_gpus_to_profile": {
+    "4": {}
+  }
+}

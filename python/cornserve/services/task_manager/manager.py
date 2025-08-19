@@ -220,15 +220,15 @@ class TaskManager:
             )
 
             # Check for errors in spawning
-            failed = 0
+            error_messages = []
             for result in spawn_results:
                 if isinstance(result, BaseException):
                     logger.error("Failed to spawn task executor: %s", result)
-                    failed += 1
+                    error_messages.append(str(result))
 
-            if failed:
-                logger.error("Failed to spawn %d task executors.", failed)
-                raise RuntimeError("Failed to spawn task executors")
+            if error_messages:
+                logger.error("Failed to spawn %d task executors.", len(error_messages))
+                raise RuntimeError("Failed to spawn task executors" + (":\n" + ",\n".join(error_messages)))
 
     async def get_route(self, request_id: str, routing_hint: str) -> tuple[str, list[int]]:
         """Get the URL to the task executor for a request.
@@ -365,6 +365,13 @@ class TaskManager:
                                 for port_name, p in additional_service_ports
                             ]
                         ),
+                        env_from=[
+                            kclient.V1EnvFromSource(
+                                config_map_ref=kclient.V1ConfigMapEnvSource(
+                                    name=constants.K8S_CORNSERVE_CONFIG_MAP_NAME,
+                                )
+                            ),
+                        ],
                         resources=kclient.V1ResourceRequirements(
                             limits={
                                 "nvidia.com/gpu": len(gpus),
@@ -394,9 +401,7 @@ class TaskManager:
                             )
                             for name, _, container_path in self.descriptor.get_container_volumes()
                         ],
-                        security_context=kclient.V1SecurityContext(
-                            privileged=True, capabilities=kclient.V1Capabilities(add=["IPC_LOCK", "NET_ADMIN"])
-                        ),
+                        security_context=kclient.V1SecurityContext(privileged=True),
                     )
                 ],
                 volumes=[
@@ -475,8 +480,19 @@ class TaskManager:
                 )  # type: ignore
                 assert isinstance(pod_status, kclient.V1Pod)
                 if isinstance(pod_status.status, kclient.V1PodStatus) and pod_status.status.phase == "Failed":
+                    # for debugging purposes, we get the last 20 lines of the pod logs
+                    logs = ""
+                    try:
+                        logs = await self.core_client.read_namespaced_pod_log(
+                            name=pod_name,
+                            namespace=constants.K8S_NAMESPACE,
+                            tail_lines=100,
+                            timestamps=True,
+                        )
+                    except kclient.ApiException as e:
+                        logs = f"<no logs available> due to {e}"
                     logger.error("Task executor pod %s is in Error state", pod_name)
-                    raise RuntimeError(f"Task executor pod {pod_name} is in Error state")
+                    raise RuntimeError(f"Task executor pod {pod_name} is in Error state, logs:\n{logs}")
 
                 await asyncio.sleep(0.5)
 

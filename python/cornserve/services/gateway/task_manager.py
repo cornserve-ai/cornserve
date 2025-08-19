@@ -10,6 +10,7 @@ from typing import Any
 
 import aiohttp
 import grpc
+from grpc.aio import AioRpcError
 from opentelemetry import trace
 
 from cornserve.constants import K8S_TASK_DISPATCHER_HTTP_URL
@@ -22,6 +23,7 @@ from cornserve.services.pb.resource_manager_pb2 import (
 )
 from cornserve.services.pb.resource_manager_pb2_grpc import ResourceManagerStub
 from cornserve.task.base import TASK_TIMEOUT, TaskGraphDispatch, UnitTask
+from cornserve.utils import format_grpc_error
 
 logger = get_logger(__name__)
 tracer = trace.get_tracer(__name__)
@@ -116,7 +118,11 @@ class TaskManager:
             errors: list[BaseException] = []
             deployed_tasks: list[str] = []
             for resp, deployed_task in zip(responses, to_deploy, strict=True):
-                if isinstance(resp, BaseException):
+                if isinstance(resp, AioRpcError):
+                    # If the response is an AioRpcError, pretty print it
+                    logger.error("gRPC error while deploying task %s: \n%s", deployed_task, format_grpc_error(resp))
+                    errors.append(resp)
+                elif isinstance(resp, BaseException):
                     logger.error("Error while deploying task: %s", resp)
                     errors.append(resp)
                 else:
@@ -138,7 +144,8 @@ class TaskManager:
                         del self.task_usage_counter[task_id]
                 await asyncio.gather(*cleanup_coros)
                 logger.info("Rolled back deployment of all deployed tasks")
-                raise RuntimeError(f"Error while deploying tasks: {errors}")
+                # Errors are logged above, so we just raise a generic error here.
+                raise RuntimeError("Error while deploying tasks")
 
             # Update task states
             for task_id in task_ids:
@@ -240,8 +247,6 @@ class TaskManager:
         Returns:
             The outputs of all tasks.
         """
-        logger.info("Invoking tasks: %s", dispatch)
-
         # Check if all tasks are deployed
         running_task_ids: list[str] = []
         async with self.task_lock:

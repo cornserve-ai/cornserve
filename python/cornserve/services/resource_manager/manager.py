@@ -29,6 +29,7 @@ from cornserve.services.utils import to_strict_k8s_name
 from cornserve.sidecar.constants import grpc_url_from_rank
 from cornserve.task.base import UnitTask
 from cornserve.task_executors.profile import UnitTaskProfileManager
+from cornserve.utils import format_grpc_error
 
 logger = get_logger(__name__)
 tracer = trace.get_tracer(__name__)
@@ -416,6 +417,27 @@ class ResourceManager:
                         task_state.resources = []
                     task_state.resources.extend(resources)
             except Exception as e:
+                gpus = [
+                    task_manager_pb2.GPUResource(
+                        action=task_manager_pb2.ResourceAction.REMOVE,
+                        node_id=gpu.node,
+                        global_rank=gpu.global_rank,
+                        local_rank=gpu.local_rank,
+                    )
+                    for gpu in resources
+                ]
+                update_resource_req = task_manager_pb2.UpdateResourcesRequest(task_manager_id=task_state.id, gpus=gpus)
+                try:
+                    response = await task_state.stub.UpdateResources(update_resource_req)
+                    if response.status != common_pb2.Status.STATUS_OK:
+                        logger.error(
+                            "UpdateResources gRPC error when trying to remove GPUs from task manager %s: %s",
+                            task_state.id,
+                            response,
+                        )
+                        raise RuntimeError("Failed to remove GPUs from task manager") from e
+                except Exception:
+                    logger.error("Failed to remove GPUs from task manager %s: %s", task_state.id, e)
                 async with self.task_states_lock:
                     for gpu in resources:
                         gpu.free()
@@ -712,6 +734,8 @@ class ResourceManager:
 
             # Allocate resource starter pack for the task manager
             state.resources = self.resource.allocate(num_gpus=num_gpus, owner=state.id)
+            # uncomment below during benchmarking to speedup
+            # state.resources = []
             span.set_attribute(
                 "resource_manager._spawn_task_manager.gpu_global_ranks",
                 [gpu.global_rank for gpu in state.resources],
@@ -823,6 +847,13 @@ class ResourceManager:
                     raise RuntimeError(f"Failed to register task manager: {response}")
 
         except Exception as e:
+            if isinstance(e, grpc.aio.AioRpcError):
+                # pretty print gRPC erros
+                logger.error("gRPC error while spawning task manager: %s", format_grpc_error(e))
+                await state.tear_down(self.kube_core_client)
+                raise RuntimeError(
+                    f"Failed to initialize spawned task manager for {task}: {format_grpc_error(e)}"
+                ) from e
             logger.exception("Failed to spawn task manager: %s", e)
             await state.tear_down(self.kube_core_client)
             raise RuntimeError(f"Failed to initialize spawned task manager for {task}: {e}") from e

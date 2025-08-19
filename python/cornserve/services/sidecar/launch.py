@@ -44,9 +44,7 @@ class SidecarLaunchInfo:
                         name="sidecar",
                         image=constants.CONTAINER_IMAGE_SIDECAR,
                         image_pull_policy=constants.CONTAINER_IMAGE_PULL_POLICY,
-                        security_context=kclient.V1SecurityContext(
-                            privileged=True,
-                        ),
+                        security_context=kclient.V1SecurityContext(privileged=True),
                         env=[
                             kclient.V1EnvVar(name=name, value=value)
                             for name, value in SidecarLaunchInfo.get_envs(

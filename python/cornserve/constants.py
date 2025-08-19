@@ -72,6 +72,7 @@ K8S_TASK_EXECUTOR_HEALTHY_TIMEOUT = 20 * 60.0
 # Volume host paths.
 VOLUME_HF_CACHE = "/data/hfcache"
 VOLUME_SHM = "/dev/shm"
+VOLUME_VLLM_EXECUTOR_CACHE = "/data/cornserve/cache"
 
 # Unit task profiles mounted here with a ConfigMap.
 UNIT_TASK_PROFILES_DIR = "/etc/cornserve/profiles"

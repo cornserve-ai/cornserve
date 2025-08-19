@@ -14,5 +14,5 @@ else
   ruff check --select I cornserve tests ../examples
 fi
 
-ruff check --target-version py311 cornserve ../examples
+ruff check --target-version py311 cornserve ../examples 
 pyright cornserve ../examples

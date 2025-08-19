@@ -17,6 +17,7 @@ RUN cd build && \
       make -j$(nproc) && make install
 
 ENV RAPIDS_LIBUCX_PREFER_SYSTEM_LIBRARY=true
+ENV LD_LIBRARY_PATH=/usr/lib64:$LD_LIBRARY_PATH
 ENV LD_LIBRARY_PATH=/opt/conda/lib:$LD_LIBRARY_PATH
 ########### End Install UCX ###########
 
