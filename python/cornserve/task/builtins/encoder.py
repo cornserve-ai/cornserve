@@ -88,7 +88,7 @@ class DummyEncoderOutput(TaskOutput):
     """Dummpy Output model for encoder tasks."""
 
 
-class DummyEncoderTask(UnitTask[EncoderInput, EncoderOutput]):
+class DummyEncoderTask(UnitTask[EncoderInput, DummyEncoderOutput]):
     """A dummy task that invokes an encoder without dataforward.
 
     Attributes:
@@ -111,9 +111,9 @@ class DummyEncoderTask(UnitTask[EncoderInput, EncoderOutput]):
             raise ValueError("At least one model ID must be provided.")
         return model_ids
 
-    def make_record_output(self, task_input: EncoderInput) -> EncoderOutput:
+    def make_record_output(self, task_input: EncoderInput) -> DummyEncoderOutput:
         """Create a task output for task invocation recording."""
-        return EncoderOutput(embeddings=[DataForward[Tensor]() for _ in task_input.data_urls])
+        return DummyEncoderOutput()
 
     def validate_input(self, task_input: EncoderInput) -> None:
         """Validate the input for the encoder task."""
