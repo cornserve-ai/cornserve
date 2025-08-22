@@ -2,8 +2,8 @@ import asyncio
 import multiprocessing
 import os
 import random
-from typing import Any, Generator, Literal
 import uuid
+from typing import Any, Generator, Literal
 
 import pytest
 import torch

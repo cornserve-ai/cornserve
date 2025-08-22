@@ -6,7 +6,7 @@ import time
 from typing import List, Optional
 
 NUM_GPUS = 4
-CONTAINER_IMAGE = "cornserve-test:latest"
+CONTAINER_IMAGE = "cornserve/dev:latest"
 SERVER_CONTAINER_NAME = "serde_server"
 CLIENT_CONTAINER_PREFIX = "serde_client"
 
@@ -15,6 +15,7 @@ DEFAULT_DOCKER_ARGS = [
     "--network=host",
     # "--cap-add=IPC_LOCK",
     # "--cap-add=SYS_NICE",
+    "--workdir=/workspace/cornserve/python/tests/services/sidecar/host_only",
     "--rm",
     "--ipc=host",
     "--pid=host",
