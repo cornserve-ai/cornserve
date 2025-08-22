@@ -123,6 +123,24 @@ class SidecarReceiver:
         with contextlib.suppress(Exception):
             os.unlink(shm_filename())
 
+    async def close_stream(
+        self,
+        request: sidecar_pb2.CloseStreamRequest,
+        context: grpc.aio.ServicerContext,
+    ) -> sidecar_pb2.CloseStreamResponse:
+        """Close a stream for a given request ID in the receiver."""
+        try:
+            async with self.recv_done_lock:
+                req_state = self.ledger[request.id]
+                logger.info("Closing stream for request %s with %d chunks", request.id, request.num_chunks)
+                # chunk_ids are 0-indexed, so we need to add 1 to get the total number of chunks
+                req_state.num_chunks = request.num_chunks
+                req_state.done_event.set()
+            return sidecar_pb2.CloseStreamResponse(status=common_pb2.Status.STATUS_OK)
+        except Exception:
+            logger.exception("Failed to close stream for request %s with %d chunks", request.id, request.num_chunks)
+            await context.abort(grpc.StatusCode.INTERNAL, "Failed to close stream")
+
     async def prepare_receive(
         self,
         request: sidecar_pb2.PrepareReceiveRequest,
@@ -291,8 +309,14 @@ class SidecarReceiver:
         while True:
             await req_state.done_event.wait()
             # some chunk of this request is already received
-            if recv_req.chunk_id > req_state.num_chunks:
+            if req_state.num_chunks and recv_req.chunk_id >= req_state.num_chunks:
                 # check out of bound
+                logger.info(
+                    "receive: chunk_id %d out of bound for request %s >= request.num_chunks %s",
+                    recv_req.chunk_id,
+                    recv_req.id,
+                    req_state.num_chunks,
+                )
                 return sidecar_pb2.ReceiveResponse(
                     status=common_pb2.Status.STATUS_OK,
                     data=self.encoder.encode(None),

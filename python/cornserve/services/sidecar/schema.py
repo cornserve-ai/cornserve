@@ -273,7 +273,8 @@ class RecvRequestState:
 
     Attributes:
         id: The request id of the receive request
-        num_chunks: The number of chunks in the request
+        num_chunks: The number of chunks in the request. `0` for streaming unkown number of chunks,
+            and `-1` when the receiver client creates the state before receiving the first chunk.
         chunks: A dictionary of chunk id to RecvChunkState
     """
 

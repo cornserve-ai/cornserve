@@ -64,10 +64,18 @@ class Sidecar:
         # register the sidecar to the server, provide hint and grouping
         # note when using TP, only talks to the head sidecar
         assert self.group, "Sidecar group should not be empty"
-        self.channel = grpc.insecure_channel(grpc_url_from_rank(min(self.group)))
-        self.stub = sidecar_pb2_grpc.SidecarStub(self.channel)
-        self.aio_channel = grpc.aio.insecure_channel(grpc_url_from_rank(min(self.group)))
-        self.aio_stub = sidecar_pb2_grpc.SidecarStub(self.aio_channel)
+
+        # sidecar rank -> sync grpc channels
+        self.channels = {}
+        # sidecar rank -> sync grpc stubs
+        self.stubs = {}
+        # sidecar rank -> async grpc channels
+        self.aio_channels = {}
+        # sidecar rank -> async grpc stubs
+        self.aio_stubs = {}
+
+        self.stub = self._get_grpc_stub(min(self.group))
+        self.aio_stub = self._get_aio_grpc_stub(min(self.group))
 
         request = sidecar_pb2.RegisterRequest(
             rank=self.sidecar_rank,
@@ -101,6 +109,24 @@ class Sidecar:
 
         self._finalizer = weakref.finalize(self, self.__del__)
 
+    def _get_grpc_stub(self, sidecar_rank: int) -> sidecar_pb2_grpc.SidecarStub:
+        """Get the grpc stub for the given sidecar rank."""
+        if sidecar_rank not in self.stubs:
+            if sidecar_rank not in self.channels:
+                channel = grpc.insecure_channel(grpc_url_from_rank(sidecar_rank))
+                self.channels[sidecar_rank] = channel
+            self.stubs[sidecar_rank] = sidecar_pb2_grpc.SidecarStub(self.channels[sidecar_rank])
+        return self.stubs[sidecar_rank]
+
+    def _get_aio_grpc_stub(self, sidecar_rank: int) -> sidecar_pb2_grpc.SidecarStub:
+        """Get the aio grpc stub for the given sidecar rank."""
+        if sidecar_rank not in self.aio_stubs:
+            if sidecar_rank not in self.aio_channels:
+                channel = grpc.aio.insecure_channel(grpc_url_from_rank(sidecar_rank))
+                self.aio_channels[sidecar_rank] = channel
+            self.aio_stubs[sidecar_rank] = sidecar_pb2_grpc.SidecarStub(self.aio_channels[sidecar_rank])
+        return self.aio_stubs[sidecar_rank]
+
     @tracer.start_as_current_span(name="Sidecar.send")
     def send(
         self,
@@ -109,6 +135,7 @@ class Sidecar:
         dst_sidecar_ranks: list[list[int]],
         chunk_id: int = 0,
         num_chunks: int = 1,
+        stream: bool = False,
     ) -> None:
         """Send some data to other sidecars.
 
@@ -119,6 +146,8 @@ class Sidecar:
                 where each list is a sidecar TP group.
             chunk_id: The chunk id of the data when only sending a chunk.
             num_chunks: The number of chunks the entire data is split into.
+            stream: Whether to stream the data. If True, `num_chunks` is ignored, and the sender needs
+                to call `close_stream` to mark the end of the stream.
         """
         # need to pass a shared pytorch tensor handle
         # assume broadcast
@@ -133,6 +162,9 @@ class Sidecar:
 
         span = trace.get_current_span()
         span.set_attribute("sidecar.send.id", id)
+        if stream:
+            logger.info("Streaming chunks")
+            num_chunks = 0
 
         future = self.worker_pool.submit(
             self._send_worker,
@@ -173,7 +205,9 @@ class Sidecar:
 
         data = self.msgpack_encoder.encode(obj)
         dst_ranks = [sidecar_pb2.RankGroup(ranks=group) for group in dst_sidecar_ranks]
-        logger.info("Sending shard %d of chunk %d in req %s to ranks %s", self.shard_rank, chunk_id, id, dst_ranks)
+        logger.info(
+            "Sending shard %d of chunk %d in req %s to ranks %s", self.shard_rank, chunk_id, id, dst_sidecar_ranks
+        )
         request = sidecar_pb2.SendRequest(
             id=id,
             dst_ranks=dst_ranks,
@@ -189,6 +223,62 @@ class Sidecar:
                 torch.cuda.ipc_collect()
         else:
             logger.error("Failed to send data with id %s", id)
+
+    @tracer.start_as_current_span(name="Sidecar.close_stream")
+    def close_stream(
+        self,
+        id: str,
+        num_chunks: int,
+        dst_sidecar_ranks: list[list[int]],
+    ) -> None:
+        """Signal the end of a stream to the sidecar server.
+
+        Args:
+            id: The id of the data. This is used to identify the data in the sidecar.
+            num_chunks: The toatal number of chunks sent in the stream.
+            dst_sidecar_ranks: The ranks of the sidecars to send the data to. This is a list of lists,
+                where each list is a sidecar TP group.
+        """
+        span = trace.get_current_span()
+        span.set_attribute("sidecar.close_stream.id", id)
+
+        dst_ranks = [min(group) for group in dst_sidecar_ranks]
+
+        for sidecar_rank in dst_ranks:
+            if sidecar_rank < 0:
+                raise ValueError("Invalid sidecar rank")
+            future = self.worker_pool.submit(
+                self._close_stream_worker,
+                id,
+                num_chunks,
+                sidecar_rank,
+            )
+            future.add_done_callback(lambda f: f.result())
+
+    @tracer.start_as_current_span(name="Sidecar._close_stream_worker")
+    def _close_stream_worker(
+        self,
+        id: str,
+        num_chunks: int,
+        sidecar_rank: int,
+    ) -> None:
+        """The worker function to close a stream in the sidecar server.
+
+        Args:
+            id: The id of the data. This is used to identify the data in the sidecar.
+            num_chunks: The toatal number of chunks sent in the stream.
+            sidecar_rank: The sidecar rank to notify about the stream closure.
+        """
+        request = sidecar_pb2.CloseStreamRequest(
+            id=id,
+            num_chunks=num_chunks,
+        )
+        grpc_stub = self._get_grpc_stub(sidecar_rank)
+        response = grpc_stub.CloseStream(request)
+        if response.status == common_pb2.Status.STATUS_OK:
+            logger.info("Closed stream %s successfully with %d chunks", id, num_chunks)
+        else:
+            logger.error("Failed to close stream %s with %d chunks", id, num_chunks)
 
     @tracer.start_as_current_span(name="Sidecar.recv")
     async def recv(self, id: str, chunk_id: int = 0) -> Any:
@@ -298,18 +388,23 @@ class Sidecar:
             return
         logger.warning("Sidecar not shutdown properly, remember to call shutdown()")
         try:
-            del self.channel
-            del self.aio_channel
+            for channel in self.channels.values():
+                channel.close()
+                del channel
+            for aio_channel in self.aio_channels.values():
+                del aio_channel
         except Exception:
             pass
 
     async def shutdown(self) -> None:
         """Shutdown the sidecar client."""
         try:
-            self.channel.close()
-            await self.aio_channel.close()
-            del self.channel
-            del self.aio_channel
+            for channel in self.channels.values():
+                channel.close()
+                del channel
+            for aio_channel in self.aio_channels.values():
+                await aio_channel.close()
+                del aio_channel
             self.worker_pool.shutdown(wait=True)
         except Exception:
             pass
