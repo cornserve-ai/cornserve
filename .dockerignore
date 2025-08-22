@@ -104,3 +104,9 @@ proto/
 
 # Text files
 *.md
+
+# Benchmark scripts and data
+benchmark/
+
+# profiles
+profiles/

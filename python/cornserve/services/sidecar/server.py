@@ -255,6 +255,26 @@ class SidecarServicer(sidecar_pb2_grpc.SidecarServicer):
             logger.exception("Error in Register")
             await context.abort(grpc.StatusCode.INTERNAL, f"Error in Register: {e} \n {tb_str}")
 
+    async def CloseStream(  # noqa: N802
+        self,
+        request: sidecar_pb2.CloseStreamRequest,
+        context: grpc.aio.ServicerContext,
+    ) -> sidecar_pb2.CloseStreamResponse:
+        """Close a stream on the sender sidecar."""
+        try:
+            if not self.live:
+                logger.error("Sidecar not online")
+                await context.abort(grpc.StatusCode.FAILED_PRECONDITION, "Sidecar not online")
+            if self.receiver is None:
+                logger.error("Sidecar not registered")
+                await context.abort(grpc.StatusCode.FAILED_PRECONDITION, "Sidecar not registered")
+            return await self.receiver.close_stream(request, context)
+            # return await self.scheduler.submit(self.receiver.close_stream, request, context)
+        except Exception as e:
+            tb_str = traceback.format_exc()
+            logger.exception("Error in CloseStream")
+            await context.abort(grpc.StatusCode.INTERNAL, f"Error in CloseStream: {e} \n {tb_str}")
+
     async def Send(  # noqa: N802
         self,
         request: sidecar_pb2.SendRequest,
