@@ -41,6 +41,7 @@ _LAZY_CONSTANTS = {
     "CONTAINER_IMAGE_TASK_MANAGER": lambda: _build_image_name("task-manager"),
     "CONTAINER_IMAGE_SIDECAR": lambda: _build_image_name("sidecar"),
     "CONTAINER_IMAGE_ERIC": lambda: _build_image_name("eric"),
+    "CONTAINER_IMAGE_GERI": lambda: _build_image_name("geri"),
     "CONTAINER_IMAGE_VLLM": lambda: _build_image_name("vllm"),
     "CONTAINER_IMAGE_PULL_POLICY": lambda: _get_env_warn_default("CORNSERVE_IMAGE_PULL_POLICY", "IfNotPresent"),
 }
@@ -83,5 +84,6 @@ if TYPE_CHECKING:
     CONTAINER_IMAGE_TASK_MANAGER: str
     CONTAINER_IMAGE_SIDECAR: str
     CONTAINER_IMAGE_ERIC: str
+    CONTAINER_IMAGE_GERI: str
     CONTAINER_IMAGE_VLLM: str
     CONTAINER_IMAGE_PULL_POLICY: str

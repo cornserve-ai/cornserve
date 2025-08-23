@@ -77,6 +77,7 @@ eric-no-gpu = [
   "msgspec",
   "psutil",
   "torch>=2.5.0, <=2.7.0",
+  "torchvision",
   "transformers",
   "huggingface_hub",
   "pillow",
@@ -88,9 +89,24 @@ eric-no-gpu = [
 ]
 eric = ["flash-attn==2.7.4.post1", "xformers", "cornserve[eric-no-gpu]"]
 eric-audio = ["cornserve[eric,audio]"]
+geri-no-gpu = [
+  "fastapi",
+  "uvicorn[standard]",
+  "pyzmq",
+  "msgspec",
+  "torch>=2.5.0, <=2.7.0",
+  "transformers",
+  "huggingface_hub",
+  "pillow",
+  "diffusers",
+  "cornserve[sidecar-api]",
+  "opentelemetry-instrumentation-fastapi",
+  "opentelemetry-instrumentation-threading",
+]
+geri = ["cornserve[geri-no-gpu]"]
 dev-common = [
   "grpcio-tools",
-  "pyright!=1.1.401",
+  "pyright",
   "ruff",
   "pytest",
   "pytest-asyncio",
@@ -99,8 +115,8 @@ dev-common = [
   "timm",
   "cornserve[sidecar-api,gateway,resource-manager,task-manager,task-dispatcher]",
 ]
-dev = ["cornserve[dev-common,sidecar,eric]"]
-dev-no-gpu = ["cornserve[dev-common,eric-no-gpu]"]
+dev = ["cornserve[dev-common,sidecar,eric,geri]"]
+dev-no-gpu = ["cornserve[dev-common,eric-no-gpu,geri-no-gpu]"]
 
 [tool.setuptools.dynamic]
 version = { attr = "cornserve.__version__" }
