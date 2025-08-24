@@ -265,11 +265,11 @@ class ResourceManager:
             failed = 0
             for i, result in enumerate(spawn_results):
                 if isinstance(result, BaseException):
-                    logger.error("Failed to spawn sidecar pod for GPU %s: %s", gpus[i], result)
+                    logger.error("Failed to spawn sidecar pod for %s: %s", gpus[i], result)
                     failed += 1
                 else:
                     created_pods.append(result)
-                    logger.info("Successfully spawned sidecar pod for GPU %s", gpus[i])
+                    logger.info("Successfully spawned sidecar pod for %s", gpus[i])
 
             async def cleanup():
                 """Clean up any created pods in case of failure."""

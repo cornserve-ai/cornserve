@@ -36,6 +36,7 @@ class QwenImageModel(GeriModel):
 
         # First load on CPU to avoid allocating GPU memory for unused components.
         pipeline = QwenImagePipeline.from_pretrained(model_id, torch_dtype=torch_dtype)
+        self._embedding_dim = pipeline.text_encoder.config.hidden_size
         pipeline.text_encoder = None
         pipeline.tokenizer = None
 
@@ -61,7 +62,7 @@ class QwenImageModel(GeriModel):
     @property
     def embedding_dim(self) -> int:
         """The dimension of the prompt embeddings used by the model."""
-        return self.pipeline.text_encoder.config.hidden_size
+        return self._embedding_dim
 
     def generate(
         self,

@@ -3,10 +3,14 @@
 from __future__ import annotations
 
 import asyncio
+import warnings
 from asyncio.futures import Future
 from contextlib import suppress
 
 import torch
+
+# XXX(J1): Workaround for PyTorch 2.8.0 circular import issue
+import torch._dynamo  # noqa: F401
 import zmq
 import zmq.asyncio
 from opentelemetry import propagate, trace
@@ -46,11 +50,15 @@ class EngineClient:
         4. Initializes the sidecar client that waits for data to arrive before enqueuing requests.
         """
         # Figure out the embedding dimension from a temporary model instance
-        with torch.device("meta"):
-            temp_model = load_model(
-                model_id=config.model.id,
-                torch_device=torch.device("meta"),
+        meta_device = torch.device("meta")
+        with warnings.catch_warnings():
+            warnings.filterwarnings(
+                "ignore",
+                message=".*copying from a non-meta parameter.*",
+                category=UserWarning,
             )
+            with meta_device:
+                temp_model = load_model(model_id=config.model.id, torch_device=meta_device)
 
         # Create ZMQ sockets for communication with the engine
         self.ctx = zmq.asyncio.Context(io_threads=2)

@@ -71,6 +71,5 @@ class GeneratorTask(UnitTask[GeneratorInput, GeneratorOutput]):
 
     def make_name(self) -> str:
         """Create a concise string representation of the task."""
-        # Use the model name from the model_id (e.g., "Qwen/Qwen-Image" -> "qwen-image")
-        model_name = self.model_id.split("/")[-1].lower().replace("-", "_")
+        model_name = self.model_id.split("/")[-1].lower()
         return f"generator-{self.modality.lower()}-{model_name}"

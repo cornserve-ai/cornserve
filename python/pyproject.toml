@@ -99,6 +99,7 @@ geri-no-gpu = [
   "huggingface_hub",
   "pillow",
   "diffusers",
+  "accelerate",
   "cornserve[sidecar-api]",
   "opentelemetry-instrumentation-fastapi",
   "opentelemetry-instrumentation-threading",
