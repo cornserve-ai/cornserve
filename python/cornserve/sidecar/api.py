@@ -51,7 +51,7 @@ def _get_mock_mapping() -> dict[str, Path]:
     try:
         mapping_dict = json.loads(mapping)
         return {k: Path(v) for k, v in mapping_dict.items()}
-    except Exception:
+    except json.JSONDecodeError:
         logger.exception("Failed to decode CORNSERVE_MOCK_SIDECAR_MAPPING, should be a json string")
         return {}
 
