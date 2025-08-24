@@ -5,8 +5,11 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import ctypes
+import json
+import os
 import weakref
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 from typing import Any
 
 import grpc
@@ -20,16 +23,10 @@ from opentelemetry.instrumentation.threading import ThreadingInstrumentor
 
 from cornserve.logging import get_logger
 from cornserve.services.pb import common_pb2, sidecar_pb2, sidecar_pb2_grpc
-from cornserve.sidecar.constants import (
-    grpc_url_from_rank,
-    shm_filename,
-)
+from cornserve.sidecar.constants import grpc_url_from_rank, shm_filename
 from cornserve.sidecar.schema import SidecarConfig
 from cornserve.sidecar.serde import MsgpackDecoder, MsgpackEncoder, SharedTensorHandle
-from cornserve.sidecar.utils import (
-    device_from_rank,
-    init_shmem,
-)
+from cornserve.sidecar.utils import device_from_rank, init_shmem
 from cornserve.utils import set_ulimit
 
 logger = get_logger(__name__)
@@ -38,6 +35,25 @@ tracer = trace.get_tracer(__name__)
 GrpcInstrumentorClient().instrument()
 GrpcAioInstrumentorClient().instrument()
 ThreadingInstrumentor().instrument()
+
+
+def _is_mocking() -> bool:
+    """Check if we are mocking the sidecar client."""
+    env = os.environ.get("CORNSERVE_MOCK_SIDECAR", "0")
+    return env == "1" or env.lower() == "true"
+
+
+def _get_mock_mapping() -> dict[str, Path]:
+    """Get the mapping from sidecar id to local file path for mocking."""
+    mapping = os.environ.get("CORNSERVE_MOCK_SIDECAR_MAPPING", "")
+    if not mapping:
+        return {}
+    try:
+        mapping_dict = json.loads(mapping)
+        return {k: Path(v) for k, v in mapping_dict.items()}
+    except Exception:
+        logger.exception("Failed to decode CORNSERVE_MOCK_SIDECAR_MAPPING, should be a json string")
+        return {}
 
 
 class Sidecar:
@@ -55,6 +71,10 @@ class Sidecar:
             config: The configuration for the sidecar.
         """
         set_ulimit()
+
+        if _is_mocking():
+            logger.warning("Mocking sidecar client, no actual grpc connection will be made.")
+            return
 
         self.config = config
         self.sidecar_rank = config.sidecar_rank
@@ -149,6 +169,20 @@ class Sidecar:
             stream: Whether to stream the data. If True, `num_chunks` is ignored, and the sender needs
                 to call `close_stream` to mark the end of the stream.
         """
+        if _is_mocking():
+            mapping = _get_mock_mapping()
+            key = f"{id}-{chunk_id}"
+            if key not in mapping:
+                raise ValueError(f"Mocking sidecar but key {key} not in mapping")
+            local_path = mapping[key]
+            if isinstance(data, torch.Tensor):
+                torch.save(data, local_path)
+            else:
+                # save as json
+                str_data = json.dumps(data)
+                local_path.write_text(str_data)
+            return
+
         # need to pass a shared pytorch tensor handle
         # assume broadcast
         if any(rank == self.config.sidecar_rank for group in dst_sidecar_ranks for rank in group):
@@ -239,6 +273,9 @@ class Sidecar:
             dst_sidecar_ranks: The ranks of the sidecars to send the data to. This is a list of lists,
                 where each list is a sidecar TP group.
         """
+        if _is_mocking():
+            return
+
         span = trace.get_current_span()
         span.set_attribute("sidecar.close_stream.id", id)
 
@@ -280,6 +317,24 @@ class Sidecar:
         else:
             logger.error("Failed to close stream %s with %d chunks", id, num_chunks)
 
+    def _mock_recv(self, id: str, chunk_id: int = 0) -> Any:
+        if _is_mocking():
+            mapping = _get_mock_mapping()
+            key = f"{id}-{chunk_id}"
+            if key not in mapping:
+                raise ValueError(f"Mocking sidecar but key {key} not in mapping")
+            local_path = mapping[key]
+            if not local_path.exists():
+                raise ValueError(f"Mocking sidecar but file {local_path} does not exist")
+            suffix = local_path.suffix.lower()
+            if suffix in [".pt", ".pth"]:
+                tensor = torch.load(local_path, map_location="cpu")
+                return tensor
+            else:
+                # assumes json
+                str_data = local_path.read_text()
+                return json.loads(str_data)
+
     @tracer.start_as_current_span(name="Sidecar.recv")
     async def recv(self, id: str, chunk_id: int = 0) -> Any:
         """Receive data from the sidecar server.
@@ -290,6 +345,9 @@ class Sidecar:
             id: The id of the data.
             chunk_id: The chunk id of the data to receive.
         """
+        if _is_mocking():
+            return self._mock_recv(id, chunk_id)
+
         # TODO (Jeff): Async Generator
         span = trace.get_current_span()
         span.set_attribute("sidecar.recv.id", id)
@@ -319,6 +377,9 @@ class Sidecar:
             id: The id of the data.
             chunk_id: The chunk id of the data to receive.
         """
+        if _is_mocking():
+            return self._mock_recv(id, chunk_id)
+
         span = trace.get_current_span()
         span.set_attribute("sidecar.read.id", id)
         span.set_attribute("sidecar.read.chunk_id", chunk_id)
@@ -344,6 +405,9 @@ class Sidecar:
             id: The id of the data.
             chunk_id: The chunk id of the data to mark as done.
         """
+        if _is_mocking():
+            return
+
         span = trace.get_current_span()
         span.set_attribute("sidecar.mark_done.id", id)
         request = sidecar_pb2.MarkDoneRequest(id=id, chunk_id=chunk_id)
@@ -375,6 +439,9 @@ class Sidecar:
             id: The id of the data.
             chunk_id: The chunk id of the data to mark as done.
         """
+        if _is_mocking():
+            return
+
         future = self.worker_pool.submit(
             self._mark_done_worker,
             id,
@@ -384,6 +451,9 @@ class Sidecar:
 
     def __del__(self) -> None:
         """Unlink the shared memory buffer."""
+        if _is_mocking():
+            return
+
         if not hasattr(self, "channel"):
             return
         logger.warning("Sidecar not shutdown properly, remember to call shutdown()")
@@ -398,6 +468,9 @@ class Sidecar:
 
     async def shutdown(self) -> None:
         """Shutdown the sidecar client."""
+        if _is_mocking():
+            return
+
         try:
             for channel in self.channels.values():
                 channel.close()
@@ -411,5 +484,8 @@ class Sidecar:
 
     def shutdown_sync(self) -> None:
         """Synchronously shutdown the sidecar client."""
+        if _is_mocking():
+            return
+
         with contextlib.suppress(Exception):
             asyncio.run(self.shutdown())
