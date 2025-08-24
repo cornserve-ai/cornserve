@@ -71,4 +71,4 @@ def test_mock_send_recv(tmp_path):
         assert torch.allclose(tensor_chunk0, recv_tensor_chunk0.to(tensor_chunk0.device))
         assert torch.allclose(tensor_chunk1, recv_tensor_chunk1.to(tensor_chunk1.device))
         assert dict_data == recv_dict
-        assert int_data == recv_str
+        assert int_data == recv_int
