@@ -27,18 +27,18 @@ def mock_sidecar_files(mock_mapping):
                 pass
 
 
-def test_mock_send_recv():
+def test_mock_send_recv(tmp_path):
     """Tests sending and receiving data using mock sidecar."""
     tensor_id = uuid.uuid4().hex
     chunked_tensor_id = uuid.uuid4().hex
     dict_data_id = uuid.uuid4().hex
     int_data_id = uuid.uuid4().hex
     mock_mapping = {
-        f"{tensor_id}-0": "tmp_tensor.pt",
-        f"{chunked_tensor_id}-0": "tmp_tensor-chunk0.pt",
-        f"{chunked_tensor_id}-1": "tmp_tensor-chunk1.pt",
-        f"{dict_data_id}-0": "tmp_dict.json",
-        f"{int_data_id}-0": "tmp_int.json",
+        f"{tensor_id}-0": str(tmp_path / "tmp_tensor.pt"),
+        f"{chunked_tensor_id}-0": str(tmp_path / "tmp_tensor-chunk0.pt"),
+        f"{chunked_tensor_id}-1": str(tmp_path / "tmp_tensor-chunk1.pt"),
+        f"{dict_data_id}-0": str(tmp_path / "tmp_dict.json"),
+        f"{int_data_id}-0": str(tmp_path / "tmp_int.json"),
     }
     with mock_sidecar_files(mock_mapping):
         config = SidecarConfig(
