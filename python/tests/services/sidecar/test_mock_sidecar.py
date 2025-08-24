@@ -65,7 +65,7 @@ def test_mock_send_recv(tmp_path):
         recv_tensor_chunk0 = receiver.recv_sync(id=chunked_tensor_id, chunk_id=0)
         recv_tensor_chunk1 = receiver.recv_sync(id=chunked_tensor_id, chunk_id=1)
         recv_dict = receiver.recv_sync(id=dict_data_id)
-        recv_str = receiver.recv_sync(id=int_data_id)
+        recv_int = receiver.recv_sync(id=int_data_id)
 
         assert torch.allclose(tensor_data, recv_tensor.to(tensor_data.device))
         assert torch.allclose(tensor_chunk0, recv_tensor_chunk0.to(tensor_chunk0.device))
