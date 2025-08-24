@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import base64
 from typing import Any
 
 import aiohttp
@@ -51,19 +50,14 @@ class GeriDescriptor(TaskExecutionDescriptor[GeneratorTask, GeneratorInput, Gene
 
     def to_request(self, task_input: GeneratorInput, task_output: GeneratorOutput) -> dict[str, Any]:
         """Convert TaskInput to a request object for the task executor."""
-        # Extract the embedding data ID from the first embedding forward reference
-        # In the sidecar system, embeddings are identified by data IDs
-        if not task_input.embeddings:
-            raise ValueError("No embeddings provided for generator task")
-
-        # Use the first embedding's data ID (assumes single embedding for now)
-        embedding_data_id = task_input.embeddings[0].id
+        embedding_data_id = task_input.embeddings.id
 
         req = GenerationRequest(
             embedding_data_id=embedding_data_id,
             height=task_input.height,
             width=task_input.width,
             num_inference_steps=task_input.num_inference_steps,
+            skip_tokens=task_input.skip_tokens,
         )
         return req.model_dump()
 
@@ -75,15 +69,7 @@ class GeriDescriptor(TaskExecutionDescriptor[GeneratorTask, GeneratorInput, Gene
             if resp.generated is None:
                 raise RuntimeError("No generated content received from Geri")
 
-            # In a real implementation, you would:
-            # 1. Store the PNG bytes in a file storage system (S3, local filesystem, etc.)
-            # 2. Return a URL to access the stored content
-            #
-            # For now, we'll create a data URL that embeds the PNG bytes directly
-            png_b64 = base64.b64encode(resp.generated).decode("ascii")
-            content_url = f"data:image/png;base64,{png_b64}"
-
-            return GeneratorOutput(content_url=content_url)
+            return GeneratorOutput(generated=resp.generated)
         else:
             raise RuntimeError(f"Error in generator task: {resp.error_message}")
 

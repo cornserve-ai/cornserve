@@ -35,6 +35,7 @@ jobs:
           - resource-manager
           - gateway
           - eric
+          - geri
           - vllm
         include:
           - component: eric

@@ -24,6 +24,7 @@ class ScheduledRequest:
     height: int
     width: int
     num_inference_steps: int
+    skip_tokens: int
     span: Span | None = None
 
 
@@ -70,6 +71,11 @@ class SchedulerBatch:
         """Get list of tracing spans for this batch."""
         return [req.span for req in self.requests]
 
+    @property
+    def skip_tokens(self) -> list[int]:
+        """Get list of skip tokens for this batch."""
+        return [req.skip_tokens for req in self.requests]
+
 
 class RequestQueue:
     """A FCFS request queue that allows batching of consecutive requests with same parameters."""
@@ -87,6 +93,7 @@ class RequestQueue:
             height=request.height,
             width=request.width,
             num_inference_steps=request.num_inference_steps,
+            skip_tokens=request.skip_tokens,
             span=span,
         )
 

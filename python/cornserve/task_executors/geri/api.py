@@ -23,12 +23,14 @@ class GenerationRequest(BaseModel):
         width: Width of the generated content in pixels.
         num_inference_steps: Number of denoising steps to perform.
         embedding_data_id: Sidecar data ID for the prompt embeddings.
+        skip_tokens: Number of initial tokens to skip from the embeddings.
     """
 
     height: int
     width: int
     num_inference_steps: int
     embedding_data_id: str
+    skip_tokens: int = 0
 
 
 class Status(enum.IntEnum):

@@ -1,10 +1,8 @@
-"""Built-in task for multimodal content generators."""
+"""Built-in task for multimodal content generation."""
 
 from __future__ import annotations
 
 import enum
-
-from pydantic import field_validator
 
 from cornserve.task.base import TaskInput, TaskOutput, UnitTask
 from cornserve.task.forward import DataForward, Tensor
@@ -25,23 +23,25 @@ class GeneratorInput(TaskInput):
         height: Height of the generated content in pixels.
         width: Width of the generated content in pixels.
         num_inference_steps: Number of denoising steps to perform.
-        embeddings: Text embeddings from the LLM encoder (received via sidecar).
+        embeddings: Text (e.g., prompt) embeddings from the encoder.
+        skip_tokens: Number of initial tokens to skip from the embeddings.
     """
 
-    height: int = 1328
-    width: int = 1328
-    num_inference_steps: int = 50
-    embeddings: list[DataForward[Tensor]]
+    height: int
+    width: int
+    num_inference_steps: int
+    embeddings: DataForward[Tensor]
+    skip_tokens: int = 0
 
 
 class GeneratorOutput(TaskOutput):
     """Output model for generator tasks.
 
     Attributes:
-        content_url: URL to the generated content.
+        generated: The generated content as bytes. PNG for images.
     """
 
-    content_url: str
+    generated: bytes
 
 
 class GeneratorTask(UnitTask[GeneratorInput, GeneratorOutput]):
@@ -57,17 +57,9 @@ class GeneratorTask(UnitTask[GeneratorInput, GeneratorOutput]):
     model_id: str
     max_batch_size: int = 1
 
-    @field_validator("model_id")
-    @classmethod
-    def _validate_model_id(cls, model_id: str) -> str:
-        """Ensure model ID is provided."""
-        if not model_id:
-            raise ValueError("Model ID must be provided.")
-        return model_id
-
     def make_record_output(self, task_input: GeneratorInput) -> GeneratorOutput:
         """Create a task output for task invocation recording."""
-        return GeneratorOutput(content_url="")
+        return GeneratorOutput(generated=b"")
 
     def validate_input(self, task_input: GeneratorInput) -> None:
         """Validate the input for the generator task."""
@@ -76,9 +68,6 @@ class GeneratorTask(UnitTask[GeneratorInput, GeneratorOutput]):
 
         if task_input.num_inference_steps <= 0:
             raise ValueError("Number of inference steps must be positive.")
-
-        if not task_input.embeddings:
-            raise ValueError("Embeddings must be provided (received from LLM via sidecar).")
 
     def make_name(self) -> str:
         """Create a concise string representation of the task."""

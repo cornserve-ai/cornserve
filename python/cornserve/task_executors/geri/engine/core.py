@@ -142,14 +142,16 @@ class Engine:
         responses. It handles scheduling, executing, and processing results.
         """
         batch = self.scheduler.schedule()
-        if not batch:
+        if batch is None:
             return []
 
         try:
             # Collect all embeddings for the batch
             prompt_embeds = []
-            for embedding_data_id in batch.embedding_data_ids:
-                # Collect chunks for this embedding data ID
+            for embedding_data_id, skip_tokens in zip(batch.embedding_data_ids, batch.skip_tokens, strict=True):
+                # Collect chunks for this embedding data ID.
+                # Since data was already awaited by the engine client, these
+                # `recv_sync` calls should return immediately.
                 embedding_chunks = []
                 chunk_id = 0
                 while True:
@@ -159,11 +161,17 @@ class Engine:
                     embedding_chunks.append(chunk)
                     chunk_id += 1
 
-                # Concatenate chunks for this request
+                # Concatenate chunks for this request and slice initial tokens as specified
                 if embedding_chunks:
-                    embedding = torch.cat(embedding_chunks, dim=0).contiguous()
+                    embedding = torch.cat(embedding_chunks, dim=0)[skip_tokens:].contiguous()
                     prompt_embeds.append(embedding)
-                    logger.debug("Retrieved %d chunks for embedding: %s", len(embedding_chunks), embedding_data_id)
+                    logger.debug(
+                        "Retrieved embedding for data ID %s with %s and %d chunks (skipped %d initial tokens).",
+                        embedding_data_id,
+                        list(embedding.shape),
+                        chunk_id,
+                        skip_tokens,
+                    )
                 else:
                     logger.error("No embedding chunks received for data ID: %s", embedding_data_id)
                     raise RuntimeError(f"No embeddings received for data ID: {embedding_data_id}")

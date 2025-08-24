@@ -42,6 +42,7 @@ class EngineRequest(msgspec.Struct, array_like=True, omit_defaults=True):
     height: int
     width: int
     num_inference_steps: int
+    skip_tokens: int
     span_context: dict[str, str] | None = None
 
 

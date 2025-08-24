@@ -133,6 +133,7 @@ class EngineClient:
             height=request.height,
             width=request.width,
             num_inference_steps=request.num_inference_steps,
+            skip_tokens=request.skip_tokens,
             span_context=span_context,
         )
 
