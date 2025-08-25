@@ -90,16 +90,21 @@ class VLLMDescriptor(TaskExecutionDescriptor[LLMBaseUnitTask, OpenAIChatCompleti
             "--port",
             str(port),
             "--trust-remote-code",
+            "--cornserve-sidecar-ranks",
+            *[str(gpu.global_rank) for gpu in gpus],
+            # XXX: Sending hidden states from vLLM to the sidecar fases device pointer errors
+            # when compilation is enabled. Unsure if it's CUDA graph, torch.compile, or something else.
+            "--enforce-eager",
+            # XXX: When prefix caching is enabled, hidden states of the prefix that hit the cache
+            # are never computed and thus never sent to the sidecar. Ideally, we want to include the
+            # hidden states in the prefix cache, which V1 doesn't support yet.
+            "--no-enable-prefix-caching",
             # These arguments will be hand tuned during benchmarking
-            # "--no-enable-prefix-caching",
             # "--disable-mm-preprocessor-cache",
             # "--max-num-seqs",
             # "60",
             # "--max-model-len",
             # "8192",
-            "--cornserve-sidecar-ranks",
-            *[str(gpu.global_rank) for gpu in gpus],
-            "--enforce-eager",
         ]
         return args
 

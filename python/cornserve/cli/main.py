@@ -92,9 +92,8 @@ def _serialize_gr_command(**cmd) -> bytes:
     return b"".join(parts)
 
 
-def _write_png_chunked(png_data: bytes) -> None:
+def _write_png_chunked(data: bytes) -> None:
     """Write PNG data to terminal using Kitty TGP in chunks."""
-    data = base64.standard_b64encode(png_data)
     cmd = {"a": "T", "f": 100}
     while data:
         chunk, data = data[:4096], data[4096:]
@@ -132,20 +131,17 @@ def _handle_png_from_response(response_data: dict[str, Any], png_key: str, save_
         return
 
     try:
-        # Decode base64 PNG data
-        png_data = base64.b64decode(png_value)
-
         # Save to file if path is specified
         if save_path:
             try:
                 with open(save_path, "wb") as f:
-                    f.write(png_data)
+                    f.write(base64.b64decode(png_value))
                 rich.print(Panel(f"PNG saved to {save_path}", style="green", expand=False))
             except Exception as e:
                 rich.print(Panel(f"Failed to save PNG to {save_path}: {e}", style="red", expand=False))
 
-        # Flush Rich output before sending TGP commands
-        _write_png_chunked(png_data)
+        # Print out the PNG image using the Kitty Terminal Graphics Protocol
+        _write_png_chunked(png_value.encode("ascii"))
 
     except Exception as e:
         rich.print(Panel(f"Failed to decode PNG data: {e}", style="red", expand=False))

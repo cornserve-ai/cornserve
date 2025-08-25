@@ -104,7 +104,6 @@ class QwenImageModel(GeriModel):
         for img in images:
             buffer = io.BytesIO()
             img.save(buffer, format="PNG")
-            img.save("image.png", format="PNG")  # For debugging purposes
             images_png.append(base64.b64encode(buffer.getvalue()).decode("ascii"))
 
         logger.info("Generated %d images successfully", len(images_png))

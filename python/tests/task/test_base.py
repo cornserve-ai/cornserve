@@ -11,6 +11,8 @@ from cornserve.task.builtins.encoder import EncoderInput, EncoderOutput, Encoder
 from cornserve.task.builtins.llm import (
     ChatCompletionContentPartTextParam,
     ChatCompletionMessageParam,
+    LLMBaseUnitTask,
+    LLMEmbeddingUnitTask,
     LLMUnitTask,
     OpenAIChatCompletionChunk,
     OpenAIChatCompletionRequest,
@@ -68,11 +70,12 @@ class ToyForwardTask(ToyBaseTask[OpenAIChatCompletionRequest, ToyForwardOutput])
 
 def test_root_unit_task_cls():
     """Tests whether the root unit task class is figured out correctly."""
-    assert LLMUnitTask.root_unit_task_cls is LLMUnitTask
+    assert LLMUnitTask.root_unit_task_cls is LLMBaseUnitTask
+    assert LLMEmbeddingUnitTask.root_unit_task_cls is LLMBaseUnitTask
     assert EncoderTask.root_unit_task_cls is EncoderTask
 
     # Direct inheritence of existing concrete unit task
-    assert ToyLLMTask.root_unit_task_cls is LLMUnitTask
+    assert ToyLLMTask.root_unit_task_cls is LLMBaseUnitTask
     assert ToyEncoderTask.root_unit_task_cls is EncoderTask
 
     # Base unit task was meant for subclassing

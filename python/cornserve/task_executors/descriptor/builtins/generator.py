@@ -57,7 +57,6 @@ class GeriDescriptor(TaskExecutionDescriptor[GeneratorTask, GeneratorInput, Gene
             num_inference_steps=task_input.num_inference_steps,
             skip_tokens=task_input.skip_tokens,
         )
-        print("GenerationRequest:", req, flush=True)
         return req.model_dump()
 
     async def from_response(self, task_output: GeneratorOutput, response: aiohttp.ClientResponse) -> GeneratorOutput:

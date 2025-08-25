@@ -23,13 +23,6 @@ class ModelConfig(BaseModel):
     # Modality type
     modality: Modality
 
-    # Embedding dimension
-    _embed_dim: int
-
-    def model_post_init(self, context, /) -> None:
-        """Post-initialization hook for the model."""
-        pass
-
 
 class ServerConfig(BaseModel):
     """Serving config."""

@@ -1,5 +1,7 @@
 """Testing utilities for Geri."""
 
+import base64
+
 import torch
 
 
@@ -20,20 +22,14 @@ def create_dummy_embeddings(
     return [torch.randn(seq_len, hidden_size, dtype=dtype, device=torch.device("cuda")) for _ in range(batch_size)]
 
 
-def assert_valid_png_bytes_list(png_bytes_list: list[bytes], expected_batch_size: int = 1) -> None:
-    """Assert that the generated PNG bytes list is valid.
+def assert_valid_png_results_list(results: list[str], expected_batch_size: int = 1) -> None:
+    """Assert that the generated PNG results list is valid."""
+    assert isinstance(results, list), f"Expected list, got {type(results)}"
+    assert len(results) == expected_batch_size, f"Expected batch size {expected_batch_size}, got {len(results)}"
 
-    Args:
-        png_bytes_list: List of PNG-encoded image bytes.
-        expected_batch_size: Expected batch size.
-    """
-    assert isinstance(png_bytes_list, list), f"Expected list, got {type(png_bytes_list)}"
-    assert len(png_bytes_list) == expected_batch_size, (
-        f"Expected batch size {expected_batch_size}, got {len(png_bytes_list)}"
-    )
-
-    for i, png_bytes in enumerate(png_bytes_list):
-        assert isinstance(png_bytes, bytes), f"Item {i} should be bytes, got {type(png_bytes)}"
+    for i, png_str in enumerate(results):
+        assert isinstance(png_str, str), f"Item {i} should be str, got {type(png_str)}"
+        png_bytes = base64.b64decode(png_str.encode("ascii"))
         assert len(png_bytes) > 0, f"Item {i} should not be empty"
         # Check PNG header
         assert png_bytes.startswith(b"\x89PNG"), f"Item {i} should start with PNG header"
