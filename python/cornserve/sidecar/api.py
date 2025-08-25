@@ -9,6 +9,7 @@ import json
 import os
 import weakref
 from concurrent.futures import ThreadPoolExecutor
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
@@ -37,12 +38,14 @@ GrpcAioInstrumentorClient().instrument()
 ThreadingInstrumentor().instrument()
 
 
+@lru_cache(maxsize=1)
 def _is_mocking() -> bool:
     """Check if we are mocking the sidecar client."""
     env = os.environ.get("CORNSERVE_MOCK_SIDECAR", "0")
     return env == "1" or env.lower() == "true"
 
 
+@lru_cache(maxsize=1)
 def _get_mock_mapping() -> dict[str, Path]:
     """Get the mapping from sidecar id to local file path for mocking."""
     mapping = os.environ.get("CORNSERVE_MOCK_SIDECAR_MAPPING", "")
