@@ -70,6 +70,7 @@ class QwenImageTask(Task[QwenImageInput, QwenImageOutput]):
                     {"role": "system", "content": self.system_prompt},
                     {"role": "user", "content": task_input.prompt},
                 ],
+                max_completion_tokens=1,
             )
         )
         encoder_output = self.text_encoder.invoke(encoder_input)

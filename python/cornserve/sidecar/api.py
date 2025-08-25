@@ -303,8 +303,15 @@ class Sidecar:
         if isinstance(obj, SharedTensorHandle):
             cbuf = (ctypes.c_byte * obj.numel * self.dtype.itemsize).from_address(self.base_ptr + obj.offset)
             tensor = torch.frombuffer(cbuf, dtype=self.dtype, count=obj.numel)
-            logger.info("Received shard %d of chunk %d in req %s successfully", self.shard_rank, chunk_id, id)
-            return tensor.view(self.config.get_recv_tensor_shape())
+            tensor_view = tensor.view(self.config.get_recv_tensor_shape())
+            logger.info(
+                "Received shard %d of chunk %d in req %s successfully (shape %s)",
+                self.shard_rank,
+                chunk_id,
+                id,
+                list(tensor_view.shape),
+            )
+            return tensor_view
         else:
             return obj
 
@@ -331,8 +338,15 @@ class Sidecar:
         if isinstance(obj, SharedTensorHandle):
             cbuf = (ctypes.c_byte * obj.numel * self.dtype.itemsize).from_address(self.base_ptr + obj.offset)
             tensor = torch.frombuffer(cbuf, dtype=self.dtype, count=obj.numel)
-            logger.info("Sync read shard %d of chunk %d in req %s successfully", self.shard_rank, chunk_id, id)
-            return tensor.view(self.config.get_recv_tensor_shape())
+            tensor_view = tensor.view(self.config.get_recv_tensor_shape())
+            logger.info(
+                "Sync read shard %d of chunk %d in req %s successfully (shape %s)",
+                self.shard_rank,
+                chunk_id,
+                id,
+                list(tensor_view.shape),
+            )
+            return tensor_view
         else:
             return obj
 
