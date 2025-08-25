@@ -38,6 +38,8 @@ async def generate(
     """Handler for generation requests."""
     engine_client: EngineClient = raw_request.app.state.engine_client
 
+    logger.info("Received generation request: %s", request)
+
     try:
         request_id = uuid.uuid4().hex
         trace.get_current_span().set_attribute("request_id", request_id)

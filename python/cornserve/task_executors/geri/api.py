@@ -45,11 +45,11 @@ class GenerationResponse(BaseModel):
 
     Attributes:
         status: Status of the generation operation.
-        generated: Bytes of the generated content, if successful.
+        generated: Base64 encoded bytes of the generated content, if successful.
             Bytes are in PNG format for images.
         error_message: Error message if the status is ERROR.
     """
 
     status: Status
-    generated: bytes | None = None
+    generated: str | None = None
     error_message: str | None = None

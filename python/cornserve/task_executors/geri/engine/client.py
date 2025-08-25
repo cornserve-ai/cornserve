@@ -9,7 +9,7 @@ from contextlib import suppress
 
 import torch
 
-# XXX(J1): Workaround for PyTorch 2.8.0 circular import issue
+# Workaround for PyTorch 2.8.0 circular import issue
 import torch._dynamo  # noqa: F401
 import zmq
 import zmq.asyncio
@@ -101,7 +101,7 @@ class EngineClient:
         logger.info("Shutting down EngineClient")
 
         # Send shutdown message to engine
-        await self.request_sock.send_multipart((EngineOpcode.SHUTDOWN.value,), copy=False)
+        await self.request_sock.send_multipart((EngineOpcode.SHUTDOWN.value, b""), copy=False)
 
         # Wait for engine process to shutdown
         self.engine_process.join(timeout=10)
@@ -154,6 +154,7 @@ class EngineClient:
             (EngineOpcode.GENERATE.value, self.encoder.encode(message)),
             copy=False,
         )
+        logger.info("Sent generate request to engine: %s", message)
 
         # Wait for response
         try:

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import io
 
 import torch
@@ -70,7 +71,7 @@ class QwenImageModel(GeriModel):
         height: int,
         width: int,
         num_inference_steps: int = 50,
-    ) -> list[bytes]:
+    ) -> list[str]:
         """Generate images from prompt embeddings."""
         batch_size = len(prompt_embeds)
         max_seq_len = max([emb.size(0) for emb in prompt_embeds])
@@ -99,11 +100,11 @@ class QwenImageModel(GeriModel):
         images = result.images
         assert isinstance(images, list) and all(isinstance(img, Image.Image) for img in images)
 
-        images_png: list[bytes] = []
+        images_png: list[str] = []
         for img in images:
             buffer = io.BytesIO()
             img.save(buffer, format="PNG")
-            images_png.append(buffer.getvalue())
+            images_png.append(base64.b64encode(buffer.getvalue()).decode("ascii"))
 
         logger.info("Generated %d images successfully", len(images_png))
 

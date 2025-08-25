@@ -31,7 +31,7 @@ class GeriModel(ABC):
         height: int,
         width: int,
         num_inference_steps: int = 50,
-    ) -> list[bytes]:
+    ) -> list[str]:
         """Generate images from prompt embeddings.
 
         Args:
@@ -42,7 +42,8 @@ class GeriModel(ABC):
             num_inference_steps: Number of denoising steps to perform.
 
         Returns:
-            Generated multimodal content as bytes. For images, bytes are in PNG format.
+            Generated multimodal content as base64-encoded bytes.
+            For images, bytes are in PNG format.
         """
 
     @property

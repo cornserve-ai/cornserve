@@ -27,7 +27,7 @@ from cornserve.task_executors.geri.schema import (
     EngineResponse,
 )
 from cornserve.task_executors.geri.utils.serde import MsgpackDecoder, MsgpackEncoder
-from cornserve.task_executors.geri.utils.zmq import zmq_sync_socket, zmq_sync_socket_ctx
+from cornserve.task_executors.geri.utils.zmq import zmq_sync_socket_ctx
 from cornserve.tracing import configure_otel
 
 logger = get_logger(__name__)
@@ -68,11 +68,6 @@ class Engine:
                 recv_tensor_shape=(-1, model.embedding_dim),
             )
         )
-
-        # Set up ZMQ sockets
-        self.ctx = zmq.Context(io_threads=2)
-        self.request_sock = zmq_sync_socket(self.ctx, request_sock_path, zmq.PULL)
-        self.response_sock = zmq_sync_socket(self.ctx, response_sock_path, zmq.PUSH)
 
         # Set up serialization
         self.decoder = MsgpackDecoder(EngineRequest)
@@ -197,7 +192,7 @@ class Engine:
 
                 # Execute the batch
                 result = self.executor.generate(
-                    prompt_embeds=prompt_embeds,
+                    prompt_embeds=[e.cuda() for e in prompt_embeds],
                     height=batch.height,
                     width=batch.width,
                     num_inference_steps=batch.num_inference_steps,
@@ -280,6 +275,7 @@ class Engine:
 
     def _request_receive_loop(self, sock_path: str) -> None:
         """Continuously receive requests from a ZMQ socket and enqueue them."""
+        logger.info("Starting request receive thread. Listening on %s", sock_path)
         with zmq_sync_socket_ctx(sock_path, zmq.PULL) as sock:
             while True:
                 opcode_frame, inst_frame = sock.recv_multipart(copy=False)
@@ -305,9 +301,6 @@ class Engine:
 
         if hasattr(self, "executor"):
             self.executor.shutdown()
-
-        if hasattr(self, "ctx"):
-            self.ctx.destroy()
 
     @classmethod
     def spawn_engine(

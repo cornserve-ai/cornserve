@@ -37,9 +37,13 @@ class QwenImageInput(TaskInput):
 
 
 class QwenImageOutput(TaskOutput):
-    """Output model for Qwen-Image generation task."""
+    """Output model for Qwen-Image generation task.
 
-    image: bytes
+    Attributes:
+        image: Generated image as a base64-encoded PNG bytes.
+    """
+
+    image: str
 
 
 class QwenImageTask(Task[QwenImageInput, QwenImageOutput]):
@@ -73,6 +77,7 @@ class QwenImageTask(Task[QwenImageInput, QwenImageOutput]):
             height=task_input.height,
             width=task_input.width,
             num_inference_steps=task_input.num_inference_steps,
+            skip_tokens=self.num_prefix_tokens_to_slice,
             embeddings=encoder_output.embeddings,
         )
         generator_output = self.generator.invoke(generator_input)

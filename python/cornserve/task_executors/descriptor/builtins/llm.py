@@ -99,6 +99,7 @@ class VLLMDescriptor(TaskExecutionDescriptor[LLMBaseUnitTask, OpenAIChatCompleti
             # "8192",
             "--cornserve-sidecar-ranks",
             *[str(gpu.global_rank) for gpu in gpus],
+            "--enforce-eager",
         ]
         return args
 

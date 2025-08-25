@@ -38,10 +38,10 @@ class GeneratorOutput(TaskOutput):
     """Output model for generator tasks.
 
     Attributes:
-        generated: The generated content as bytes. PNG for images.
+        generated: Generated content as bytes, encoded in base64. PNG for images.
     """
 
-    generated: bytes
+    generated: str
 
 
 class GeneratorTask(UnitTask[GeneratorInput, GeneratorOutput]):
@@ -59,7 +59,7 @@ class GeneratorTask(UnitTask[GeneratorInput, GeneratorOutput]):
 
     def make_record_output(self, task_input: GeneratorInput) -> GeneratorOutput:
         """Create a task output for task invocation recording."""
-        return GeneratorOutput(generated=b"")
+        return GeneratorOutput(generated="")
 
     def validate_input(self, task_input: GeneratorInput) -> None:
         """Validate the input for the generator task."""

@@ -51,7 +51,7 @@ class EngineResponse(msgspec.Struct, array_like=True, omit_defaults=True):
 
     request_id: str
     status: Status
-    generated: bytes | None = None
+    generated: str | None = None
     error_message: str | None = None
 
 
@@ -60,5 +60,5 @@ class GenerationResult:
     """Result from model executor (internal, not serialized)."""
 
     status: Status
-    generated: list[bytes] = field(default_factory=list)
+    generated: list[str] = field(default_factory=list)
     error_message: str | None = None
