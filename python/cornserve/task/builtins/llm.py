@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import uuid
 from collections import defaultdict
-from typing import Literal, TypeAlias
+from typing import Generic, Literal, TypeAlias, TypeVar
 
 from openai.types.chat import ChatCompletionChunk
 from pydantic import BaseModel, Field
@@ -120,12 +120,12 @@ def extract_multimodal_content(
     return multimodal_data
 
 
-class OpenAIChatCompletionChunk(TaskOutput, ChatCompletionChunk):
-    """Output model for streamed OpenAI Chat Completion tasks."""
+InputT = TypeVar("InputT", bound=TaskInput)
+OutputT = TypeVar("OutputT", bound=TaskOutput)
 
 
-class LLMUnitTask(UnitTask[OpenAIChatCompletionRequest, Stream[OpenAIChatCompletionChunk]]):
-    """A task that invokes an LLM and returns a stream of chat completion chunks.
+class LLMBaseUnitTask(UnitTask[InputT, OutputT], Generic[InputT, OutputT]):
+    """Base class for LLM unit tasks.
 
     Attributes:
         model_id: The ID of the model to use for the task.
@@ -146,6 +146,20 @@ class LLMUnitTask(UnitTask[OpenAIChatCompletionRequest, Stream[OpenAIChatComplet
         """Create a concise string representation of the task."""
         return f"llm-{self.model_id.split('/')[-1].lower()}"
 
+
+class OpenAIChatCompletionChunk(TaskOutput, ChatCompletionChunk):
+    """Output model for streamed OpenAI Chat Completion tasks."""
+
+
+class LLMUnitTask(LLMBaseUnitTask[OpenAIChatCompletionRequest, Stream[OpenAIChatCompletionChunk]]):
+    """A task that invokes an LLM and returns a stream of chat completion chunks.
+
+    Attributes:
+        model_id: The ID of the model to use for the task.
+        receive_embeddings: Whether to receive multimodal embeddings from
+            a separate encoder task. If False, the task will compute them itself.
+    """
+
     def make_record_output(
         self,
         task_input: OpenAIChatCompletionRequest,
@@ -153,12 +167,25 @@ class LLMUnitTask(UnitTask[OpenAIChatCompletionRequest, Stream[OpenAIChatComplet
         """Create a mock task output object for invocation recording."""
         return Stream[OpenAIChatCompletionChunk]()
 
-    def validate_input(self, task_input: OpenAIChatCompletionRequest) -> None:
-        """Validate the task input."""
-        if task_input.model != self.model_id:
-            raise ValueError(
-                f"Model ID in task input ({task_input.model}) does not match the task model ID ({self.model_id})."
-            )
+
+class LLMEmbeddingResponse(TaskOutput):
+    """Output model for LLM embedding tasks."""
+
+    embeddings: DataForward[Tensor]
+
+
+class LLMEmbeddingUnitTask(LLMBaseUnitTask[OpenAIChatCompletionRequest, LLMEmbeddingResponse]):
+    """A task that invokes an LLM to compute multimodal embeddings.
+
+    Attributes:
+        model_id: The ID of the model to use for the task.
+        receive_embeddings: Whether to receive multimodal embeddings from
+            a separate encoder task. If False, the task will compute them itself.
+    """
+
+    def make_record_output(self, task_input: OpenAIChatCompletionRequest) -> LLMEmbeddingResponse:
+        """Create a mock task output object for invocation recording."""
+        return LLMEmbeddingResponse(embeddings=DataForward[Tensor]())
 
 
 class MLLMTask(Task[OpenAIChatCompletionRequest, Stream[OpenAIChatCompletionChunk]]):
@@ -245,7 +272,8 @@ class MLLMTask(Task[OpenAIChatCompletionRequest, Stream[OpenAIChatCompletionChun
 class PrefillChatCompletionResponse(TaskOutput):
     """Output model for Prefill vLLM Chat Completion tasks."""
 
-    kv_transfer_params: DataForward[dict]
+    kv_transfer_params: DataForward[dict] | None = None
+    hidden_states: DataForward[Tensor] | None = None
 
 
 class PrefillLLMUnitTask(UnitTask[OpenAIChatCompletionRequest, PrefillChatCompletionResponse]):
@@ -253,6 +281,7 @@ class PrefillLLMUnitTask(UnitTask[OpenAIChatCompletionRequest, PrefillChatComple
 
     model_id: str
     receive_embeddings: bool = True
+    send_hidden_states: bool = False
 
     def make_name(self) -> str:
         """Create a concise string representation of the task."""
@@ -260,6 +289,8 @@ class PrefillLLMUnitTask(UnitTask[OpenAIChatCompletionRequest, PrefillChatComple
 
     def make_record_output(self, task_input: OpenAIChatCompletionRequest) -> PrefillChatCompletionResponse:
         """Create a mock task output object for invocation recording."""
+        if self.send_hidden_states:
+            return PrefillChatCompletionResponse(hidden_states=DataForward[Tensor]())
         return PrefillChatCompletionResponse(kv_transfer_params=DataForward[dict]())
 
     def validate_input(self, task_input: OpenAIChatCompletionRequest) -> None:

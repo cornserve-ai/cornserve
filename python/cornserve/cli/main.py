@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import json
 import os
 import sys
@@ -78,6 +79,72 @@ def _load_payload(args: list[str]) -> dict[str, Any]:
     raise ValueError(
         f"Invalid payload format. JSON failed with: '{json_error}'. YAML failed with: '{yaml_error}'",
     )
+
+
+def _serialize_gr_command(**cmd) -> bytes:
+    """Serialize a graphics command for Kitty TGP."""
+    payload = cmd.pop("payload", None)
+    cmd_str = ",".join(f"{k}={v}" for k, v in cmd.items())
+    parts = [b"\033_G", cmd_str.encode("ascii")]
+    if payload:
+        parts.extend([b";", payload])
+    parts.append(b"\033\\")
+    return b"".join(parts)
+
+
+def _write_png_chunked(data: bytes) -> None:
+    """Write PNG data to terminal using Kitty TGP in chunks."""
+    cmd = {"a": "T", "f": 100}
+    while data:
+        chunk, data = data[:4096], data[4096:]
+        m = 1 if data else 0
+        sys.stdout.buffer.write(_serialize_gr_command(payload=chunk, m=m, **cmd))
+        sys.stdout.flush()
+        cmd.clear()
+    print()
+
+
+def _extract_nested_value(data: Any, key: str) -> Any:
+    """Extract a value from nested dict using dot notation."""
+    parts = key.split(".")
+    value = data
+    try:
+        for part in parts:
+            # Try to convert to int for list indexing
+            with suppress(ValueError):
+                part = int(part)
+            value = value[part]
+        return value
+    except (KeyError, IndexError, TypeError):
+        return None
+
+
+def _handle_png_from_response(response_data: dict[str, Any], png_key: str, save_path: str | None = None) -> None:
+    """Extract PNG from response data and display/save it if the key exists."""
+    png_value = _extract_nested_value(response_data, png_key)
+    if png_value is None:
+        rich.print(Panel(f"PNG key '{png_key}' not found in response", style="red", expand=False))
+        return
+
+    if not isinstance(png_value, str):
+        rich.print(Panel(f"PNG key '{png_key}' does not contain string data", style="red", expand=False))
+        return
+
+    # Save to file if path is specified
+    if save_path:
+        try:
+            with open(save_path, "wb") as f:
+                f.write(base64.b64decode(png_value))
+            rich.print(Panel(f"PNG saved to {save_path}", style="green", expand=False))
+        except Exception as e:
+            rich.print(Panel(f"Failed to save PNG to {save_path}: {e}", style="red", expand=False))
+
+    # Print out the PNG image using the Kitty Terminal Graphics Protocol.
+    # Nothing should happen if the terminal does not support it (e.g., tmux).
+    try:
+        _write_png_chunked(png_value.encode("ascii"))
+    except Exception as e:
+        rich.print(Panel(f"Failed to display PNG in terminal: {e}", style="red", expand=False))
 
 
 class Alias:
@@ -327,6 +394,8 @@ def invoke(
         ),
     ],
     aggregate_keys: list[str] | None = None,
+    png_key: str | None = None,
+    save_png_path: str | None = None,
 ) -> None:
     """Invoke an app with the given data.
 
@@ -340,6 +409,11 @@ def invoke(
             Keys can use dot notation to access nested fields (e.g., "choices.0.delta.content").
             Pure numbers will be cast to integers to index into lists. If not specified, each
             response chunk (likely JSON) will be displayed as a new row in the table.
+        png_key: Optional key in the response containing a base64-encoded PNG image.
+            Supports dot notation for nested fields (e.g., "image.data"). If specified,
+            the PNG will be displayed using Kitty TGP (if supported) and/or saved to file.
+        save_png_path: Optional path to save the PNG file. If specified along with png_key,
+            the PNG data will be decoded and saved to this file path.
     """
     if app_id_or_alias.startswith("app-"):
         app_id = app_id_or_alias
@@ -367,9 +441,12 @@ def invoke(
         raw_response.raise_for_status()
 
         if "text/plain" in raw_response.headers.get("content-type", ""):
+            if png_key:
+                rich.print(Panel("PNG display is not supported for streaming responses", style="red", expand=False))
+                return
             _handle_streaming_response(raw_response, aggregate_keys)
         else:
-            _handle_non_streaming_response(raw_response)
+            _handle_non_streaming_response(raw_response, png_key, save_png_path)
 
     except Exception as e:
         rich.print(Panel(f"Failed to invoke app: {e}", style="red", expand=False))
@@ -383,11 +460,18 @@ def _create_response_table(data: dict[str, Any], fields: list[str] | None = None
     return table
 
 
-def _handle_non_streaming_response(response: requests.Response) -> None:
+def _handle_non_streaming_response(
+    response: requests.Response, png_key: str | None = None, save_png_path: str | None = None
+) -> None:
     """Handle non-streaming response."""
     # Collect all data since we opened stream=True but it's actually not streaming
     content = b"".join(response.iter_content())
     data = json.loads(content.decode())
+
+    # Handle PNG if requested
+    if png_key:
+        _handle_png_from_response(data, png_key, save_png_path)
+
     rich.print(_create_response_table(data))
 
 
@@ -421,20 +505,8 @@ def _handle_streaming_response(
 
                         # Extract and accumulate values for each aggregate key
                         for key in aggregate_keys:
-                            parts = key.split(".")
-                            value = response_data
-                            try:
-                                for part in parts:
-                                    # Try to convert to int for list indexing
-                                    with suppress(ValueError):
-                                        part = int(part)
-                                    value = value[part]
-                                # If the final value is None, skip
-                                if value is not None:
-                                    accumulated_data[key] += str(value)
-                            except (KeyError, IndexError, TypeError):
-                                # Key doesn't exist in this response, skip
-                                pass
+                            if (value := _extract_nested_value(response_data, key)) is not None:
+                                accumulated_data[key] += str(value)
 
                         # Update the live table
                         table = _create_response_table(accumulated_data, aggregate_keys)

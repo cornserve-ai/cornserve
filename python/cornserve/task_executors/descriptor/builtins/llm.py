@@ -11,11 +11,12 @@ import kubernetes_asyncio.client as kclient
 from cornserve import constants
 from cornserve.logging import get_logger
 from cornserve.services.resource import GPU
-from cornserve.task.base import Stream
+from cornserve.task.base import Stream, TaskOutput
 from cornserve.task.builtins.llm import (
     URL,
     DecodeLLMUnitTask,
-    LLMUnitTask,
+    LLMBaseUnitTask,
+    LLMEmbeddingResponse,
     OpenAIChatCompletionChunk,
     OpenAIChatCompletionRequest,
     PrefillChatCompletionResponse,
@@ -60,9 +61,7 @@ async def parse_stream_to_completion_chunks(response: aiohttp.ClientResponse) ->
         response.close()
 
 
-class VLLMDescriptor(
-    TaskExecutionDescriptor[LLMUnitTask, OpenAIChatCompletionRequest, Stream[OpenAIChatCompletionChunk]]
-):
+class VLLMDescriptor(TaskExecutionDescriptor[LLMBaseUnitTask, OpenAIChatCompletionRequest, TaskOutput]):
     """Task execution descriptor using vLLM."""
 
     def create_executor_name(self) -> str:
@@ -91,15 +90,21 @@ class VLLMDescriptor(
             "--port",
             str(port),
             "--trust-remote-code",
+            "--cornserve-sidecar-ranks",
+            *[str(gpu.global_rank) for gpu in gpus],
+            # XXX: Sending hidden states from vLLM to the sidecar fases device pointer errors
+            # when compilation is enabled. Unsure if it's CUDA graph, torch.compile, or something else.
+            "--enforce-eager",
+            # XXX: When prefix caching is enabled, hidden states of the prefix that hit the cache
+            # are never computed and thus never sent to the sidecar. Ideally, we want to include the
+            # hidden states in the prefix cache, which V1 doesn't support yet.
+            "--no-enable-prefix-caching",
             # These arguments will be hand tuned during benchmarking
-            # "--no-enable-prefix-caching",
             # "--disable-mm-preprocessor-cache",
             # "--max-num-seqs",
             # "60",
             # "--max-model-len",
             # "8192",
-            "--cornserve-sidecar-ranks",
-            *[str(gpu.global_rank) for gpu in gpus],
         ]
         return args
 
@@ -110,7 +115,7 @@ class VLLMDescriptor(
     def to_request(
         self,
         task_input: OpenAIChatCompletionRequest,
-        task_output: Stream[OpenAIChatCompletionChunk],
+        task_output: TaskOutput,
     ) -> dict[str, Any]:
         """Convert TaskInput to a request object for the task executor."""
         # If `cornserve_embeddings` is empty, the request will be sent to vLLM as is.
@@ -138,19 +143,30 @@ class VLLMDescriptor(
                 data_url.url = f"data:{modality}/uuid;data_id={forward.id};url={data_url.url},"
 
         request = task_input.model_dump(exclude={"cornserve_embeddings"})
-        request["stream"] = True
+
+        if isinstance(task_output, Stream):
+            request["stream"] = True
+
+        if isinstance(task_output, LLMEmbeddingResponse):
+            request["cornserve_hidden_states_forward_ranks"] = task_output.embeddings.dst_sidecar_ranks
+            request["cornserve_hidden_states_forward_data_id"] = task_output.embeddings.id
+
         return request
 
     async def from_response(
         self,
-        task_output: Stream[OpenAIChatCompletionChunk],
+        task_output: TaskOutput,
         response: aiohttp.ClientResponse,
-    ) -> Stream[OpenAIChatCompletionChunk]:
+    ) -> TaskOutput:
         """Convert the response from the task executor to TaskOutput."""
-        return Stream[OpenAIChatCompletionChunk](
-            async_iterator=parse_stream_to_completion_chunks(response),
-            response=response,
-        )
+        if isinstance(task_output, Stream):
+            return Stream[OpenAIChatCompletionChunk](
+                async_iterator=parse_stream_to_completion_chunks(response),
+                response=response,
+            )
+        if isinstance(task_output, LLMEmbeddingResponse):
+            return LLMEmbeddingResponse(embeddings=task_output.embeddings)
+        raise ValueError(f"Expected task output to be Stream or LLMEmbeddingResponse, got {type(task_output)}")
 
     def get_container_volumes(self) -> list[tuple[str, str, str]]:
         """Get the container volumes for the task manager.
@@ -165,7 +181,7 @@ class VLLMDescriptor(
         ]
 
 
-DESCRIPTOR_REGISTRY.register(LLMUnitTask, VLLMDescriptor, default=True)
+DESCRIPTOR_REGISTRY.register(LLMBaseUnitTask, VLLMDescriptor, default=True)
 
 
 class PrefillVLLMDescriptor(
@@ -288,18 +304,24 @@ class PrefillVLLMDescriptor(
         request = task_input.model_dump(exclude={"cornserve_embeddings", "stream_options"})
         # overwrite max_completion_tokens
         request["max_completion_tokens"] = 1
-        request["kv_transfer_params"] = {
-            "do_remote_decode": True,
-            "do_remote_prefill": False,
-            "remote_engine_id": None,
-            "remote_block_ids": None,
-            "remote_host": None,
-            "remote_port": None,
-        }
-        request["cornserve_kv_transfer_send_params"] = {
-            "id": task_output.kv_transfer_params.id,
-            "receiver_sidecar_ranks": task_output.kv_transfer_params.dst_sidecar_ranks,
-        }
+
+        if (params := task_input.cornserve_kv_transfer_params) is not None:
+            request["kv_transfer_params"] = {
+                "do_remote_decode": True,
+                "do_remote_prefill": False,
+                "remote_engine_id": None,
+                "remote_block_ids": None,
+                "remote_host": None,
+                "remote_port": None,
+            }
+            request["cornserve_kv_transfer_send_params"] = {
+                "id": params.id,
+                "receiver_sidecar_ranks": params.dst_sidecar_ranks,
+            }
+
+        if (hidden_states := task_output.hidden_states) is not None:
+            request["cornserve_hidden_states_forward_ranks"] = hidden_states.dst_sidecar_ranks
+
         return request
 
     async def from_response(
@@ -309,9 +331,9 @@ class PrefillVLLMDescriptor(
     ) -> PrefillChatCompletionResponse:
         """Convert the response from the task executor to TaskOutput."""
         resp_data = await response.json()
-        if "kv_transfer_params" not in resp_data:
-            raise ValueError("Response does not contain kv_transfer_params.")
-        return PrefillChatCompletionResponse(kv_transfer_params=task_output.kv_transfer_params)
+        if "kv_transfer_params" in resp_data:
+            return PrefillChatCompletionResponse(kv_transfer_params=task_output.kv_transfer_params)
+        return PrefillChatCompletionResponse(hidden_states=task_output.hidden_states)
 
 
 DESCRIPTOR_REGISTRY.register(PrefillLLMUnitTask, PrefillVLLMDescriptor, default=True)

@@ -275,8 +275,11 @@ class TaskDispatcher:
         """Execute a single task by sending request to executor and processing response."""
         url = execution.invocation.task.execution_descriptor.get_api_url(execution.executor_url)
         logger.info(
-            "Invoking task %s",
+            "Invoking %s task %s by posting request %s to %s",
+            "streaming" if execution.is_streaming else "non-streaming",
             execution.invocation.task.__class__.__name__,
+            request,
+            url,
         )
         try:
             response = await self.client.post(url, json=request)
