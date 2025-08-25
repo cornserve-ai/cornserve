@@ -24,7 +24,7 @@ class ScheduledRequest:
     height: int
     width: int
     num_inference_steps: int
-    skip_tokens: int
+    skip_tokens: int = 0
     span: Span | None = None
 
 

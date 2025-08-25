@@ -137,7 +137,14 @@ class VLLMDescriptor(TaskExecutionDescriptor[LLMBaseUnitTask, OpenAIChatCompleti
                 data_url.url = f"data:{modality}/uuid;data_id={forward.id};url={data_url.url},"
 
         request = task_input.model_dump(exclude={"cornserve_embeddings"})
-        request["stream"] = True
+
+        if isinstance(task_output, Stream):
+            request["stream"] = True
+
+        if isinstance(task_output, LLMEmbeddingResponse):
+            request["cornserve_hidden_states_forward_ranks"] = task_output.embeddings.dst_sidecar_ranks
+            request["cornserve_hidden_states_forward_data_id"] = task_output.embeddings.id
+
         return request
 
     async def from_response(

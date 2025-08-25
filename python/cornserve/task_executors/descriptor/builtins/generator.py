@@ -50,15 +50,14 @@ class GeriDescriptor(TaskExecutionDescriptor[GeneratorTask, GeneratorInput, Gene
 
     def to_request(self, task_input: GeneratorInput, task_output: GeneratorOutput) -> dict[str, Any]:
         """Convert TaskInput to a request object for the task executor."""
-        embedding_data_id = task_input.embeddings.id
-
         req = GenerationRequest(
-            embedding_data_id=embedding_data_id,
+            embedding_data_id=task_input.embeddings.id,
             height=task_input.height,
             width=task_input.width,
             num_inference_steps=task_input.num_inference_steps,
             skip_tokens=task_input.skip_tokens,
         )
+        print("GenerationRequest:", req, flush=True)
         return req.model_dump()
 
     async def from_response(self, task_output: GeneratorOutput, response: aiohttp.ClientResponse) -> GeneratorOutput:
