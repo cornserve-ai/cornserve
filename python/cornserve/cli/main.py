@@ -130,21 +130,21 @@ def _handle_png_from_response(response_data: dict[str, Any], png_key: str, save_
         rich.print(Panel(f"PNG key '{png_key}' does not contain string data", style="red", expand=False))
         return
 
+    # Save to file if path is specified
+    if save_path:
+        try:
+            with open(save_path, "wb") as f:
+                f.write(base64.b64decode(png_value))
+            rich.print(Panel(f"PNG saved to {save_path}", style="green", expand=False))
+        except Exception as e:
+            rich.print(Panel(f"Failed to save PNG to {save_path}: {e}", style="red", expand=False))
+
+    # Print out the PNG image using the Kitty Terminal Graphics Protocol.
+    # Nothing should happen if the terminal does not support it (e.g., tmux).
     try:
-        # Save to file if path is specified
-        if save_path:
-            try:
-                with open(save_path, "wb") as f:
-                    f.write(base64.b64decode(png_value))
-                rich.print(Panel(f"PNG saved to {save_path}", style="green", expand=False))
-            except Exception as e:
-                rich.print(Panel(f"Failed to save PNG to {save_path}: {e}", style="red", expand=False))
-
-        # Print out the PNG image using the Kitty Terminal Graphics Protocol
         _write_png_chunked(png_value.encode("ascii"))
-
     except Exception as e:
-        rich.print(Panel(f"Failed to decode PNG data: {e}", style="red", expand=False))
+        rich.print(Panel(f"Failed to display PNG in terminal: {e}", style="red", expand=False))
 
 
 class Alias:
