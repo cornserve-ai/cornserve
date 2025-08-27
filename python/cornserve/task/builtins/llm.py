@@ -272,6 +272,11 @@ class MLLMTask(Task[OpenAIChatCompletionRequest, Stream[OpenAIChatCompletionChun
 class MLLMEmbeddingTask(Task[OpenAIChatCompletionRequest, LLMEmbeddingResponse]):
     """A task that invokes a Multimodal LLM.
 
+    Note: this task only differs from MLLMTask in that it outputs embeddings instread of
+    OpenAIChatCompletionChunk stream, which is intended to be chained to another UnitTask
+    which needs the hidden states.
+    TODO: update the task abstraction to allow multiple output types.
+
     Attributes:
         model_id: The ID of the model to use for the task.
         modalities: List of input modalities other than text.
