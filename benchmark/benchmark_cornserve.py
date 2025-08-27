@@ -298,6 +298,9 @@ async def cornserve_invoke(
                             continue
                         timestamp = time.perf_counter()
                         data = json.loads(line)
+                        # here we do the hack to identify the OmniOutputChunk type
+                        if "text_chunk" in data:
+                            data = data["text_chunk"]
                         if choices := data.get("choices"):
                             content = choices[0]["delta"].get("content")
                             # First token
