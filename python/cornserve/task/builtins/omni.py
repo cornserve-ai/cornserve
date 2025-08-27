@@ -118,7 +118,6 @@ class OmniTask(Task[OmniInput, Stream[OmniOutputChunk]]):
         Given multimodal data and a text prompt, run the corresponding encoder
         for multimodal data and then pass the embeddings and text prompt to the LLM.
         """
-        """Invoke the task."""
         # add system prompt
         thinker_input = OpenAIChatCompletionRequest.model_validate(
             dict(
