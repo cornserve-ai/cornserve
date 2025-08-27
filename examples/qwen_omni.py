@@ -9,7 +9,7 @@ messages:
 - role: "user"
   content:
   - type: text
-    text: "Descrive what you see and hear"
+    text: "Describe what you see and hear"
   - type: video_url
     video_url:
       url: "https://dedicated.junzema.com/draw.mp4"
@@ -22,7 +22,7 @@ messages:
 - role: "user"
   content:
   - type: text
-    text: "Descrive what you see and hear"
+    text: "Describe what you see and hear"
   - type: video_url
     video_url:
       url: "https://dedicated.junzema.com/draw.mp4"
