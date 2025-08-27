@@ -47,15 +47,11 @@ class ArenaTask(Task[ArenaInput, ArenaOutput]):
 
         Normally we would save the task instances somewhere, but for testing, we let them go.
         """
-        EncoderTask(
-            modality=self.modality,
-            model_ids=set(self.models.values()),
-        )
+        model_ids = list(self.models.values())
 
-        MLLMTask(
-            model_id=list(self.models.values())[1],
-            modalities=[self.modality],
-        )
+        EncoderTask(modality=self.modality, model_ids=set(model_ids))
+
+        MLLMTask(model_id=model_ids[1], modalities=[self.modality])
 
         for model_id in self.models.values():
             LLMUnitTask(model_id=model_id)
