@@ -12,7 +12,7 @@ from cornserve import constants
 from cornserve.logging import get_logger
 from cornserve.services.resource_manager.resource import GPU
 from cornserve.task.base import Stream
-from cornserve.tasklib.task.builtins.llm import (
+from cornserve_tasklib.task.builtins.unit.llm import (
     URL,
     DecodeLLMUnitTask,
     LLMUnitTask,
@@ -137,8 +137,6 @@ class VLLMDescriptor(
             async_iterator=parse_stream_to_completion_chunks(response),
             response=response,
         )
-
-
 
 
 class PrefillVLLMDescriptor(
@@ -280,8 +278,6 @@ class PrefillVLLMDescriptor(
         if "kv_transfer_params" not in resp:
             raise ValueError("Response does not contain kv_transfer_params.")
         return PrefillChatCompletionResponse(kv_transfer_params=task_output.kv_transfer_params)
-
-
 
 
 class DecodeVLLMDescriptor(

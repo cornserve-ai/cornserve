@@ -33,11 +33,6 @@ async def serve() -> None:
     logger.info("Starting task watcher for Gateway service")
     task_registry = TaskRegistry()
     
-    # Deploy built-in task definitions as Custom Resources
-    from cornserve.services.gateway.router import deploy_builtin_task_crs
-    logger.info("Deploying built-in task definitions")
-    await deploy_builtin_task_crs()
-    
     cr_watcher_task = asyncio.create_task(
         task_registry.watch_updates(),
         name="gateway_cr_watcher"

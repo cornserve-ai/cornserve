@@ -5,8 +5,8 @@ import asyncio
 import pytest
 
 from cornserve.task.base import Stream, TaskContext, TaskInvocation, task_context
-from cornserve.tasklib.task.builtins.encoder import Modality
-from cornserve.tasklib.task.builtins.llm import (
+from cornserve_tasklib.task.builtins.encoder import Modality
+from cornserve_tasklib.task.builtins.llm import (
     URL,
     ChatCompletionContentPartImageParam,
     ChatCompletionContentPartTextParam,

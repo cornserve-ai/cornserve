@@ -42,8 +42,9 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 
 from cornserve.app.base import AppConfig
-from cornserve.tasklib.task.builtins.encoder import Modality
-from cornserve.tasklib.task.builtins.llm import MLLMTask, OpenAIChatCompletionChunk, OpenAIChatCompletionRequest
+from cornserve_tasklib.task.builtins.unit.encoder import Modality
+from cornserve_tasklib.task.builtins.unit.llm import OpenAIChatCompletionChunk, OpenAIChatCompletionRequest
+from cornserve_tasklib.task.builtins.composite.llm import MLLMTask
 
 mllm = MLLMTask(
     model_id="Qwen/Qwen2-VL-7B-Instruct",

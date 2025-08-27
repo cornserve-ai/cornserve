@@ -58,6 +58,7 @@ class TaskRegistry:
         task_class_name: str,
         module_name: str,
         source_code: str,
+        is_unit_task: bool = True,
         namespace: str = K8S_NAMESPACE,
     ) -> dict[str, Any]:
         """Create a task definition from source code."""
@@ -68,12 +69,13 @@ class TaskRegistry:
 
         body = {
             "apiVersion": f"{CRD_GROUP}/{CRD_VERSION}",
-            "kind": "UnitTaskDefinition",
+            "kind": "TaskDefinition",
             "metadata": {"name": name, "namespace": namespace},
             "spec": {
                 "taskClassName": task_class_name,
                 "moduleName": module_name,
                 "sourceCode": encoded_source,
+                "isUnitTask": is_unit_task,
             },
         }
 
@@ -82,7 +84,7 @@ class TaskRegistry:
                 group=CRD_GROUP,
                 version=CRD_VERSION,
                 namespace=namespace,
-                plural="unittaskdefinitions",
+                plural="taskdefinitions",
                 body=body,
             )
         except client.ApiException as e:
@@ -197,7 +199,7 @@ class TaskRegistry:
             if not config:
                 raise ValueError(f"Task instance {instance_name} missing config")
 
-            task_cls, _, _ = TASK_CLASS_REGISTRY.get(definition_ref)
+            task_cls, _, _ = TASK_CLASS_REGISTRY.get_unit_task(definition_ref)
             task_instance = task_cls.model_validate(config)
             logger.info("Reconstructed %s from task instance: %s", definition_ref, instance_name)
             return task_instance
@@ -210,7 +212,7 @@ class TaskRegistry:
         """Background task to populate registries by watching definitions and descriptors."""
         await self._load_config()
         watchers = [
-            self._watch_unittaskdefinitions(),
+            self._watch_taskdefinitions(),
             self._watch_executiondescriptors(),
         ]
         await asyncio.gather(*watchers)
@@ -220,13 +222,14 @@ class TaskRegistry:
         metadata = obj.get("metadata", {})
         name = metadata.get("name")
 
-        if kind == "UnitTaskDefinition" and event_type in ("EXISTING", "ADDED", "MODIFIED"):
+        if kind == "TaskDefinition" and event_type in ("EXISTING", "ADDED", "MODIFIED"):
             try:
                 task_class_name = spec.get("taskClassName")
                 module_name = spec.get("moduleName")
                 source_code = spec.get("sourceCode")
+                is_unit_task = spec.get("isUnitTask")
 
-                if not task_class_name or not module_name or not source_code:
+                if not task_class_name or not module_name or not source_code or is_unit_task is None:
                     logger.error("Task definition %s missing required fields", name)
                     return
 
@@ -236,16 +239,19 @@ class TaskRegistry:
                     source_code=source_code,
                     task_class_name=task_class_name,
                     module_name=module_name,
+                    is_unit_task=is_unit_task,
                 )
-                logger.info("Registered task: %s", task_class_name)
-                # Bind any descriptors that were queued before the task class loaded
-                from cornserve.services.task_registry.descriptor_registry import DESCRIPTOR_REGISTRY
-                try:
-                    task_cls, _, _ = TASK_CLASS_REGISTRY.get(task_class_name)
-                    DESCRIPTOR_REGISTRY.bind_pending_descriptor_for_task_class(task_cls)
-                except Exception:
-                    # If task not fully available, binding will happen on later attempts
-                    pass
+                logger.info("Registered %s task: %s", "unit" if is_unit_task else "composite", task_class_name)
+                
+                # Only bind descriptors for unit tasks
+                if is_unit_task:
+                    from cornserve.services.task_registry.descriptor_registry import DESCRIPTOR_REGISTRY
+                    try:
+                        task_cls, _, _ = TASK_CLASS_REGISTRY.get_unit_task(task_class_name)
+                        DESCRIPTOR_REGISTRY.bind_pending_descriptor_for_task_class(task_cls)
+                    except Exception:
+                        # If task not fully available, binding will happen on later attempts
+                        pass
             except Exception as e:
                 logger.error("Failed to register task %s from %s: %s", task_class_name if 'task_class_name' in locals() else 'unknown', name, e)
 
@@ -280,19 +286,24 @@ class TaskRegistry:
     async def _watch_resource(self, plural: str, kind: str) -> None:
         assert self._custom_api is not None
 
+        # Save the last resourceVersion seen to resume watch without relisting
+        resource_version: str | None = None
+
         while True:
             try:
-                initial_list = await self._custom_api.list_namespaced_custom_object(
-                    group=CRD_GROUP,
-                    version=CRD_VERSION,
-                    namespace=K8S_NAMESPACE,
-                    plural=plural,
-                )
+                # Only relist when we don't have a resourceVersion
+                if resource_version is None:
+                    initial_list = await self._custom_api.list_namespaced_custom_object(
+                        group=CRD_GROUP,
+                        version=CRD_VERSION,
+                        namespace=K8S_NAMESPACE,
+                        plural=plural,
+                    )
 
-                for item in initial_list.get("items", []):
-                    self._handle_object(item, kind, "EXISTING")
+                    for item in initial_list.get("items", []):
+                        self._handle_object(item, kind, "EXISTING")
 
-                resource_version = initial_list.get("metadata", {}).get("resourceVersion")
+                    resource_version = initial_list.get("metadata", {}).get("resourceVersion")
 
                 w = Watch()
                 async with w.stream(
@@ -307,15 +318,32 @@ class TaskRegistry:
                 ) as stream:
                     async for event in stream:
                         event_type = event.get("type", "UNKNOWN")
-                        self._handle_object(event["object"], kind, event_type)
+                        obj = event["object"]
+                        self._handle_object(obj, kind, event_type)
+                        # Update resourceVersion
+                        try:
+                            rv = obj.get("metadata", {}).get("resourceVersion")
+                            if rv:
+                                resource_version = rv
+                        except Exception:
+                            logger.error("Failed to get resourceVersion for %s", kind)
             except asyncio.CancelledError:
                 raise
+            except client.ApiException as e:
+                # If the resourceVersion is too old, the API returns 410 Gone.
+                # Reset resourceVersion to force a relist on next loop.
+                if getattr(e, "status", None) == 410:
+                    logger.warning("Watch for %s expired (410 Gone). Relisting to refresh.", kind)
+                    resource_version = None
+                    continue
+                logger.error("Error watching %s (API): %s", kind, e)
+                await asyncio.sleep(5)
             except Exception as e:
                 logger.error("Error watching %s: %s", kind, e)
                 await asyncio.sleep(5)
 
-    async def _watch_unittaskdefinitions(self) -> None:
-        await self._watch_resource("unittaskdefinitions", "UnitTaskDefinition")
+    async def _watch_taskdefinitions(self) -> None:
+        await self._watch_resource("taskdefinitions", "TaskDefinition")
 
     async def _watch_executiondescriptors(self) -> None:
         await self._watch_resource("executiondescriptors", "ExecutionDescriptor")

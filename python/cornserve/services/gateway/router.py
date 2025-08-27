@@ -26,6 +26,8 @@ from cornserve.services.gateway.app.manager import AppManager
 from cornserve.services.gateway.models import (
     AppInvocationRequest,
     AppRegistrationRequest,
+    UnitTasksDeploymentRequest,
+    CompositeTasksDeploymentRequest,
     RegistrationErrorResponse,
     RegistrationFinalResponse,
     RegistrationInitialResponse,
@@ -41,130 +43,6 @@ logger = get_logger(__name__)
 tracer = trace.get_tracer(__name__)
 
 
-async def deploy_builtin_task_crs() -> None:
-    """Deploy built-in task definitions as Custom Resources.
-    
-    Note: This function deploys Custom Resource instances (CRs), not Custom Resource 
-    Definitions (CRDs). CRDs are deployed at the cluster level via Kubernetes manifests.
-    """
-    try:
-        logger.info("Deploying built-in task definitions as Custom Resources")
-        task_registry = TaskRegistry()
-        
-        # Read the LLM task source code
-        import inspect
-        from cornserve.tasklib.task.builtins import llm, encoder
-        
-        llm_source = inspect.getsource(llm)
-        encoder_source = inspect.getsource(encoder)
-        
-        # Deploy UnitTask definitions from llm.py as Custom Resources
-        llm_tasks = [
-            ("LLMUnitTask", "llm-unit-task", "cornserve.tasklib.task.builtins.llm"),
-            ("PrefillLLMUnitTask", "prefill-llm-unit-task", "cornserve.tasklib.task.builtins.llm"), 
-            ("DecodeLLMUnitTask", "decode-llm-unit-task", "cornserve.tasklib.task.builtins.llm"),
-        ]
-        
-        # Deploy UnitTask definitions from encoder.py as Custom Resources
-        encoder_tasks = [
-            ("EncoderTask", "encoder-task", "cornserve.tasklib.task.builtins.encoder"),
-        ]
-        
-        # Deploy LLM tasks
-        for task_class_name, cr_name, module_name in llm_tasks:
-            try:
-                await task_registry.create_task_definition(
-                    name=cr_name,
-                    task_class_name=task_class_name,
-                    module_name=module_name,
-                    source_code=llm_source
-                )
-                logger.info("Successfully deployed UnitTaskDefinition CR: %s", cr_name)
-            except ValueError as e:
-                if "already exists" in str(e):
-                    logger.info("UnitTaskDefinition CR already exists: %s", cr_name)
-                else:
-                    raise
-        
-        # Deploy Encoder tasks
-        for task_class_name, cr_name, module_name in encoder_tasks:
-            try:
-                await task_registry.create_task_definition(
-                    name=cr_name,
-                    task_class_name=task_class_name,
-                    module_name=module_name,
-                    source_code=encoder_source
-                )
-                logger.info("Successfully deployed UnitTaskDefinition CR: %s", cr_name)
-            except ValueError as e:
-                if "already exists" in str(e):
-                    logger.info("UnitTaskDefinition CR already exists: %s", cr_name)
-                else:
-                    raise
-        
-        # Deploy ExecutionDescriptor definitions from built-in descriptors as Custom Resources
-        logger.info("Deploying built-in execution descriptors as Custom Resources")
-        
-        # Read the descriptor source code
-        from cornserve.tasklib.task_executors.descriptor.builtins import llm as llm_descriptors, encoder as encoder_descriptors
-        
-        llm_descriptors_source = inspect.getsource(llm_descriptors)
-        encoder_descriptors_source = inspect.getsource(encoder_descriptors)
-        
-        # Deploy ExecutionDescriptor definitions from llm descriptors
-        llm_descriptors_list = [
-            ("VLLMDescriptor", "vllm-descriptor", "cornserve.tasklib.task_executors.descriptor.builtins.llm", "LLMUnitTask"),
-            ("PrefillVLLMDescriptor", "prefill-vllm-descriptor", "cornserve.tasklib.task_executors.descriptor.builtins.llm", "PrefillLLMUnitTask"),
-            ("DecodeVLLMDescriptor", "decode-vllm-descriptor", "cornserve.tasklib.task_executors.descriptor.builtins.llm", "DecodeLLMUnitTask"),
-        ]
-        
-        # Deploy ExecutionDescriptor definitions from encoder descriptors
-        encoder_descriptors_list = [
-            ("EricDescriptor", "eric-descriptor", "cornserve.tasklib.task_executors.descriptor.builtins.encoder", "EncoderTask"),
-        ]
-        
-        # Deploy LLM descriptors
-        for descriptor_class_name, cr_name, module_name, task_class_name in llm_descriptors_list:
-            try:
-                await task_registry.create_execution_descriptor(
-                    name=cr_name,
-                    task_class_name=task_class_name,
-                    descriptor_class_name=descriptor_class_name,
-                    module_name=module_name,
-                    source_code=llm_descriptors_source,
-                    is_default=True
-                )
-                logger.info("Successfully deployed ExecutionDescriptor CR: %s", cr_name)
-            except ValueError as e:
-                if "already exists" in str(e):
-                    logger.info("ExecutionDescriptor CR already exists: %s", cr_name)
-                else:
-                    raise
-        
-        # Deploy Encoder descriptors
-        for descriptor_class_name, cr_name, module_name, task_class_name in encoder_descriptors_list:
-            try:
-                await task_registry.create_execution_descriptor(
-                    name=cr_name,
-                    task_class_name=task_class_name,
-                    descriptor_class_name=descriptor_class_name,
-                    module_name=module_name,
-                    source_code=encoder_descriptors_source,
-                    is_default=True
-                )
-                logger.info("Successfully deployed ExecutionDescriptor CR: %s", cr_name)
-            except ValueError as e:
-                if "already exists" in str(e):
-                    logger.info("ExecutionDescriptor CR already exists: %s", cr_name)
-                else:
-                    raise
-        
-        await task_registry.shutdown()
-        logger.info("Completed deploying built-in task definitions and execution descriptors as Custom Resources")
-        
-    except Exception as e:
-        logger.error("Failed to deploy built-in task Custom Resources: %s", e)
-        # Don't fail the service startup, just log the error
 
 
 @router.post("/app/register")
@@ -467,3 +345,80 @@ def create_app() -> FastAPI:
     app.include_router(router)
     init_app_state(app)
     return app
+
+
+@router.post("/builtins/deploy-unit-tasks")
+async def deploy_unit_tasks(request: UnitTasksDeploymentRequest):
+    """Deploy unit tasks and their descriptors from provided sources."""
+    task_registry = TaskRegistry()
+    try:
+        import base64
+        # Unit tasks
+        for spec in request.task_definitions:
+            try:
+                source = base64.b64decode(spec.source_b64).decode("utf-8")
+                await task_registry.create_task_definition(
+                    name=spec.cr_name,
+                    task_class_name=spec.task_class_name,
+                    module_name=spec.module_name,
+                    source_code=source,
+                    is_unit_task=spec.is_unit_task,
+                )
+            except ValueError as e:
+                if "already exists" not in str(e):
+                    raise
+
+        # Descriptors for unit tasks
+        for spec in request.descriptor_definitions:
+            try:
+                source = base64.b64decode(spec.source_b64).decode("utf-8")
+                await task_registry.create_execution_descriptor(
+                    name=spec.cr_name,
+                    task_class_name=spec.task_class_name,
+                    descriptor_class_name=spec.descriptor_class_name,
+                    module_name=spec.module_name,
+                    source_code=source,
+                    is_default=True,
+                )
+            except ValueError as e:
+                if "already exists" not in str(e):
+                    raise
+
+        await task_registry.shutdown()
+        return {"status": "ok"}
+    except Exception as e:
+        logger.exception("Failed to deploy unit tasks")
+        await task_registry.shutdown()
+        return Response(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, content=str(e))
+
+
+@router.post("/builtins/deploy-composite-tasks")
+async def deploy_composite_tasks(request: CompositeTasksDeploymentRequest):
+    """Deploy composite tasks from provided sources."""
+    task_registry = TaskRegistry()
+    try:
+        import base64
+        # Composite tasks
+        for spec in request.task_definitions:
+            try:
+                source = base64.b64decode(spec.source_b64).decode("utf-8")
+                await task_registry.create_task_definition(
+                    name=spec.cr_name,
+                    task_class_name=spec.task_class_name,
+                    module_name=spec.module_name,
+                    source_code=source,
+                    is_unit_task=spec.is_unit_task,
+                )
+            except ValueError as e:
+                if "already exists" not in str(e):
+                    raise
+
+        await task_registry.shutdown()
+        return {"status": "ok"}
+    except Exception as e:
+        logger.exception("Failed to deploy composite tasks")
+        await task_registry.shutdown()
+        return Response(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, content=str(e))
+
+
+

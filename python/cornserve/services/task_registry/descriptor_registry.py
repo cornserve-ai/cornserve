@@ -48,54 +48,84 @@ class TaskExecutionDescriptorRegistry:
         """Load a descriptor class from base64-encoded source.
 
         Because descriptor code imports task classes, we need to ensure task classes registered before
-        their corresponding descriptors are loaded. So, if the task class is present, register immediately;
+        their corresponding descriptors are loaded. So, if required task class presents, register immediately;
         otherwise put to the pending queue.
         """
+        import types
+        from importlib.machinery import ModuleSpec
+
         decoded_source = base64.b64decode(source_code).decode("utf-8")
 
-        # Create module for the descriptor and exec source inside
-        spec = importlib.util.spec_from_loader(module_name, loader=None)
-        if spec is None:
-            raise ImportError(f"Failed to create spec for module {module_name}")
-        module = importlib.util.module_from_spec(spec)
-        sys.modules[module_name] = module
+        created_packages: list[str] = []
 
-        # Provide symbols descriptors expect at exec time
-        from cornserve.task_executors.descriptor.base import TaskExecutionDescriptor
-        from cornserve.services.task_registry.descriptor_registry import DESCRIPTOR_REGISTRY
-        from cornserve.services.resource_manager.resource import GPU
-        from cornserve import constants
-        module.TaskExecutionDescriptor = TaskExecutionDescriptor
-        module.DESCRIPTOR_REGISTRY = DESCRIPTOR_REGISTRY
-        module.GPU = GPU
-        module.constants = constants
-        import httpx
-        module.httpx = httpx
-        import enum
-        module.enum = enum
+        def ensure_package(name: str) -> None:
+            if name in sys.modules:
+                return
+            pkg = types.ModuleType(name)
+            pkg.__spec__ = ModuleSpec(name, loader=None, is_package=True)
+            pkg.__path__ = []
+            parent = name.rpartition('.')[0]
+            if parent:
+                ensure_package(parent)
+                setattr(sys.modules[parent], name.split('.')[-1], pkg)
+            sys.modules[name] = pkg
+            created_packages.append(name)
 
-        # Execute the decoded source in the module namespace
-        exec(decoded_source, module.__dict__)
+        # Determine parent package name (do not create yet)
+        parent = module_name.rpartition('.')[0]
 
-        # Validate descriptor exists and is a subclass
-        if not hasattr(module, descriptor_class_name):
-            raise ValueError(f"Descriptor class {descriptor_class_name} not found in source code")
-        descriptor_cls = getattr(module, descriptor_class_name)
-        if not issubclass(descriptor_cls, TaskExecutionDescriptor):
-            raise ValueError(f"Class {descriptor_class_name} is not a TaskExecutionDescriptor subclass")
+        # Prepare the module (do not insert yet)
+        module = types.ModuleType(module_name)
+        module.__spec__ = ModuleSpec(module_name, loader=None, is_package=False)
+        module.__package__ = parent or module_name
+        module.__file__ = f"<crd:{module_name}>"
 
-        # Register the descriptor now if corresponding task class is available, else put to the pending queue
-        from cornserve.services.task_registry.task_class_registry import TASK_CLASS_REGISTRY
-        if task_class_name in TASK_CLASS_REGISTRY:
-            task_cls, _, _ = TASK_CLASS_REGISTRY.get(task_class_name)
-            self.register(task_cls, descriptor_cls, descriptor_class_name, default=True)
-        else:
-            self._pending[task_class_name].append((descriptor_cls, descriptor_class_name, True))
-            logger.info(
-                "Queued execution descriptor %s for task %s until task class is loaded",
-                descriptor_class_name,
-                task_class_name,
-            )
+        try:
+            # Execute source
+            exec(decoded_source, module.__dict__)
+
+            # Validate descriptor exists and is a subclass
+            from cornserve.task_executors.descriptor.base import TaskExecutionDescriptor
+            if not hasattr(module, descriptor_class_name):
+                raise ValueError(f"Descriptor class {descriptor_class_name} not found in source code")
+            descriptor_cls = getattr(module, descriptor_class_name)
+            if not issubclass(descriptor_cls, TaskExecutionDescriptor):
+                raise ValueError(f"Class {descriptor_class_name} is not a TaskExecutionDescriptor subclass")
+
+            # Create parent packages only now, after validation succeeds
+            if parent:
+                ensure_package(parent)
+
+            # Install after validation
+            sys.modules[module_name] = module
+            if parent:
+                setattr(sys.modules[parent], module_name.split('.')[-1], module)
+
+            # Register now or queue pending
+            from cornserve.services.task_registry.task_class_registry import TASK_CLASS_REGISTRY
+            if task_class_name in TASK_CLASS_REGISTRY:
+                task_cls, _, _ = TASK_CLASS_REGISTRY.get_unit_task(task_class_name)
+                self.register(task_cls, descriptor_cls, descriptor_class_name, default=True)
+            else:
+                self._pending[task_class_name].append((descriptor_cls, descriptor_class_name, True))
+                logger.info(
+                    "Queued execution descriptor %s for task %s until task class is loaded",
+                    descriptor_class_name,
+                    task_class_name,
+                )
+        except Exception:
+            # Roll back any packages we created
+            for pkg_name in reversed(created_packages):
+                parent_name = pkg_name.rpartition('.')[0]
+                child_name = pkg_name.split('.')[-1]
+                if parent_name in sys.modules:
+                    try:
+                        if getattr(sys.modules[parent_name], child_name, None) is sys.modules.get(pkg_name):
+                            delattr(sys.modules[parent_name], child_name)
+                    except Exception:
+                        pass
+                sys.modules.pop(pkg_name, None)
+            raise
 
     def bind_pending_descriptor_for_task_class(self, task: type[UnitTask]) -> None:
         """Bind any queued descriptors to the now-available task class."""

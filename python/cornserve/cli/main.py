@@ -25,6 +25,8 @@ from cornserve.cli.log_streamer import LogStreamer
 from cornserve.services.gateway.models import (
     AppInvocationRequest,
     AppRegistrationRequest,
+    UnitTasksDeploymentRequest,
+    CompositeTasksDeploymentRequest,
     RegistrationErrorResponse,
     RegistrationFinalResponse,
     RegistrationInitialResponse,
@@ -470,3 +472,135 @@ def _handle_streaming_response(
 def main() -> None:
     """Main entry point for the Cornserve CLI."""
     app.cli(description="Cornserve CLI")
+
+
+@app.command(name="deploy_builtins")
+def deploy_builtins() -> None:
+    """Deploy built-in tasks via the gateway.
+
+    This command imports cornserve_tasklib locally in the CLI environment,
+    extracts module sources and posts them (base64-encoded) to the gateway.
+    Unit tasks are deployed first, then composite tasks, ensuring dependencies are met.
+    """
+    import inspect
+    try:
+        from cornserve_tasklib.task.builtins.unit import llm as unit_llm_mod, encoder as unit_encoder_mod
+        from cornserve_tasklib.task.builtins.composite import llm as composite_llm_mod
+        from cornserve_tasklib.task_executors.descriptor.builtins import (
+            llm as llm_desc_mod,
+            encoder as encoder_desc_mod,
+        )
+    except Exception as e:
+        rich.print(Panel(f"Failed to import cornserve_tasklib: {e}", style="red", expand=False))
+        return
+
+    import base64
+    
+    # Step 1: Deploy unit tasks first
+    unit_llm_source_b64 = base64.b64encode(inspect.getsource(unit_llm_mod).encode("utf-8")).decode("ascii")
+    unit_encoder_source_b64 = base64.b64encode(inspect.getsource(unit_encoder_mod).encode("utf-8")).decode("ascii")
+    llm_desc_source_b64 = base64.b64encode(inspect.getsource(llm_desc_mod).encode("utf-8")).decode("ascii")
+    encoder_desc_source_b64 = base64.b64encode(inspect.getsource(encoder_desc_mod).encode("utf-8")).decode("ascii")
+
+    unit_payload = UnitTasksDeploymentRequest(
+        task_definitions=[
+            {
+                "source_b64": unit_llm_source_b64,
+                "task_class_name": "LLMUnitTask",
+                "cr_name": "llm-unit-task",
+                "module_name": "cornserve_tasklib.task.builtins.unit.llm",
+                "is_unit_task": True,
+            },
+            {
+                "source_b64": unit_llm_source_b64,
+                "task_class_name": "PrefillLLMUnitTask",
+                "cr_name": "prefill-llm-unit-task",
+                "module_name": "cornserve_tasklib.task.builtins.unit.llm",
+                "is_unit_task": True,
+            },
+            {
+                "source_b64": unit_llm_source_b64,
+                "task_class_name": "DecodeLLMUnitTask",
+                "cr_name": "decode-llm-unit-task",
+                "module_name": "cornserve_tasklib.task.builtins.unit.llm",
+                "is_unit_task": True,
+            },
+            {
+                "source_b64": unit_encoder_source_b64,
+                "task_class_name": "EncoderTask",
+                "cr_name": "encoder-task",
+                "module_name": "cornserve_tasklib.task.builtins.unit.encoder",
+                "is_unit_task": True,
+            },
+        ],
+        descriptor_definitions=[
+            {
+                "source_b64": llm_desc_source_b64,
+                "descriptor_class_name": "VLLMDescriptor",
+                "cr_name": "vllm-descriptor",
+                "module_name": "cornserve_tasklib.task_executors.descriptor.builtins.llm",
+                "task_class_name": "LLMUnitTask",
+            },
+            {
+                "source_b64": llm_desc_source_b64,
+                "descriptor_class_name": "PrefillVLLMDescriptor",
+                "cr_name": "prefill-vllm-descriptor",
+                "module_name": "cornserve_tasklib.task_executors.descriptor.builtins.llm",
+                "task_class_name": "PrefillLLMUnitTask",
+            },
+            {
+                "source_b64": llm_desc_source_b64,
+                "descriptor_class_name": "DecodeVLLMDescriptor",
+                "cr_name": "decode-llm-descriptor",
+                "module_name": "cornserve_tasklib.task_executors.descriptor.builtins.llm",
+                "task_class_name": "DecodeLLMUnitTask",
+            },
+            {
+                "source_b64": encoder_desc_source_b64,
+                "descriptor_class_name": "EricDescriptor",
+                "cr_name": "eric-descriptor",
+                "module_name": "cornserve_tasklib.task_executors.descriptor.builtins.encoder",
+                "task_class_name": "EncoderTask",
+            },
+        ],
+    )
+
+    try:
+        rich.print("Deploying unit tasks...")
+        resp = requests.post(f"{GATEWAY_URL}/builtins/deploy-unit-tasks", json=unit_payload.model_dump())
+        resp.raise_for_status()
+        rich.print(Panel("Unit tasks deployed successfully.", style="green", expand=False))
+    except Exception as e:
+        rich.print(Panel(f"Failed to deploy unit tasks: {e}", style="red", expand=False))
+        return
+
+    # Step 2: Deploy composite tasks after unit tasks succeed
+    composite_llm_source_b64 = base64.b64encode(inspect.getsource(composite_llm_mod).encode("utf-8")).decode("ascii")
+
+    composite_payload = CompositeTasksDeploymentRequest(
+        task_definitions=[
+            {
+                "source_b64": composite_llm_source_b64,
+                "task_class_name": "MLLMTask",
+                "cr_name": "mllm-task",
+                "module_name": "cornserve_tasklib.task.builtins.composite.llm",
+                "is_unit_task": False,
+            },
+            {
+                "source_b64": composite_llm_source_b64,
+                "task_class_name": "DisaggregatedMLLMTask",
+                "cr_name": "disaggregated-mllm-task",
+                "module_name": "cornserve_tasklib.task.builtins.composite.llm",
+                "is_unit_task": False,
+            },
+        ]
+    )
+
+    try:
+        rich.print("Deploying composite tasks...")
+        resp = requests.post(f"{GATEWAY_URL}/builtins/deploy-composite-tasks", json=composite_payload.model_dump())
+        resp.raise_for_status()
+        rich.print(Panel("Composite tasks deployed successfully.", style="green", expand=False))
+        rich.print(Panel("All built-ins deployed successfully.", style="green", expand=False))
+    except Exception as e:
+        rich.print(Panel(f"Failed to deploy composite tasks: {e}", style="red", expand=False))

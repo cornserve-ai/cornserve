@@ -536,7 +536,7 @@ class TaskInvocation(BaseModel, Generic[InputT, OutputT]):
             return data
 
         # Now this is likely when we're deserializing the object from the serialized data.
-        task_cls, task_input_cls, task_output_cls = TASK_CLASS_REGISTRY.get(data["class_name"])
+        task_cls, task_input_cls, task_output_cls = TASK_CLASS_REGISTRY.get_unit_task(data["class_name"])
         task = task_cls.model_validate_json(data["body"]["task"])
         task_input = task_input_cls.model_validate_json(data["body"]["task_input"])
         task_output = task_output_cls.model_validate_json(data["body"]["task_output"])
@@ -798,7 +798,7 @@ class UnitTaskList(BaseModel):
         tasks = []
         for item in data["_task_list"]:
             task_data = item["task"]
-            task_class, _, _ = TASK_CLASS_REGISTRY.get(item["class_name"])
+            task_class, _, _ = TASK_CLASS_REGISTRY.get_unit_task(item["class_name"])
             task = task_class.model_validate_json(task_data)
             tasks.append(task)
         return {"tasks": tasks}

@@ -6,5 +6,5 @@ metadata:
   name: task-dispatcher-cr-access-role
 rules:
 - apiGroups: ["cornserve.ai"]
-  resources: ["unittaskdefinitions", "unittaskinstances", "executiondescriptors"]
+  resources: ["taskdefinitions", "unittaskinstances", "executiondescriptors"]
   verbs: ["create", "update", "patch", "get", "list", "watch", "delete"]
