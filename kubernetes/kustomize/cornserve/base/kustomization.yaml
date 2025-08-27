@@ -8,7 +8,6 @@ resources:
 - task-manager
 - namespace.yaml
 - crds
-- service-accounts.yaml
 images:
 - name: cornserve/gateway
   newName: cornserve/gateway
