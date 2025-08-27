@@ -43,6 +43,7 @@ _LAZY_CONSTANTS = {
     "CONTAINER_IMAGE_ERIC": lambda: _build_image_name("eric"),
     "CONTAINER_IMAGE_GERI": lambda: _build_image_name("geri"),
     "CONTAINER_IMAGE_VLLM": lambda: _build_image_name("vllm"),
+    "CONTAINER_IMAGE_VLLM_OMNI_TALKER": lambda: _build_image_name("vllm-omni-talker"),
     "CONTAINER_IMAGE_PULL_POLICY": lambda: _get_env_warn_default("CORNSERVE_IMAGE_PULL_POLICY", "IfNotPresent"),
 }
 
@@ -86,4 +87,5 @@ if TYPE_CHECKING:
     CONTAINER_IMAGE_ERIC: str
     CONTAINER_IMAGE_GERI: str
     CONTAINER_IMAGE_VLLM: str
+    CONTAINER_IMAGE_VLLM_OMNI_TALKER: str
     CONTAINER_IMAGE_PULL_POLICY: str

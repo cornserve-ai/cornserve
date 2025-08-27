@@ -135,7 +135,8 @@ class VLLMDescriptor(TaskExecutionDescriptor[LLMBaseUnitTask, OpenAIChatCompleti
                     task_input.cornserve_embeddings,
                 )
                 raise ValueError(
-                    "The number of multimodal data in messages does not match the number of embeddings provided."
+                    f"The number of multimodal data in messages {len(multimodal_data)} != "
+                    f"{len(task_input.cornserve_embeddings)} the number of embeddings provided."
                 )
             for multimodal_content, forward in zip(multimodal_data, task_input.cornserve_embeddings, strict=True):
                 modality = multimodal_content.type.split("_")[0]  # e.g., "audio", "image", "video"
