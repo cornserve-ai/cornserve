@@ -3,8 +3,10 @@ FROM nvidia/cuda:12.8.1-devel-ubuntu22.04 AS base
 ARG DEBIAN_FRONTEND=noninteractive
 
 RUN apt-get update -y \
-      && apt-get install -y git curl wget ffmpeg libsndfile1 \
-      && curl -LsSf https://astral.sh/uv/install.sh | sh
+    && apt-get install -y git curl wget ffmpeg libsndfile1 \
+    && curl -LsSf https://astral.sh/uv/install.sh | sh \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 
 ENV PATH="/root/.local/bin:$PATH"
 ENV VIRTUAL_ENV="/opt/venv"
