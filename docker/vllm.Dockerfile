@@ -55,7 +55,9 @@ RUN uv pip install "git+https://github.com/ai-dynamo/nixl@0.5.0" \
 ########### End Install nixl ###########
 
 COPY ./python /workspace/cornserve/python
+# Toggle between local vllm and remote for development
 COPY ./third_party/vllm /workspace/cornserve/third_party/c-vllm
+# RUN git clone -b jm-pd https://github.com/cornserve-ai/vllm.git /workspace/cornserve/third_party/c-vllm
 WORKDIR /workspace/cornserve/third_party/c-vllm
 
 RUN cd ../.. && uv pip install './python[sidecar-api]'

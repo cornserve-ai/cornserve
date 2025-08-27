@@ -12,7 +12,7 @@ from collections import defaultdict
 from collections.abc import AsyncGenerator, AsyncIterator, Callable, Generator, Iterable
 from contextlib import contextmanager
 from contextvars import ContextVar
-from typing import TYPE_CHECKING, Any, ClassVar, Generic, Self, TypeVar, final
+from typing import TYPE_CHECKING, Any, ClassVar, Generic, Self, TypeVar, final, get_type_hints
 
 import aiohttp
 from opentelemetry import trace
@@ -112,21 +112,47 @@ class Stream(TaskOutput, Generic[OutputT]):
 
         return item_type  # type: ignore
 
-    def transform(self, transform_func: Callable[[OutputT], TransformT]) -> Stream[TransformT]:
+    def transform(
+        self,
+        transform_func: Callable[[OutputT], TransformT],
+        output_type: type[TaskOutput] | None = None,
+    ) -> Stream[TransformT]:
         """Transform the stream's output items using a transformation function.
 
         Args:
             transform_func: A function that takes an `OutputT` item and returns a `TransformT` item.
+            output_type: If the transform function does not have a return type hint (e.g., Lambda functions),
+                you can specify the output type explicitly. This should be a subclass of `TaskOutput`.
+                If the transform function has a return type hint, this argument is ignored.
         """
-        new_stream = Stream[TransformT](
+        if self._transform_func is not None:
+            raise ValueError("Cannot transform a stream more than once.")
+
+        # Extract the return type from the transform function
+        type_hints = get_type_hints(transform_func)
+        return_type = type_hints.get("return", None)
+
+        # If we can get the return type and it's a TaskOutput, use it
+        if return_type is None:
+            if output_type is None:
+                raise ValueError("Output type must be specified if the transform function has no return type hint.")
+            return_type = output_type
+
+        if not issubclass(return_type, TaskOutput):
+            raise ValueError(f"Return type {return_type} is not a subclass of TaskOutput.")
+
+        # Create a properly typed Stream with the extracted return type
+        new_stream = Stream[return_type](
             async_iterator=self.async_iterator,
             response=self.response,
         )
         new_stream._prev_type = self.item_type
         new_stream._transform_func = transform_func  # type: ignore
+
+        # Clear the original stream's iterators
         self.async_iterator = None
         self.response = None
-        return new_stream
+        return new_stream  # type: ignore
 
     @model_validator(mode="after")
     def _item_type(self) -> Self:
