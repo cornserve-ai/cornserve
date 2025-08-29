@@ -8,7 +8,7 @@ from cornserve.app.base import AppConfig
 from cornserve.task.builtins.encoder import Modality
 from cornserve.task.builtins.llm import $TASK_CLASS, OpenAIChatCompletionChunk, OpenAIChatCompletionRequest
 
-mllm = MLLMTask(
+mllm = $TASK_CLASS(
     model_id="$MODEL_ID",
     modalities=[Modality.IMAGE],
     encoder_fission=$ENCODER_FISSION,
