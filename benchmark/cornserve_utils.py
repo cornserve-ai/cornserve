@@ -31,7 +31,7 @@ GATEWAY_URL = "http://localhost:30080"
 
 def register_app(
     model_id: str,
-    app_type: Literal["ev", "v", "e"],
+    app_type: Literal["ev", "v", "e", "epd", "pd"],
 ) -> str:
     """Register an app with the CornServe gateway, and return the app ID."""
     if app_type == "ev":
@@ -49,6 +49,18 @@ def register_app(
     elif app_type == "e":
         source_code = create_eric_app(
             model_id=model_id,
+        )
+    elif app_type == "epd":
+        source_code = create_mllm_app(
+            model_id=model_id,
+            task_class="DisaggregatedMLLMTask",
+            encoder_fission=True,
+        )
+    elif app_type == "pd":
+        source_code = create_mllm_app(
+            model_id=model_id,
+            task_class="DisaggregatedMLLMTask",
+            encoder_fission=False,
         )
     else:
         raise NotImplementedError(f"Unsupported app_type: {app_type}.")
@@ -233,12 +245,12 @@ async def scale(config: ExperimentConfig) -> None:
                 vllm_task_id = task_id
         assert all([eric_task_id, vllm_task_id]), "Not all tasks are running. Please check the task and app states."
         await scale_task_with_num_gpus(
-            task_id=eric_task_id,
-            num_gpus=config.backend_config.num_erics * config.backend_config.eric_tp_size,
-        )
-        await scale_task_with_num_gpus(
             task_id=vllm_task_id,
             num_gpus=config.backend_config.num_vllms * config.backend_config.vllm_tp_size,
+        )
+        await scale_task_with_num_gpus(
+            task_id=eric_task_id,
+            num_gpus=config.backend_config.num_erics * config.backend_config.eric_tp_size,
         )
     elif isinstance(config.backend_config, EricConfig):
         for task_def, task_id, state in tasks:

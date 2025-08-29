@@ -419,6 +419,9 @@ class DisaggregatedMLLMTask(Task[OpenAIChatCompletionRequest, Stream[OpenAIChatC
         modalities: List of input modalities other than text.
         encoder_fission: If True, the task will use separate encoder tasks for computing
             multimodal embeddings. If False, it will use the LLM server to compute them.
+        coalesce_encoder_invocations: If True, the task will coalesce encoder invocations
+            for the same modality into a single invocation. If False, it will invoke the
+            encoder task for each data URL separately.
         encoder_model_ids: Encoders can take multiple model IDs when the architecture
             supports adapters (e.g., Gemma 3 multimodal projectors). Only used when
             `encoder_fission` is True.
@@ -427,6 +430,7 @@ class DisaggregatedMLLMTask(Task[OpenAIChatCompletionRequest, Stream[OpenAIChatC
     model_id: str
     modalities: list[Modality] = []
     encoder_fission: bool = True
+    coalesce_encoder_invocations: bool = False
     encoder_model_ids: set[str] | None = None
 
     def post_init(self) -> None:
@@ -456,20 +460,31 @@ class DisaggregatedMLLMTask(Task[OpenAIChatCompletionRequest, Stream[OpenAIChatC
                     f"{[mod.value for mod in diff]}",
                 )
 
-            # Invoke the encoder tasks for each modality
-            encoder_outputs: dict[Modality, EncoderOutput] = {}
-            for modality, encoder_task in self.encoders.items():
-                if modality not in encoder_input_urls:
-                    continue
-                encoder_input = EncoderInput(model_id=task_input.model, data_urls=encoder_input_urls[modality])
-                encoder_output = encoder_task.invoke(encoder_input)
-                encoder_outputs[modality] = encoder_output
+            # Invoke the encoder tasks
+            if self.coalesce_encoder_invocations:
+                # Coalesce encoder invocations: invoke once per modality with all URLs
+                encoder_outputs: dict[Modality, EncoderOutput] = {}
+                for modality, encoder_task in self.encoders.items():
+                    if modality not in encoder_input_urls:
+                        continue
+                    encoder_input = EncoderInput(model_id=task_input.model, data_urls=encoder_input_urls[modality])
+                    encoder_output = encoder_task.invoke(encoder_input)
+                    encoder_outputs[modality] = encoder_output
 
-            # Retain the order of multimodal data in the task input
-            embeddings: list[DataForward[Tensor]] = []
-            for multimodal_content in multimodal_contents:
-                modality = Modality(multimodal_content.type.split("_")[0])
-                embeddings.append(encoder_outputs[modality].embeddings.pop(0))
+                # Retain the order of multimodal data in the task input
+                embeddings: list[DataForward[Tensor]] = []
+                for multimodal_content in multimodal_contents:
+                    modality = Modality(multimodal_content.type.split("_")[0])
+                    embeddings.append(encoder_outputs[modality].embeddings.pop(0))
+            else:
+                # Separate encoder invocations: invoke encoder for each individual URL
+                embeddings: list[DataForward[Tensor]] = []
+                for multimodal_content in multimodal_contents:
+                    modality = Modality(multimodal_content.type.split("_")[0])
+                    data_url: URL = getattr(multimodal_content, multimodal_content.type)
+                    encoder_input = EncoderInput(model_id=task_input.model, data_urls=[data_url.url])
+                    encoder_output = self.encoders[modality].invoke(encoder_input)
+                    embeddings.append(encoder_output.embeddings[0])
 
             # To be consumed by the LLM task.
             task_input.cornserve_embeddings = embeddings

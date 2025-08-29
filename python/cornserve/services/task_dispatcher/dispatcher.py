@@ -274,7 +274,7 @@ class TaskDispatcher:
     async def _execute_unit_task(self, execution: UnitTaskExecution, request: dict[str, Any]) -> TaskOutput:
         """Execute a single task by sending request to executor and processing response."""
         url = execution.invocation.task.execution_descriptor.get_api_url(execution.executor_url)
-        logger.info(
+        logger.debug(
             "Invoking %s task %s by posting request %s to %s",
             "streaming" if execution.is_streaming else "non-streaming",
             execution.invocation.task.__class__.__name__,
@@ -284,7 +284,7 @@ class TaskDispatcher:
         try:
             response = await self.client.post(url, json=request)
             response.raise_for_status()
-            logger.info(
+            logger.debug(
                 "Task %s response: %s",
                 execution.invocation.task.__class__.__name__,
                 "[Stream]" if execution.is_streaming else await response.text(),

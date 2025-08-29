@@ -100,7 +100,8 @@ class VLLMDescriptor(TaskExecutionDescriptor[LLMBaseUnitTask, OpenAIChatCompleti
             # hidden states in the prefix cache, which V1 doesn't support yet.
             "--no-enable-prefix-caching",
             # These arguments will be hand tuned during benchmarking
-            # "--disable-mm-preprocessor-cache",
+            # When benchmarking, we reuse mm inputs, so we disable the preprocessor cache
+            "--disable-mm-preprocessor-cache",
             # "--max-num-seqs",
             # "60",
             # "--max-model-len",
@@ -250,6 +251,10 @@ class PrefillVLLMDescriptor(
             # need to forward KV transfer parameters to a decode instance
             "--cornserve-sidecar-ranks",
             *[str(gpu.global_rank) for gpu in gpus],
+            # here we synchronize arguments with the base descriptor
+            "--enforce-eager",
+            "--no-enable-prefix-caching",
+            "--disable-mm-preprocessor-cache",
         ]
         return args
 
@@ -306,7 +311,7 @@ class PrefillVLLMDescriptor(
         # overwrite max_completion_tokens
         request["max_completion_tokens"] = 1
 
-        if (params := task_input.cornserve_kv_transfer_params) is not None:
+        if (params := task_output.kv_transfer_params) is not None:
             request["kv_transfer_params"] = {
                 "do_remote_decode": True,
                 "do_remote_prefill": False,
@@ -401,6 +406,10 @@ class DecodeVLLMDescriptor(
             # need to receive KV transfer parameters from a decode instance
             "--cornserve-sidecar-ranks",
             *[str(gpu.global_rank) for gpu in gpus],
+            # here we synchronize arguments with the base descriptor
+            "--enforce-eager",
+            "--no-enable-prefix-caching",
+            "--disable-mm-preprocessor-cache",
         ]
 
         return args
