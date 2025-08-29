@@ -445,6 +445,8 @@ class DisaggregatedMLLMTask(Task[OpenAIChatCompletionRequest, Stream[OpenAIChatC
 
     def invoke(self, task_input: OpenAIChatCompletionRequest) -> Stream[OpenAIChatCompletionChunk]:
         """Invoke the task."""
+
+        # TODO: clean up repeated code with MLLMTask
         if self.encoder_fission:
             encoder_input_urls: dict[Modality, list[str]] = defaultdict(list)
             multimodal_contents = extract_multimodal_content(task_input.messages)

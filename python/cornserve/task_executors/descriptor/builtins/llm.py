@@ -395,6 +395,7 @@ class DecodeVLLMDescriptor(
 
     def get_container_args(self, gpus: list[GPU], port: int) -> list[str]:
         """Get the container command for the task executor."""
+        # TODO: reduce duplication
         args = [
             self.task.model_id,
             "--tensor-parallel-size",
