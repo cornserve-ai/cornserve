@@ -17,10 +17,10 @@ RUN apt-get update -y \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 
-########### Install UCX 1.18.0 ###########
-RUN wget https://github.com/openucx/ucx/releases/download/v1.18.0/ucx-1.18.0.tar.gz
-RUN tar xzf ucx-1.18.0.tar.gz
-WORKDIR /workspace/ucx-1.18.0
+########### Install UCX 1.19.0 ###########
+RUN wget https://github.com/openucx/ucx/releases/download/v1.19.0/ucx-1.19.0.tar.gz
+RUN tar xzf ucx-1.19.0.tar.gz
+WORKDIR /workspace/ucx-1.19.0
 RUN mkdir build
 RUN cd build && \
       ../configure --build=x86_64-unknown-linux-gnu --host=x86_64-unknown-linux-gnu --program-prefix= --disable-dependency-tracking \
@@ -48,7 +48,7 @@ RUN mkdir -p /opt/ucx-shim/{lib,include}
 RUN ln -s /usr/lib64        /opt/ucx-shim/lib
 RUN ln -s /usr/include      /opt/ucx-shim/include
 ENV UCX_PREFIX=/opt/ucx-shim
-RUN uv pip install "git+https://github.com/ai-dynamo/nixl@0.5.0" \
+RUN uv pip install "git+https://github.com/ai-dynamo/nixl@0.5.1" \
   --config-settings=setup-args="-Ducx_path=$UCX_PREFIX" \
   --config-settings=setup-args="-Dinstall_headers=false" \
   --config-settings=setup-args="-Dbuild_docs=false"
