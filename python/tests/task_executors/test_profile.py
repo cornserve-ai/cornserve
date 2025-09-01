@@ -15,7 +15,7 @@ GEMMA_3_27B_PROFILE_JSON = """
   },
   "num_gpus_to_profile": {
     "2": {},
-    "4": {}
+    "4": {"launch_args": ["--max-num-seqs", "768"]}
   }
 }
 """
@@ -31,7 +31,7 @@ def test_example_profile(tmp_path: Path) -> None:
     profile = UnitTaskProfile.from_json_file(tempfile)
 
     assert profile.task.is_equivalent_to(unit_task)
-    assert profile.num_gpus_to_profile == {2: ProfileInfo(), 4: ProfileInfo()}
+    assert profile.num_gpus_to_profile == {2: ProfileInfo(), 4: ProfileInfo(launch_args=["--max-num-seqs", "768"])}
 
     manager = UnitTaskProfileManager(profile_dir=tmp_path)
-    assert manager.get_profile(task=unit_task) == {2: ProfileInfo(), 4: ProfileInfo()}
+    assert manager.get_profile(task=unit_task).num_gpus_to_profile == {2: ProfileInfo(), 4: ProfileInfo(launch_args=["--max-num-seqs", "768"])}
