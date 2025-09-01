@@ -16,8 +16,9 @@ async def run(
     # model_ids.append("OpenGVLab/InternVL3-8B")
     model_ids.append("Qwen/Qwen2.5-VL-7B-Instruct")
 
+    gpu_type="A100"
     MAX_BATCH_SIZE = 8
-    REQUEST_RATE = 15
+    REQUEST_RATE = 30
 
     app_ids = {}
     for model_id in model_ids:
@@ -50,6 +51,7 @@ async def run(
                 image_width=image_width,
                 image_height=image_height,
                 image_choices=32,
+                gpu_type=gpu_type,
             )
             configs.append(exp_config)
 

@@ -30,4 +30,4 @@ configMapGenerator:
   - CORNSERVE_IMAGE_PULL_POLICY=Always
   - CORNSERVE_IMAGE_TAG=latest
   # uncomment below to disable OTEL during benchmarking
-  # - OTEL_SDK_DISABLED=true
+  - OTEL_SDK_DISABLED=true
