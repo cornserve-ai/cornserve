@@ -174,7 +174,7 @@ class TaskManager:
             # |         7 | 1 x 4 GPUs + 1 x 2 GPUs + 1 x 1 GPU |
             # |         8 | 2 x 4 GPUs                          |
             # |-----------|-------------------------------------|
-            feasible_num_gpus = sorted(self.task_profile.keys(), reverse=True)
+            feasible_num_gpus = sorted(self.task_profile.num_gpus_to_profile.keys(), reverse=True)
             assert feasible_num_gpus, "Task profile must have at least one feasible number of GPUs"
 
             # Determine task executors to spawn based on the free GPUs
@@ -340,6 +340,25 @@ class TaskManager:
         # executor ID could be longer than that. Therefore, we use a UUID4 label.
         executor_id_label = str(uuid.uuid4())
 
+        # Container arguments are created from the execution descriptor and the task profile
+        container_args = self.descriptor.get_container_args(gpus, port)
+        try:
+            container_args += self.task_profile.num_gpus_to_profile[len(gpus)].launch_args
+        except KeyError as e:
+            raise RuntimeError(
+                f"Cannot spawn task executor with {len(gpus)} GPUs because the unit task profile "
+                f"does not support that number of GPUs. Unit task profile: {self.task_profile}"
+            ) from e
+
+        logger.info(
+            "Spawning task executor %s on node %s with pod name %s, service name %s, and args %s",
+            executor_id,
+            node_name,
+            pod_name,
+            service_name,
+            container_args,
+        )
+
         # Create the pod spec
         pod = kclient.V1Pod(
             metadata=kclient.V1ObjectMeta(
@@ -357,7 +376,7 @@ class TaskManager:
                         name="task-executor",
                         image=self.descriptor.get_container_image(),
                         image_pull_policy=constants.CONTAINER_IMAGE_PULL_POLICY,
-                        args=self.descriptor.get_container_args(gpus, port),
+                        args=container_args,
                         ports=(
                             [kclient.V1ContainerPort(container_port=port, name="http")]
                             + [

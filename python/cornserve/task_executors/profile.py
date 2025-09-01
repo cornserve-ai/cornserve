@@ -8,6 +8,7 @@ Kubernetes as ConfigMaps for dynamic resource allocation.
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass
 from pathlib import Path
 
 from pydantic import BaseModel
@@ -23,24 +24,26 @@ logger = get_logger(__name__)
 class ProfileInfo(BaseModel):
     """Profile information for a specific GPU count.
 
-    This class is currently empty but can be extended in the future to include
-    additional metadata such as performance characteristics given a specific
-    number of GPUs.
+    This class will eventually hold performance-related metadata as well.
+
+    Attributes:
+        launch_args: Additional arguments to pass when launching the task
     """
 
+    launch_args: list[str] = []
 
+
+@dataclass
 class UnitTaskProfile:
-    """Profile mapping GPU counts to profile information for a UnitTask."""
+    """Profile mapping GPU counts to profile information for a UnitTask.
 
-    def __init__(self, task: UnitTask, num_gpus_to_profile: dict[int, ProfileInfo]) -> None:
-        """Initialize the UnitTaskProfile.
+    Attributes:
+        task: The UnitTask instance this profile applies to
+        num_gpus_to_profile: Mapping from GPU count to ProfileInfo
+    """
 
-        Args:
-            task: The UnitTask instance this profile applies to
-            num_gpus_to_profile: Mapping from GPU count to ProfileInfo
-        """
-        self.task = task
-        self.num_gpus_to_profile = num_gpus_to_profile
+    task: UnitTask
+    num_gpus_to_profile: dict[int, ProfileInfo]
 
     @classmethod
     def from_json_file(cls, file_path: Path) -> UnitTaskProfile:
@@ -134,7 +137,7 @@ class UnitTaskProfileManager:
             logger.warning("Failed to load profile from %s: %s", file_path, e)
             return None
 
-    def get_profile(self, task: UnitTask) -> dict[int, ProfileInfo]:
+    def get_profile(self, task: UnitTask) -> UnitTaskProfile:
         """Get the profile for a UnitTask by scanning the profile directory.
 
         This method iterates through all JSON files in the profile directory
@@ -143,13 +146,10 @@ class UnitTaskProfileManager:
 
         Args:
             task: The UnitTask to get the profile for
-
-        Returns:
-            Dictionary mapping GPU count to ProfileInfo
         """
         if not self.profile_dir.exists():
             logger.info("Profile directory %s does not exist", self.profile_dir)
-            return self.get_default_profile()
+            return self.get_default_profile(task)
 
         # Iterate through all JSON files in the profile directory
         for file_path in self.profile_dir.glob("*.json"):
@@ -158,16 +158,16 @@ class UnitTaskProfileManager:
                 logger.info("Found profile for task %s in %s", task, file_path)
                 if not profile.num_gpus_to_profile:
                     raise ValueError(f"Profile for task {task} in {file_path} has no GPU profiles defined")
-                return profile.num_gpus_to_profile
+                return profile
 
         # No profile found, return default profile
         logger.info("No profile found for task %s, using default (1 GPU)", task)
-        return self.get_default_profile()
+        return self.get_default_profile(task)
 
-    def get_default_profile(self) -> dict[int, ProfileInfo]:
+    def get_default_profile(self, task: UnitTask) -> UnitTaskProfile:
         """Get the default profile for tasks without specific profiles.
 
         Returns:
             Default profile that can only run with 1 GPU
         """
-        return {1: ProfileInfo()}
+        return UnitTaskProfile(task=task, num_gpus_to_profile={1: ProfileInfo()})

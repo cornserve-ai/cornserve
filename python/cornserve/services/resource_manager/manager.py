@@ -341,17 +341,17 @@ class ResourceManager:
 
         # Check if the number of GPUs to scale up is valid
         profile = self.profile_manager.get_profile(task)
-        if num_gpus < min(profile.keys()):
+        if num_gpus < min(profile.num_gpus_to_profile.keys()):
             logger.warning(
                 "Requested %d GPUs to scale up task %s, but minimum required is %d GPUs according to the profile: %s",
                 num_gpus,
                 task,
-                min(profile.keys()),
+                min(profile.num_gpus_to_profile.keys()),
                 profile,
             )
             raise ValueError(
                 f"Cannot scale up task {task} by {num_gpus} GPUs. "
-                f"Minimum required is {min(profile.keys())} GPUs according to the profile."
+                f"Minimum required is {min(profile.num_gpus_to_profile.keys())} GPUs according to the profile."
             )
 
         # Find the task manager state for this task
@@ -368,7 +368,7 @@ class ResourceManager:
             # TODO: decide GPU placement strategy & preference
             resources = []
             gpus_to_allocate = num_gpus
-            for chunk_size in sorted(profile.keys(), reverse=True):
+            for chunk_size in sorted(profile.num_gpus_to_profile.keys(), reverse=True):
                 num_chunks, gpus_to_allocate = divmod(gpus_to_allocate, chunk_size)
                 if num_chunks == 0:
                     continue
@@ -728,7 +728,7 @@ class ResourceManager:
             profile = self.profile_manager.get_profile(task)
 
             # Start off the task manager with the minimum number of GPUs required
-            num_gpus = min(profile.keys())
+            num_gpus = min(profile.num_gpus_to_profile.keys())
 
             logger.info("Allocating %d GPUs for task %s based on profile", num_gpus, task)
 
