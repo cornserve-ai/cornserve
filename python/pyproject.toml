@@ -98,7 +98,7 @@ geri-no-gpu = [
   "transformers",
   "huggingface_hub",
   "pillow",
-  "diffusers",
+  "diffusers>=0.35.1",
   "accelerate",
   "cornserve[sidecar-api]",
   "opentelemetry-instrumentation-fastapi",

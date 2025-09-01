@@ -6,6 +6,6 @@
     "execution_descriptor_name": null
   },
   "num_gpus_to_profile": {
-    "4": {}
+    "4": {"launch_args": ["--max-num-seqs", "256"]}
   }
 }
