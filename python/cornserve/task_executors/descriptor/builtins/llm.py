@@ -103,9 +103,9 @@ class VLLMDescriptor(TaskExecutionDescriptor[LLMBaseUnitTask, OpenAIChatCompleti
             # When benchmarking, we reuse mm inputs, so we disable the preprocessor cache
             "--disable-mm-preprocessor-cache",
             # "--max-num-seqs",
-            # "60",
+            # str(22 if self.task.receive_embeddings else 4),
             # "--max-model-len",
-            # "8192",
+            # "4092",
         ]
         return args
 
@@ -246,6 +246,7 @@ class PrefillVLLMDescriptor(
             str(len(gpus)),
             "--port",
             str(port),
+            "--trust-remote-code",
             "--kv-transfer-config",
             '{"kv_connector":"NixlConnector","kv_role":"kv_producer"}',
             # need to forward KV transfer parameters to a decode instance
@@ -255,6 +256,10 @@ class PrefillVLLMDescriptor(
             "--enforce-eager",
             "--no-enable-prefix-caching",
             "--disable-mm-preprocessor-cache",
+            # "--max-model-len",
+            # "4092",
+            # "--max-num-seqs",
+            # str(22 if self.task.receive_embeddings else 4),
         ]
         return args
 
@@ -376,10 +381,9 @@ class DecodeVLLMDescriptor(
                 ("VLLM_NIXL_SIDE_CHANNEL_PORT", str(self.NIXL_BASE_PORT + gpus[0].global_rank)),
             ]
         )
-        if self.task.receive_embeddings:
-            envs.append(
-                ("CORNSERVE_VLLM_DISABLE_MULTIMODAL", "1"),
-            )
+        envs.append(
+            ("CORNSERVE_VLLM_DISABLE_MULTIMODAL", "1"),
+        )
         return envs
 
     def get_kubernetes_envs(self, gpus: list[GPU]) -> list[kclient.V1EnvVar]:
@@ -402,6 +406,7 @@ class DecodeVLLMDescriptor(
             str(len(gpus)),
             "--port",
             str(port),
+            "--trust-remote-code",
             "--kv-transfer-config",
             '{"kv_connector":"NixlConnector","kv_role":"kv_consumer"}',
             # need to receive KV transfer parameters from a decode instance
@@ -411,6 +416,10 @@ class DecodeVLLMDescriptor(
             "--enforce-eager",
             "--no-enable-prefix-caching",
             "--disable-mm-preprocessor-cache",
+            # "--max-model-len",
+            # "4092",
+            # "--max-num-seqs",
+            # str(22 if self.task.receive_embeddings else 4),
         ]
 
         return args

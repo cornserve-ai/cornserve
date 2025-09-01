@@ -1,0 +1,12 @@
+{
+  "task": {
+    "__class__": "PrefillLLMUnitTask",
+    "model_id": "OpenGVLab/InternVL3-38B",
+    "receive_embeddings": true,
+    "send_hidden_states": false,
+    "execution_descriptor_name": null
+  },
+  "num_gpus_to_profile": {
+    "2": {}
+  }
+}
