@@ -64,6 +64,18 @@ def register_app(
             task_class="DisaggregatedMLLMTask",
             encoder_fission=False,
         )
+    elif app_type == "epd":
+        source_code = create_mllm_app(
+            model_id=model_id,
+            task_class="DisaggregatedMLLMTask",
+            encoder_fission=True,
+        )
+    elif app_type == "pd":
+        source_code = create_mllm_app(
+            model_id=model_id,
+            task_class="DisaggregatedMLLMTask",
+            encoder_fission=False,
+        )
     else:
         raise NotImplementedError(f"Unsupported app_type: {app_type}.")
 
