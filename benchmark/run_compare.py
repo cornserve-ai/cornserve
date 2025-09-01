@@ -43,10 +43,11 @@ async def run(
     pd_d_config = PDConfig(num_prefills=3, prefill_tp_size=2, num_decodes=1, decode_tp_size=2)
 
     configs = []
+    gpu_type = "A100"
     image_width = 1920
     image_height = 1080
     image_count = 1
-    input_len = 600
+    input_len = 100
     output_len = 300
     num_prompts = 500
 
@@ -75,6 +76,7 @@ async def run(
             num_prompts=num_prompts,
             image_width=image_width,
             image_height=image_height,
+            gpu_type=gpu_type,
         )
         configs.append(exp_config)
 
@@ -90,6 +92,7 @@ async def run(
             num_prompts=num_prompts,
             image_width=image_width,
             image_height=image_height,
+            gpu_type=gpu_type,
         )
         configs.append(exp_config)
 
@@ -105,6 +108,7 @@ async def run(
             num_prompts=num_prompts,
             image_width=image_width,
             image_height=image_height,
+            gpu_type=gpu_type,
         )
         configs.append(exp_config)
 
@@ -122,6 +126,7 @@ async def run(
             num_prompts=num_prompts,
             image_width=image_width,
             image_height=image_height,
+            gpu_type=gpu_type,
         )
         configs.append(exp_config)
 
@@ -137,6 +142,7 @@ async def run(
             num_prompts=num_prompts,
             image_width=image_width,
             image_height=image_height,
+            gpu_type=gpu_type,
         )
         configs.append(exp_config)
 
@@ -153,6 +159,7 @@ async def run(
             num_prompts=num_prompts,
             image_width=image_width,
             image_height=image_height,
+            gpu_type=gpu_type,
         )
         configs.append(exp_config)
 
@@ -168,6 +175,7 @@ async def run(
             num_prompts=num_prompts,
             image_width=image_width,
             image_height=image_height,
+            gpu_type=gpu_type,
         )
         configs.append(exp_config)
 

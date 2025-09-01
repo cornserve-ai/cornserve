@@ -18,6 +18,7 @@ logger = getLogger(__name__)
 
 def run() -> None:
 
+    gpu_type = "A100"
     eric_batch_dize = 1
     vllm_config = VLLMConfig(num_replicas=1, tp_size=2)
     # we compare single vLLM with disaggregated vLLM, ignoring Eric cost
@@ -36,25 +37,25 @@ def run() -> None:
     # the decode in EPD and PD profile can be shared
     pd_d_config = PDConfig(num_prefills=3, prefill_tp_size=2, num_decodes=1, decode_tp_size=2)
 
-    # model_id: str = "OpenGVLab/InternVL3-38B"
-    # # model_id: str = "Qwen/Qwen2.5-VL-7B-Instruct"
-    # image_width = 1920
-    # image_height = 1080
-    # image_count = 1
-    # input_len = 100
-    # output_len = 300
-    # num_prompts = 500
-    model_id: str = "Qwen/Qwen2.5-VL-7B-Instruct"
+    model_id: str = "OpenGVLab/InternVL3-38B"
+    # model_id: str = "Qwen/Qwen2.5-VL-7B-Instruct"
     image_width = 1920
     image_height = 1080
     image_count = 1
-    input_len = 300
-    output_len = 200
-    num_prompts = 1000
+    input_len = 100
+    output_len = 300
+    num_prompts = 500
+    # model_id: str = "Qwen/Qwen2.5-VL-7B-Instruct"
+    # image_width = 1920
+    # image_height = 1080
+    # image_count = 1
+    # input_len = 300
+    # output_len = 200
+    # num_prompts = 1000
 
     configs = []
 
-    for r in [5]:
+    for r in [10]:
         eric_exp = ExperimentConfig(
             backend_config=eric_config,
             app_id="",
@@ -67,6 +68,7 @@ def run() -> None:
             num_prompts=num_prompts,
             image_width=image_width,
             image_height=image_height,
+            gpu_type=gpu_type,
         )
         configs.append(eric_exp)
 
@@ -82,6 +84,7 @@ def run() -> None:
             num_prompts=num_prompts,
             image_width=image_width,
             image_height=image_height,
+            gpu_type=gpu_type,
         )
         configs.append(vllm_exp)
 
@@ -97,6 +100,7 @@ def run() -> None:
             num_prompts=num_prompts,
             image_width=image_width,
             image_height=image_height,
+            gpu_type=gpu_type,
         )
         configs.append(el_l_exp)
 
@@ -114,6 +118,7 @@ def run() -> None:
             num_prompts=num_prompts,
             image_width=image_width,
             image_height=image_height,
+            gpu_type=gpu_type,
         )
         configs.append(epd_p_exp)
 
@@ -129,6 +134,7 @@ def run() -> None:
             num_prompts=num_prompts,
             image_width=image_width,
             image_height=image_height,
+            gpu_type=gpu_type,
         )
         configs.append(epd_d_exp)
 
@@ -145,6 +151,7 @@ def run() -> None:
             num_prompts=num_prompts,
             image_width=image_width,
             image_height=image_height,
+            gpu_type=gpu_type,
         )
         configs.append(pd_p_exp)
 
@@ -160,6 +167,7 @@ def run() -> None:
             num_prompts=num_prompts,
             image_width=image_width,
             image_height=image_height,
+            gpu_type=gpu_type,
         )
         configs.append(pd_d_exp)
 
