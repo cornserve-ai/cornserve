@@ -22,70 +22,18 @@ EOF
 from __future__ import annotations
 
 from cornserve.app.base import AppConfig
-from cornserve.task.base import Task, TaskInput, TaskOutput
-from cornserve.task.builtins.generator import GeneratorInput, GeneratorTask, Modality
-from cornserve.task.builtins.llm import LLMEmbeddingUnitTask, OpenAIChatCompletionRequest
+from cornserve.task.builtins.huggingface import (
+    HuggingFaceQwenImageInput,
+    HuggingFaceQwenImageOutput,
+    HuggingFaceQwenImageTask,
+)
 
+# Keep backward compatibility with original input/output types
+QwenImageInput = HuggingFaceQwenImageInput
+QwenImageOutput = HuggingFaceQwenImageOutput
 
-class QwenImageInput(TaskInput):
-    """Input model for Qwen-Image generation task."""
-
-    prompt: str
-    height: int
-    width: int
-    num_inference_steps: int
-
-
-class QwenImageOutput(TaskOutput):
-    """Output model for Qwen-Image generation task.
-
-    Attributes:
-        image: Generated image as a base64-encoded PNG bytes.
-    """
-
-    image: str
-
-
-class QwenImageTask(Task[QwenImageInput, QwenImageOutput]):
-    """A task that invokes the Qwen-Image model for image generation."""
-
-    def post_init(self) -> None:
-        """Initialize subtasks."""
-        self.text_encoder = LLMEmbeddingUnitTask(model_id="Qwen/Qwen2.5-VL-7B-Instruct")
-        self.generator = GeneratorTask(modality=Modality.IMAGE, model_id="Qwen/Qwen-Image")
-
-        # These two parameters are specific to Qwen/Qwen-Image and should not be changed.
-        self.system_prompt = (
-            "Describe the image by detailing the color, shape, size, texture, quantity, "
-            "text, spatial relationships of the objects and background:"
-        )
-        self.num_prefix_tokens_to_slice = 34
-
-    def invoke(self, task_input: QwenImageInput) -> QwenImageOutput:
-        """Invoke the task."""
-        encoder_input = OpenAIChatCompletionRequest.model_validate(
-            dict(
-                model="Qwen/Qwen2.5-VL-7B-Instruct",
-                messages=[
-                    {"role": "system", "content": self.system_prompt},
-                    {"role": "user", "content": task_input.prompt},
-                ],
-                max_completion_tokens=1,
-            )
-        )
-        encoder_output = self.text_encoder.invoke(encoder_input)
-        generator_input = GeneratorInput(
-            height=task_input.height,
-            width=task_input.width,
-            num_inference_steps=task_input.num_inference_steps,
-            skip_tokens=self.num_prefix_tokens_to_slice,
-            embeddings=encoder_output.embeddings,
-        )
-        generator_output = self.generator.invoke(generator_input)
-        return QwenImageOutput(image=generator_output.generated)
-
-
-qwen_image = QwenImageTask()
+# Use HuggingFace-based task instead of the complex composite task
+qwen_image = HuggingFaceQwenImageTask(model_id="Qwen/Qwen-Image")
 
 
 class Config(AppConfig):
