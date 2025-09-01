@@ -34,7 +34,10 @@ def test_example_profile(tmp_path: Path) -> None:
     assert profile.num_gpus_to_profile == {2: ProfileInfo(), 4: ProfileInfo(launch_args=["--max-num-seqs", "768"])}
 
     manager = UnitTaskProfileManager(profile_dir=tmp_path)
-    assert manager.get_profile(task=unit_task).num_gpus_to_profile == {2: ProfileInfo(), 4: ProfileInfo(launch_args=["--max-num-seqs", "768"])}
+    assert manager.get_profile(task=unit_task).num_gpus_to_profile == {
+        2: ProfileInfo(),
+        4: ProfileInfo(launch_args=["--max-num-seqs", "768"]),
+    }
 
     assert not profile.num_gpus_to_profile[2].launch_args
     assert profile.num_gpus_to_profile[4].launch_args == ["--max-num-seqs", "768"]
