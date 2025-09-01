@@ -31,7 +31,6 @@ logger = get_logger(__name__)
 
 async def parse_stream_to_completion_chunks(response: aiohttp.ClientResponse) -> AsyncGenerator[str]:
     """Parse the response stream to OpenAIChatCompletionChunk objects."""
-    assert not response.closed, "Response must not be closed when parsing."
     try:
         async for line in response.content:
             line = line.decode().strip()
