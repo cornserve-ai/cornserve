@@ -3,10 +3,10 @@ FROM pytorch/pytorch:2.7.0-cuda12.6-cudnn9-runtime
 RUN apt-get update && apt-get upgrade -y
 RUN apt-get install wget build-essential librdmacm-dev net-tools -y
 
-########### Install UCX 1.18.0 ###########
-RUN wget https://github.com/openucx/ucx/releases/download/v1.18.0/ucx-1.18.0.tar.gz
-RUN tar xzf ucx-1.18.0.tar.gz
-WORKDIR /workspace/ucx-1.18.0
+########### Install UCX 1.19.0 ###########
+RUN wget https://github.com/openucx/ucx/releases/download/v1.19.0/ucx-1.19.0.tar.gz
+RUN tar xzf ucx-1.19.0.tar.gz
+WORKDIR /workspace/ucx-1.19.0
 RUN mkdir build
 RUN cd build && \
       ../configure --build=x86_64-unknown-linux-gnu --host=x86_64-unknown-linux-gnu --program-prefix= --disable-dependency-tracking \
