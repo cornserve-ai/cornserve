@@ -101,6 +101,8 @@ class VLLMDescriptor(TaskExecutionDescriptor[LLMBaseUnitTask, OpenAIChatCompleti
             # These arguments will be hand tuned during benchmarking
             # When benchmarking, we reuse mm inputs, so we disable the preprocessor cache
             "--disable-mm-preprocessor-cache",
+            "--gpu-memory-utilization",
+            "0.95",
             # "--max-num-seqs",
             # str(22 if self.task.receive_embeddings else 4),
             # "--max-model-len",
@@ -255,6 +257,8 @@ class PrefillVLLMDescriptor(
             "--enforce-eager",
             "--no-enable-prefix-caching",
             "--disable-mm-preprocessor-cache",
+            "--gpu-memory-utilization",
+            "0.95",
             # "--max-model-len",
             # "4092",
             # "--max-num-seqs",
@@ -415,6 +419,8 @@ class DecodeVLLMDescriptor(
             "--enforce-eager",
             "--no-enable-prefix-caching",
             "--disable-mm-preprocessor-cache",
+            "--gpu-memory-utilization",
+            "0.95",
             # "--max-model-len",
             # "4092",
             # "--max-num-seqs",
