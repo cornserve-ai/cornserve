@@ -13,7 +13,7 @@ async def run(
     overwrite: bool = False,
 ) -> None:
     eric_batch_dize = 1
-    # model_id: str = "Qwen/Qwen2.5-VL-7B-Instruct"
+    # model_id: str = "Qwen/Qwen2.5-VL-32B-Instruct"
     model_id: str = "OpenGVLab/InternVL3-38B"
     ev = register_app(model_id=model_id, app_type="ev")
     print(f"Registered {model_id} EV with ID: {ev}")
@@ -219,8 +219,11 @@ async def run(
         request_inputs = transform_sampled_requests(config=cfg, sampled_requests=sampled_requests)
         output_data = await benchmark(request_inputs=request_inputs, config=cfg)
         completed = output_data["metrics"]["completed"]
+        total_output_tokens = output_data["metrics"]["total_output"]
         if completed <= cfg.num_prompts * 0.95:
             raise RuntimeError("Insufficient completed requests")
+        if total_output_tokens <= cfg.num_prompts * cfg.output_len * 0.95:
+            raise RuntimeError("Insufficient output tokens")
         print("Benchmark completed for current batch.")
         print("=" * 50)
 
