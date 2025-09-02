@@ -1,8 +1,4 @@
-import asyncio
-
 from schema import CornserveConfig, EricConfig, ExperimentConfig, VLLMConfig, EPDConfig, PDConfig
-
-from cornserve.utils import set_ulimit
 
 import logging
 from logging import getLogger
@@ -49,9 +45,9 @@ def run() -> None:
     # image_width = 1920
     # image_height = 1080
     # image_count = 1
-    # input_len = 300
-    # output_len = 200
-    # num_prompts = 1000
+    # input_len = 100
+    # output_len = 300
+    # num_prompts = 500
 
     configs = []
 
@@ -188,6 +184,9 @@ def run() -> None:
             print("    P95 Latency: {:.2f} s".format(p95_latency))
             print("    P99 Latency: {:.2f} s".format(p99_latency))
             tput_results[cfg] = tput
+    with open("InternVL3-38B_tput_results.json", "w") as f:
+        import json
+        json.dump({str(k): v for k, v in tput_results.items()}, f, indent=4)
 
     # we analyze the tputs
     def analyze(gpu_count: int):

@@ -51,6 +51,7 @@ async def run(
     output_len = 300
     num_prompts = 500
 
+    # InternVL3-38B # of KV cache tokens on A40 TP2
     # 72,832 -- without E
     # 96*0.9 -32*2
     # 160*0.9 -32*2
@@ -80,10 +81,11 @@ async def run(
         )
         configs.append(exp_config)
 
+    # we run L_{D} first bc it's the easiest part to crash due to eviction
     for r in [5]:
         exp_config = ExperimentConfig(
-            backend_config=vllm_config,
-            app_id=vllm,
+            backend_config=pd_d_config,
+            app_id=pd,
             model_id=model_id,
             request_rate=r,
             input_len=input_len,
@@ -96,6 +98,8 @@ async def run(
         )
         configs.append(exp_config)
 
+    # then we run L_{PD} bc CUDA IPC somehow always use GPU 0 (bug?) and having high GPU utilization
+    # may cause CUDA OOM
     for r in [5]:
         exp_config = ExperimentConfig(
             backend_config=cornserve_l_config,
@@ -112,6 +116,39 @@ async def run(
         )
         configs.append(exp_config)
 
+
+    for r in [5]:
+        exp_config = ExperimentConfig(
+            backend_config=pd_p_config,
+            app_id=pd,
+            model_id=model_id,
+            request_rate=r,
+            input_len=input_len,
+            # Dedicated prefill benchmark, so we set output_len to 1
+            output_len=1,
+            image_count=image_count,
+            num_prompts=num_prompts,
+            image_width=image_width,
+            image_height=image_height,
+            gpu_type=gpu_type,
+        )
+        configs.append(exp_config)
+
+    for r in [5]:
+        exp_config = ExperimentConfig(
+            backend_config=vllm_config,
+            app_id=vllm,
+            model_id=model_id,
+            request_rate=r,
+            input_len=input_len,
+            output_len=output_len,
+            image_count=image_count,
+            num_prompts=num_prompts,
+            image_width=image_width,
+            image_height=image_height,
+            gpu_type=gpu_type,
+        )
+        configs.append(exp_config)
 
     for r in [5]:
         exp_config = ExperimentConfig(
@@ -134,39 +171,6 @@ async def run(
         exp_config = ExperimentConfig(
             backend_config=epd_d_config,
             app_id=epd,
-            model_id=model_id,
-            request_rate=r,
-            input_len=input_len,
-            output_len=output_len,
-            image_count=image_count,
-            num_prompts=num_prompts,
-            image_width=image_width,
-            image_height=image_height,
-            gpu_type=gpu_type,
-        )
-        configs.append(exp_config)
-
-    for r in [5]:
-        exp_config = ExperimentConfig(
-            backend_config=pd_p_config,
-            app_id=pd,
-            model_id=model_id,
-            request_rate=r,
-            input_len=input_len,
-            # Dedicated prefill benchmark, so we set output_len to 1
-            output_len=1,
-            image_count=image_count,
-            num_prompts=num_prompts,
-            image_width=image_width,
-            image_height=image_height,
-            gpu_type=gpu_type,
-        )
-        configs.append(exp_config)
-
-    for r in [5]:
-        exp_config = ExperimentConfig(
-            backend_config=pd_d_config,
-            app_id=pd,
             model_id=model_id,
             request_rate=r,
             input_len=input_len,
@@ -213,14 +217,17 @@ async def run(
         # we scale every time to clean up the task executors states just in case
         await scale(cfg)
         request_inputs = transform_sampled_requests(config=cfg, sampled_requests=sampled_requests)
-        await benchmark(request_inputs=request_inputs, config=cfg)
+        output_data = await benchmark(request_inputs=request_inputs, config=cfg)
+        completed = output_data["metrics"]["completed"]
+        if completed <= cfg.num_prompts * 0.95:
+            raise RuntimeError("Insufficient completed requests")
         print("Benchmark completed for current batch.")
         print("=" * 50)
 
 
 async def main():
     set_ulimit()
-    await run(overwrite=False)
+    await run(overwrite=True)
 
 
 if __name__ == "__main__":
@@ -228,3 +235,4 @@ if __name__ == "__main__":
         asyncio.run(main())
     except KeyboardInterrupt:
         print("Benchmark interrupted by user.")
+
