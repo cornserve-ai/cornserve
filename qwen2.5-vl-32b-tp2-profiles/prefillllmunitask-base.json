@@ -7,6 +7,11 @@
     "execution_descriptor_name": null
   },
   "num_gpus_to_profile": {
-    "2": {"launch_args": ["--max-num-seqs", "128"]}
+    "1": {"launch_args": [
+      "--max-num-seqs",
+      "128",
+      "--max-model-len",
+      "8092"
+    ]}
   }
 }
