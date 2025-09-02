@@ -21,17 +21,27 @@ async def run(
 
     vllm_config = VLLMConfig(num_replicas=1, tp_size=2)
     # set max output tokens to 1 to profile prefill 
-    pd_p_config = PDConfig(num_prefills=1, prefill_tp_size=2, num_decodes=3, decode_tp_size=2)
-    pd_d_config = PDConfig(num_prefills=3, prefill_tp_size=2, num_decodes=1, decode_tp_size=2)
+    pd_p_config = PDConfig(num_prefills=1, prefill_tp_size=1, num_decodes=3, decode_tp_size=2)
+    pd_d_config = PDConfig(num_prefills=6, prefill_tp_size=1, num_decodes=1, decode_tp_size=2)
 
     configs = []
     gpu_type = "A100"
     image_width = 1920
     image_height = 1080
     image_count = 0
+    input_len = 1800
+    output_len = 700
+    """
     input_len = 1500
     output_len = 1000
+    4 l_{epd} vs 2P3D
+    4.8192846718540086 vs 3.33422489374055 4.768260810355426 3.33422489374055
+    4 l_{epd} vs 4P2D
+    4.8192846718540086 vs 2.2228165958270334 9.536521620710852 2.2228165958270334
     """
+
+    """
+
     # input_len = 2000
     # output_len = 500
     D = 1.56
@@ -125,10 +135,10 @@ async def run(
             pd_d_tput = pd_d_exp.load()["metrics"]["request_throughput"]
 
             # we only consider 8 gpu case
-            print("4 l_{epd} vs 1P3D")
-            print(4*vllm_tput, "vs", min(1*pd_p_tput,3*pd_d_tput), 1*pd_p_tput,3*pd_d_tput)
-            print("4 l_{epd} vs 2P2D")
-            print(4*vllm_tput, "vs", min(2*pd_p_tput,2*pd_d_tput), 2*pd_p_tput,2*pd_d_tput)
+            print("4 l_{epd} vs 2P3D")
+            print(4*vllm_tput, "vs", min(2*pd_p_tput,3*pd_d_tput), 2*pd_p_tput,3*pd_d_tput)
+            print("4 l_{epd} vs 4P2D")
+            print(4*vllm_tput, "vs", min(4*pd_p_tput,2*pd_d_tput), 4*pd_p_tput,2*pd_d_tput)
             exit(0)
 
 
@@ -177,10 +187,10 @@ async def run(
     pd_d_tput = pd_d_exp.load()["metrics"]["request_throughput"]
 
     # we only consider 8 gpu case
-    print("4 l_{epd} vs 1P3D")
-    print(4*vllm_tput, "vs", min(1*pd_p_tput,3*pd_d_tput), 1*pd_p_tput,3*pd_d_tput)
-    print("4 l_{epd} vs 2P2D")
-    print(4*vllm_tput, "vs", min(2*pd_p_tput,2*pd_d_tput), 2*pd_p_tput,2*pd_d_tput)
+    print("4 l_{epd} vs 2P3D")
+    print(4*vllm_tput, "vs", min(2*pd_p_tput,3*pd_d_tput), 2*pd_p_tput,3*pd_d_tput)
+    print("4 l_{epd} vs 4P2D")
+    print(4*vllm_tput, "vs", min(4*pd_p_tput,2*pd_d_tput), 4*pd_p_tput,2*pd_d_tput)
 
 async def main():
     set_ulimit()
