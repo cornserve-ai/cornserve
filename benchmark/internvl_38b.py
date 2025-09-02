@@ -1,4 +1,4 @@
-"""Execute throughput benchmark for Qwen2.5-VL-32B model."""
+"""Execute throughput benchmark for InternVL3-38B model."""
 
 import asyncio
 
@@ -11,29 +11,27 @@ from transformers import AutoTokenizer
 from cornserve.utils import set_ulimit
 
 
-async def run_qwen2_5_vl_32b(
+async def run(
     overwrite: bool = False,
 ) -> None:
-    """Run throughput benchmark for Qwen2.5-VL-32B model."""
-    model_id: str = "Qwen/Qwen2.5-VL-32B-Instruct"
+    """Run throughput benchmark for InternVL3-38B model."""
+    model_id: str = "OpenGVLab/InternVL3-38B"
     ev = register_app(model_id=model_id, app_type="ev")
-    print(f"Registered Qwen2.5-VL-32B EV with ID: {ev}")
-    e = register_app(model_id=model_id, app_type="e")
-    print(f"Registered Qwen2.5-VL-32B E with ID: {e}")
+    print(f"Registered {model_id} EV with ID: {ev}")
     vllm = register_app(model_id=model_id, app_type="v")
-    print(f"Registered Qwen2.5-VL-32B V with ID: {vllm}")
+    print(f"Registered {model_id} V with ID: {vllm}")
 
     vllm_config = VLLMConfig(num_replicas=4, tp_size=2)
     cornserve_config = CornserveConfig(num_vllms=3, vllm_tp_size=2, num_erics=2)
 
     configs = []
-    image_width = 1280
-    image_height = 720
-    input_len = 300
+    image_width = 1920
+    image_height = 1080
+    input_len = 1000
     output_len = 300
     image_count = 1
-    num_prompts = 1000
-    for r in []:
+    num_prompts = 2000
+    for r in [4,3,2]:
         exp_config = ExperimentConfig(
             backend_config=vllm_config,
             app_id=vllm,
@@ -47,7 +45,7 @@ async def run_qwen2_5_vl_32b(
             image_height=image_height,
         )
         configs.append(exp_config)
-    for r in [5]:
+    for r in [4,3,2]:
         exp_config = ExperimentConfig(
             backend_config=cornserve_config,
             app_id=ev,
@@ -103,7 +101,7 @@ async def run_qwen2_5_vl_32b(
 async def main():
     """Main function."""
     set_ulimit()
-    await run_qwen2_5_vl_32b()
+    await run()
 
 
 if __name__ == "__main__":
