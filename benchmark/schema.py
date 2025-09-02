@@ -27,10 +27,12 @@ class EricConfig(BackendConfig):
 
     num_replicas: int
     tp_size: int = 1
+    max_batch_size: int = 1
 
     def to_subdir_name(self) -> str:
         """Return the file name for the backend configuration."""
-        return f"eric+replicas{self.num_replicas}+tp{self.tp_size}"
+        subdir_name = f"eric+replicas{self.num_replicas}+tp{self.tp_size}+maxbs{self.max_batch_size}"
+        return subdir_name
 
 
 class CornserveConfig(BackendConfig):

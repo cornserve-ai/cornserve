@@ -31,7 +31,6 @@ logger = get_logger(__name__)
 
 async def parse_stream_to_completion_chunks(response: aiohttp.ClientResponse) -> AsyncGenerator[str]:
     """Parse the response stream to OpenAIChatCompletionChunk objects."""
-    assert not response.closed, "Response must not be closed when parsing."
     try:
         async for line in response.content:
             line = line.decode().strip()
@@ -102,10 +101,8 @@ class VLLMDescriptor(TaskExecutionDescriptor[LLMBaseUnitTask, OpenAIChatCompleti
             # These arguments will be hand tuned during benchmarking
             # When benchmarking, we reuse mm inputs, so we disable the preprocessor cache
             "--disable-mm-preprocessor-cache",
-            # "--max-num-seqs",
-            # "60",
-            # "--max-model-len",
-            # "8192",
+            "--gpu-memory-utilization",
+            "0.93",
         ]
         return args
 
@@ -246,6 +243,7 @@ class PrefillVLLMDescriptor(
             str(len(gpus)),
             "--port",
             str(port),
+            "--trust-remote-code",
             "--kv-transfer-config",
             '{"kv_connector":"NixlConnector","kv_role":"kv_producer"}',
             # need to forward KV transfer parameters to a decode instance
@@ -255,6 +253,8 @@ class PrefillVLLMDescriptor(
             "--enforce-eager",
             "--no-enable-prefix-caching",
             "--disable-mm-preprocessor-cache",
+            "--gpu-memory-utilization",
+            "0.93",
         ]
         return args
 
@@ -376,10 +376,9 @@ class DecodeVLLMDescriptor(
                 ("VLLM_NIXL_SIDE_CHANNEL_PORT", str(self.NIXL_BASE_PORT + gpus[0].global_rank)),
             ]
         )
-        if self.task.receive_embeddings:
-            envs.append(
-                ("CORNSERVE_VLLM_DISABLE_MULTIMODAL", "1"),
-            )
+        envs.append(
+            ("CORNSERVE_VLLM_DISABLE_MULTIMODAL", "1"),
+        )
         return envs
 
     def get_kubernetes_envs(self, gpus: list[GPU]) -> list[kclient.V1EnvVar]:
@@ -402,6 +401,7 @@ class DecodeVLLMDescriptor(
             str(len(gpus)),
             "--port",
             str(port),
+            "--trust-remote-code",
             "--kv-transfer-config",
             '{"kv_connector":"NixlConnector","kv_role":"kv_consumer"}',
             # need to receive KV transfer parameters from a decode instance
@@ -411,6 +411,8 @@ class DecodeVLLMDescriptor(
             "--enforce-eager",
             "--no-enable-prefix-caching",
             "--disable-mm-preprocessor-cache",
+            "--gpu-memory-utilization",
+            "0.93",
         ]
 
         return args

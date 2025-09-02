@@ -27,6 +27,7 @@ def create_mllm_app(
 
 def create_eric_app(
     model_id: str,
+    max_batch_size: int = 1,
 ) -> str:
     """Create an Eric app source code from a template.
 
@@ -36,5 +37,6 @@ def create_eric_app(
     src = Path(ERIC_TEMPLATE_PATH).read_text()
     rendered = Template(src).substitute(
         MODEL_ID=model_id,
+        MAX_BATCH_SIZE=max_batch_size,
     )
     return rendered.strip()
