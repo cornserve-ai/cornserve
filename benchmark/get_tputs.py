@@ -34,7 +34,7 @@ def run() -> None:
     pd_d_config = PDConfig(num_prefills=3, prefill_tp_size=2, num_decodes=1, decode_tp_size=2)
 
     model_id: str = "OpenGVLab/InternVL3-38B"
-    # model_id: str = "Qwen/Qwen2.5-VL-7B-Instruct"
+    # model_id: str = "Qwen/Qwen2.5-VL-32B-Instruct"
     image_width = 1920
     image_height = 1080
     image_count = 1
@@ -174,17 +174,20 @@ def run() -> None:
             data = cfg.load()
             metrics = data["metrics"]
             completed = metrics["completed"]
+            total_output = metrics["total_output"]
             tput = metrics["request_throughput"]
             mean_latency = metrics["mean_e2el_ms"] / 1000
             p95_latency = metrics["percentiles_e2el_ms"][1][1] / 1000
             p99_latency = metrics["percentiles_e2el_ms"][2][1] / 1000
             print("    Completed: {} / {}".format(completed, cfg.num_prompts))
+            print("    Total output tokens: {}".format(total_output))
             print("    Throughput: {:.2f} requests/s".format(tput))
             print("    Mean Latency: {:.2f} s".format(mean_latency))
             print("    P95 Latency: {:.2f} s".format(p95_latency))
             print("    P99 Latency: {:.2f} s".format(p99_latency))
             tput_results[cfg] = tput
-    with open("InternVL3-38B_tput_results.json", "w") as f:
+
+    with open(f"{model_id.replace("/", "_")}_tput_results.json", "w") as f:
         import json
         json.dump({str(k): v for k, v in tput_results.items()}, f, indent=4)
 
@@ -242,7 +245,7 @@ def run() -> None:
     for i in range(2, cell_size + 1, 2):
         # TP2
         num_l = i // 2
-        L_epd_mappings[i] = (num_l * tput_results[vllm_exp], (num_l))
+        L_epd_mappings[i] = (num_l * tput_results[vllm_exp], (num_l,))
 
     L_ep_L_d_mappings = {}
     for i in range(2, cell_size + 1, 2):
