@@ -32,10 +32,17 @@ async def run(
     image_width = 1920
     image_height = 1080
     image_count = 0
-    input_len = 1800
-    output_len = 700
+    input_len = 2000
+    output_len = 500
 
     """
+    input_len = 1800
+    output_len = 700
+    4 l_{epd} vs 2P3D
+    5.446149238560734 vs 3.822622696937028 3.95686752668122 3.822622696937028
+    4 l_{epd} vs 4P2D
+    5.446149238560734 vs 2.548415131291352 7.91373505336244 2.548415131291352
+
     input_len = 1500
     output_len = 1500
     4 l_{epd} vs 2P3D
