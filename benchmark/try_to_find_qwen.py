@@ -23,6 +23,9 @@ async def run(
     # set max output tokens to 1 to profile prefill 
     pd_p_config = PDConfig(num_prefills=1, prefill_tp_size=1, num_decodes=3, decode_tp_size=2)
     pd_d_config = PDConfig(num_prefills=6, prefill_tp_size=1, num_decodes=1, decode_tp_size=2)
+    # for 1500, 1500
+    # pd_p_config = PDConfig(num_prefills=1, prefill_tp_size=2, num_decodes=3, decode_tp_size=2)
+    # pd_d_config = PDConfig(num_prefills=3, prefill_tp_size=2, num_decodes=1, decode_tp_size=2)
 
     configs = []
     gpu_type = "A100"
@@ -31,7 +34,15 @@ async def run(
     image_count = 0
     input_len = 1800
     output_len = 700
+
     """
+    input_len = 1500
+    output_len = 1500
+    4 l_{epd} vs 2P3D
+    2.67543626471797 vs 1.9543301738920578 8.691939761788758 1.9543301738920578
+    4 l_{epd} vs 4P2D
+    2.67543626471797 vs 1.3028867825947053 17.383879523577516 1.3028867825947053
+
     input_len = 1500
     output_len = 1000
     4 l_{epd} vs 2P3D
