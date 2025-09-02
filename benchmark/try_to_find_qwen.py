@@ -21,16 +21,35 @@ async def run(
 
     vllm_config = VLLMConfig(num_replicas=1, tp_size=2)
     # set max output tokens to 1 to profile prefill 
-    pd_p_config = PDConfig(num_prefills=1, prefill_tp_size=1, num_decodes=3, decode_tp_size=2)
-    pd_d_config = PDConfig(num_prefills=6, prefill_tp_size=1, num_decodes=1, decode_tp_size=2)
+    pd_p_config = PDConfig(num_prefills=1, prefill_tp_size=2, num_decodes=3, decode_tp_size=2)
+    pd_d_config = PDConfig(num_prefills=3, prefill_tp_size=2, num_decodes=1, decode_tp_size=2)
 
     configs = []
     gpu_type = "A100"
     image_width = 1920
     image_height = 1080
     image_count = 0
+    input_len = 1500
+    output_len = 1500
+    """
+    # input_len = 2000
+    # output_len = 500
+    D = 1.56
+    P = 3.23
+    V = 1.24
+    bs=96
+    4 l_{epd} vs 1P3D
+    4.973209471390194 vs 4.681374013977647
+    4 l_{epd} vs 2P2D
+    4.973209471390194 vs 3.1209160093184316
+
     input_len = 2000
-    output_len = 500
+    output_len = 1000
+    4 l_{epd} vs 1P3D
+    3.4206014361388095 vs 2.5888921493782093
+    4 l_{epd} vs 2P2D
+    3.4206014361388095 vs 1.7259280995854729
+    """
     num_prompts = 500
 
     # InternVL3-38B # of KV cache tokens on A40 TP2
@@ -106,14 +125,10 @@ async def run(
             pd_d_tput = pd_d_exp.load()["metrics"]["request_throughput"]
 
             # we only consider 8 gpu case
-            print("4 l_{epd} vs 2P3D")
-            print(4*vllm_tput, "vs", min(2*pd_p_tput,3*pd_d_tput))
-            print("4 l_{epd} vs 4P2D")
-            print(4*vllm_tput, "vs", min(4*pd_p_tput,2*pd_d_tput))
-            # print("4 l_{epd} vs 1P3D")
-            # print(4*vllm_tput, "vs", min(1*pd_p_tput,3*pd_d_tput))
-            # print("4 l_{epd} vs 2P2D")
-            # print(4*vllm_tput, "vs", min(2*pd_p_tput,2*pd_d_tput))
+            print("4 l_{epd} vs 1P3D")
+            print(4*vllm_tput, "vs", min(1*pd_p_tput,3*pd_d_tput))
+            print("4 l_{epd} vs 2P2D")
+            print(4*vllm_tput, "vs", min(2*pd_p_tput,2*pd_d_tput))
             exit(0)
 
 
@@ -162,14 +177,10 @@ async def run(
     pd_d_tput = pd_d_exp.load()["metrics"]["request_throughput"]
 
     # we only consider 8 gpu case
-    print("4 l_{epd} vs 2P3D")
-    print(4*vllm_tput, "vs", min(2*pd_p_tput,3*pd_d_tput))
-    print("4 l_{epd} vs 4P2D")
-    print(4*vllm_tput, "vs", min(4*pd_p_tput,2*pd_d_tput))
-    # print("4 l_{epd} vs 1P3D")
-    # print(4*vllm_tput, "vs", min(1*pd_p_tput,3*pd_d_tput))
-    # print("4 l_{epd} vs 2P2D")
-    # print(4*vllm_tput, "vs", min(2*pd_p_tput,2*pd_d_tput))
+    print("4 l_{epd} vs 1P3D")
+    print(4*vllm_tput, "vs", min(1*pd_p_tput,3*pd_d_tput))
+    print("4 l_{epd} vs 2P2D")
+    print(4*vllm_tput, "vs", min(2*pd_p_tput,2*pd_d_tput))
 
 async def main():
     set_ulimit()
