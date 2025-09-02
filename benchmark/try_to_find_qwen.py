@@ -110,6 +110,10 @@ async def run(
             print(4*vllm_tput, "vs", min(2*pd_p_tput,3*pd_d_tput))
             print("4 l_{epd} vs 4P2D")
             print(4*vllm_tput, "vs", min(4*pd_p_tput,2*pd_d_tput))
+            # print("4 l_{epd} vs 1P3D")
+            # print(4*vllm_tput, "vs", min(1*pd_p_tput,3*pd_d_tput))
+            # print("4 l_{epd} vs 2P2D")
+            # print(4*vllm_tput, "vs", min(2*pd_p_tput,2*pd_d_tput))
             exit(0)
 
 
@@ -158,10 +162,14 @@ async def run(
     pd_d_tput = pd_d_exp.load()["metrics"]["request_throughput"]
 
     # we only consider 8 gpu case
-    print("4 l_{epd} vs 1P3D")
+    print("4 l_{epd} vs 2P3D")
     print(4*vllm_tput, "vs", min(2*pd_p_tput,3*pd_d_tput))
-    print("4 l_{epd} vs 2P2D")
+    print("4 l_{epd} vs 4P2D")
     print(4*vllm_tput, "vs", min(4*pd_p_tput,2*pd_d_tput))
+    # print("4 l_{epd} vs 1P3D")
+    # print(4*vllm_tput, "vs", min(1*pd_p_tput,3*pd_d_tput))
+    # print("4 l_{epd} vs 2P2D")
+    # print(4*vllm_tput, "vs", min(2*pd_p_tput,2*pd_d_tput))
 
 async def main():
     set_ulimit()
