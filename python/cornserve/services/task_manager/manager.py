@@ -60,11 +60,16 @@ class TaskManager:
         # Config variables
         self.task_executor_healthy_timeout = constants.K8S_TASK_EXECUTOR_HEALTHY_TIMEOUT
 
-        # Load the unit task profile
-        self.task_profile = UnitTaskProfileManager(profile_dir=constants.UNIT_TASK_PROFILES_DIR).get_profile(task)
+        # We only save the profile manager here so that profiles could be updated dynamically
+        self.task_profile_manager = UnitTaskProfileManager(profile_dir=constants.UNIT_TASK_PROFILES_DIR)
 
         # Round robin routing
         self.rr_counter = 0
+
+    @property
+    def task_profile(self):
+        """Get the unit task profile for the managed task."""
+        return self.task_profile_manager.get_profile(self.task)
 
     @classmethod
     async def init(cls, id: str, task: UnitTask, gpus: list[GPU]) -> TaskManager:

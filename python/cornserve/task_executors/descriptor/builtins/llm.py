@@ -103,10 +103,6 @@ class VLLMDescriptor(TaskExecutionDescriptor[LLMBaseUnitTask, OpenAIChatCompleti
             "--disable-mm-preprocessor-cache",
             "--gpu-memory-utilization",
             "0.93",
-            # "--max-num-seqs",
-            # str(22 if self.task.receive_embeddings else 4),
-            # "--max-model-len",
-            # "4092",
         ]
         return args
 
@@ -259,10 +255,6 @@ class PrefillVLLMDescriptor(
             "--disable-mm-preprocessor-cache",
             "--gpu-memory-utilization",
             "0.93",
-            # "--max-model-len",
-            # "4092",
-            # "--max-num-seqs",
-            # str(22 if self.task.receive_embeddings else 4),
         ]
         return args
 
@@ -421,10 +413,6 @@ class DecodeVLLMDescriptor(
             "--disable-mm-preprocessor-cache",
             "--gpu-memory-utilization",
             "0.93",
-            # "--max-model-len",
-            # "4092",
-            # "--max-num-seqs",
-            # str(22 if self.task.receive_embeddings else 4),
         ]
 
         return args
