@@ -32,10 +32,7 @@ async def run(
     # 1792 image tokens
     input_len = 300
     output_len = 1500
-
-    """
-    """
-    num_prompts = 200
+    num_prompts = 500
 
     # InternVL3-38B # of KV cache tokens on A40 TP2
     # 72,832 -- without E

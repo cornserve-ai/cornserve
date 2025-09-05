@@ -287,6 +287,7 @@ async def cornserve_invoke(
         st = time.perf_counter()
         output.start_timestamp = st
         most_recent_timestamp = st
+        current_completion_tokens = 0
         try:
             async with session.post(url=api_url, json=payload) as response:
                 if response.status == 200:
@@ -298,6 +299,8 @@ async def cornserve_invoke(
                             continue
                         timestamp = time.perf_counter()
                         data = json.loads(line)
+                        usage = data.get("usage")
+                        completion_tokens = usage and usage.get("completion_tokens")
                         # here we do the hack to identify the OmniOutputChunk type
                         if "text_chunk" in data:
                             data = data["text_chunk"]
@@ -310,6 +313,14 @@ async def cornserve_invoke(
                             # Decoding phase
                             else:
                                 output.itl.append(timestamp - most_recent_timestamp)
+                                # in case we get multiple tokens in one chunk
+                                if completion_tokens:
+                                    inc = completion_tokens - current_completion_tokens
+                                    # if inc == 0, below are no-ops
+                                    current_completion_tokens = completion_tokens
+                                    for _ in range(inc - 1):
+                                        output.itl.append(0)
+
                             generated_text += content or ""
                         elif usage := data.get("usage"):
                             output.output_tokens = usage.get("completion_tokens")
