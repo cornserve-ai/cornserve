@@ -313,13 +313,14 @@ async def cornserve_invoke(
                             # Decoding phase
                             else:
                                 output.itl.append(timestamp - most_recent_timestamp)
-                                # in case we get multiple tokens in one chunk
-                                if completion_tokens:
-                                    inc = completion_tokens - current_completion_tokens
-                                    # if inc == 0, below are no-ops
-                                    current_completion_tokens = completion_tokens
-                                    for _ in range(inc - 1):
-                                        output.itl.append(0)
+
+                            # in case we get multiple tokens in one chunk
+                            if completion_tokens:
+                                inc = completion_tokens - current_completion_tokens
+                                # if inc == 0, below are no-ops
+                                current_completion_tokens = completion_tokens
+                                for _ in range(inc - 1):
+                                    output.itl.append(0)
 
                             generated_text += content or ""
                         elif usage := data.get("usage"):
