@@ -271,6 +271,7 @@ async def cornserve_invoke(
             "max_completion_tokens": request_input.output_len,
             "stream_options": {
                 "include_usage": True,
+                "continuous_usage_stats": True,
             },
             "encoder_fission": request_input.encoder_fission,
             "ignore_eos": request_input.ignore_eos,
