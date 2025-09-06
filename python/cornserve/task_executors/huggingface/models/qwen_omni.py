@@ -3,27 +3,26 @@
 from __future__ import annotations
 
 import base64
-import uuid
-from collections.abc import AsyncGenerator
 
-import numpy as np
+import torch
+from qwen_omni_utils import process_mm_info
 from transformers import Qwen2_5OmniForConditionalGeneration, Qwen2_5OmniProcessor
 
 from cornserve.logging import get_logger
-from cornserve.task.builtins.llm import OpenAIChatCompletionChunk
 from cornserve.task_executors.huggingface.api import HuggingFaceRequest, HuggingFaceResponse, Status
+from cornserve.task_executors.huggingface.models.base import HFModel
 
 logger = get_logger(__name__)
 
 
-class QwenOmniModel:
+class QwenOmniModel(HFModel):
     """Wrapper for Qwen 2.5 Omni model using HuggingFace transformers.
 
     Uses Qwen2_5OmniForConditionalGeneration and Qwen2_5OmniProcessor for
     multimodal generation with text and audio output.
     """
 
-    def __init__(self, model_id: str):
+    def __init__(self, model_id: str) -> None:
         """Initialize the Qwen 2.5 Omni model.
 
         Args:
@@ -35,45 +34,46 @@ class QwenOmniModel:
         # Load the model and processor
         self.model = Qwen2_5OmniForConditionalGeneration.from_pretrained(
             model_id,
-            torch_dtype="auto",
-            device_map="auto",
+            torch_dtype=torch.bfloat16,
+            device_map="cuda",
         )
 
         self.processor = Qwen2_5OmniProcessor.from_pretrained(model_id)
 
         logger.info("Successfully loaded Qwen 2.5 Omni model")
 
-    async def generate_stream(self, request: HuggingFaceRequest) -> AsyncGenerator[HuggingFaceResponse, None]:
-        """Generate streaming response for multimodal input.
+    def generate(self, request: HuggingFaceRequest) -> HuggingFaceResponse:
+        """Generate audio from the Qwem Omni model."""
+        assert request.messages is not None, "Messages must be provided in the request"
 
-        Args:
-            request: The request containing messages and options.
+        if not request.return_audio:
+            raise ValueError("Only audio generation is supported for the Qwen 2.5 Omni model")
 
-        Yields:
-            HuggingFaceResponse chunks with either text or audio content.
-        """
-        try:
-            # Convert messages to the format expected by the processor
-            conversations = self._convert_messages(request.messages)
+        # Convert messages to the format expected by the processor
+        conversations = self._convert_messages(request.messages)
 
-            # Process inputs
-            inputs = self.processor.apply_chat_template(
-                conversations, add_generation_prompt=True, tokenize=True, return_dict=True
-            )
+        # Process inputs
+        text = self.processor.apply_chat_template(conversations, add_generation_prompt=True, tokenize=True)
+        audios, images, videos = process_mm_info(conversations, use_audio_in_video=False)  # type: ignore
+        inputs = self.processor(
+            text=text,
+            audio=audios,
+            images=images,
+            videos=videos,
+            return_tensors="pt",
+            padding=True,
+            use_audio_in_video=False,  # type: ignore
+        )
 
-            # Generate response
-            if request.return_audio:
-                # Generate both text and audio
-                async for chunk in self._generate_with_audio(inputs, request):
-                    yield chunk
-            else:
-                # Generate text only
-                async for chunk in self._generate_text_only(inputs, request):
-                    yield chunk
+        # Generate response
+        text_ids, audio = self.model.generate(**inputs, use_audio_in_video=False, return_audio=True)
 
-        except Exception as e:
-            logger.exception("Error in Qwen 2.5 Omni generation: %s", e)
-            yield HuggingFaceResponse(status=Status.ERROR, error_message=f"Error in generation: {e}")
+        text = self.processor.batch_decode(text_ids)[0]
+        logger.info("Generated text: %s", text[text.rfind("<|im_start|>") :])
+
+        audio_data = audio.reshape(-1).detach().cpu().numpy()  # np.float32
+        audio_b64 = base64.b64encode(audio_data.tobytes()).decode("utf-8")
+        return HuggingFaceResponse(status=Status.SUCCESS, audio_chunk=audio_b64)
 
     def _convert_messages(self, messages: list[dict]) -> list[dict]:
         """Convert OpenAI-style messages to Qwen format.
@@ -94,7 +94,7 @@ class QwenOmniModel:
                 # Simple text message
                 conversations.append({"role": role, "content": [{"type": "text", "text": content}]})
             elif isinstance(content, list):
-                # Multimodal content
+                # Could contain multimodal content
                 converted_content = []
                 for part in content:
                     if isinstance(part, dict):
@@ -113,128 +113,3 @@ class QwenOmniModel:
                 conversations.append({"role": role, "content": converted_content})
 
         return conversations
-
-    async def _generate_with_audio(
-        self, inputs: dict, request: HuggingFaceRequest
-    ) -> AsyncGenerator[HuggingFaceResponse, None]:
-        """Generate response with audio output.
-
-        Args:
-            inputs: Processed inputs from processor.
-            request: Original request.
-
-        Yields:
-            Response chunks with text and audio.
-        """
-        try:
-            # Generate with audio output (using default speaker "Chelsie")
-            text_ids, audio = self.model.generate(**inputs, speaker="Chelsie")
-
-            # Convert text tokens to text
-            generated_text = self.processor.decode(text_ids[0], skip_special_tokens=True)
-
-            # Create text chunks (simulate streaming)
-            chunk_id = uuid.uuid4().hex
-
-            # Yield text chunk
-            text_chunk = OpenAIChatCompletionChunk(
-                id=chunk_id,
-                object="chat.completion.chunk",
-                created=0,
-                model=request.model_id,
-                choices=[{"index": 0, "delta": {"content": generated_text}, "finish_reason": None}],
-            )
-
-            yield HuggingFaceResponse(status=Status.SUCCESS, text_chunk=text_chunk.model_dump())
-
-            # Convert and yield audio chunks
-            if audio is not None:
-                # Convert audio to base64
-                audio_np = audio.cpu().numpy() if hasattr(audio, "cpu") else audio
-                if isinstance(audio_np, (list, tuple)):
-                    audio_np = np.array(audio_np)
-
-                # Ensure audio is float32
-                if audio_np.dtype != np.float32:
-                    audio_np = audio_np.astype(np.float32)
-
-                # Split audio into chunks for streaming
-                chunk_size = 4096  # samples per chunk
-                for i in range(0, len(audio_np), chunk_size):
-                    audio_chunk = audio_np[i : i + chunk_size]
-
-                    # Convert to base64
-                    audio_b64 = base64.b64encode(audio_chunk.tobytes()).decode("utf-8")
-
-                    yield HuggingFaceResponse(status=Status.SUCCESS, audio_chunk=audio_b64)
-
-            # Final chunk
-            final_chunk = OpenAIChatCompletionChunk(
-                id=chunk_id,
-                object="chat.completion.chunk",
-                created=0,
-                model=request.model_id,
-                choices=[{"index": 0, "delta": {}, "finish_reason": "stop"}],
-            )
-
-            yield HuggingFaceResponse(status=Status.SUCCESS, text_chunk=final_chunk.model_dump())
-
-        except Exception as e:
-            logger.exception("Error in audio generation: %s", e)
-            yield HuggingFaceResponse(status=Status.ERROR, error_message=f"Error in audio generation: {e}")
-
-    async def _generate_text_only(
-        self, inputs: dict, request: HuggingFaceRequest
-    ) -> AsyncGenerator[HuggingFaceResponse, None]:
-        """Generate text-only response.
-
-        Args:
-            inputs: Processed inputs from processor.
-            request: Original request.
-
-        Yields:
-            Response chunks with text only.
-        """
-        try:
-            # Generate text without audio
-            # Note: For text-only generation, we might need to use a different method
-            # This is a simplified implementation
-            text_ids, _ = self.model.generate(**inputs)
-
-            # Convert text tokens to text
-            generated_text = self.processor.decode(text_ids[0], skip_special_tokens=True)
-
-            # Create streaming chunks
-            chunk_id = uuid.uuid4().hex
-
-            # Simulate streaming by splitting text
-            words = generated_text.split()
-            current_text = ""
-
-            for word in words:
-                current_text += word + " "
-
-                text_chunk = OpenAIChatCompletionChunk(
-                    id=chunk_id,
-                    object="chat.completion.chunk",
-                    created=0,
-                    model=request.model_id,
-                    choices=[{"index": 0, "delta": {"content": word + " "}, "finish_reason": None}],
-                )
-
-                yield HuggingFaceResponse(status=Status.SUCCESS, text_chunk=text_chunk.model_dump())
-
-            # Final chunk
-            final_chunk = OpenAIChatCompletionChunk(
-                id=chunk_id,
-                object="chat.completion.chunk",
-                created=0,
-                model=request.model_id,
-                choices=[{"index": 0, "delta": {}, "finish_reason": "stop"}],
-            )
-
-            yield HuggingFaceResponse(status=Status.SUCCESS, text_chunk=final_chunk.model_dump())
-
-        except Exception as e:
-            logger.exception("Error in text generation: %s", e)
-            yield HuggingFaceResponse(status=Status.ERROR, error_message=f"Error in text generation: {e}")

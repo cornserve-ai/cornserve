@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from cornserve.task_executors.huggingface.api import TaskType
+from cornserve.task_executors.huggingface.api import ModelType
 
 
 @dataclass
@@ -30,6 +30,7 @@ class ModelConfig:
     """
 
     id: str
+    model_type: ModelType
     max_batch_size: int = 1
 
 
@@ -43,6 +44,5 @@ class HuggingFaceConfig:
         server: Server configuration.
     """
 
-    task_type: TaskType
     model: ModelConfig
     server: ServerConfig

@@ -8,7 +8,6 @@ import aiohttp
 
 from cornserve import constants
 from cornserve.services.resource import GPU
-from cornserve.task.base import Stream
 from cornserve.task.builtins.huggingface import (
     HuggingFaceQwenImageInput,
     HuggingFaceQwenImageOutput,
@@ -19,7 +18,7 @@ from cornserve.task.builtins.huggingface import (
 )
 from cornserve.task_executors.descriptor.base import TaskExecutionDescriptor
 from cornserve.task_executors.descriptor.registry import DESCRIPTOR_REGISTRY
-from cornserve.task_executors.huggingface.api import HuggingFaceRequest, HuggingFaceResponse, TaskType
+from cornserve.task_executors.huggingface.api import HuggingFaceRequest, HuggingFaceResponse, ModelType, Status
 
 
 class HuggingFaceQwenImageDescriptor(
@@ -39,8 +38,8 @@ class HuggingFaceQwenImageDescriptor(
     def get_container_args(self, gpus: list[GPU], port: int) -> list[str]:
         """Get the container command for the task executor."""
         return [
-            "--task-type",
-            TaskType.QWEN_IMAGE.value,
+            "--model.model-type",
+            ModelType.QWEN_IMAGE.value,
             "--model.id",
             self.task.model_id,
             "--server.port",
@@ -57,9 +56,7 @@ class HuggingFaceQwenImageDescriptor(
         self, task_input: HuggingFaceQwenImageInput, task_output: HuggingFaceQwenImageOutput
     ) -> dict[str, Any]:
         """Convert TaskInput to a request object for the task executor."""
-        return HuggingFaceRequest(
-            task_type=TaskType.QWEN_IMAGE, model_id=self.task.model_id, **task_input.model_dump()
-        ).model_dump()
+        return HuggingFaceRequest(**task_input.model_dump()).model_dump()
 
     async def from_response(
         self, task_output: HuggingFaceQwenImageOutput, response: aiohttp.ClientResponse
@@ -68,7 +65,7 @@ class HuggingFaceQwenImageDescriptor(
         response_data = await response.json()
         hf_response = HuggingFaceResponse.model_validate(response_data)
 
-        if hf_response.status != 0:  # SUCCESS
+        if hf_response.status != Status.SUCCESS:
             raise RuntimeError(f"Error in HuggingFace Qwen-Image task: {hf_response.error_message}")
 
         if hf_response.image is None:
@@ -78,7 +75,7 @@ class HuggingFaceQwenImageDescriptor(
 
 
 class HuggingFaceQwenOmniDescriptor(
-    TaskExecutionDescriptor[HuggingFaceQwenOmniTask, HuggingFaceQwenOmniInput, Stream[HuggingFaceQwenOmniOutput]]
+    TaskExecutionDescriptor[HuggingFaceQwenOmniTask, HuggingFaceQwenOmniInput, HuggingFaceQwenOmniOutput]
 ):
     """Task execution descriptor for HuggingFace Qwen 2.5 Omni tasks."""
 
@@ -94,8 +91,8 @@ class HuggingFaceQwenOmniDescriptor(
     def get_container_args(self, gpus: list[GPU], port: int) -> list[str]:
         """Get the container command for the task executor."""
         return [
-            "--task-type",
-            TaskType.QWEN_OMNI.value,
+            "--model.model-type",
+            ModelType.QWEN_OMNI.value,
             "--model.id",
             self.task.model_id,
             "--server.port",
@@ -109,50 +106,32 @@ class HuggingFaceQwenOmniDescriptor(
         return f"{base}/generate"
 
     def to_request(
-        self, task_input: HuggingFaceQwenOmniInput, task_output: Stream[HuggingFaceQwenOmniOutput]
+        self,
+        task_input: HuggingFaceQwenOmniInput,
+        task_output: HuggingFaceQwenOmniOutput,
     ) -> dict[str, Any]:
         """Convert TaskInput to a request object for the task executor."""
-        return HuggingFaceRequest(
-            task_type=TaskType.QWEN_OMNI, model_id=self.task.model_id, **task_input.model_dump()
-        ).model_dump()
+        if not task_input.return_audio:
+            raise ValueError("HuggingFace Qwen-Omni tasks must have return_audio=True")
+
+        return HuggingFaceRequest(**task_input.model_dump()).model_dump()
 
     async def from_response(
-        self, task_output: Stream[HuggingFaceQwenOmniOutput], response: aiohttp.ClientResponse
-    ) -> Stream[HuggingFaceQwenOmniOutput]:
+        self,
+        task_output: HuggingFaceQwenOmniOutput,
+        response: aiohttp.ClientResponse,
+    ) -> HuggingFaceQwenOmniOutput:
         """Convert the task executor response to TaskOutput."""
+        response_data = await response.json()
+        hf_response = HuggingFaceResponse.model_validate(response_data)
 
-        # Parse streaming response similar to vLLM descriptor
-        async def parse_stream():
-            async for line in response.content:
-                line = line.decode().strip()
-                if not line:
-                    continue
+        if hf_response.status != Status.SUCCESS:
+            raise RuntimeError(f"Error in HuggingFace Qwen-Omni task: {hf_response.error_message}")
 
-                if not line.startswith("data: "):
-                    continue
+        if hf_response.audio_chunk is None:
+            raise RuntimeError("No audio chunk received from HuggingFace Qwen-Omni task")
 
-                line = line[6:].strip()
-
-                if line.startswith("[DONE]"):
-                    break
-
-                # Parse HuggingFaceResponse and convert to HuggingFaceQwenOmniOutput
-                try:
-                    hf_response = HuggingFaceResponse.model_validate_json(line)
-                    if hf_response.status != 0:  # SUCCESS
-                        raise RuntimeError(f"Error in HuggingFace Qwen-Omni task: {hf_response.error_message}")
-
-                    omni_output = HuggingFaceQwenOmniOutput(
-                        audio_chunk=hf_response.audio_chunk, text_chunk=hf_response.text_chunk
-                    )
-                    yield omni_output.model_dump_json()
-                except Exception as e:
-                    raise RuntimeError(f"Failed to parse HuggingFace Qwen-Omni response: {e}") from e
-
-        return Stream[HuggingFaceQwenOmniOutput](
-            async_iterator=parse_stream(),
-            response=response,
-        )
+        return HuggingFaceQwenOmniOutput(audio_chunk=hf_response.audio_chunk)
 
 
 # Register descriptors with the registry

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import uuid
-from typing import Any
 
 from pydantic import Field
 
@@ -36,7 +35,7 @@ class HuggingFaceQwenImageInput(TaskInput):
 class HuggingFaceQwenImageOutput(TaskOutput):
     """Output model for Qwen-Image generation task.
 
-    Matches QwenImageOutput from examples/qwen_image.py.
+    Same as QwenImageOutput in examples/qwen_image.py.
 
     Attributes:
         image: Generated image as a base64-encoded PNG bytes.
@@ -66,28 +65,10 @@ class HuggingFaceQwenImageTask(UnitTask[HuggingFaceQwenImageInput, HuggingFaceQw
 
 
 class HuggingFaceQwenOmniInput(TaskInput):
-    """Input model for Qwen 2.5 Omni tasks.
+    """Input model for Qwen 2.5 Omni tasks."""
 
-    Matches OmniInput from omni.py (inherits OpenAIChatCompletionRequest pattern).
-
-    Attributes:
-        model: The model ID to use.
-        messages: List of chat messages.
-        return_audio: Whether to return audio response.
-        frequency_penalty: Frequency penalty for generation.
-        max_completion_tokens: Maximum completion tokens.
-        presence_penalty: Presence penalty for generation.
-        seed: Random seed for generation.
-        stream_options: Streaming options.
-        temperature: Temperature for generation.
-        top_p: Top-p for generation.
-        request_id: Unique request identifier.
-        ignore_eos: Whether to ignore end-of-sequence tokens.
-    """
-
-    model: str = "Qwen/Qwen2.5-Omni-7B"
     messages: list[ChatCompletionMessageParam]
-    return_audio: bool = True
+    model: str
     frequency_penalty: float | None = 0.0
     max_completion_tokens: int | None = None
     presence_penalty: float | None = 0.0
@@ -98,10 +79,7 @@ class HuggingFaceQwenOmniInput(TaskInput):
     request_id: str = Field(default_factory=lambda: uuid.uuid4().hex)
     ignore_eos: bool = False
 
-    def model_post_init(self, context: Any, /) -> None:
-        """Validate the model."""
-        if self.model != "Qwen/Qwen2.5-Omni-7B":
-            raise ValueError("Only Qwen/Qwen2.5-Omni-7B is supported.")
+    return_audio: bool = True
 
 
 class HuggingFaceQwenOmniOutput(TaskOutput):

@@ -9,41 +9,15 @@ from pydantic import BaseModel
 from cornserve.task.builtins.llm import StreamOptions
 
 
-class TaskType(enum.StrEnum):
-    """Task type for HuggingFace executor."""
+class ModelType(enum.StrEnum):
+    """Model type for HuggingFace executor."""
 
     QWEN_IMAGE = "qwen-image"
     QWEN_OMNI = "qwen-omni"
 
 
 class HuggingFaceRequest(BaseModel):
-    """Request to HuggingFace task executor.
-
-    Attributes:
-        task_type: Type of task to execute.
-        model_id: Model ID to use.
-
-        # Qwen-Image fields
-        prompt: Text prompt for image generation.
-        height: Height of generated image in pixels.
-        width: Width of generated image in pixels.
-        num_inference_steps: Number of denoising steps.
-
-        # Qwen-Omni fields (OpenAI chat completion compatible)
-        messages: List of chat messages.
-        return_audio: Whether to return audio response.
-        frequency_penalty: Frequency penalty for generation.
-        max_completion_tokens: Maximum completion tokens.
-        presence_penalty: Presence penalty for generation.
-        seed: Random seed for generation.
-        stream_options: Streaming options.
-        temperature: Temperature for generation.
-        top_p: Top-p for generation.
-        request_id: Unique request identifier.
-    """
-
-    task_type: TaskType
-    model_id: str
+    """Request to HuggingFace task executor."""
 
     # Qwen-Image fields
     prompt: str | None = None
@@ -53,15 +27,17 @@ class HuggingFaceRequest(BaseModel):
 
     # Qwen-Omni fields
     messages: list[dict] | None = None
-    return_audio: bool | None = None
-    frequency_penalty: float | None = None
+    model: str
+    frequency_penalty: float | None = 0.0
     max_completion_tokens: int | None = None
-    presence_penalty: float | None = None
+    presence_penalty: float | None = 0.0
     seed: int | None = None
     stream_options: StreamOptions | None = None
     temperature: float | None = None
     top_p: float | None = None
-    request_id: str | None = None
+    request_id: str
+    ignore_eos: bool = False
+    return_audio: bool | None = None
 
 
 class Status(enum.IntEnum):
