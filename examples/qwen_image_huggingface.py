@@ -1,7 +1,7 @@
 """An app that generates images using Qwen-Image model.
 
 ```console
-$ cornserve register examples/qwen_image.py
+$ cornserve register examples/qwen_image_huggingface.py
 
 $ cornserve invoke qwen_image_huggingface --data - <<EOF
 prompt: "A beautiful landscape with mountains and a lake at sunset"
