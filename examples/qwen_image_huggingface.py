@@ -28,7 +28,6 @@ from cornserve.task.builtins.huggingface import (
     HuggingFaceQwenImageTask,
 )
 
-# Use HuggingFace-based task instead of the complex composite task
 qwen_image = HuggingFaceQwenImageTask(model_id="Qwen/Qwen-Image")
 
 

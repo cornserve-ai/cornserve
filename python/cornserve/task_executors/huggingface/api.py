@@ -12,8 +12,8 @@ from cornserve.task.builtins.llm import StreamOptions
 class ModelType(enum.StrEnum):
     """Model type for HuggingFace executor."""
 
-    QWEN_IMAGE = "qwen-image"
-    QWEN_OMNI = "qwen-omni"
+    QWEN_IMAGE = "QWEN_IMAGE"
+    QWEN_OMNI = "QWEN_OMNI"
 
 
 class HuggingFaceRequest(BaseModel):

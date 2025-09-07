@@ -47,7 +47,7 @@ async def info(raw_request: Request) -> dict[str, Any]:
     return {
         "model_type": config.model.model_type,
         "model_id": config.model.id,
-        "max_batch_size": config.model.max_batch_size,
+        "max_batch_size": config.server.max_batch_size,
     }
 
 
@@ -78,7 +78,7 @@ def create_app(config: HuggingFaceConfig) -> FastAPI:
 
     # Initialize app state
     engine = HuggingFaceEngine(
-        max_batch_size=config.model.max_batch_size,
+        max_batch_size=config.server.max_batch_size,
         model_type=config.model.model_type,
         model_id=config.model.id,
     )

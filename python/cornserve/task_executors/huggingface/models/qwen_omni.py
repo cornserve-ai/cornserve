@@ -53,7 +53,7 @@ class QwenOmniModel(HFModel):
         conversations = self._convert_messages(request.messages)
 
         # Process inputs
-        text = self.processor.apply_chat_template(conversations, add_generation_prompt=True, tokenize=True)
+        text = self.processor.apply_chat_template(conversations, add_generation_prompt=True, tokenize=False)
         audios, images, videos = process_mm_info(conversations, use_audio_in_video=False)  # type: ignore
         inputs = self.processor(
             text=text,
@@ -64,15 +64,23 @@ class QwenOmniModel(HFModel):
             padding=True,
             use_audio_in_video=False,  # type: ignore
         )
+        inputs = inputs.to(self.model.device).to(self.model.dtype)
 
         # Generate response
         text_ids, audio = self.model.generate(**inputs, use_audio_in_video=False, return_audio=True)
 
         text = self.processor.batch_decode(text_ids)[0]
-        logger.info("Generated text: %s", text[text.rfind("<|im_start|>") :])
 
         audio_data = audio.reshape(-1).detach().cpu().numpy()  # np.float32
         audio_b64 = base64.b64encode(audio_data.tobytes()).decode("utf-8")
+
+        logger.info("Generated text: %s", text[text.rfind("<|im_start|>") :])
+        logger.info(
+            "Generated audio length is %f seconds and size after base64 encoding is %.2f MiBs",
+            audio.numel() / 24000,
+            len(audio_b64) / (1024 * 1024),
+        )
+
         return HuggingFaceResponse(status=Status.SUCCESS, audio_chunk=audio_b64)
 
     def _convert_messages(self, messages: list[dict]) -> list[dict]:

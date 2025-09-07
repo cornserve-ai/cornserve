@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import uuid
 
+from openai.types.chat.chat_completion_chunk import Choice, ChoiceDelta
 from pydantic import Field
 
-from cornserve.task.base import Stream, TaskInput, TaskOutput, UnitTask
+from cornserve.task.base import TaskInput, TaskOutput, UnitTask
 from cornserve.task.builtins.llm import (
     ChatCompletionMessageParam,
     OpenAIChatCompletionChunk,
@@ -98,7 +99,7 @@ class HuggingFaceQwenOmniOutput(TaskOutput):
     text_chunk: OpenAIChatCompletionChunk | None = None
 
 
-class HuggingFaceQwenOmniTask(UnitTask[HuggingFaceQwenOmniInput, Stream[HuggingFaceQwenOmniOutput]]):
+class HuggingFaceQwenOmniTask(UnitTask[HuggingFaceQwenOmniInput, HuggingFaceQwenOmniOutput]):
     """A task that invokes the Qwen 2.5 Omni model via HuggingFace transformers.
 
     Attributes:
@@ -109,9 +110,20 @@ class HuggingFaceQwenOmniTask(UnitTask[HuggingFaceQwenOmniInput, Stream[HuggingF
     model_id: str = "Qwen/Qwen2.5-Omni-7B"
     max_batch_size: int = 1
 
-    def make_record_output(self, task_input: HuggingFaceQwenOmniInput) -> Stream[HuggingFaceQwenOmniOutput]:
+    def make_record_output(self, task_input: HuggingFaceQwenOmniInput) -> HuggingFaceQwenOmniOutput:
         """Create a mock task output object for invocation recording."""
-        return Stream[HuggingFaceQwenOmniOutput]()
+        if task_input.return_audio:
+            return HuggingFaceQwenOmniOutput(audio_chunk="")
+
+        return HuggingFaceQwenOmniOutput(
+            text_chunk=OpenAIChatCompletionChunk(
+                id="ID",
+                choices=[Choice(index=0, finish_reason="stop", delta=ChoiceDelta(role="assistant", content=""))],
+                created=0,
+                object="chat.completion.chunk",
+                model=task_input.model,
+            ),
+        )
 
     def make_name(self) -> str:
         """Create a concise string representation of the task."""
