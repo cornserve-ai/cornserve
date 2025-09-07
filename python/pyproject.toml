@@ -111,7 +111,7 @@ huggingface-te = [
   "transformers==4.55.4",
   "pillow",
   "diffusers>=0.35.1",
-  "qwen_omni_utils",
+  "qwen_omni_utils==0.0.8",
   "accelerate",
   "opentelemetry-instrumentation-fastapi",
 ]

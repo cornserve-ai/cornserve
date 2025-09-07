@@ -2,15 +2,12 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-
-from pydantic import PositiveInt, field_validator
+from pydantic import BaseModel, PositiveInt, field_validator
 
 from cornserve.task_executors.huggingface.api import ModelType
 
 
-@dataclass
-class ServerConfig:
+class ServerConfig(BaseModel):
     """Server configuration.
 
     Attributes:
@@ -31,8 +28,7 @@ class ServerConfig:
         return v
 
 
-@dataclass
-class ModelConfig:
+class ModelConfig(BaseModel):
     """Model configuration.
 
     Attributes:
@@ -44,12 +40,10 @@ class ModelConfig:
     model_type: ModelType
 
 
-@dataclass
-class HuggingFaceConfig:
+class HuggingFaceConfig(BaseModel):
     """Configuration for HuggingFace task executor.
 
     Attributes:
-        task_type: Type of task to execute.
         model: Model configuration.
         server: Server configuration.
     """
