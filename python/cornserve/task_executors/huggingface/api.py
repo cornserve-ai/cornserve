@@ -27,7 +27,6 @@ class HuggingFaceRequest(BaseModel):
 
     # Qwen-Omni fields
     messages: list[dict] | None = None
-    model: str
     frequency_penalty: float | None = 0.0
     max_completion_tokens: int | None = None
     presence_penalty: float | None = 0.0
@@ -35,7 +34,6 @@ class HuggingFaceRequest(BaseModel):
     stream_options: StreamOptions | None = None
     temperature: float | None = None
     top_p: float | None = None
-    request_id: str
     ignore_eos: bool = False
     return_audio: bool | None = None
 

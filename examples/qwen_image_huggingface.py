@@ -3,14 +3,14 @@
 ```console
 $ cornserve register examples/qwen_image.py
 
-$ cornserve invoke qwen_image --data - <<EOF
+$ cornserve invoke qwen_image_huggingface --data - <<EOF
 prompt: "A beautiful landscape with mountains and a lake at sunset"
 height: 512
 width: 512
 num_inference_steps: 20
 EOF
 
-$ cornserve invoke qwen_image --data - <<EOF
+$ cornserve invoke qwen_image_huggingface --data - <<EOF
 prompt: "A cute robot playing with a cat in a futuristic city"
 height: 1024
 width: 1024
