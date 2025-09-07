@@ -60,7 +60,7 @@ class TaskManager:
         # Task-related state. Key is the task ID.
         self.tasks: dict[str, UnitTask] = {}
         self.task_states: dict[str, TaskState] = {}  # Can be read without holding lock.
-        self.task_cr_names: dict[str, str] = {}  # Map task_id -> task instance name
+        self.unit_task_instance_names: dict[str, str] = {}  # Map task_id -> unit task instance name
         self.task_uuids: dict[str, str] = {}  # Map task_id -> UUID, used to generate CR names
         self.task_invocation_tasks: dict[str, list[asyncio.Task]] = defaultdict(list)
         self.task_usage_counter: dict[str, int] = defaultdict(int)
@@ -114,18 +114,22 @@ class TaskManager:
 
             # Deploy tasks by creating instances and passing names to resource manager
             coros = []
-            task_cr_names = {}  # Map task_id -> instance name for cleanup if needed
+            unit_task_instance_names = {}  # Map task_id -> instance name for cleanup if needed
             
             for task_id in to_deploy:
                 task = self.tasks[task_id]
                 
                 # Create named task instance for this task
                 task_uuid = self.task_uuids[task_id]
-                cr_name = await self.task_registry.create_task_instance_from_task(task, task_uuid)
-                task_cr_names[task_id] = cr_name
-                self.task_cr_names[task_id] = cr_name  # Store for future teardown
-                
-                coros.append(self.resource_manager.DeployUnitTask(DeployUnitTaskRequest(task_instance_name=cr_name)))
+                unit_task_instance_name = await self.task_registry.create_task_instance_from_task(task, task_uuid)
+                unit_task_instance_names[task_id] = unit_task_instance_name
+                self.unit_task_instance_names[task_id] = unit_task_instance_name  # Store for future teardown
+
+                coros.append(
+                    self.resource_manager.DeployUnitTask(
+                        DeployUnitTaskRequest(task_instance_name=unit_task_instance_name)
+                    )
+                )
                 
             responses = await asyncio.gather(*coros, return_exceptions=True)
 
@@ -144,11 +148,15 @@ class TaskManager:
             if errors:
                 cleanup_coros = []
                 for task_id in to_deploy:
-                    cr_name = task_cr_names[task_id]
-                    cleanup_coros.append(self.resource_manager.TeardownUnitTask(TeardownUnitTaskRequest(task_instance_name=cr_name)))
+                    unit_task_instance_name = unit_task_instance_names[task_id]
+                    cleanup_coros.append(
+                        self.resource_manager.TeardownUnitTask(
+                            TeardownUnitTaskRequest(task_instance_name=unit_task_instance_name)
+                        )
+                    )
                     del self.tasks[task_id]
                     del self.task_states[task_id]
-                    del self.task_cr_names[task_id]
+                    del self.unit_task_instance_names[task_id]
                     del self.task_uuids[task_id]
                     self.task_usage_counter[task_id] -= 1
                     if self.task_usage_counter[task_id] == 0:
@@ -199,9 +207,13 @@ class TaskManager:
             # Teardown tasks
             coros = []
             for task_id in to_teardown:
-                if task_id in self.task_cr_names:
-                    cr_name = self.task_cr_names[task_id]
-                    coros.append(self.resource_manager.TeardownUnitTask(TeardownUnitTaskRequest(task_instance_name=cr_name)))
+                if task_id in self.unit_task_instance_names:
+                    unit_task_instance_name = self.unit_task_instance_names[task_id]
+                    coros.append(
+                        self.resource_manager.TeardownUnitTask(
+                            TeardownUnitTaskRequest(task_instance_name=unit_task_instance_name)
+                        )
+                    )
                 else:
                     logger.error("No CR name found for task %s during teardown", task_id)
             responses = await asyncio.gather(*coros, return_exceptions=True)
@@ -215,7 +227,7 @@ class TaskManager:
                 else:
                     del self.tasks[task_id]
                     del self.task_states[task_id]
-                    del self.task_cr_names[task_id]
+                    del self.unit_task_instance_names[task_id]
                     del self.task_uuids[task_id]
                     del self.task_usage_counter[task_id]
                     logger.info("Teardown complete: %r", task_id)
@@ -231,12 +243,12 @@ class TaskManager:
                 raise KeyError(f"Unit Task with task_id {task_id} is not deployed")
             if self.task_states[task_id] != TaskState.READY:
                 raise RuntimeError(f"Unit Task {task_id} is not ready yet. Retry when it's ready.")
-            if task_id not in self.task_cr_names:
+            if task_id not in self.unit_task_instance_names:
                 raise RuntimeError(f"No CR name found for task {task_id}")
             
-            cr_name = self.task_cr_names[task_id]
+            unit_task_instance_name = self.unit_task_instance_names[task_id]
             response = await self.resource_manager.ScaleUnitTask(
-                ScaleUnitTaskRequest(task_instance_name=cr_name, num_gpus=num_gpus)
+                ScaleUnitTaskRequest(task_instance_name=unit_task_instance_name, num_gpus=num_gpus)
             )
             if response.status != common_pb2.Status.STATUS_OK:
                 raise RuntimeError(f"Failed to scale task {task} to update {num_gpus} GPUs: {response.message}")

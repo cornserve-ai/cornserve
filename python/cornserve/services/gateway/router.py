@@ -358,7 +358,7 @@ async def deploy_unit_tasks(request: UnitTasksDeploymentRequest):
             try:
                 source = base64.b64decode(spec.source_b64).decode("utf-8")
                 await task_registry.create_task_definition(
-                    name=spec.cr_name,
+                    name=spec.task_definition_name,
                     task_class_name=spec.task_class_name,
                     module_name=spec.module_name,
                     source_code=source,
@@ -373,7 +373,7 @@ async def deploy_unit_tasks(request: UnitTasksDeploymentRequest):
             try:
                 source = base64.b64decode(spec.source_b64).decode("utf-8")
                 await task_registry.create_execution_descriptor(
-                    name=spec.cr_name,
+                    name=spec.descriptor_definition_name,
                     task_class_name=spec.task_class_name,
                     descriptor_class_name=spec.descriptor_class_name,
                     module_name=spec.module_name,
@@ -403,7 +403,7 @@ async def deploy_composite_tasks(request: CompositeTasksDeploymentRequest):
             try:
                 source = base64.b64decode(spec.source_b64).decode("utf-8")
                 await task_registry.create_task_definition(
-                    name=spec.cr_name,
+                    name=spec.task_definition_name,
                     task_class_name=spec.task_class_name,
                     module_name=spec.module_name,
                     source_code=source,
@@ -419,6 +419,5 @@ async def deploy_composite_tasks(request: CompositeTasksDeploymentRequest):
         logger.exception("Failed to deploy composite tasks")
         await task_registry.shutdown()
         return Response(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, content=str(e))
-
 
 

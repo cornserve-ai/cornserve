@@ -201,4 +201,3 @@ class DecodeLLMUnitTask(UnitTask[OpenAIChatCompletionRequest, Stream[OpenAIChatC
             )
         if not task_input.cornserve_kv_transfer_params:
             raise ValueError("KV transfer parameters must be specified in the task input.")
-

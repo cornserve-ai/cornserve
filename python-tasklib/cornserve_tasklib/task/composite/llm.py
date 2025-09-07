@@ -6,8 +6,8 @@ from collections import defaultdict
 
 from cornserve.task.base import Stream, Task
 from cornserve.task.forward import DataForward, Tensor
-from cornserve_tasklib.task.builtins.unit.encoder import EncoderInput, EncoderOutput, EncoderTask, Modality
-from cornserve_tasklib.task.builtins.unit.llm import (
+from cornserve_tasklib.task.unit.encoder import EncoderInput, EncoderOutput, EncoderTask, Modality
+from cornserve_tasklib.task.unit.llm import (
     LLMUnitTask,
     PrefillLLMUnitTask,
     DecodeLLMUnitTask,

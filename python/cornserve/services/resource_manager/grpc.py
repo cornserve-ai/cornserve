@@ -75,19 +75,19 @@ class ResourceManagerServicer(resource_manager_pb2_grpc.ResourceManagerServicer)
             proto_statuses = []
             for task, status in task_manager_statuses:
                 # Find the instance name for this task
-                task_cr_name = None
+                unit_task_instance_name = None
                 for state_id, state in self.manager.task_states.items():
                     if state.deployment and state.deployment.task == task:
-                        task_cr_name = self.manager.task_cr_names.get(state_id)
+                        unit_task_instance_name = self.manager.unit_task_instance_names.get(state_id)
                         break
-                
-                if task_cr_name is None:
+
+                if unit_task_instance_name is None:
                     logger.warning("No instance name found for task %s in healthcheck", task)
-                    task_cr_name = f"unknown-{task.make_name()}"
-                
+                    unit_task_instance_name = f"unknown-{task.make_name()}"
+
                 proto_statuses.append(
                     resource_manager_pb2.TaskManagerStatus(
-                        task_instance_name=task_cr_name,
+                        task_instance_name=unit_task_instance_name,
                         status=status_map[status]
                     )
                 )

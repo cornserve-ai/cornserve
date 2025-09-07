@@ -12,7 +12,7 @@ from cornserve import constants
 from cornserve.logging import get_logger
 from cornserve.services.resource_manager.resource import GPU
 from cornserve.task.base import Stream
-from cornserve_tasklib.task.builtins.unit.llm import (
+from cornserve_tasklib.task.unit.llm import (
     URL,
     DecodeLLMUnitTask,
     LLMUnitTask,
@@ -402,5 +402,4 @@ class DecodeVLLMDescriptor(
             async_iterator=parse_stream_to_completion_chunks(response),
             response=response,
         )
-
 

@@ -75,7 +75,7 @@ class TaskDefinitionPayload(BaseModel):
     """Payload for a task definition."""
     source_b64: str
     task_class_name: str
-    cr_name: str
+    task_definition_name: str
     module_name: str
     is_unit_task: bool = True
 
@@ -84,7 +84,7 @@ class DescriptorDefinitionPayload(BaseModel):
     """Payload for a descriptor definition."""
     source_b64: str
     descriptor_class_name: str
-    cr_name: str
+    descriptor_definition_name: str
     module_name: str
     task_class_name: str
 
@@ -100,6 +100,5 @@ class CompositeTasksDeploymentRequest(BaseModel):
     """Request to deploy composite tasks from provided sources."""
 
     task_definitions: list[TaskDefinitionPayload] = []
-
 
 

@@ -129,7 +129,7 @@ class ResourceManager:
 
         # Task state
         self.task_states: dict[str, TaskManagerState] = {}
-        self.task_cr_names: dict[str, str] = {}  # Map task_manager_id -> instance name
+        self.unit_task_instance_names: dict[str, str] = {}  # Map task_manager_id -> unit task instance name
         self.task_states_lock = asyncio.Lock()
 
     @staticmethod
@@ -392,7 +392,7 @@ class ResourceManager:
             task_manager_id = f"{task.make_name()}-{uuid.uuid4().hex[:8]}"
             state = TaskManagerState(id=task_manager_id)
             self.task_states[task_manager_id] = state
-            self.task_cr_names[task_manager_id] = task_instance_name
+            self.unit_task_instance_names[task_manager_id] = task_instance_name
 
         # Spawn task manager with state-specific lock
         async with state.lock:
@@ -404,8 +404,8 @@ class ResourceManager:
                 logger.error("Failed to spawn task manager for %s: %s", task, e)
                 async with self.task_states_lock:
                     self.task_states.pop(task_manager_id, None)
-                    if task_manager_id in self.task_cr_names:
-                        del self.task_cr_names[task_manager_id]
+                    if task_manager_id in self.unit_task_instance_names:
+                        del self.unit_task_instance_names[task_manager_id]
                 raise RuntimeError(f"Failed to spawn task manager for {task}: {e}") from e
 
         # Notify the task dispatcher of the new task and task manager using instance name
@@ -448,26 +448,30 @@ class ResourceManager:
 
         # Find the task manager state for this task
         task_state = None
-        task_cr_name_from_state = None
+        unit_task_instance_name_from_state = None
         async with self.task_states_lock:
             for state_id, state in self.task_states.items():
                 if state.deployment and state.deployment.task == task:
                     task_state = state
-                    task_cr_name_from_state = self.task_cr_names.get(state_id)
+                    unit_task_instance_name_from_state = self.unit_task_instance_names.get(state_id)
                     # Remove from task_states dict but don't cleanup yet
                     self.task_states.pop(state_id)
-                    if state_id in self.task_cr_names:
-                        del self.task_cr_names[state_id]
+                    if state_id in self.unit_task_instance_names:
+                        del self.unit_task_instance_names[state_id]
                     break
 
             if task_state is None:
                 logger.info("Task %s is not running, returning immediately", task)
                 return
 
-        # First notify the task dispatcher of the removed task using CR name
-        # Use the CR name from state if available, otherwise use the passed one
-        cr_name_to_use = task_cr_name_from_state if task_cr_name_from_state else task_instance_name
-        task_info = task_dispatcher_pb2.NotifyUnitTaskTeardownRequest(task_instance_name=cr_name_to_use)
+        # First notify the task dispatcher of the removed task using unit task instance name
+        # Use the instance name from state if available, otherwise use the passed one
+        unit_task_instance_name_to_use = (
+            unit_task_instance_name_from_state if unit_task_instance_name_from_state else task_instance_name
+        )
+        task_info = task_dispatcher_pb2.NotifyUnitTaskTeardownRequest(
+            task_instance_name=unit_task_instance_name_to_use
+        )
         try:
             await self.task_dispatcher_stub.NotifyUnitTaskTeardown(task_info)
         except Exception as e:
@@ -638,7 +642,7 @@ class ResourceManager:
             state.channel = grpc.aio.insecure_channel(f"{state.service_name}:{port}")
             state.stub = task_manager_pb2_grpc.TaskManagerStub(state.channel)
 
-            # Initialize the task manager by providing it with the task CR name it will manage
+            # Initialize the task manager by providing it with the unit task instance name it will manage
             # and an initial set of GPU resources to work with.
             with tracer.start_as_current_span("ResourceManager._spawn_task_manager.register_task"):
                 register_task_req = task_manager_pb2.RegisterTaskRequest(
