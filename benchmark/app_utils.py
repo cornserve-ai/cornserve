@@ -10,7 +10,7 @@ ERIC_TEMPLATE_PATH = "apps/eric.py.tmpl"
 
 def create_mllm_app(
     model_id: str,
-    task_class: Literal["MLLMTask", "DisaggregatedMLLMTask"] = "MLLMTask",
+    task_class: Literal["MLLMTask", "DisaggregatedMLLMTask", "NcclDisaggregatedMLLMTask"] = "MLLMTask",
     encoder_fission: bool = True,
 ) -> str:
     """Create an MLLM app srouce code from a template.

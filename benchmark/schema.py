@@ -104,6 +104,34 @@ class PDConfig(BackendConfig):
         print(f"Created {len(configs)} PD configurations for {num_gpus} GPUs.")
         return configs
 
+class NcclPDConfig(BackendConfig):
+    """Configuration for the Cornserve backend with a specific number of erics and vLLMs."""
+
+    num_prefills: int
+    prefill_tp_size: int = 1
+    num_decodes: int
+    decode_tp_size: int = 1
+
+    def to_subdir_name(self) -> str:
+        """Return the subdirectory name for the Cornserve configuration."""
+        return (
+            f"ncclpd+prefills{self.num_prefills}+tp{self.prefill_tp_size}"
+            + f"+decodes{self.num_decodes}+tp{self.decode_tp_size}"
+        )
+
+    @classmethod
+    def create_backend_configs(
+        cls,
+        num_gpus: int,
+    ) -> list[CornserveConfig]:
+        """Create a list of CornserveConfig instances based on the number of GPUs."""
+        configs = []
+        for num_prefills in range(1, num_gpus):
+            num_decodes = num_gpus - num_prefills
+            configs.append(cls(num_prefills=num_prefills, num_decodes=num_decodes))
+        print(f"Created {len(configs)} PD configurations for {num_gpus} GPUs.")
+        return configs
+
 
 class EPDConfig(BackendConfig):
     """Configuration for the Cornserve backend with a specific number of erics and vLLMs."""

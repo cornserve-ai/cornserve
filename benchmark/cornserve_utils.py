@@ -13,6 +13,7 @@ from schema import (
     EPDConfig,
     EricConfig,
     ExperimentConfig,
+    NcclPDConfig,
     PDConfig,
     VLLMConfig,
 )
@@ -31,7 +32,7 @@ GATEWAY_URL = "http://localhost:30080"
 
 def register_app(
     model_id: str,
-    app_type: Literal["ev", "v", "e", "epd", "pd"],
+    app_type: Literal["ev", "v", "e", "epd", "pd", "nccl-pd"],
     eric_max_batch_size: int = 1,
 ) -> str:
     """Register an app with the CornServe gateway, and return the app ID."""
@@ -64,16 +65,10 @@ def register_app(
             task_class="DisaggregatedMLLMTask",
             encoder_fission=False,
         )
-    elif app_type == "epd":
+    elif app_type == "nccl-pd":
         source_code = create_mllm_app(
             model_id=model_id,
-            task_class="DisaggregatedMLLMTask",
-            encoder_fission=True,
-        )
-    elif app_type == "pd":
-        source_code = create_mllm_app(
-            model_id=model_id,
-            task_class="DisaggregatedMLLMTask",
+            task_class="NcclDisaggregatedMLLMTask",
             encoder_fission=False,
         )
     else:
@@ -195,10 +190,12 @@ async def scale(config: ExperimentConfig) -> None:
                     and "dummyencodertask" not in task_id:
                 encoder_task_id = task_id
             elif "prefillllmunittask" in task_id and model_id == task_def["model_id"] \
-                    and task_def["receive_embeddings"] == True:
+                    and task_def["receive_embeddings"] == True \
+                    and "nccl" not in task_id:
                 prefill_task_id = task_id
             elif "decodellmunittask" in task_id and model_id == task_def["model_id"] \
-                    and task_def["receive_embeddings"] == True:
+                    and task_def["receive_embeddings"] == True \
+                    and "nccl" not in task_id:
                 decode_task_id = task_id
         assert all([prefill_task_id, decode_task_id, encoder_task_id]), (
             "Not all tasks are running. Please check the task and app states."
@@ -220,10 +217,33 @@ async def scale(config: ExperimentConfig) -> None:
             if state != "ready":
                 continue
             if "prefillllmunittask" in task_id and model_id == task_def["model_id"] \
-                and task_def["receive_embeddings"] == False:
+                    and task_def["receive_embeddings"] == False \
+                    and "nccl" not in task_id:
                 prefill_task_id = task_id
             elif "decodellmunittask" in task_id and model_id == task_def["model_id"] \
-                and task_def["receive_embeddings"] == False:
+                    and task_def["receive_embeddings"] == False \
+                    and "nccl" not in task_id:
+                decode_task_id = task_id
+        assert all([prefill_task_id, decode_task_id]), (
+            "Not all tasks are running. Please check the task and app states."
+        )
+        await scale_task_with_num_gpus(
+            task_id=prefill_task_id,
+            num_gpus=config.backend_config.num_prefills * config.backend_config.prefill_tp_size,
+        )
+        await scale_task_with_num_gpus(
+            task_id=decode_task_id,
+            num_gpus=config.backend_config.num_decodes * config.backend_config.decode_tp_size,
+        )
+    elif isinstance(config.backend_config, NcclPDConfig):
+        for task_def, task_id, state in tasks:
+            if state != "ready":
+                continue
+            if "ncclprefillllmunittask" in task_id and model_id == task_def["model_id"] \
+                    and task_def["receive_embeddings"] == False:
+                prefill_task_id = task_id
+            elif "nccldecodellmunittask" in task_id and model_id == task_def["model_id"] \
+                    and task_def["receive_embeddings"] == False:
                 decode_task_id = task_id
         assert all([prefill_task_id, decode_task_id]), (
             "Not all tasks are running. Please check the task and app states."
