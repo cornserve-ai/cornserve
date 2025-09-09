@@ -26,10 +26,11 @@ from PIL import Image
 from transformers.tokenization_utils_base import PreTrainedTokenizerBase
 
 from servegen import Category, ClientPool
-from servegen.construct import Request, generate_workload
+from servegen.construct import generate_workload
 from servegen.utils import get_scaled_rate_fn, get_constant_rate_fn
+from servegen_distributions import add_update_multimodal_content
 
-from image_utils import create_dummy_image, get_image_data_uris
+from image_utils import create_dummy_image, create_dummy_video, create_dummy_audio, get_image_data_uris
 
 logger = logging.getLogger(__name__)
 
@@ -562,16 +563,24 @@ class ServeGenDataset:
         print("\n=== Generating Multimodal Workload ===")
 
         # image
-        pool = ClientPool(Category.MULTIMODAL, "mm-image")
+        pool = ClientPool(Category.MULTIMODAL, "mm-image", data_dir="../third_party/servegen/data")
         print(f"Loaded {len(pool.clients)} multimodal clients")
-        # (JW)TODO: add audio and video based on prob
-        view = pool.span(0, duration)
+        view = pool.span(0, float("inf"))
 
-        # (JW)TODO: which rate fn to use?
-        rate_fn = get_constant_rate_fn(view, request_rate)
-        # rate_fn = get_scaled_rate_fn(view, 1)
+        # rate_fn = get_constant_rate_fn(view, request_rate)
+        rate_fn = get_scaled_rate_fn(view, request_rate / 5.55)
 
         requests = generate_workload(view, rate_fn, duration=duration, seed=self.random_seed)
+
+        # Add video and audio data sampled from empirically fit distributions
+        # based on video_prob and audio_prob. Remove images based on no_image_prob.
+        requests = add_update_multimodal_content(
+            requests,
+            no_image_prob=no_image_prob,
+            video_prob=video_prob,
+            audio_prob=audio_prob,
+            seed=self.random_seed,
+        )
 
         # Print statistics
         print("\nMultimodal Workload Statistics:")
@@ -598,21 +607,36 @@ class ServeGenDataset:
             prompt = _generate_random_text_with_length(tokenizer, input_len)  # type: ignore
             mm_data = []
             filenames = []
-            if np.random.rand() >= no_image_prob:
-                # add images
-                for image_resolution in req.data["image_resolution"]:  # type: ignore
-                    # for simplicity, we always use the same image for each resolution
-                    image_filename = create_dummy_image(
-                        width=image_resolution[1],
-                        height=image_resolution[0],
-                        id=0,
-                    )
-                    # base64 data uri
-                    filenames.append(image_filename)
-                    image_uri = get_image_data_uris([image_filename], root="images")[0]
-                    mm_data.append({"type": "image_url", "image_url": {"url": image_uri}})
 
-            # (JW)TODO: audio and video
+            # "image_resolution" will be an empty list if there are no images
+            for image_resolution in req.data["image_resolution"]:  # type: ignore
+                # for simplicity, we always use the same image for each resolution
+                image_filename = create_dummy_image(
+                    width=image_resolution[1],
+                    height=image_resolution[0],
+                    id=0,
+                )
+                # base64 data uri
+                filenames.append(image_filename)
+                image_uri = get_image_data_uris([image_filename], root="images")[0]
+                mm_data.append({"type": "image_url", "image_url": {"url": image_uri}})
+
+            for video_resolution in req.data["video_resolution"]:  # type: ignore
+                video_filename = create_dummy_video(
+                    num_frames=video_resolution[0],
+                    width=video_resolution[2],
+                    height=video_resolution[1],
+                    id=0,
+                )
+                filenames.append(video_filename)
+                video_uri = get_image_data_uris([video_filename], root="videos")[0]
+                mm_data.append({"type": "video_url", "video_url": {"url": video_uri}})
+
+            for audio_duration in req.data["audio_duration"]:  # type: ignore
+                audio_filename = create_dummy_audio(duration_sec=int(audio_duration), id=0)
+                filenames.append(audio_filename)
+                audio_uri = get_image_data_uris([audio_filename], root="audios")[0]
+                mm_data.append({"type": "audio_url", "audio_url": {"url": audio_uri}})
 
             sampled_req = SampleRequest(
                 prompt=prompt,
