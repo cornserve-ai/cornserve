@@ -18,11 +18,18 @@ from abc import ABC, abstractmethod
 from collections.abc import Callable
 from typing import Any
 from dataclasses import dataclass, field
+import numpy as np
 from io import BytesIO
 
 from datasets import load_dataset
 from PIL import Image
 from transformers.tokenization_utils_base import PreTrainedTokenizerBase
+
+from servegen import Category, ClientPool
+from servegen.construct import Request, generate_workload
+from servegen.utils import get_scaled_rate_fn, get_constant_rate_fn
+
+from image_utils import create_dummy_image, get_image_data_uris
 
 logger = logging.getLogger(__name__)
 
@@ -41,15 +48,22 @@ class SampleRequest:
     prompt_len: int
     expected_output_len: int
     # original image
-    multi_modal_data: dict[str, Any]
-    # synthetic data
-    image_urls: list[str] = field(default_factory=list)
-    filenames: list[str] = field(default_factory=list)
-    encoder_fission: bool = False
+    multi_modal_data_list: list[dict[str, Any]]
 
-    # TODO:
+    # synthetic data, will be procesed in transform()
+    image_urls: list[str] = field(default_factory=list)
+    # TODO: homogeneous synthetic audio & video
     # audio_urls: list[str] = field(default_factory=list)
     # video_urls: list[str] = field(default_factory=list)
+
+    # mm data bookeeping
+    filenames: list[str] = field(default_factory=list)
+
+    # servegen
+    timestamp: float | None = None
+
+    # additional args
+    encoder_fission: bool = False
 
 
 # -----------------------------------------------------------------------------
@@ -64,7 +78,7 @@ class BenchmarkDataset(ABC):
 
     def __init__(
         self,
-        dataset_path: str,
+        dataset_path: str | None,
         random_seed: int = DEFAULT_SEED,
     ) -> None:
         """Initialize the BenchmarkDataset with an optional dataset path and random seed.
@@ -314,7 +328,7 @@ class HuggingFaceDataset(BenchmarkDataset):
     def load_data(self) -> None:
         """Load data from HuggingFace datasets."""
         self.data = load_dataset(
-            self.dataset_path,
+            self.dataset_path,  # type: ignore
             name=self.dataset_subset,
             split=self.dataset_split,
             streaming=True,
@@ -435,10 +449,180 @@ class VisionArenaDataset(HuggingFaceDataset):
                     prompt=prompt,
                     prompt_len=prompt_len,
                     expected_output_len=output_len,
-                    multi_modal_data=mm_content,
+                    multi_modal_data_list=[mm_content],
                 )
             )
         self.maybe_oversample_requests(sampled_requests, num_requests)
+        return sampled_requests
+
+# https://github.com/ml-energy/leaderboard-v3/blob/master/mlenergy/llm/datasets.py
+def _generate_random_text_with_length(
+        tokenizer: PreTrainedTokenizerBase, target_length: int
+   ) -> str:
+       """Generate random text that tokenizes to approximately the target length.
+
+       Args:
+           tokenizer: Tokenizer to use for measuring token length.
+           target_length: Target number of tokens.
+
+       Returns:
+           Random text string that tokenizes to approximately target_length tokens.
+       """
+       special_ids = set(tokenizer.all_special_ids)
+       vocab_size = len(tokenizer)
+
+       # Pre-generate a long sequence of random token IDs
+       # hard coded max len
+       pool_size = max(32768, target_length * 2)
+       long_token_ids = []
+
+       while len(long_token_ids) < pool_size:
+           # Generate extra to account for filtering
+           batch_size = pool_size + max(50, pool_size // 100)
+           random_tokens = np.random.randint(
+               0, vocab_size, size=batch_size, dtype=np.int32
+           )
+
+           # Filter out special tokens
+           if special_ids:
+               mask = ~np.isin(random_tokens, list(special_ids))
+               valid_tokens = random_tokens[mask]
+           else:
+               valid_tokens = random_tokens
+
+           long_token_ids.extend(valid_tokens.tolist())
+
+           if len(long_token_ids) >= pool_size:
+               long_token_ids = long_token_ids[:pool_size]
+               break
+
+       # Take a slightly longer slice than needed (add some buffer)
+       buffer_size = min(
+           50, max(10, target_length // 10)
+       )  # At least 10, up to 50 tokens buffer
+       slice_length = min(target_length + buffer_size, len(long_token_ids))
+       token_slice = long_token_ids[:slice_length]
+
+       random.shuffle(token_slice)
+
+       # Fine-tune to get exact target_length after tokenization
+       current_tokens = token_slice[:target_length]
+       prompt = tokenizer.decode(
+           current_tokens, clean_up_tokenization_spaces=True
+       ).strip()
+
+       encoded_tokens = tokenizer.encode(prompt, add_special_tokens=False)
+       actual_length = len(encoded_tokens) + 1  # for the eos token
+       current_tokens = encoded_tokens
+
+       if actual_length == target_length:
+           return prompt
+       elif actual_length < target_length:
+           # Need more tokens, add from our shuffled pool
+           needed = target_length - actual_length
+           if len(current_tokens) + needed <= len(token_slice):
+               current_tokens = token_slice[: len(current_tokens) + needed]
+           else:
+               needed_from_pool = needed - (slice_length - target_length)
+               current_tokens = (
+                   token_slice
+                   + long_token_ids[slice_length : slice_length + needed_from_pool]
+               )
+       else:
+           # Too many tokens, remove some
+           excess = actual_length - target_length
+           current_tokens = current_tokens[: max(1, len(current_tokens) - excess)]
+
+       prompt = tokenizer.decode(
+           current_tokens, clean_up_tokenization_spaces=True
+       ).strip()
+       return prompt
+
+class ServeGenDataset:
+
+    DEFAULT_SEED = 0
+
+    def __init__(
+        self,
+        random_seed: int = DEFAULT_SEED,
+    ) -> None:
+        self.random_seed = random_seed
+
+    def sample(
+        self,
+        tokenizer: PreTrainedTokenizerBase,
+        request_rate: float,
+        duration: int,
+        no_image_prob: float,
+        audio_prob: float,
+        video_prob: float,
+    ) -> list[SampleRequest]:
+
+        np.random.seed(self.random_seed)
+        print("\n=== Generating Multimodal Workload ===")
+
+        # image
+        pool = ClientPool(Category.MULTIMODAL, "mm-image")
+        print(f"Loaded {len(pool.clients)} multimodal clients")
+        # (JW)TODO: add audio and video based on prob
+        view = pool.span(0, duration)
+
+        # (JW)TODO: which rate fn to use?
+        rate_fn = get_constant_rate_fn(view, request_rate)
+        # rate_fn = get_scaled_rate_fn(view, 1)
+
+        requests = generate_workload(view, rate_fn, duration=duration, seed=self.random_seed)
+
+        # Print statistics
+        print("\nMultimodal Workload Statistics:")
+        print(f"Total Requests: {len(requests)}")
+        print(f"Time Range: {requests[0].timestamp:.2f} to {requests[-1].timestamp:.2f}")
+        
+        # Calculate average token counts
+        avg_text = sum(r.data['text_tokens'] for r in requests) / len(requests)  # type: ignore
+        avg_output = sum(r.data['output_tokens'] for r in requests) / len(requests)  # type: ignore
+        avg_image = sum(len(r.data['image_tokens']) for r in requests) / len(requests)  # type: ignore
+        avg_audio = sum(len(r.data['audio_tokens']) for r in requests) / len(requests)  # type: ignore
+        avg_video = sum(len(r.data['video_tokens']) for r in requests) / len(requests)  # type: ignore
+        
+        print("\nAverage Token Counts:")
+        print(f"  Text tokens: {avg_text:.2f}")
+        print(f"  Output tokens: {avg_output:.2f}")
+        print(f"  Image count: {avg_image:.2f}")
+        print(f"  Audio count: {avg_audio:.2f}")
+        print(f"  Video count: {avg_video:.2f}")
+
+        sampled_requests: list[SampleRequest] = []
+        for req in requests:
+            input_len = req.data["text_tokens"]
+            prompt = _generate_random_text_with_length(tokenizer, input_len)  # type: ignore
+            mm_data = []
+            filenames = []
+            if np.random.rand() >= no_image_prob:
+                # add images
+                for image_resolution in req.data["image_resolution"]:  # type: ignore
+                    # for simplicity, we always use the same image for each resolution
+                    image_filename = create_dummy_image(
+                        width=image_resolution[1],
+                        height=image_resolution[0],
+                        id=0,
+                    )
+                    # base64 data uri
+                    filenames.append(image_filename)
+                    image_uri = get_image_data_uris([image_filename], root="images")[0]
+                    mm_data.append({"type": "image_url", "image_url": {"url": image_uri}})
+
+            # (JW)TODO: audio and video
+
+            sampled_req = SampleRequest(
+                prompt=prompt,
+                prompt_len=len(tokenizer(prompt).input_ids),
+                multi_modal_data_list=mm_data,
+                expected_output_len=req.data["output_tokens"],  # type: ignore
+                timestamp=req.timestamp,
+            )
+            sampled_requests.append(sampled_req)
+
         return sampled_requests
 
 

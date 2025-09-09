@@ -9,7 +9,7 @@ import math
 import sys
 import time
 import traceback
-from typing import Any
+from typing import Any, Awaitable, Callable
 import warnings
 
 import aiohttp
@@ -20,7 +20,7 @@ from transformers.tokenization_utils_base import PreTrainedTokenizerBase
 
 from benchmark_dataset import SampleRequest
 from image_utils import create_dummy_image, get_image_data_uris
-from schema import DutyCycleConfig, EricConfig, ExperimentConfig
+from schema import DutyCycleConfig, EricConfig, ExperimentConfig, ServeGenConfig
 
 AIOHTTP_TIMEOUT = aiohttp.ClientTimeout(total=6 * 60 * 60)
 MILLISECONDS_TO_SECONDS_CONVERSION = 1000
@@ -40,6 +40,9 @@ class RequestInput:
     ignore_eos: bool = True
 
     encoder_fission: bool = False
+
+    # if timestamp, will use the timestamp as the start time
+    timestamp: float | None = None
 
 
 @dataclass
@@ -447,24 +450,34 @@ async def get_request(
         # The next request will be sent after the interval.
         await asyncio.sleep(interval)
 
+async def timestamp_invoke(
+    request_func: Callable[[RequestInput, tqdm | None], Awaitable[RequestOutput]],
+    request_input: RequestInput,
+    pbar: tqdm | None,
+) -> RequestOutput:
+    if request_input.timestamp is None:
+        raise ValueError("Timestamp must be provided for timestamp_invoke.")
+    await asyncio.sleep(request_input.timestamp)
+    return await request_func(request_input, pbar)
+
 
 def transform_sampled_requests(
     config: ExperimentConfig,
     sampled_requests: list[SampleRequest],
 ) -> list[RequestInput]:
     """Transforms the sampled requests from the dataset to RequestInput."""
-    # synthesize image_choices images
-    image_filenames = [
-        create_dummy_image(
-            width=config.image_width,
-            height=config.image_height,
-            id=i,
-        )
-        for i in range(config.image_choices)
-    ]
-    np.random.seed(config.seed)
-    # first synthesize image_data
     if config.use_synthesized_data:
+        # synthesize image_choices images
+        image_filenames = [
+            create_dummy_image(
+                width=config.image_width,
+                height=config.image_height,
+                id=i,
+            )
+            for i in range(config.image_choices)
+        ]
+        np.random.seed(config.seed)
+        # first synthesize image_data
         print(f"Synthesizing image data with probability {config.image_probability}.")
         for request in sampled_requests:
             if np.random.rand() < config.image_probability:
@@ -481,7 +494,6 @@ def transform_sampled_requests(
             if np.random.rand() < config.encoder_fission_probability:
                 # encoder fission
                 request.encoder_fission = True
-        # print(f"Total fissioned requests: {sum(request.encoder_fission for request in sampled_requests)}")
 
     request_inputs = []
     app_id = config.app_id
@@ -491,7 +503,7 @@ def transform_sampled_requests(
             for image_uri in request.image_urls:
                 mm_data_list.append({"type": "image_url", "image_url": {"url": image_uri}})
         else:
-            mm_data_list = [request.multi_modal_data]
+            mm_data_list = request.multi_modal_data_list
         request_input = RequestInput(
             url=f"http://127.0.0.1:30080/app/invoke/{app_id}",
             model=config.model_id,
@@ -501,6 +513,7 @@ def transform_sampled_requests(
             multi_modal_data=mm_data_list,
             filenames=request.filenames,
             encoder_fission=request.encoder_fission,
+            timestamp=request.timestamp,
         )
         request_inputs.append(request_input)
     return request_inputs
@@ -515,7 +528,7 @@ async def benchmark(
     max_concurrency = config.max_concurrency
     semaphore = asyncio.Semaphore(max_concurrency) if max_concurrency else contextlib.nullcontext()
 
-    async def request_func(request_input: RequestInput, pbar: tqdm) -> RequestOutput:
+    async def request_func(request_input: RequestInput, pbar: tqdm | None) -> RequestOutput:
         async with semaphore:
             if isinstance(config.backend_config, EricConfig):
                 return await cornserve_invoke_eric(request_input, pbar)
@@ -523,9 +536,7 @@ async def benchmark(
 
     # first test a request
     print("Testing a single request to verify the setup...")
-    test_pbar = tqdm(total=1, desc="Test")
-    test_output = await request_func(request_inputs[0], test_pbar)
-    test_pbar.close()
+    test_output = await request_func(request_inputs[0], None)
     if not test_output.success:
         print("Test request failed. Please check the setup.")
         print(f"Error: {test_output.error}")
@@ -548,9 +559,13 @@ async def benchmark(
 
     pbar = tqdm(total=len(request_inputs))
     print(f"Starting benchmark with {len(request_inputs)} requests...")
-    distribution = "Poisson process" if config.burstiness == 1.0 else "Gamma distribution"
-    print(f"Traffic request rate: {config.request_rate}")
-    print(f"Burstiness factor: {config.burstiness} ({distribution})")
+    if config.workload_config is not None and isinstance(config.workload_config, ServeGenConfig):
+        print("Using ServeGen workload configuration.")
+        print(f"ServeGen config: {config.workload_config}")
+    else:
+        distribution = "Poisson process" if config.burstiness == 1.0 else "Gamma distribution"
+        print(f"Traffic request rate: {config.request_rate}")
+        print(f"Burstiness factor: {config.burstiness} ({distribution})")
     print(f"Maximum request concurrency: {max_concurrency}")
 
     # Start time for overall benchmark
@@ -562,6 +577,10 @@ async def benchmark(
         print("Using duty cycle request pattern.")
         async for request in duty_cycle_get_request(request_inputs, config.workload_config):
             task = asyncio.create_task(request_func(request_input=request, pbar=pbar))
+            tasks.append(task)
+    if config.workload_config is not None and isinstance(config.workload_config, ServeGenConfig):
+        for request in request_inputs:
+            task = asyncio.create_task(timestamp_invoke(request_func=request_func, request_input=request, pbar=pbar))
             tasks.append(task)
     else:
         print("Using standard request pattern.")

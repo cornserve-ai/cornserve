@@ -194,6 +194,18 @@ class DutyCycleConfig(WorkloadConfig):
             f"+off_factor{self.off_request_factor}+cycles{self.cycles}"
         )
 
+class ServeGenConfig(WorkloadConfig):
+    """Configuration for the ServeGen workload."""
+
+    request_rate: float
+    duration: int
+
+    no_image_prob: float = 0.0
+    audio_prob: float = 0.0
+    video_prob: float = 0.0
+
+    def to_suffix(self) -> str:
+        return f"servegen+rate{self.request_rate}+duration{self.duration}"
 
 class ExperimentConfig(BaseModel):
     """Configuration for the a benchmark experiment."""
@@ -213,13 +225,9 @@ class ExperimentConfig(BaseModel):
         ),
     )
     gpu_type: Literal["A40", "A100", "H100"] = "A40"
-    num_gpus: int = Field(
-        default=12,
-        description="Number of GPUs to use for the benchmark. This is used to scale the tasks.",
-    )
 
     # workload config
-    dataset: Literal["lmarena-ai/VisionArena-Chat"] = Field(
+    dataset: Literal["lmarena-ai/VisionArena-Chat", "servegen"] = Field(
         default="lmarena-ai/VisionArena-Chat",
         description=("Dataset to use for the benchmark. Currently only supports lmarena-ai/VisionArena-Chat."),
     )
