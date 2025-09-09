@@ -509,7 +509,7 @@ def transform_sampled_requests(
             model=config.model_id,
             prompt=request.prompt,
             prompt_len=request.prompt_len,
-            output_len=config.output_len,
+            output_len=request.expected_output_len,
             multi_modal_data=mm_data_list,
             filenames=request.filenames,
             encoder_fission=request.encoder_fission,

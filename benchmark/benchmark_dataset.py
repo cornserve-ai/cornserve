@@ -567,9 +567,7 @@ class ServeGenDataset:
         # (JW)TODO: add audio and video based on prob
         view = pool.span(0, duration)
 
-        # (JW)TODO: which rate fn to use?
-        rate_fn = get_constant_rate_fn(view, request_rate)
-        # rate_fn = get_scaled_rate_fn(view, 1)
+        rate_fn = get_scaled_rate_fn(view, request_rate / 5.5)
 
         requests = generate_workload(view, rate_fn, duration=duration, seed=self.random_seed)
 
@@ -618,7 +616,7 @@ class ServeGenDataset:
                 prompt=prompt,
                 prompt_len=len(tokenizer(prompt).input_ids),
                 multi_modal_data_list=mm_data,
-                expected_output_len=req.data["output_tokens"],  # type: ignore
+                expected_output_len=int(req.data["output_tokens"]),  # type: ignore
                 timestamp=req.timestamp,
             )
             sampled_requests.append(sampled_req)
