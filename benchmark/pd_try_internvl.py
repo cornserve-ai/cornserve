@@ -25,14 +25,14 @@ async def run(
     pd_d_config = PDConfig(num_prefills=3, prefill_tp_size=2, num_decodes=1, decode_tp_size=2)
 
     configs = []
-    gpu_type = "A100"
+    gpu_type = "A40"
     image_width = 1680
     image_height = 1050
     image_count = 1
     # 1792 image tokens
     input_len = 300
-    output_len = 1500
-    num_prompts = 500
+    output_len = 300
+    num_prompts = 200
 
     # InternVL3-38B # of KV cache tokens on A40 TP2
     # 72,832 -- without E
@@ -63,7 +63,7 @@ async def run(
         )
         configs.append(pd_d_exp)
 
-    for r in [5]:
+    for r in []:
         pd_p_exp = ExperimentConfig(
             backend_config=pd_p_config,
             app_id=pd,
@@ -80,7 +80,7 @@ async def run(
         )
         configs.append(pd_p_exp)
 
-    for r in [5]:
+    for r in []:
         vllm_exp = ExperimentConfig(
             backend_config=vllm_config,
             app_id=vllm,
@@ -164,7 +164,7 @@ async def run(
 
 async def main():
     set_ulimit()
-    await run(overwrite=False)
+    await run(overwrite=True)
 
 
 if __name__ == "__main__":

@@ -1,4 +1,4 @@
 mirrors:
-  "localhost:5000":
+  "ampere00.eecs.umich.edu:5000":
     endpoint:
-      - "http://localhost:5000"
+      - "http://ampere00.eecs.umich.edu:5000"

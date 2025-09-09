@@ -15,21 +15,24 @@ async def run(
     model_id: str = "Qwen/Qwen2.5-VL-7B-Instruct"
     vllm = register_app(model_id=model_id, app_type="v")
     print(f"Registered {model_id} V with ID: {vllm}")
-    nccl_pd = register_app(model_id=model_id, app_type="nccl-pd")
-    print(f"Registered {model_id} pd with ID: {nccl_pd}")
+    # nccl_pd = register_app(model_id=model_id, app_type="nccl-pd")
+    # print(f"Registered {model_id} pd with ID: {nccl_pd}")
+    pd = register_app(model_id=model_id, app_type="pd")
+    print(f"Registered {model_id} pd with ID: {pd}")
 
     vllm_config = VLLMConfig(num_replicas=2, tp_size=1)
-    nccl_pd_config = NcclPDConfig(num_prefills=1, prefill_tp_size=1, num_decodes=1, decode_tp_size=1)
+    pd_config = PDConfig(num_prefills=1, prefill_tp_size=1, num_decodes=1, decode_tp_size=1)
 
     configs = []
     gpu_type = "A40"
-    image_width = 256
-    image_height = 256
+    image_width = 1024
+    image_height = 768
+    # 256 
     image_count = 1
     # 1792 image tokens
     input_len = 100
-    output_len = 50
-    num_prompts = 300
+    output_len = 80
+    num_prompts = 1000
 
     # InternVL3-38B # of KV cache tokens on A40 TP2
     # 72,832 -- without E
@@ -45,24 +48,24 @@ async def run(
     # 105,000
 
 
-    for r in [3]:
-        pd_p_exp = ExperimentConfig(
-            backend_config=nccl_pd_config,
-            app_id=nccl_pd,
+    for r in [1]:
+        pd_exp = ExperimentConfig(
+            backend_config=pd_config,
+            app_id=pd,
             model_id=model_id,
             request_rate=r,
             input_len=input_len,
             # Dedicated prefill benchmark, so we set output_len to 1
-            output_len=1,
+            output_len=output_len,
             image_count=image_count,
             num_prompts=num_prompts,
             image_width=image_width,
             image_height=image_height,
             gpu_type=gpu_type,
         )
-        configs.append(pd_p_exp)
+        configs.append(pd_exp)
 
-    for r in [3]:
+    for r in [1]:
         vllm_exp = ExperimentConfig(
             backend_config=vllm_config,
             app_id=vllm,
@@ -80,6 +83,7 @@ async def run(
 
     # prioritize by request rate
     configs.sort(key=lambda config: (-config.request_rate,))
+    configs = configs if overwrite else [cfg for cfg in configs if not cfg.exists()]
 
     print(f"Total configs: {len(configs)}")
 
@@ -120,7 +124,7 @@ async def run(
 
 async def main():
     set_ulimit()
-    await run(overwrite=True)
+    await run(overwrite=False)
 
 
 if __name__ == "__main__":
