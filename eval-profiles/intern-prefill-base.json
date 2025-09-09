@@ -1,17 +1,12 @@
 {
   "task": {
     "__class__": "PrefillLLMUnitTask",
-    "model_id": "Qwen/Qwen2.5-VL-32B-Instruct",
+    "model_id": "OpenGVLab/InternVL3-38B",
     "receive_embeddings": false,
     "send_hidden_states": false,
     "execution_descriptor_name": null
   },
   "num_gpus_to_profile": {
-    "1": {"launch_args": [
-      "--max-num-seqs",
-      "128",
-      "--max-model-len",
-      "8092"
-    ]}
+    "2": {"launch_args": []}
   }
 }

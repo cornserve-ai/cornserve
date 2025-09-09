@@ -1,11 +1,11 @@
 {
   "task": {
-    "__class__": "DecodeLLMUnitTask",
+    "__class__": "LLMUnitTask",
     "model_id": "OpenGVLab/InternVL3-38B",
     "receive_embeddings": false,
     "execution_descriptor_name": null
   },
   "num_gpus_to_profile": {
-    "2": {"launch_args": ["--max-num-seqs", "90"]}
+    "2": {"launch_args": []}
   }
 }
