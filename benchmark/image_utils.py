@@ -3,6 +3,7 @@
 import base64
 import mimetypes
 import os
+import wave
 
 import cv2
 import numpy as np
@@ -49,5 +50,67 @@ def create_dummy_image(
     # Fixed PNG compression for consistent output; 0 is fastest
     if not cv2.imwrite(path, img, [cv2.IMWRITE_PNG_COMPRESSION, 9]):
         raise RuntimeError(f"Failed to save image: {path}")
+
+    return filename
+
+
+def create_dummy_video(
+    num_frames: int,
+    width: int,
+    height: int,
+    id: int = 0,
+) -> str:
+    """Create a dummy video with fixed color frames based on the id."""
+    if height <= 0 or width <= 0 or num_frames <= 0:
+        raise ValueError("height, width, and num_frames must be positive")
+
+    if height > width:
+        height, width = width, height
+
+    filename = f"{num_frames}x{height}x{width}_{id}.mp4"
+    os.makedirs("videos", exist_ok=True)
+    path = os.path.join("videos", filename)
+    if os.path.exists(path):
+        return filename
+
+    # Deterministic BGR color from id
+    b = 32 + (id * 73) % 192
+    g = 32 + (id * 151) % 192
+    r = 32 + (id * 191) % 192
+    img = np.full((height, width, 3), (b, g, r), dtype=np.uint8)
+
+    # Use MP4 codec; may not work on all systems
+    fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+    video = cv2.VideoWriter(path, fourcc, 25.0, (width, height))
+    if not video.isOpened():
+        raise RuntimeError(f"Failed to open video for writing: {path}")
+
+    for _ in range(num_frames):
+        video.write(img)
+    video.release()
+
+    return filename
+
+def create_dummy_audio(duration_sec: int, id: int = 0) -> str:
+    """Create a dummy audio file with a fixed frequency based on the id."""
+    if duration_sec <= 0:
+        raise ValueError("duration_sec must be positive")
+
+    filename = f"{duration_sec}s_{id}.wav"
+    os.makedirs("audios", exist_ok=True)
+    path = os.path.join("audios", filename)
+    if os.path.exists(path):
+        return filename
+
+    sample_rate = 16000
+    num_samples = int(duration_sec * sample_rate)
+    rng = np.random.default_rng(id)
+    data = rng.integers(-32768, 32767, num_samples, dtype=np.int16)
+
+    with wave.open(path, "wb") as wf:
+        wf.setnchannels(1)
+        wf.setsampwidth(2)  # 16 bits
+        wf.setframerate(sample_rate)
+        wf.writeframes(data.tobytes())
 
     return filename

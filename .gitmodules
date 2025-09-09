@@ -3,4 +3,4 @@
   url = https://github.com/cornserve-ai/vllm.git
 [submodule "benchmark/servegen"]
 	path = third_party/servegen
-	url = https://github.com/cornserve-ai/servegen.git
+  url = git@github.com:cornserve-ai/servegen.git
