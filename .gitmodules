@@ -1,3 +1,6 @@
 [submodule "third_party/vllm"]
 	path = third_party/vllm
   url = https://github.com/cornserve-ai/vllm.git
+[submodule "benchmark/servegen"]
+	path = benchmark/servegen
+	url = https://github.com/cornserve-ai/servegen.git
