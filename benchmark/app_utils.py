@@ -11,6 +11,7 @@ ERIC_TEMPLATE_PATH = "apps/eric.py.tmpl"
 def create_mllm_app(
     model_id: str,
     task_class: Literal["MLLMTask", "DisaggregatedMLLMTask", "NcclDisaggregatedMLLMTask"] = "MLLMTask",
+    modalities: list[Literal["IMAGE", "AUDIO", "VIDEO"]] = ["IMAGE"],
     encoder_fission: bool = True,
 ) -> str:
     """Create an MLLM app srouce code from a template.
@@ -21,12 +22,19 @@ def create_mllm_app(
         encoder_fission (str): Whether to use encoder fission, defaults to "False".
     """
     src = Path(MLLM_TEMPLATE_PATH).read_text()
-    rendered = Template(src).substitute(MODEL_ID=model_id, TASK_CLASS=task_class, ENCODER_FISSION=str(encoder_fission))
+    modalitiy_str = ", ".join([f"Modality.{m}" for m in modalities])
+    rendered = Template(src).substitute(
+        MODEL_ID=model_id,
+        TASK_CLASS=task_class,
+        MODALITIES=modalitiy_str,
+        ENCODER_FISSION=str(encoder_fission),
+    )
     return rendered.strip()
 
 
 def create_eric_app(
     model_id: str,
+    modality: Literal["IMAGE", "AUDIO", "VIDEO"] = "IMAGE",
     max_batch_size: int = 1,
 ) -> str:
     """Create an Eric app source code from a template.
@@ -37,6 +45,7 @@ def create_eric_app(
     src = Path(ERIC_TEMPLATE_PATH).read_text()
     rendered = Template(src).substitute(
         MODEL_ID=model_id,
+        MODALITY=f"Modality.{modality}",
         MAX_BATCH_SIZE=max_batch_size,
     )
     return rendered.strip()

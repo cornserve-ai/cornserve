@@ -11,10 +11,15 @@ from cornserve.utils import set_ulimit
 async def run(
     overwrite: bool = False,
 ) -> None:
-    model_id: str = "Qwen/Qwen2.5-VL-7B-Instruct"
-    vllm = register_app(model_id=model_id, app_type="v")
+    # model_id: str = "Qwen/Qwen2.5-VL-7B-Instruct"
+    model_id: str = "Qwen/Qwen2.5-Omni-7B"
+    vllm = register_app(
+        model_id=model_id,
+        modalities=["AUDIO", "IMAGE", "VIDEO"],
+        app_type="v",
+    )
     print(f"Registered {model_id} V with ID: {vllm}")
-    vllm_config = VLLMConfig(num_replicas=2, tp_size=1)
+    vllm_config = VLLMConfig(num_replicas=1, tp_size=1)
 
     configs = []
     gpu_type = "A40"
@@ -22,6 +27,9 @@ async def run(
     serve_gen_config = ServeGenConfig(
         request_rate=2.0,
         duration=300,
+        no_image_prob=0.3,
+        audio_prob=0.3,
+        video_prob=0.3,
     )
 
     for r in [2]:
@@ -78,7 +86,7 @@ async def run(
 
 async def main():
     set_ulimit()
-    await run(overwrite=False)
+    await run(overwrite=True)
 
 
 if __name__ == "__main__":

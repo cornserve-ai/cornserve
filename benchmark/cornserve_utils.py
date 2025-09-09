@@ -33,6 +33,7 @@ GATEWAY_URL = "http://localhost:30080"
 def register_app(
     model_id: str,
     app_type: Literal["ev", "v", "e", "epd", "pd", "nccl-pd"],
+    modalities: list[Literal["IMAGE", "AUDIO", "VIDEO"]] = ["IMAGE"],
     eric_max_batch_size: int = 1,
 ) -> str:
     """Register an app with the CornServe gateway, and return the app ID."""
@@ -40,17 +41,21 @@ def register_app(
         source_code = create_mllm_app(
             model_id=model_id,
             task_class="MLLMTask",
+            modalities=modalities,
             encoder_fission=True,
         )
     elif app_type == "v":
         source_code = create_mllm_app(
             model_id=model_id,
             task_class="MLLMTask",
+            modalities=modalities,
             encoder_fission=False,
         )
     elif app_type == "e":
+        assert len(modalities) == 1, "Eric app only supports one modality."
         source_code = create_eric_app(
             model_id=model_id,
+            modality=modalities[0],
             max_batch_size=eric_max_batch_size,
         )
     elif app_type == "epd":
@@ -62,12 +67,14 @@ def register_app(
     elif app_type == "pd":
         source_code = create_mllm_app(
             model_id=model_id,
+            modalities=modalities,
             task_class="DisaggregatedMLLMTask",
             encoder_fission=False,
         )
     elif app_type == "nccl-pd":
         source_code = create_mllm_app(
             model_id=model_id,
+            modalities=modalities,
             task_class="NcclDisaggregatedMLLMTask",
             encoder_fission=False,
         )

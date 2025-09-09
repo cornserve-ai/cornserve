@@ -10,7 +10,7 @@ from cornserve.task.builtins.llm import $TASK_CLASS, OpenAIChatCompletionChunk, 
 
 mllm = $TASK_CLASS(
     model_id="$MODEL_ID",
-    modalities=[Modality.IMAGE],
+    modalities=[$MODALITIES],
     encoder_fission=$ENCODER_FISSION,
 )
 
