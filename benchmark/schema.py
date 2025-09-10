@@ -279,6 +279,12 @@ class ExperimentConfig(BaseModel):
 
     workload_config: SerializeAsAny[WorkloadConfig] | None = None
 
+    def model_post_init(self, __context: Any) -> None:
+        if self.workload_config is not None and isinstance(self.workload_config, ServeGenConfig):
+            assert self.dataset == "servegen", "ServeGenConfig can only be used with the servegen dataset."
+            assert self.use_synthesized_data == False, "ServeGen dataset already contains mm data."
+            self.request_rate = self.workload_config.request_rate
+
     def _get_image_config_str(self) -> str:
         """Get the image configuration as a string."""
         return (
