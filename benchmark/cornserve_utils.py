@@ -189,6 +189,7 @@ async def scale(config: ExperimentConfig) -> None:
     await clear_task_executors()
     tasks = await get_tasks()
     model_id = config.model_id
+    coros = []
     if isinstance(config.backend_config, EPDConfig):
         for task_def, task_id, state in tasks:
             if state != "ready":
@@ -207,18 +208,9 @@ async def scale(config: ExperimentConfig) -> None:
         assert all([prefill_task_id, decode_task_id, encoder_task_id]), (
             "Not all tasks are running. Please check the task and app states."
         )
-        await scale_task_with_num_gpus(
-            task_id=prefill_task_id,
-            num_gpus=config.backend_config.num_prefills * config.backend_config.prefill_tp_size,
-        )
-        await scale_task_with_num_gpus(
-            task_id=decode_task_id,
-            num_gpus=config.backend_config.num_decodes * config.backend_config.decode_tp_size,
-        )
-        await scale_task_with_num_gpus(
-            task_id=encoder_task_id,
-            num_gpus=config.backend_config.num_erics * config.backend_config.eric_tp_size,
-        )
+        coros.append(scale_task_with_num_gpus(task_id=prefill_task_id, num_gpus=config.backend_config.num_prefills * config.backend_config.prefill_tp_size))
+        coros.append(scale_task_with_num_gpus(task_id=decode_task_id, num_gpus=config.backend_config.num_decodes * config.backend_config.decode_tp_size))
+        coros.append(scale_task_with_num_gpus(task_id=encoder_task_id, num_gpus=config.backend_config.num_erics * config.backend_config.eric_tp_size))
     elif isinstance(config.backend_config, PDConfig):
         for task_def, task_id, state in tasks:
             if state != "ready":
@@ -234,14 +226,8 @@ async def scale(config: ExperimentConfig) -> None:
         assert all([prefill_task_id, decode_task_id]), (
             "Not all tasks are running. Please check the task and app states."
         )
-        await scale_task_with_num_gpus(
-            task_id=prefill_task_id,
-            num_gpus=config.backend_config.num_prefills * config.backend_config.prefill_tp_size,
-        )
-        await scale_task_with_num_gpus(
-            task_id=decode_task_id,
-            num_gpus=config.backend_config.num_decodes * config.backend_config.decode_tp_size,
-        )
+        coros.append(scale_task_with_num_gpus(task_id=prefill_task_id, num_gpus=config.backend_config.num_prefills * config.backend_config.prefill_tp_size))
+        coros.append(scale_task_with_num_gpus(task_id=decode_task_id, num_gpus=config.backend_config.num_decodes * config.backend_config.decode_tp_size))
     elif isinstance(config.backend_config, NcclPDConfig):
         for task_def, task_id, state in tasks:
             if state != "ready":
@@ -255,14 +241,8 @@ async def scale(config: ExperimentConfig) -> None:
         assert all([prefill_task_id, decode_task_id]), (
             "Not all tasks are running. Please check the task and app states."
         )
-        await scale_task_with_num_gpus(
-            task_id=prefill_task_id,
-            num_gpus=config.backend_config.num_prefills * config.backend_config.prefill_tp_size,
-        )
-        await scale_task_with_num_gpus(
-            task_id=decode_task_id,
-            num_gpus=config.backend_config.num_decodes * config.backend_config.decode_tp_size,
-        )
+        coros.append(scale_task_with_num_gpus(task_id=prefill_task_id, num_gpus=config.backend_config.num_prefills * config.backend_config.prefill_tp_size))
+        coros.append(scale_task_with_num_gpus(task_id=decode_task_id, num_gpus=config.backend_config.num_decodes * config.backend_config.decode_tp_size))
     elif isinstance(config.backend_config, VLLMConfig):
         for task_def, task_id, state in tasks:
             if state != "ready":
@@ -272,10 +252,7 @@ async def scale(config: ExperimentConfig) -> None:
                     and "decode" not in task_id and "prefill" not in task_id:
                 vllm_task_id = task_id
         assert vllm_task_id, "No vLLM task found. Please check the task and app states."
-        await scale_task_with_num_gpus(
-            task_id=vllm_task_id,
-            num_gpus=config.backend_config.num_replicas * config.backend_config.tp_size,
-        )
+        coros.append(scale_task_with_num_gpus(task_id=vllm_task_id, num_gpus=config.backend_config.num_replicas * config.backend_config.tp_size))
     elif isinstance(config.backend_config, CornserveConfig):
         for task_def, task_id, state in tasks:
             if state != "ready":
@@ -288,14 +265,8 @@ async def scale(config: ExperimentConfig) -> None:
                     and "decode" not in task_id and "prefill" not in task_id:
                 vllm_task_id = task_id
         assert all([eric_task_id, vllm_task_id]), "Not all tasks are running. Please check the task and app states."
-        await scale_task_with_num_gpus(
-            task_id=vllm_task_id,
-            num_gpus=config.backend_config.num_vllms * config.backend_config.vllm_tp_size,
-        )
-        await scale_task_with_num_gpus(
-            task_id=eric_task_id,
-            num_gpus=config.backend_config.num_erics * config.backend_config.eric_tp_size,
-        )
+        coros.append(scale_task_with_num_gpus(task_id=eric_task_id, num_gpus=config.backend_config.num_erics * config.backend_config.eric_tp_size))
+        coros.append(scale_task_with_num_gpus(task_id=vllm_task_id, num_gpus=config.backend_config.num_vllms * config.backend_config.vllm_tp_size))
     elif isinstance(config.backend_config, EricConfig):
         for task_def, task_id, state in tasks:
             if state != "ready":
@@ -303,13 +274,11 @@ async def scale(config: ExperimentConfig) -> None:
             if "dummyencodertask" in task_id and model_id in task_def["model_ids"] and task_def["max_batch_size"] == config.backend_config.max_batch_size:
                 eric_task_id = task_id
         assert eric_task_id, "No Eric task found. Please check the task and app states."
-        await scale_task_with_num_gpus(
-            task_id=eric_task_id,
-            num_gpus=config.backend_config.num_replicas * config.backend_config.tp_size,
-        )
+        coros.append(scale_task_with_num_gpus(task_id=eric_task_id, num_gpus=config.backend_config.num_replicas * config.backend_config.tp_size))
     else:
         raise NotImplementedError(f"Backend config {config.backend_config} is not supported.")
 
+    await asyncio.gather(*coros)
 
 if __name__ == "__main__":
     app_id = register_app(
