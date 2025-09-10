@@ -7,6 +7,7 @@ from typing import Any, ClassVar
 
 import aiohttp
 import kubernetes_asyncio.client as kclient
+from prometheus_client.parser import text_string_to_metric_families
 
 from cornserve import constants
 from cornserve.logging import get_logger
@@ -65,6 +66,8 @@ async def parse_stream_to_completion_chunks(response: aiohttp.ClientResponse) ->
 
 class VLLMDescriptor(TaskExecutionDescriptor[LLMBaseUnitTask, OpenAIChatCompletionRequest, TaskOutput]):
     """Task execution descriptor using vLLM."""
+
+    enable_load_query: bool = True
 
     def create_executor_name(self) -> str:
         """Create a name for the task executor."""
@@ -181,6 +184,33 @@ class VLLMDescriptor(TaskExecutionDescriptor[LLMBaseUnitTask, OpenAIChatCompleti
             ("shm", constants.VOLUME_SHM, "/dev/shm"),
             ("torch-compile-cache", constants.VOLUME_VLLM_EXECUTOR_CACHE, "/root/.cache/vllm/torch_compile_cache"),
         ]
+
+    _METRIC_NAMES: tuple[str,...] = (
+        "vllm:num_requests_waiting",
+        "vllm:kv_cache_usage_perc",
+        # "vllm:num_requests_running",
+    )
+
+    async def query_load(self, executor_url: str, client: aiohttp.ClientSession) -> tuple[float, ...]:
+        """Query the current load of the task executor at the given URL."""
+        metrics_url = f"{executor_url}/metrics"
+        async with client.get(metrics_url) as resp:
+            resp.raise_for_status()
+            body = await resp.text()
+
+        metrics: dict[str, float] = {name: 0.0 for name in self._METRIC_NAMES}
+
+        for family in text_string_to_metric_families(body):
+            name = family.name
+
+            if name in metrics:
+                vals = [float(s.value) for s in family.samples]
+                if name == "vllm:kv_cache_usage_perc":
+                    metrics[name] = max(vals) if vals else 0.0
+                else:
+                    metrics[name] = sum(vals)
+
+        return tuple(metrics[name] for name in self._METRIC_NAMES)
 
 
 DESCRIPTOR_REGISTRY.register(LLMBaseUnitTask, VLLMDescriptor, default=True)

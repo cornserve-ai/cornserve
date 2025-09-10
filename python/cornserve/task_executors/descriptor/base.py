@@ -26,6 +26,7 @@ class TaskExecutionDescriptor(BaseModel, ABC, Generic[TaskT, InputT, OutputT]):
     """
 
     task: TaskT
+    enable_load_query: bool = False
 
     @abstractmethod
     def create_executor_name(self) -> str:
@@ -89,3 +90,11 @@ class TaskExecutionDescriptor(BaseModel, ABC, Generic[TaskT, InputT, OutputT]):
         In general, the `task_output` object will be deep-copied and concrete values
         will be filled in from the response.
         """
+
+    async def query_load(self, executor_url: str, client: aiohttp.ClientSession) -> tuple[float,...]:
+        """Query the current load of the task executor at the given URL.
+
+        This should return a tuple of floats representing the load on each GPU.
+        The task manager will use it through a heap for least loaded routing.
+        """
+        return (0.0,)

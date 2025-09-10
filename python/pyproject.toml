@@ -61,9 +61,13 @@ gateway = [
 resource-manager = [
   "opentelemetry-instrumentation-grpc",
 ]
-task-manager = []
+task-manager = [
+  "heapdict",
+  "prometheus_client",
+]
 task-dispatcher = [
   "fastapi",
+  "prometheus_client",
   "uvicorn[standard]",
   "opentelemetry-instrumentation-fastapi",
   "opentelemetry-instrumentation-aiohttp-client",

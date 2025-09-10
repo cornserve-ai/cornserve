@@ -9,6 +9,7 @@ from contextlib import suppress
 from dataclasses import dataclass
 
 import aiohttp
+from heapdict import heapdict
 import kubernetes_asyncio.client as kclient
 import kubernetes_asyncio.config as kconfig
 
@@ -50,6 +51,7 @@ class TaskManager:
         self.executor_deployments: dict[str, TaskExecutorDeployment] = {}
         self.executor_pod_names: dict[str, str] = {}
         self.executor_service_names: dict[str, str] = {}
+        self.deployment_updated_event = asyncio.Event()
 
         self.http_client = aiohttp.ClientSession()
 
@@ -65,6 +67,70 @@ class TaskManager:
 
         # Round robin routing
         self.rr_counter = 0
+
+        self.least_load_routing = self.descriptor.enable_load_query
+
+        if self.least_load_routing:
+            self.load_heap_lock = asyncio.Lock()
+            self.load_heap = heapdict()
+            self._client_session = aiohttp.ClientSession(
+                timeout=aiohttp.ClientTimeout(total=2.0),
+            )
+            logger.info("Starting load monitoring loop for task manager %s", self.id)
+            self.monitoring_task = asyncio.create_task(
+                self.load_monitoring_loop(
+                    interval=1,
+                ),
+            )
+
+    async def load_monitoring_loop(self, interval: float) -> None:
+        monitoring_tasks = []
+        try:
+            while True:
+                logger.info("Load monitoring loop waiting for deployment update...")
+                await self.deployment_updated_event.wait()
+                # kill existing monitoring tasks
+                for task in monitoring_tasks:
+                    task.cancel()
+                monitoring_tasks.clear()
+                self.load_heap.clear()
+                for executor_id, deployment in self.executor_deployments.items():
+                    task = asyncio.create_task(self.deployment_monitoring_loop(
+                        executor_id,
+                        deployment,
+                        interval,
+                    ))
+                    monitoring_tasks.append(task)
+                logger.info("Load monitoring loop started %d monitoring tasks", len(monitoring_tasks))
+                self.deployment_updated_event.clear()
+        except asyncio.CancelledError:
+            for task in monitoring_tasks:
+                task.cancel()
+            with suppress(asyncio.CancelledError):
+                await asyncio.gather(*monitoring_tasks)
+            raise
+
+    async def deployment_monitoring_loop(
+        self,
+        executor_id: str,
+        deployment: TaskExecutorDeployment,
+        interval: float,
+    ) -> None:
+        """Background task to monitor the load of a task executor deployment."""
+        logger.info("Starting load monitoring load for deployment %s at %s", executor_id, deployment.url)
+        while True:
+            try:
+                load = await self.descriptor.query_load(deployment.url, client=self._client_session)
+                async with self.load_heap_lock:
+                    self.load_heap[executor_id] = load
+                # logger.info("Updated load for deployment %s: %s", executor_id, load)
+                await asyncio.sleep(interval)
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                logger.error("Failed to query load from %s: %s", deployment.url, e)
+                async with self.load_heap_lock:
+                    self.load_heap[executor_id] = (float("inf"),)
 
     @property
     def task_profile(self):
@@ -234,6 +300,7 @@ class TaskManager:
             if error_messages:
                 logger.error("Failed to spawn %d task executors.", len(error_messages))
                 raise RuntimeError("Failed to spawn task executors" + (":\n" + ",\n".join(error_messages)))
+        self.deployment_updated_event.set()
 
     async def get_route(self, request_id: str, routing_hint: str) -> tuple[str, list[int]]:
         """Get the URL to the task executor for a request.
@@ -252,11 +319,21 @@ class TaskManager:
         """
         logger.info("Routing request %s with routing hint %s", request_id, routing_hint)
 
-        # index = hash(request_id) % len(self.executor_deployments)
-        # Round robin routing
-        index = self.rr_counter % len(self.executor_deployments)
-        self.rr_counter += 1
-        deployment = list(self.executor_deployments.values())[index]
+        if self.least_load_routing:
+            async with self.load_heap_lock:
+                if len(self.load_heap) > 0:
+                    executor_id, _ = self.load_heap.peekitem()
+                    deployment = self.executor_deployments[executor_id]
+                else:
+                    index = self.rr_counter % len(self.executor_deployments)
+                    self.rr_counter += 1
+                    deployment = list(self.executor_deployments.values())[index]
+        else:
+            # index = hash(request_id) % len(self.executor_deployments)
+            # Round robin routing
+            index = self.rr_counter % len(self.executor_deployments)
+            self.rr_counter += 1
+            deployment = list(self.executor_deployments.values())[index]
 
         route = deployment.url
         sidecar_ranks = [gpu.global_rank for gpu in deployment.gpus]
@@ -313,6 +390,12 @@ class TaskManager:
 
         await self.http_client.close()
         await self.k8s_client.close()
+
+        if self.least_load_routing:
+            self.monitoring_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await self.monitoring_task
+            await self._client_session.close()
 
         logger.info("Task manager %s shut down", self.id)
 
