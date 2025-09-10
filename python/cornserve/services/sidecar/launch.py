@@ -80,9 +80,6 @@ class SidecarLaunchInfo:
                 node_name=node.metadata.name,
                 host_ipc=True,
                 host_pid=True,
-                # use host network for cloud env
-                host_network=True,
-                dns_policy="ClusterFirstWithHostNet",
                 hostname=f"sidecar-{sidecar_rank}",
                 subdomain="sidecar",
             ),
@@ -114,6 +111,6 @@ class SidecarLaunchInfo:
         """Get the container volumes for the sidecar."""
         return [
             ("shm", constants.VOLUME_SHM, "/dev/shm"),
-            ("sys-class", "/sys", "/sys"),
-            ("sys-dev", "/dev", "/dev"),
+            ("infiniband-class", "/sys/class/infiniband", "/sys/class/infiniband"),
+            ("infiniband-dev", "/dev/infiniband", "/dev/infiniband"),
         ]
