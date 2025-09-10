@@ -205,7 +205,14 @@ class ServeGenConfig(WorkloadConfig):
     video_prob: float = 0.0
 
     def to_suffix(self) -> str:
-        return f"servegen+rate{self.request_rate}+duration{self.duration}"
+        basename = f"servegen+rate{self.request_rate}+duration{self.duration}"
+        print(self.no_image_prob + self.audio_prob + self.video_prob)
+        if self.no_image_prob + self.audio_prob + self.video_prob > 0:
+            # non default
+            basename += f"+no_image_prob{self.no_image_prob}+audio_prob{self.audio_prob}+video_prob{self.video_prob}"
+        return basename
+
+
 
 class ExperimentConfig(BaseModel):
     """Configuration for the a benchmark experiment."""

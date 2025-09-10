@@ -96,6 +96,7 @@ class BenchmarkMetrics:
     median_e2el_ms: float
     std_e2el_ms: float
     percentiles_e2el_ms: list[tuple[float, float]]
+    benchmark_duration: float
 
 
 def calculate_metrics(
@@ -207,6 +208,7 @@ def calculate_metrics(
             (p, np.percentile(e2els or 0, p) * 1000)
             for p in selected_percentiles  # type: ignore
         ],
+        benchmark_duration=dur_s,
     )
 
     return metrics, actual_output_lens
