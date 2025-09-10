@@ -7,6 +7,6 @@
     "execution_descriptor_name": null
   },
   "num_gpus_to_profile": {
-    "1": {"launch_args": []}
+    "2": {"launch_args": []}
   }
 }
