@@ -206,7 +206,6 @@ class ServeGenConfig(WorkloadConfig):
 
     def to_suffix(self) -> str:
         basename = f"servegen+rate{self.request_rate}+duration{self.duration}"
-        print(self.no_image_prob + self.audio_prob + self.video_prob)
         if self.no_image_prob + self.audio_prob + self.video_prob > 0:
             # non default
             basename += f"+no_image_prob{self.no_image_prob}+audio_prob{self.audio_prob}+video_prob{self.video_prob}"
