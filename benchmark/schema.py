@@ -37,6 +37,33 @@ class EricConfig(BackendConfig):
             subdir_name += f"+{self.modality}"
         return subdir_name
 
+class CornserveOmniConfig(BackendConfig):
+    """Configuration for the  backend with a specific number of erics and vLLMs."""
+    num_image_erics: int = 0
+    num_video_erics: int = 0
+    num_audio_erics: int = 0
+    num_thinkers: int
+    num_talker_vocoders: int
+    # tp not supported bc only 7B
+
+    modalities: list[Literal["image", "video", "audio"]] = ["image", "video", "audio"]
+
+    def to_subdir_name(self) -> str:
+        """Return the subdirectory name for the Cornserve configuration."""
+        suffix = f"cornserve_omni+image_erics{self.num_image_erics}+video_erics{self.num_video_erics}+audio_erics{self.num_audio_erics}" + \
+                f"+thinkers{self.num_thinkers}+talker_vocoders{self.num_talker_vocoders}"
+        return suffix
+
+class VLLMOmniConfig(BackendConfig):
+    """Configuration for the  backend with a specific number of erics and vLLMs."""
+    num_thinkers: int
+    num_talker_vocoders: int
+    # tp not supported bc only 7B
+
+    def to_subdir_name(self) -> str:
+        """Return the subdirectory name for the Cornserve configuration."""
+        suffix = f"vllm_omni+thinkers{self.num_thinkers}+talker_vocoders{self.num_talker_vocoders}"
+        return suffix
 
 class CornserveConfig(BackendConfig):
     """Configuration for the Cornserve backend with a specific number of erics and vLLMs."""
@@ -251,8 +278,9 @@ class OmniConfig(WorkloadConfig):
         if self.include_audio:
             suffix += f"+audio_dur{self.audio_duration_sec}"
         if self.return_audio_prob > 0.0:
-            assert self.return_audio_tokens > 0, "return_audio_tokens must be > 0 if return_audio_prob > 0"
-            suffix += f"+return_audio_prob{self.return_audio_prob}+return_audio_tokens{self.return_audio_tokens}"
+            # assert self.return_audio_tokens > 0, "return_audio_tokens must be > 0 if return_audio_prob > 0"
+            # suffix += f"+return_audio_prob{self.return_audio_prob}+return_audio_tokens{self.return_audio_tokens}"
+            suffix += f"+return_audio_prob{self.return_audio_prob}"
         return suffix
 
 

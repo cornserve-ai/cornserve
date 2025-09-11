@@ -40,6 +40,7 @@ class RequestInput:
     ignore_eos: bool = True
 
     encoder_fission: bool = False
+    return_audio: bool | None = None
 
     # if timestamp, will use the timestamp as the start time
     timestamp: float | None = None
@@ -62,6 +63,7 @@ class RequestOutput:
     input: RequestInput | None = None
     usage: dict[str, Any] | None = None
 
+    audio_chunks: int = 0
     start_timestamp: float = 0.0  # Timestamp when the request was sent
     completion_timestamp: float = 0.0  # Timestamp when the completion was generated
 
@@ -97,6 +99,7 @@ class BenchmarkMetrics:
     std_e2el_ms: float
     percentiles_e2el_ms: list[tuple[float, float]]
     benchmark_duration: float
+    total_audio_chunks: int = 0
 
 
 def calculate_metrics(
@@ -171,6 +174,8 @@ def calculate_metrics(
             "All requests failed. This is likely due to a misconfiguration on the benchmark arguments.",
             stacklevel=2,
         )
+
+    total_audio_chunks = sum(output.audio_chunks for output in outputs)
     metrics = BenchmarkMetrics(
         completed=completed,
         total_input=total_input,
@@ -209,6 +214,7 @@ def calculate_metrics(
             for p in selected_percentiles  # type: ignore
         ],
         benchmark_duration=dur_s,
+        total_audio_chunks=total_audio_chunks,
     )
 
     return metrics, actual_output_lens
@@ -296,6 +302,8 @@ async def cornserve_invoke(
             "encoder_fission": request_input.encoder_fission,
             "ignore_eos": request_input.ignore_eos,
         }
+        if request_input.return_audio is not None:
+            request_data["return_audio"] = request_input.return_audio
 
         payload = {"request_data": request_data}
 
@@ -323,8 +331,15 @@ async def cornserve_invoke(
                         usage = data.get("usage")
                         completion_tokens = usage and usage.get("completion_tokens")
                         # here we do the hack to identify the OmniOutputChunk type
+                        if "audio_chunk" in data:
+                            output.audio_chunks += 1
+                            print(f"Received audio chunk #{output.audio_chunks} at {timestamp - st:.2f}s")
                         if "text_chunk" in data:
                             data = data["text_chunk"]
+                        if data is None:
+                            most_recent_timestamp = timestamp
+                            continue
+                        # TODO: handle TTFT and ITL for audio chunks
                         if choices := data.get("choices"):
                             content = choices[0]["delta"].get("content")
                             # First token
@@ -529,8 +544,9 @@ def transform_sampled_requests(
             output_len=request.expected_output_len,
             multi_modal_data=mm_data_list,
             filenames=request.filenames,
-            encoder_fission=request.encoder_fission,
             timestamp=request.timestamp,
+            encoder_fission=request.encoder_fission,
+            return_audio=request.return_audio,
         )
         request_inputs.append(request_input)
     return request_inputs
@@ -625,6 +641,7 @@ async def benchmark(
     print("{:<40} {:<10.2f}".format("Benchmark duration (s):", benchmark_duration))
     print("{:<40} {:<10}".format("Total input tokens:", metrics.total_input))
     print("{:<40} {:<10}".format("Total generated tokens:", metrics.total_output))
+    print("{:<40} {:<10}".format("Total generated audio chunks:", metrics.total_audio_chunks))
     print("{:<40} {:<10.4f}".format("Request throughput (req/s):", metrics.request_throughput))
     # if goodput_config_dict:
     #     print(

@@ -90,7 +90,7 @@ class OmniTask(Task[OmniInput, Stream[OmniOutputChunk]]):
     model_id: Literal["Qwen/Qwen2.5-Omni-7B"] = "Qwen/Qwen2.5-Omni-7B"
     modalities: list[Modality] = []
     encoder_fission: bool = True
-    coalesce_encoder_invocations: bool = True
+    coalesce_encoder_invocations: bool = False
 
     def post_init(self) -> None:
         """Initialize subtasks."""

@@ -7,15 +7,17 @@ from typing import Any, Literal
 
 import aiohttp
 import requests
-from app_utils import create_eric_app, create_mllm_app
+from app_utils import create_eric_app, create_mllm_app, create_omni_app
 from schema import (
     CornserveConfig,
+    CornserveOmniConfig,
     EPDConfig,
     EricConfig,
     ExperimentConfig,
     NcclPDConfig,
     PDConfig,
     VLLMConfig,
+    VLLMOmniConfig,
 )
 
 from cornserve.services.gateway.models import (
@@ -32,7 +34,16 @@ GATEWAY_URL = "http://localhost:30080"
 
 def register_app(
     model_id: str,
-    app_type: Literal["ev", "v", "e", "epd", "pd", "nccl-pd"],
+    app_type: Literal[
+        "ev",
+        "v",
+        "e",
+        "epd",
+        "pd",
+        "nccl-pd",
+        "ela", # encoder + llm + audio
+        "la", # llm + audio
+    ],
     modalities: list[Literal["IMAGE", "AUDIO", "VIDEO"]] = ["IMAGE"],
     eric_max_batch_size: int = 1,
 ) -> str:
@@ -76,6 +87,18 @@ def register_app(
             model_id=model_id,
             modalities=modalities,
             task_class="NcclDisaggregatedMLLMTask",
+            encoder_fission=False,
+        )
+    elif app_type == "ela":
+        source_code = create_omni_app(
+            model_id=model_id,
+            modalities=modalities,
+            encoder_fission=True,
+        )
+    elif app_type == "la":
+        source_code = create_omni_app(
+            model_id=model_id,
+            modalities=modalities,
             encoder_fission=False,
         )
     else:
@@ -291,6 +314,50 @@ async def scale(config: ExperimentConfig) -> None:
                 eric_task_id = task_id
         assert eric_task_id, "No Eric task found. Please check the task and app states."
         coros.append(scale_task_with_num_gpus(task_id=eric_task_id, num_gpus=config.backend_config.num_replicas * config.backend_config.tp_size))
+    elif isinstance(config.backend_config, CornserveOmniConfig):
+        task_ids = {}
+        for task_def, task_id, state in tasks:
+            if state != "ready":
+                continue
+            if "encodertask" in task_id and model_id in task_def["model_ids"] \
+                    and "dummyencodertask" not in task_id:
+                for modality in config.backend_config.modalities:
+                    if task_def["modality"] == modality:
+                        task_ids[modality] = task_id
+            elif "llmunittask" in task_id and model_id == task_def["model_id"] \
+                    and task_def["receive_embeddings"] == True \
+                    and "decode" not in task_id and "prefill" not in task_id:
+                vllm_task_id = task_id
+            elif "omnitalkervocodertask" in task_id and model_id == task_def["model_id"]:
+                talker_vocoder_task_id = task_id
+        for modality in config.backend_config.modalities:
+            assert modality in task_ids, f"No Eric task found for modality {modality}. Please check the task and app states."
+        assert vllm_task_id, "LLM is not running. Please check the task and app states."
+        assert talker_vocoder_task_id, "No talker vocoder task found. Please check the task and app states."
+        for modality, eric_task_id in task_ids.items():
+            if modality == "image":
+                num_gpus = config.backend_config.num_image_erics
+            elif modality == "video":
+                num_gpus = config.backend_config.num_video_erics
+            elif modality == "audio":
+                num_gpus = config.backend_config.num_audio_erics
+            coros.append(scale_task_with_num_gpus(task_id=eric_task_id, num_gpus=num_gpus))
+        coros.append(scale_task_with_num_gpus(task_id=vllm_task_id, num_gpus=config.backend_config.num_thinkers))
+        coros.append(scale_task_with_num_gpus(task_id=talker_vocoder_task_id, num_gpus=config.backend_config.num_talker_vocoders))
+    elif isinstance(config.backend_config, VLLMOmniConfig):
+        for task_def, task_id, state in tasks:
+            if state != "ready":
+                continue
+            elif "llmunittask" in task_id and model_id == task_def["model_id"] \
+                    and task_def["receive_embeddings"] == False \
+                    and "decode" not in task_id and "prefill" not in task_id:
+                vllm_task_id = task_id
+            elif "omnitalkervocodertask" in task_id and model_id == task_def["model_id"]:
+                talker_vocoder_task_id = task_id
+        assert vllm_task_id, "LLM is not running. Please check the task and app states."
+        assert talker_vocoder_task_id, "No talker vocoder task found. Please check the task and app states."
+        coros.append(scale_task_with_num_gpus(task_id=vllm_task_id, num_gpus=config.backend_config.num_thinkers))
+        coros.append(scale_task_with_num_gpus(task_id=talker_vocoder_task_id, num_gpus=config.backend_config.num_talker_vocoders))
     else:
         raise NotImplementedError(f"Backend config {config.backend_config} is not supported.")
 

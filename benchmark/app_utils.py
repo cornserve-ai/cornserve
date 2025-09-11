@@ -6,11 +6,16 @@ from typing import Literal
 
 MLLM_TEMPLATE_PATH = "apps/mllm.py.tmpl"
 ERIC_TEMPLATE_PATH = "apps/eric.py.tmpl"
+OMNI_TEMPLATE_PATH = "apps/omni.py.tmpl"
 
 
 def create_mllm_app(
     model_id: str,
-    task_class: Literal["MLLMTask", "DisaggregatedMLLMTask", "NcclDisaggregatedMLLMTask"] = "MLLMTask",
+    task_class: Literal[
+        "MLLMTask",
+        "DisaggregatedMLLMTask",
+        "NcclDisaggregatedMLLMTask",
+    ] = "MLLMTask",
     modalities: list[Literal["IMAGE", "AUDIO", "VIDEO"]] = ["IMAGE"],
     encoder_fission: bool = True,
 ) -> str:
@@ -47,5 +52,25 @@ def create_eric_app(
         MODEL_ID=model_id,
         MODALITY=f"Modality.{modality}",
         MAX_BATCH_SIZE=max_batch_size,
+    )
+    return rendered.strip()
+
+def create_omni_app(
+    model_id: str,
+    modalities: list[Literal["IMAGE", "AUDIO", "VIDEO"]] = ["IMAGE"],
+    encoder_fission: bool = True,
+) -> str:
+    """Create an Omni app source code from a template.
+
+    Args:
+        model_id (str): The model identifier.
+    """
+    if model_id != "Qwen/Qwen2.5-Omni-7B":
+        raise ValueError("Only Qwen/Qwen2.5-Omni-7B is supported for Omni app.")
+    src = Path(OMNI_TEMPLATE_PATH).read_text()
+    modalitiy_str = ", ".join([f"Modality.{m}" for m in modalities])
+    rendered = Template(src).substitute(
+        MODALITIES=modalitiy_str,
+        ENCODER_FISSION=str(encoder_fission),
     )
     return rendered.strip()

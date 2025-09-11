@@ -90,6 +90,8 @@ class OmniTalkerVocoderDescriptor(
         """Convert TaskInput to a request object for the task executor."""
         request = task_input.model_dump()
         request["stream"] = True
+        # talker is on V0
+        request["max_tokens"] = task_input.max_completion_tokens
         request["cornserve_hidden_states_forward_data_id"] = task_input.embeddings.id
         return request
 

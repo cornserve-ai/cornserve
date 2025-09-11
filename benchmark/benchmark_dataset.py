@@ -65,7 +65,7 @@ class SampleRequest:
 
     # additional args
     encoder_fission: bool = False
-    return_audio: bool = False
+    return_audio: bool | None = None
 
 
 # -----------------------------------------------------------------------------
@@ -568,6 +568,7 @@ class SyntheticOmniDataset:
         video_height: int,
         include_audio: bool,
         audio_duration_sec: int,
+        return_audio_prob: float = 0.0,
     ) -> list[SampleRequest]:
         sampled_requests: list[SampleRequest] = []
         np.random.seed(self.random_seed)
@@ -595,12 +596,15 @@ class SyntheticOmniDataset:
                 filenames.append(audio_filename)
                 mm_data.append({"type": "audio_url", "audio_url": {"url": audio_uri}})
 
+            return_audio = np.random.rand() < return_audio_prob
+
             sampled_req = SampleRequest(
                 prompt=prompt,
                 prompt_len=len(tokenizer(prompt).input_ids),
                 multi_modal_data_list=mm_data,
                 expected_output_len=output_len,
                 filenames=filenames,
+                return_audio=return_audio
             )
             sampled_requests.append(sampled_req)
 

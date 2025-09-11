@@ -53,6 +53,7 @@ sidecar = [
 gateway = [
   "fastapi",
   "uvicorn[standard]",
+  "prometheus_client",
   "opentelemetry-instrumentation-fastapi",
   "opentelemetry-instrumentation-grpc",
   "opentelemetry-instrumentation-aiohttp-client",
@@ -60,6 +61,7 @@ gateway = [
 ]
 resource-manager = [
   "opentelemetry-instrumentation-grpc",
+  "prometheus_client",
 ]
 task-manager = [
   "heapdict",
