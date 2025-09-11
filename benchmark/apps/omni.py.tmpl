@@ -1,0 +1,24 @@
+from __future__ import annotations
+
+from collections.abc import AsyncIterator
+
+from cornserve.app.base import AppConfig
+from cornserve.task.builtins.encoder import Modality
+from cornserve.task.builtins.omni import OmniInput, OmniOutputChunk, OmniTask
+
+omni = OmniTask(
+    model_id="Qwen/Qwen2.5-Omni-7B",
+    modalities=[$MODALITIES],
+    encoder_fission=$ENCODER_FISSION,
+)
+
+
+class Config(AppConfig):
+    """App configuration model."""
+
+    tasks = {"omni": omni}
+
+
+async def serve(request: OmniInput) -> AsyncIterator[OmniOutputChunk]:
+    """Main serve function for the app."""
+    return await omni(request)
