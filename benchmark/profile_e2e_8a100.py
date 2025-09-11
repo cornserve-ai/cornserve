@@ -12,16 +12,16 @@ from transformers import AutoTokenizer
 
 from cornserve.utils import set_ulimit
 
-
 async def run(
     overwrite: bool = False,
 ) -> None:
     """Sweep"""
-    model_ids = ["OpenGVLab/InternVL3-38B"]
+    # model_ids = ["OpenGVLab/InternVL3-38B"]
     # model_ids = ["Qwen/Qwen2.5-VL-32B-Instruct"]
-    # model_ids = ["OpenGVLab/InternVL3-38B", "Qwen/Qwen2.5-VL-32B-Instruct"]
+    model_ids = ["OpenGVLab/InternVL3-38B", "Qwen/Qwen2.5-VL-32B-Instruct"]
 
-    app_types: list[Literal['ev', 'v', 'e', 'epd', 'pd', 'nccl-pd']] = ["ev", "v"]
+    app_types: list[Literal['ev', 'v', 'e', 'epd', 'pd', 'nccl-pd']] = ["ev", "v", "pd", "epd"]
+    # app_types: list[Literal['ev', 'v', 'e', 'epd', 'pd', 'nccl-pd']] = ["epd"]
     # image_width, image_height, image_count, input_len, output_len, num_prompts, request_rate
     # the request rate is different per model!
     workloads = [
@@ -40,10 +40,9 @@ async def run(
 
         # ----- ?
         # scale up numbers
-        # (896, 896, 1, 100, 100, 2000, 15),
-        # (896, 896, 1, 100, 300, 2000, 15),
-        # (896, 896, 1, 1000, 100, 2000, 15),
-        # (896, 896, 1, 1000, 300, 2000, 15),
+        (896, 896, 1, 100, 100, 2000, 15),
+        (896, 896, 1, 1000, 300, 2000, 6),
+        (896, 896, 2, 1000, 300, 2000, 4),
 
         # ----- small ones
         (512, 512, 1, 100, 100, 4000, 30),
@@ -75,6 +74,16 @@ async def run(
         num_erics = (8 // 2 - num_vllms) * 2
         cornserve_config = CornserveConfig(num_vllms=num_vllms, vllm_tp_size=2, num_erics=num_erics)
         backend_configs.append(cornserve_config)
+    for num_prefills in [2]:
+        num_decodes = 8//2 - num_prefills
+        pd_config = PDConfig(num_prefills=num_prefills, num_decodes=num_decodes, prefill_tp_size=2, decode_tp_size=2)
+        backend_configs.append(pd_config)
+    for num_erics in [2]:
+        # remaining = (8 - num_erics) // 2
+        for num_prefills in [1]:
+            num_decodes = 4 - num_erics//2 - num_prefills
+            epd_config = EPDConfig(num_erics=num_erics, num_prefills=num_prefills, num_decodes=num_decodes, prefill_tp_size=2, decode_tp_size=2)
+            backend_configs.append(epd_config)
 
     gpu_type = "A100"
 
@@ -83,7 +92,19 @@ async def run(
         for backend in backend_configs:
             for workload in workloads:
                 image_width, image_height, image_count, input_len, output_len, num_prompts, request_rate = workload
-                app_id = app_ids[(model_id, "ev" if isinstance(backend, CornserveConfig) else "v")]
+                if isinstance(backend, CornserveConfig):
+                    app_type = "ev"
+                elif isinstance(backend, VLLMConfig):
+                    app_type = "v"
+                elif isinstance(backend, PDConfig):
+                    app_type = "pd"
+                elif isinstance(backend, EPDConfig):
+                    app_type = "epd"
+                else:
+                    raise NotImplementedError(f"Backend {backend} is not supported.")
+                if app_type not in app_types:
+                    continue
+                app_id = app_ids[(model_id, app_type)]
                 exp_config = ExperimentConfig(
                     backend_config=backend,
                     app_id=app_id,
@@ -96,6 +117,7 @@ async def run(
                     image_width=image_width,
                     image_height=image_height,
                     gpu_type = gpu_type,
+                    use_synthesized_data=True
                 )
                 configs.append(exp_config)
 
@@ -107,29 +129,41 @@ async def run(
 
     print(f"Total configs: {len(configs)}")
 
-    shared_config = next(iter(configs))
-    tokenizer = AutoTokenizer.from_pretrained(
-        shared_config.model_id,
-        tokenizer_mode="auto",
-        trust_remote_code=True,
-    )
+    tokenizers = {}
+    for model_id in model_ids:
+        tokenizer = AutoTokenizer.from_pretrained(
+            model_id,
+            tokenizer_mode="auto",
+            trust_remote_code=True,
+        )
+        tokenizers[model_id] = tokenizer
 
-    print("Sampling reqeuests ...")
-    sampled_requests: list[SampleRequest] = VisionArenaDataset(
-        dataset_path="lmarena-ai/VisionArena-Chat",
-        dataset_subset=None,
-        dataset_split="train",
-        random_seed=shared_config.seed,
-    ).sample(
-        num_requests=shared_config.num_prompts,
-        tokenizer=tokenizer,
-        output_len=shared_config.output_len,
-        input_len=shared_config.input_len,
-    )
+    sampled_workloads = {}
+    def _try_sample_workload(cfg: ExperimentConfig) -> list[SampleRequest]:
+        key = (cfg.model_id, cfg.num_prompts, cfg.output_len, cfg.input_len, cfg.seed)
+        if key in sampled_workloads:
+            return sampled_workloads[key]
+        print(f"Sampling reqeuests ...")
+        tokenizer = tokenizers[cfg.model_id]
+        workload: list[SampleRequest] = VisionArenaDataset(
+            dataset_path="lmarena-ai/VisionArena-Chat",
+            dataset_subset=None,
+            dataset_split="train",
+            random_seed=cfg.seed,
+        ).sample(
+            num_requests=cfg.num_prompts,
+            tokenizer=tokenizer,
+            output_len=cfg.output_len,
+            input_len=cfg.input_len,
+        )
+        sampled_workloads[key] = workload
+        return workload
 
-    for cfg in configs:
-        print(f"Current config: {cfg.backend_config} {cfg.model_id} with {cfg.request_rate} requests/s")
+
+    for i, cfg in enumerate(configs):
+        print(f"Current {i}/{len(configs)} config: {cfg.backend_config} {cfg.model_id} with {cfg.request_rate} requests/s")
         # we scale every time to clean up the task executors states just in case
+        sampled_requests = _try_sample_workload(cfg)
         await scale(cfg)
         request_inputs = transform_sampled_requests(config=cfg, sampled_requests=sampled_requests)
         await benchmark(request_inputs=request_inputs, config=cfg)
