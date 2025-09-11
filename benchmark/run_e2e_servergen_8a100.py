@@ -18,8 +18,8 @@ async def run(
     # request_rates = [3,3.5,4]
 
     app_types: list[Literal['ev', 'v', 'e', 'epd', 'pd', 'nccl-pd']] = ["ev", "v"]
-    request_rates = [1.9]
-    duration = 900 # 20 minutes
+    request_rates = [2.65]
+    duration = 900 # 15 minutes
     seed = 48105
 
     app_ids = {}

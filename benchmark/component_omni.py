@@ -19,12 +19,12 @@ async def run(
     print(f"Registered {model_id} video-only Eric with ID: {video_eric}")
     audio_eric = register_app(model_id=model_id, app_type="e", modalities=["AUDIO"])
     print(f"Registered {model_id} audio-only Eric with ID: {audio_eric}")
-    # el = ""
     el = register_app(model_id=model_id, app_type="ev", modalities=["IMAGE", "VIDEO", "AUDIO"])
     print(f"Registered {model_id} omni EV with ID: {el}")
-    vllm = ""
+
     vllm = register_app(model_id=model_id, app_type="v")
     print(f"Registered {model_id} VLLM with ID: {vllm}")
+    vllm_config = VLLMConfig(num_replicas=1)
 
     image_config = EricConfig(num_replicas=1, modality="image")
     video_config = EricConfig(num_replicas=1, modality="video")
@@ -33,11 +33,10 @@ async def run(
         num_erics=7,
         num_vllms=1,
         num_audio_erics=1,
-        num_image_erics=2,
+        num_image_erics=1,
         num_video_erics=4,
         modalities=["image", "video", "audio"],
     )
-    vllm_config = VLLMConfig(num_replicas=1)
 
     tokenizer = AutoTokenizer.from_pretrained(
         model_id,
@@ -47,10 +46,10 @@ async def run(
 
     gpu_type = "A100"
     num_requests = 500
-    image_request_rate = 5
-    video_request_rate = 5
     audio_request_rate = 100
-    llm_request_rate = 5
+    image_request_rate = 20
+    video_request_rate = 8
+    llm_request_rate = 2
     input_len = 1000
     # make it short for audio output
     output_len = 30
@@ -108,6 +107,17 @@ async def run(
         video_width=video_width,
         audio_duration_sec=audio_duration_sec,
     )
+    # llm_workload_config = OmniConfig(
+    #     include_image=False,
+    #     include_audio=False,
+    #     include_video=False,
+    #     image_width=image_width,
+    #     image_height=image_height,
+    #     video_num_frames=video_num_frames,
+    #     video_height=video_height,
+    #     video_width=video_width,
+    #     audio_duration_sec=audio_duration_sec,
+    # )
 
     def smaple_requests(
         num_requests: int,
@@ -188,18 +198,18 @@ async def run(
         )
         configs.append((el_l_exp_config, llm_sampled_requests))
 
-    if vllm and llm_request_rate > 0:
-        l_exp_config = ExperimentConfig(
-            backend_config=vllm_config,
-            app_id=vllm,
-            model_id=model_id,
-            gpu_type=gpu_type,
-            dataset="omni",
-            workload_config=llm_workload_config,
-            request_rate=llm_request_rate,
-            use_synthesized_data=False,
-        )
-        configs.append((l_exp_config, llm_sampled_requests))
+    # if vllm and llm_request_rate > 0:
+    #     l_exp_config = ExperimentConfig(
+    #         backend_config=vllm_config,
+    #         app_id=vllm,
+    #         model_id=model_id,
+    #         gpu_type=gpu_type,
+    #         dataset="omni",
+    #         workload_config=llm_workload_config,
+    #         request_rate=llm_request_rate,
+    #         use_synthesized_data=False,
+    #     )
+    #     configs.append((l_exp_config, llm_sampled_requests))
 
 
     # prioritize by request rate
