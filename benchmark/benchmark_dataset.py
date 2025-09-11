@@ -65,6 +65,7 @@ class SampleRequest:
 
     # additional args
     encoder_fission: bool = False
+    return_audio: bool = False
 
 
 # -----------------------------------------------------------------------------
@@ -469,6 +470,9 @@ def _generate_random_text_with_length(
        Returns:
            Random text string that tokenizes to approximately target_length tokens.
        """
+       if target_length <= 0:
+           return ""
+
        special_ids = set(tokenizer.all_special_ids)
        vocab_size = len(tokenizer)
 
@@ -538,6 +542,69 @@ def _generate_random_text_with_length(
            current_tokens, clean_up_tokenization_spaces=True
        ).strip()
        return prompt
+
+
+class SyntheticOmniDataset:
+    DEFAULT_SEED = 0
+
+    def __init__(
+        self,
+        random_seed: int = DEFAULT_SEED,
+    ) -> None:
+        self.random_seed = random_seed
+
+    def sample(
+        self,
+        tokenizer: PreTrainedTokenizerBase,
+        num_requests: int,
+        output_len: int,
+        input_len: int,
+        include_image: bool,
+        image_width: int,
+        image_height: int,
+        include_video: bool,
+        video_num_frames: int,
+        video_width: int,
+        video_height: int,
+        include_audio: bool,
+        audio_duration_sec: int,
+    ) -> list[SampleRequest]:
+        sampled_requests: list[SampleRequest] = []
+        np.random.seed(self.random_seed)
+
+        # prepare mm data
+        image_filename = create_dummy_image(width=image_width, height=image_height, id=0)
+        image_uri = get_image_data_uris([image_filename], root="images")[0]
+        video_filename = create_dummy_video(num_frames=video_num_frames, width=video_width, height=video_height, id=0)
+        video_uri = get_image_data_uris([video_filename], root="videos")[0]
+        audio_filename = create_dummy_audio(duration_sec=audio_duration_sec, id=0)
+        audio_uri = get_image_data_uris([audio_filename], root="audios")[0]
+
+        for _ in range(num_requests):
+            prompt = _generate_random_text_with_length(tokenizer, input_len)
+            mm_data = []
+            filenames = []
+
+            if include_image:
+                filenames.append(image_filename)
+                mm_data.append({"type": "image_url", "image_url": {"url": image_uri}})
+            if include_video:
+                filenames.append(video_filename)
+                mm_data.append({"type": "video_url", "video_url": {"url": video_uri}})
+            if include_audio:
+                filenames.append(audio_filename)
+                mm_data.append({"type": "audio_url", "audio_url": {"url": audio_uri}})
+
+            sampled_req = SampleRequest(
+                prompt=prompt,
+                prompt_len=len(tokenizer(prompt).input_ids),
+                multi_modal_data_list=mm_data,
+                expected_output_len=output_len,
+                filenames=filenames,
+            )
+            sampled_requests.append(sampled_req)
+
+        return sampled_requests
 
 class ServeGenDataset:
 

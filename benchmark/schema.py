@@ -28,10 +28,13 @@ class EricConfig(BackendConfig):
     num_replicas: int
     tp_size: int = 1
     max_batch_size: int = 1
+    modality: Literal["image", "video", "audio"] = "image"
 
     def to_subdir_name(self) -> str:
         """Return the file name for the backend configuration."""
         subdir_name = f"eric+replicas{self.num_replicas}+tp{self.tp_size}+maxbs{self.max_batch_size}"
+        if self.modality != "image":
+            subdir_name += f"+{self.modality}"
         return subdir_name
 
 
@@ -43,11 +46,23 @@ class CornserveConfig(BackendConfig):
     num_vllms: int
     vllm_tp_size: int = 1
 
+    modalities: list[Literal["image", "video", "audio"]] = ["image"]
+    # only used when using omni dataset
+    num_image_erics: int = 0
+    num_video_erics: int = 0
+    num_audio_erics: int = 0
+
+    def model_post_init(self, __context: Any) -> None:
+        if set(self.modalities) == {"image"} or self.num_image_erics + self.num_video_erics + self.num_audio_erics == 0:
+            self.num_image_erics = self.num_erics
+
     def to_subdir_name(self) -> str:
         """Return the subdirectory name for the Cornserve configuration."""
-        return (
-            f"cornserve+erics{self.num_erics}+tp{self.eric_tp_size}" + f"+vllms{self.num_vllms}+tp{self.vllm_tp_size}"
-        )
+        suffix = f"cornserve+erics{self.num_erics}+tp{self.eric_tp_size}" + f"+vllms{self.num_vllms}+tp{self.vllm_tp_size}"
+        if set(self.modalities) != {"image"}:
+            suffix += f"+modalities{'-'.join(sorted(self.modalities))}"
+            suffix += f"+image_erics{self.num_image_erics}+video_erics{self.num_video_erics}+audio_erics{self.num_audio_erics}"
+        return suffix
 
     @classmethod
     def create_backend_configs(
@@ -211,6 +226,35 @@ class ServeGenConfig(WorkloadConfig):
             basename += f"+no_image_prob{self.no_image_prob}+audio_prob{self.audio_prob}+video_prob{self.video_prob}"
         return basename
 
+class OmniConfig(WorkloadConfig):
+    """Configuration for the Omni workload."""
+
+    include_image: bool = True
+    image_width: int = 1920
+    image_height: int = 1080
+    include_video: bool = True
+    video_num_frames: int = 20
+    video_width: int = 1024
+    video_height: int = 768
+    # 9990 image tokens for Qwen
+    include_audio: bool = True
+    audio_duration_sec: int = 8
+    return_audio_prob: float = 0.0
+    return_audio_tokens: int = 0
+
+    def to_suffix(self) -> str:
+        suffix = "omni"
+        if self.include_image:
+            suffix += f"+image_w{self.image_width}_h{self.image_height}"
+        if self.include_video:
+            suffix += f"+video_f{self.video_num_frames}_w{self.video_width}_h{self.video_height}"
+        if self.include_audio:
+            suffix += f"+audio_dur{self.audio_duration_sec}"
+        if self.return_audio_prob > 0.0:
+            assert self.return_audio_tokens > 0, "return_audio_tokens must be > 0 if return_audio_prob > 0"
+            suffix += f"+return_audio_prob{self.return_audio_prob}+return_audio_tokens{self.return_audio_tokens}"
+        return suffix
+
 
 
 class ExperimentConfig(BaseModel):
@@ -233,7 +277,7 @@ class ExperimentConfig(BaseModel):
     gpu_type: Literal["A40", "A100", "H100"] = "A40"
 
     # workload config
-    dataset: Literal["lmarena-ai/VisionArena-Chat", "servegen"] = Field(
+    dataset: Literal["lmarena-ai/VisionArena-Chat", "servegen", "omni"] = Field(
         default="lmarena-ai/VisionArena-Chat",
         description=("Dataset to use for the benchmark. Currently only supports lmarena-ai/VisionArena-Chat."),
     )
@@ -290,6 +334,9 @@ class ExperimentConfig(BaseModel):
             assert self.dataset == "servegen", "ServeGenConfig can only be used with the servegen dataset."
             assert self.use_synthesized_data == False, "ServeGen dataset already contains mm data."
             self.request_rate = self.workload_config.request_rate
+        if self.workload_config is not None and isinstance(self.workload_config, OmniConfig):
+            assert self.dataset == "omni", "OmniConfig can only be used with the omni dataset."
+            assert self.use_synthesized_data == False, "Omni dataset already contains mm data."
 
     def _get_image_config_str(self) -> str:
         """Get the image configuration as a string."""

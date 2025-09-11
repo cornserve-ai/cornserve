@@ -217,16 +217,31 @@ def calculate_metrics(
 async def cornserve_invoke_eric(
     request_input: RequestInput,
     pbar: tqdm | None,
+    use_synthetic_data: bool = True,
 ) -> RequestOutput:
     """Invoke an Eric app."""
     api_url = request_input.url
     async with aiohttp.ClientSession(trust_env=True, timeout=AIOHTTP_TIMEOUT) as session:
-        # only support images
-        image_urls = get_image_data_uris(request_input.filenames)
-        request_data = {
-            "model_id": request_input.model,
-            "data_urls": image_urls,
-        }
+        if use_synthetic_data:
+            image_urls = get_image_data_uris(request_input.filenames)
+            request_data = {
+                "model_id": request_input.model,
+                "data_urls": image_urls,
+            }
+        else:
+            # parse the data uri from multi_modal_data
+            data_urls = []
+            for mm_data in request_input.multi_modal_data:
+                if mm_data["type"] == "image_url":
+                    data_urls.append(mm_data["image_url"]["url"])
+                if mm_data["type"] == "video_url":
+                    data_urls.append(mm_data["video_url"]["url"])
+                if mm_data["type"] == "audio_url":
+                    data_urls.append(mm_data["audio_url"]["url"])
+            request_data = {
+                "model_id": request_input.model,
+                "data_urls": data_urls,
+            }
 
         payload = {"request_data": request_data}
 
@@ -533,7 +548,7 @@ async def benchmark(
     async def request_func(request_input: RequestInput, pbar: tqdm | None) -> RequestOutput:
         async with semaphore:
             if isinstance(config.backend_config, EricConfig):
-                return await cornserve_invoke_eric(request_input, pbar)
+                return await cornserve_invoke_eric(request_input, pbar, config.use_synthesized_data)
             return await cornserve_invoke(request_input, pbar)
 
     # first test a request
