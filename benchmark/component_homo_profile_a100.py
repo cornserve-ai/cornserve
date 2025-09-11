@@ -13,11 +13,10 @@ from cornserve.utils import set_ulimit
 async def run(
     overwrite: bool = False,
 ) -> None:
-    # model_id: str = "Qwen/Qwen2.5-VL-32B-Instruct"
     # model_ids = ["OpenGVLab/InternVL3-38B", "Qwen/Qwen2.5-VL-32B-Instruct"]
     model_ids = ["OpenGVLab/InternVL3-38B"]
-    app_types: list[Literal['ev', 'v', 'e', 'epd', 'pd', 'nccl-pd']] = ["e", "ev", "v", "pd", "epd"]
-    # model_id: str = "OpenGVLab/InternVL3-38B"
+    # app_types: list[Literal['ev', 'v', 'e', 'epd', 'pd', 'nccl-pd']] = ["e", "ev", "v", "pd", "epd"]
+    app_types: list[Literal['ev', 'v', 'e', 'epd', 'pd', 'nccl-pd']] = ["e", "ev", "v"]
 
     app_ids = {}
     for model_id in model_ids:
@@ -31,24 +30,24 @@ async def run(
     # the request rate is different per model!
     workloads = [
         # ----- Mono is better
-        # (1920, 1080, 1, 100, 100, 2000, (3, 3, 3, 3, 3, 3, 3)),
-        # (1920, 1080, 1, 100, 300, 2000, (3, 2, 2, 2, 2, 2, 2)),
+        (1920, 1080, 1, 100, 100, 500, (3, 3, 3, 3, 3, 3, 3)),
+        (1920, 1080, 1, 100, 300, 500, (3, 2, 2, 2, 2, 2, 2)),
         # ----- EV intern wins
-        (1920, 1080, 1, 1000, 300, 2000, (3,2,2,2,2,2,2)),
-        (1680, 1050, 1, 1000, 300, 2000, (3,2,2,2,2,2,2)),
+        (1920, 1080, 1, 1000, 300, 500, (3,2,2,2,2,2,2)),
+        (1680, 1050, 1, 1000, 300, 500, (3,2,2,2,2,2,2)),
         # -----
-        # (1680, 1050, 1, 1000, 300, 2000, (3,2,2,2,2,2,2)),
+        (1680, 1050, 1, 1000, 300, 500, (3,2,2,2,2,2,2)),
         # ----- For completeness
-        # (1680, 1050, 1, 100, 300, 2000, (3,2,2,2,2,2,2)),
-        (1680, 1050, 1, 1000, 500, 2000, (2,1.2,1.2,1.2,1.2,1.2,1.2)),
+        (1680, 1050, 1, 100, 300, 500, (3,2,2,2,2,2,2)),
+        (1680, 1050, 1, 1000, 500, 500, (2,1.2,1.2,1.2,1.2,1.2,1.2)),
         # ----- ?
         # scale up numbers
-        # (896, 896, 1, 100, 100, 2000, (4, 6, 6, 6, 6, 6, 6)),
-        # (896, 896, 1, 1000, 300, 2000, (4, 2.5, 2.5, 2.5, 2.5, 2.5, 2.5)),
-        (896, 896, 2, 1000, 300, 2000, (2,1.2,1.2,1.2,1.2,1.2,1.2)),
+        (896, 896, 1, 100, 100, 500, (4, 6, 6, 6, 6, 6, 6)),
+        (896, 896, 1, 1000, 300, 500, (4, 2.5, 2.5, 2.5, 2.5, 2.5, 2.5)),
+        (896, 896, 2, 1000, 300, 500, (2,1.2,1.2,1.2,1.2,1.2,1.2)),
         # ----- small ones
-        # (512, 512, 1, 100, 100, 4000, (30, 10, 10, 10, 10, 10, 10)),
-        # (512, 512, 1, 100, 300, 4000, (30, 8, 8, 8, 8, 8, 8)),
+        (512, 512, 1, 100, 100, 1000, (30, 10, 10, 10, 10, 10, 10)),
+        (512, 512, 1, 100, 300, 1000, (30, 8, 8, 8, 8, 8, 8)),
         # -----
     ]
 
@@ -61,8 +60,8 @@ async def run(
 
     # set max output tokens to 1 to profile prefill 
     epd_p_config = EPDConfig(num_prefills=1, prefill_tp_size=2, num_decodes=1, decode_tp_size=2, num_erics=4)
-    # this might not be optimal
-    epd_d_config = EPDConfig(num_prefills=2, prefill_tp_size=2, num_decodes=1, decode_tp_size=2, num_erics=2)
+    # # this might not be optimal
+    # epd_d_config = EPDConfig(num_prefills=2, prefill_tp_size=2, num_decodes=1, decode_tp_size=2, num_erics=2)
 
     # set max output tokens to 1 to profile prefill 
     pd_p_config = PDConfig(num_prefills=1, prefill_tp_size=2, num_decodes=3, decode_tp_size=2)
@@ -200,20 +199,6 @@ async def run(
                         gpu_type=gpu_type,
                     )
                     configs.append(epd_p_exp_config)
-                    epd_d_exp_config = ExperimentConfig(
-                        backend_config=epd_d_config,
-                        app_id=app_id,
-                        model_id=model_id,
-                        request_rate=epd_d_r,
-                        input_len=input_len,
-                        output_len=output_len,
-                        image_count=image_count,
-                        num_prompts=num_prompts,
-                        image_width=image_width,
-                        image_height=image_height,
-                        gpu_type=gpu_type,
-                    )
-                    configs.append(epd_d_exp_config)
                 else:
                     raise NotImplementedError(f"Backend {app_type} is not supported.")
 
@@ -227,6 +212,10 @@ async def run(
 
     for i, cfg in enumerate(configs):
         print(f"Current {i}/{len(configs)} config: {cfg.backend_config} {cfg.model_id} with {cfg.request_rate} requests/s")
+        if cfg.exists():
+            # there are overlapping configs
+            print(f"Config already exists, skipping ...")
+            continue
         # we scale every time to clean up the task executors states just in case
         sampled_requests = _try_sample_workload(cfg)
         await scale(cfg)
