@@ -643,6 +643,7 @@ class ServeGenDataset:
                 multi_modal_data_list=mm_data,
                 expected_output_len=int(req.data["output_tokens"]),  # type: ignore
                 timestamp=req.timestamp,
+                filenames=filenames,
             )
             sampled_requests.append(sampled_req)
 

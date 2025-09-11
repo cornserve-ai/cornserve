@@ -74,9 +74,8 @@ async def run(
         return workload
 
 
-    for r in [10]:
+    for r in [3]:
         serve_gen_config = ServeGenConfig(request_rate=r, duration=duration)
-        sampled_workloads[r] = _try_sample_workload(r)
         exp_config = ExperimentConfig(
             backend_config=eric_config,
             app_id=e,
@@ -95,9 +94,9 @@ async def run(
 
     # then we run L_{PD} bc CUDA IPC somehow always use GPU 0 (bug?) and having high GPU utilization
     # may cause CUDA OOM
-    for r in [5]:
+    # 1 replica has tput ~ 0.8 req/s
+    for r in [1.2]:
         serve_gen_config = ServeGenConfig(request_rate=r, duration=duration)
-        sampled_workloads[r] = _try_sample_workload(r)
         exp_config = ExperimentConfig(
             backend_config=cornserve_l_config,
             app_id=ev,
@@ -111,9 +110,9 @@ async def run(
         )
         configs.append(exp_config)
 
-    for r in [5]:
+    # 1 replicas has tput ~ 0.6 req/s
+    for r in [1.2]:
         serve_gen_config = ServeGenConfig(request_rate=r, duration=duration)
-        sampled_workloads[r] = _try_sample_workload(r)
         exp_config = ExperimentConfig(
             backend_config=vllm_config,
             app_id=vllm,
@@ -138,17 +137,18 @@ async def run(
     for cfg in configs:
         print(f"Current config: {cfg.backend_config} {cfg.model_id} with {cfg.request_rate} requests/s")
         serve_gen_rr = cfg.workload_config.request_rate
-        sampled_requests = sampled_workloads[serve_gen_rr]
+        sampled_requests = _try_sample_workload(serve_gen_rr)
         # we scale every time to clean up the task executors states just in case
         await scale(cfg)
         request_inputs = transform_sampled_requests(config=cfg, sampled_requests=sampled_requests)
         output_data = await benchmark(request_inputs=request_inputs, config=cfg)
         completed = output_data["metrics"]["completed"]
         total_output_tokens = output_data["metrics"]["total_output"]
-        if completed <= cfg.num_prompts * 0.95:
+        if completed <= len(sampled_requests) * 0.95:
             raise RuntimeError("Insufficient completed requests")
-        if total_output_tokens <= cfg.num_prompts * cfg.output_len * 0.95:
-            raise RuntimeError("Insufficient output tokens")
+        if not isinstance(cfg.backend_config, EricConfig):
+            if total_output_tokens <= sum(r.expected_output_len for r in sampled_requests) * 0.95:
+                raise RuntimeError("Insufficient output tokens")
         print("Benchmark completed for current batch.")
         print("=" * 50)
 
