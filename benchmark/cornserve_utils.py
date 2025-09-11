@@ -254,24 +254,40 @@ async def scale(config: ExperimentConfig) -> None:
         assert vllm_task_id, "No vLLM task found. Please check the task and app states."
         coros.append(scale_task_with_num_gpus(task_id=vllm_task_id, num_gpus=config.backend_config.num_replicas * config.backend_config.tp_size))
     elif isinstance(config.backend_config, CornserveConfig):
+        task_ids = {}
         for task_def, task_id, state in tasks:
             if state != "ready":
                 continue
             if "encodertask" in task_id and model_id in task_def["model_ids"] \
                     and "dummyencodertask" not in task_id:
-                eric_task_id = task_id
+                for modality in config.backend_config.modalities:
+                    if task_def["modality"] == modality:
+                        task_ids[modality] = task_id
             elif "llmunittask" in task_id and model_id == task_def["model_id"] \
                     and task_def["receive_embeddings"] == True \
                     and "decode" not in task_id and "prefill" not in task_id:
                 vllm_task_id = task_id
-        assert all([eric_task_id, vllm_task_id]), "Not all tasks are running. Please check the task and app states."
-        coros.append(scale_task_with_num_gpus(task_id=eric_task_id, num_gpus=config.backend_config.num_erics * config.backend_config.eric_tp_size))
+        for modality in config.backend_config.modalities:
+            assert modality in task_ids, f"No Eric task found for modality {modality}. Please check the task and app states."
+        assert vllm_task_id, "LLM is not running. Please check the task and app states."
+        for modality, eric_task_id in task_ids.items():
+            if modality == "image":
+                num_gpus = config.backend_config.num_image_erics * config.backend_config.eric_tp_size
+            elif modality == "video":
+                num_gpus = config.backend_config.num_video_erics * config.backend_config.eric_tp_size
+            elif modality == "audio":
+                num_gpus = config.backend_config.num_audio_erics * config.backend_config.eric_tp_size
+            coros.append(scale_task_with_num_gpus(task_id=eric_task_id, num_gpus=num_gpus))
         coros.append(scale_task_with_num_gpus(task_id=vllm_task_id, num_gpus=config.backend_config.num_vllms * config.backend_config.vllm_tp_size))
     elif isinstance(config.backend_config, EricConfig):
+        modality = config.backend_config.modality
         for task_def, task_id, state in tasks:
             if state != "ready":
                 continue
-            if "dummyencodertask" in task_id and model_id in task_def["model_ids"] and task_def["max_batch_size"] == config.backend_config.max_batch_size:
+            if "dummyencodertask" in task_id and \
+                    model_id in task_def["model_ids"] and \
+                    task_def["modality"] == modality and \
+                    task_def["max_batch_size"] == config.backend_config.max_batch_size:
                 eric_task_id = task_id
         assert eric_task_id, "No Eric task found. Please check the task and app states."
         coros.append(scale_task_with_num_gpus(task_id=eric_task_id, num_gpus=config.backend_config.num_replicas * config.backend_config.tp_size))
