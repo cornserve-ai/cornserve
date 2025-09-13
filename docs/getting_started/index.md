@@ -30,8 +30,8 @@ minikube start \
 
 Next, and this is important, we want to increase the shared memory (`/dev/shm`) size of the Minikube container.
 
-```console
-$ minikube ssh -- sudo mount -o remount,size=16G /dev/shm
+```bash
+minikube ssh -- sudo mount -o remount,size=16G /dev/shm
 ```
 
 Next, clone the Cornserve GitHub repository and deploy Cornserve on your Minikube cluster:

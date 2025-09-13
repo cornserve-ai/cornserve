@@ -105,6 +105,16 @@ geri-no-gpu = [
   "opentelemetry-instrumentation-threading",
 ]
 geri = ["cornserve[geri-no-gpu]"]
+huggingface-te = [
+  "fastapi",
+  "uvicorn[standard]",
+  "transformers==4.55.4",
+  "pillow",
+  "diffusers>=0.35.1",
+  "qwen_omni_utils==0.0.8",
+  "accelerate",
+  "opentelemetry-instrumentation-fastapi",
+]
 dev-common = [
   "grpcio-tools",
   "pyright",
@@ -116,8 +126,8 @@ dev-common = [
   "timm",
   "cornserve[sidecar-api,gateway,resource-manager,task-manager,task-dispatcher]",
 ]
-dev = ["cornserve[dev-common,sidecar,eric,geri]"]
-dev-no-gpu = ["cornserve[dev-common,eric-no-gpu,geri-no-gpu]"]
+dev = ["cornserve[dev-common,sidecar,eric,geri,huggingface-te]"]
+dev-no-gpu = ["cornserve[dev-common,eric-no-gpu,geri-no-gpu,huggingface-te]"]
 
 [tool.setuptools.dynamic]
 version = { attr = "cornserve.__version__" }
