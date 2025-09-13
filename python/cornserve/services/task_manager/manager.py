@@ -322,11 +322,14 @@ class TaskManager:
         if self.least_load_routing:
             async with self.load_heap_lock:
                 if len(self.load_heap) > 0:
-                    executor_id, _ = self.load_heap.peekitem()
+                    executor_id, load = self.load_heap.peekitem()
                     deployment = self.executor_deployments[executor_id]
                     logger.info("Least load routing selected executor %s %s", executor_id, deployment.url)
                     for k, v in self.load_heap.items():
                         logger.info("Load heap item: %s %s", k, v)
+                    # when bursting, multiple requests could be routed to the same executor
+                    # to avoid that, we increment the load by 1.0
+                    self.load_heap[executor_id] = (load[0] + 1.0,) + load[1:]
                 else:
                     index = self.rr_counter % len(self.executor_deployments)
                     self.rr_counter += 1
