@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import uuid
 from collections import defaultdict
-from typing import Generic, Literal, TypeAlias, TypeVar
+from typing import Any, ClassVar, Generic, Literal, TypeAlias, TypeVar, final
 
 from openai.types.chat import ChatCompletionChunk
 from pydantic import BaseModel, Field
@@ -134,14 +134,33 @@ class LLMBaseUnitTask(UnitTask[InputT, OutputT], Generic[InputT, OutputT]):
             a separate encoder task. If False, the task will compute them itself.
     """
 
+    MODEL_IDS_REMOVED_ENCODERS: ClassVar = [
+        "OpenGVLab/InternVL3-8B",
+        "OpenGVLab/InternVL3-9B",
+        "OpenGVLab/InternVL3-14B",
+        "OpenGVLab/InternVL3-38B",
+        "OpenGVLab/InternVL3-78B",
+    ]
+
     model_id: str
-    receive_embeddings: bool = True
-    # receive_embeddings: bool = Field(
-    #     True,
-    #     json_schema_extra={"skip_comparison": False},
-    #     # setting this will allowing sharing the vLLM instance
-    #     # see is_equivalent_to in python/cornserve/task/base.py
-    # )
+    receive_embeddings: bool = Field(
+        True,
+        json_schema_extra={"is_extra": True},
+    )
+    _compare_extra_fields: bool = False
+    # setting this will allowing sharing the vLLM instance
+    # when _compare_extra_fields is set to False, receive_embeddings
+    # is ignored in equivalence check, making task executors the same
+    # regardless of the value of receive_embeddings, thus sharing the
+    # LLM backend between disaggregated encoders and monolithic LLMs
+    # see is_equivalent_to in python/cornserve/task/base.py
+
+    @final
+    def model_post_init(self, context: Any, /) -> None:
+        if self.model_id in self.MODEL_IDS_REMOVED_ENCODERS:
+            self._compare_extra_fields = True
+        return super().model_post_init(context)
+
 
     def make_name(self) -> str:
         """Create a concise string representation of the task."""
@@ -222,7 +241,8 @@ class MLLMTask(Task[OpenAIChatCompletionRequest, Stream[OpenAIChatCompletionChun
 
     def invoke(self, task_input: OpenAIChatCompletionRequest) -> Stream[OpenAIChatCompletionChunk]:
         """Invoke the task."""
-        if self.encoder_fission:
+        if self.encoder_fission and task_input.encoder_fission:
+            print("Using encoder fission in MLLMTask")
             encoder_input_urls: dict[Modality, list[str]] = defaultdict(list)
             multimodal_contents = extract_multimodal_content(task_input.messages)
             for multimodal_content in multimodal_contents:
@@ -265,6 +285,8 @@ class MLLMTask(Task[OpenAIChatCompletionRequest, Stream[OpenAIChatCompletionChun
 
             # To be consumed by the LLM task.
             task_input.cornserve_embeddings = embeddings
+        else:
+            print("Not using encoder fission in MLLMTask")
 
         # Invoke the LLM task.
         return self.llm.invoke(task_input)

@@ -79,7 +79,7 @@ class TaskManager:
             logger.info("Starting load monitoring loop for task manager %s", self.id)
             self.monitoring_task = asyncio.create_task(
                 self.load_monitoring_loop(
-                    interval=1,
+                    interval=0.25,
                 ),
             )
 
@@ -324,6 +324,9 @@ class TaskManager:
                 if len(self.load_heap) > 0:
                     executor_id, _ = self.load_heap.peekitem()
                     deployment = self.executor_deployments[executor_id]
+                    logger.info("Least load routing selected executor %s %s", executor_id, deployment.url)
+                    for k, v in self.load_heap.items():
+                        logger.info("Load heap item: %s %s", k, v)
                 else:
                     index = self.rr_counter % len(self.executor_deployments)
                     self.rr_counter += 1

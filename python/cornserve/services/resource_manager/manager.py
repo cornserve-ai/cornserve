@@ -28,7 +28,8 @@ from cornserve.services.sidecar.launch import SidecarLaunchInfo
 from cornserve.services.utils import to_strict_k8s_name
 from cornserve.sidecar.constants import grpc_url_from_rank
 from cornserve.task.base import UnitTask
-from cornserve.task_executors.profile import UnitTaskProfileManager
+from cornserve.task.builtins.encoder import EncoderTask
+from cornserve.task_executors.profile import ProfileInfo, UnitTaskProfileManager, UnitTaskProfile
 from cornserve.utils import format_grpc_error
 
 logger = get_logger(__name__)
@@ -341,6 +342,20 @@ class ResourceManager:
 
         # Check if the number of GPUs to scale up is valid
         profile = self.profile_manager.get_profile(task)
+        # on 4-4 cross node, we want to make erics allocated with 2 GPUs when needed
+        # to enable TP for LLM, so we hardcode it here
+        if isinstance(
+            task,
+            EncoderTask,
+        ):
+            profile = UnitTaskProfile(
+                task=task,
+                num_gpus_to_profile={
+                    1: ProfileInfo(),
+                    2: ProfileInfo(),
+                },
+            )
+            logger.warning("Overriding profile for EncoderTask %s to {1, 2: ProfileInfo()}", task)
         if num_gpus < min(profile.num_gpus_to_profile.keys()):
             logger.warning(
                 "Requested %d GPUs to scale up task %s, but minimum required is %d GPUs according to the profile: %s",

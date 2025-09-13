@@ -460,15 +460,21 @@ class UnitTask(Task, Generic[InputT, OutputT]):
         if self.execution_descriptor.__class__ != other.execution_descriptor.__class__:
             return False
 
+        compare_extra_fields: bool = bool(
+            getattr(self, "_compare_extra_fields", False)
+            or getattr(other, "_compare_extra_fields", False)
+        )
+
         # Check if all fields defined by the root unit task class are the same.
         for field_name, info in self.root_unit_task_cls.model_fields.items():
             if field_name == "id":
                 # Skip the ID field; it can be different for different instances.
                 continue
             extra_schema = info.json_schema_extra
-            if isinstance(extra_schema, dict) and extra_schema.get("skip_comparison"):
+            if isinstance(extra_schema, dict) and extra_schema.get("is_extra"):
                 # Skip fields that are marked as not comparable.
-                continue
+                if not compare_extra_fields:
+                    continue
             try:
                 if getattr(self, field_name) != getattr(other, field_name):
                     return False

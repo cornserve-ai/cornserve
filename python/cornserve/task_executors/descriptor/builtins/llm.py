@@ -80,7 +80,8 @@ class VLLMDescriptor(TaskExecutionDescriptor[LLMBaseUnitTask, OpenAIChatCompleti
     def get_container_envs(self, gpus: list[GPU]) -> list[tuple[str, str]]:
         """Get the container environment variables for the task executor."""
         envs = super().get_container_envs(gpus)
-        if self.task.receive_embeddings:
+        if self.task.receive_embeddings and \
+            self.task.model_id in LLMBaseUnitTask.MODEL_IDS_REMOVED_ENCODERS:
             envs.append(
                 ("CORNSERVE_VLLM_DISABLE_MULTIMODAL", "1"),
             )
@@ -127,7 +128,7 @@ class VLLMDescriptor(TaskExecutionDescriptor[LLMBaseUnitTask, OpenAIChatCompleti
         # with Cornserve sidecar-compatible URIs (using data IDs in `DataForward`).
         # The expectation is that the number of multimodal data is the same as the
         # length of `cornserve_embeddings`.
-        if self.task.receive_embeddings:
+        if self.task.receive_embeddings and task_input.encoder_fission:
             multimodal_data = extract_multimodal_content(task_input.messages)
             if len(multimodal_data) != len(task_input.cornserve_embeddings):
                 logger.error(
