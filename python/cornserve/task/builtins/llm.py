@@ -96,7 +96,12 @@ class OpenAIChatCompletionRequest(TaskInput):
     # Cornserve-specific fields
     cornserve_embeddings: list[DataForward[Tensor]] = []
     cornserve_kv_transfer_params: DataForward[dict] | None = None
-    encoder_fission: bool = True  # not currently used
+    # if this is set, will invoke disaggregated encoders
+    encoder_fission: bool = True
+    # modality control for disaggregated encoders
+    video_fission: bool = True
+    image_fission: bool = True
+    audio_fission: bool = True
     cornserve_kv_cache: DataForward[Tensor] | None = None
 
 
@@ -247,6 +252,11 @@ class MLLMTask(Task[OpenAIChatCompletionRequest, Stream[OpenAIChatCompletionChun
             multimodal_contents = extract_multimodal_content(task_input.messages)
             for multimodal_content in multimodal_contents:
                 modality = Modality(multimodal_content.type.split("_")[0])
+                # skip the disabled ones
+                if (modality == Modality.VIDEO and not task_input.video_fission) or (
+                    modality == Modality.IMAGE and not task_input.image_fission
+                ) or (modality == Modality.AUDIO and not task_input.audio_fission):
+                    continue
                 data_url: URL = getattr(multimodal_content, multimodal_content.type)
                 encoder_input_urls[modality].append(data_url.url)
 
@@ -264,6 +274,10 @@ class MLLMTask(Task[OpenAIChatCompletionRequest, Stream[OpenAIChatCompletionChun
                 for modality, encoder_task in self.encoders.items():
                     if modality not in encoder_input_urls:
                         continue
+                    if (modality == Modality.VIDEO and not task_input.video_fission) or (
+                        modality == Modality.IMAGE and not task_input.image_fission
+                    ) or (modality == Modality.AUDIO and not task_input.audio_fission):
+                        continue
                     encoder_input = EncoderInput(model_id=task_input.model, data_urls=encoder_input_urls[modality])
                     encoder_output = encoder_task.invoke(encoder_input)
                     encoder_outputs[modality] = encoder_output
@@ -278,6 +292,10 @@ class MLLMTask(Task[OpenAIChatCompletionRequest, Stream[OpenAIChatCompletionChun
                 embeddings: list[DataForward[Tensor]] = []
                 for multimodal_content in multimodal_contents:
                     modality = Modality(multimodal_content.type.split("_")[0])
+                    if (modality == Modality.VIDEO and not task_input.video_fission) or (
+                        modality == Modality.IMAGE and not task_input.image_fission
+                    ) or (modality == Modality.AUDIO and not task_input.audio_fission):
+                        continue
                     data_url: URL = getattr(multimodal_content, multimodal_content.type)
                     encoder_input = EncoderInput(model_id=task_input.model, data_urls=[data_url.url])
                     encoder_output = self.encoders[modality].invoke(encoder_input)

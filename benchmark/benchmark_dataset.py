@@ -65,6 +65,10 @@ class SampleRequest:
 
     # additional args
     encoder_fission: bool = False
+    image_fission: bool = False
+    video_fission: bool = False
+    audio_fission: bool = False
+
     return_audio: bool | None = None
 
 

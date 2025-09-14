@@ -40,6 +40,9 @@ class RequestInput:
     ignore_eos: bool = True
 
     encoder_fission: bool = False
+    image_fission: bool = True
+    video_fission: bool = True
+    audio_fission: bool = True
     return_audio: bool | None = None
 
     # if timestamp, will use the timestamp as the start time
@@ -300,6 +303,9 @@ async def cornserve_invoke(
                 "continuous_usage_stats": True,
             },
             "encoder_fission": request_input.encoder_fission,
+            "image_fission": request_input.image_fission,
+            "video_fission": request_input.video_fission,
+            "audio_fission": request_input.audio_fission,
             "ignore_eos": request_input.ignore_eos,
         }
         if request_input.return_audio is not None:
@@ -492,6 +498,36 @@ async def timestamp_invoke(
     await asyncio.sleep(request_input.timestamp)
     return await request_func(request_input, pbar)
 
+def _make_encoder_fission_flags(N: int, p: float, interval: int) -> list[bool]:
+    p = 0.0 if p < 0 else 1.0 if p > 1 else p
+    target_true = int(round(p * N))
+    if N <= 0:
+        return []
+    if p == 0.0:
+        return [False] * N
+    if p == 1.0:
+        return [True] * N
+
+    k = max(1, int(round(interval * p / (1.0 - p))))
+    cycle = max(1, interval + k)
+    flags = [((i % cycle) >= interval) for i in range(N)]
+
+    base_true = sum(flags)
+    if base_true > target_true:  # trim extra Trues from the end
+        excess = base_true - target_true
+        for i in range(N - 1, -1, -1):
+            if excess == 0: break
+            if flags[i]:
+                flags[i] = False
+                excess -= 1
+    elif base_true < target_true:  # fill deficit by shrinking the last False block(s)
+        deficit = target_true - base_true
+        for i in range(N - 1, -1, -1):
+            if deficit == 0: break
+            if not flags[i]:
+                flags[i] = True
+                deficit -= 1
+    return flags
 
 def transform_sampled_requests(
     config: ExperimentConfig,
@@ -511,7 +547,7 @@ def transform_sampled_requests(
         np.random.seed(config.seed)
         # first synthesize image_data
         print(f"Synthesizing image data with probability {config.image_probability}.")
-        for request in sampled_requests:
+        for i, request in enumerate(sampled_requests):
             if np.random.rand() < config.image_probability:
                 # Synthesize image choices
                 chosen_image_filenames = list(
@@ -523,9 +559,17 @@ def transform_sampled_requests(
                 )
                 request.filenames = chosen_image_filenames
                 request.image_urls = get_image_data_uris(chosen_image_filenames)
-            if np.random.rand() < config.encoder_fission_probability:
-                # encoder fission
-                request.encoder_fission = True
+    encoder_fissiont_interval = config.encoder_fission_block_size
+    encoder_fission_flags = _make_encoder_fission_flags(len(sampled_requests), config.encoder_fission_probability, encoder_fissiont_interval)
+    for i, request in enumerate(sampled_requests):
+        request.encoder_fission = encoder_fission_flags[i]
+        if encoder_fission_flags[i]:
+            if np.random.rand() < config.image_fission_probability:
+                request.image_fission = True
+            if np.random.rand() < config.video_fission_probability:
+                request.video_fission = True
+            if np.random.rand() < config.audio_fission_probability:
+                request.audio_fission = True
 
     request_inputs = []
     app_id = config.app_id
@@ -546,6 +590,9 @@ def transform_sampled_requests(
             filenames=request.filenames,
             timestamp=request.timestamp,
             encoder_fission=request.encoder_fission,
+            image_fission=request.image_fission,
+            video_fission=request.video_fission,
+            audio_fission=request.audio_fission,
             return_audio=request.return_audio,
         )
         request_inputs.append(request_input)

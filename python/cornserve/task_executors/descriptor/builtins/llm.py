@@ -109,7 +109,7 @@ class VLLMDescriptor(TaskExecutionDescriptor[LLMBaseUnitTask, OpenAIChatCompleti
             # When benchmarking, we reuse mm inputs, so we disable the preprocessor cache
             "--disable-mm-preprocessor-cache",
             "--gpu-memory-utilization",
-            "0.9",
+            "0.85",
         ]
         return args
 
@@ -129,20 +129,17 @@ class VLLMDescriptor(TaskExecutionDescriptor[LLMBaseUnitTask, OpenAIChatCompleti
         # The expectation is that the number of multimodal data is the same as the
         # length of `cornserve_embeddings`.
         if self.task.receive_embeddings and task_input.encoder_fission:
-            multimodal_data = extract_multimodal_content(task_input.messages)
-            if len(multimodal_data) != len(task_input.cornserve_embeddings):
-                logger.error(
-                    "The number of multimodal data in messages (%d) does not match "
-                    "the number of embeddings provided (%d). Multimodal data: %s, Embeddings: %s",
-                    len(multimodal_data),
-                    len(task_input.cornserve_embeddings),
-                    multimodal_data,
-                    task_input.cornserve_embeddings,
-                )
-                raise ValueError(
-                    f"The number of multimodal data in messages {len(multimodal_data)} != "
-                    f"{len(task_input.cornserve_embeddings)} the number of embeddings provided."
-                )
+            all_multimodal_data = extract_multimodal_content(task_input.messages)
+            multimodal_data = []
+            for multimodal_content in all_multimodal_data:
+                modality = multimodal_content.type.split("_")[0]
+                if (modality == "image" and not task_input.image_fission) or \
+                     (modality == "video" and not task_input.video_fission) or \
+                        (modality == "audio" and not task_input.audio_fission):
+                    print(f"Skipping {modality} fission as it's disabled.")
+                    continue
+                multimodal_data.append(multimodal_content)
+            # no more checking with encoder sharing
             for multimodal_content, forward in zip(multimodal_data, task_input.cornserve_embeddings, strict=True):
                 modality = multimodal_content.type.split("_")[0]  # e.g., "audio", "image", "video"
                 data_url: URL = getattr(multimodal_content, multimodal_content.type)
@@ -288,7 +285,7 @@ class PrefillVLLMDescriptor(
             "--no-enable-prefix-caching",
             "--disable-mm-preprocessor-cache",
             "--gpu-memory-utilization",
-            "0.9",
+            "0.85",
         ]
         return args
 
@@ -446,7 +443,7 @@ class DecodeVLLMDescriptor(
             "--no-enable-prefix-caching",
             "--disable-mm-preprocessor-cache",
             "--gpu-memory-utilization",
-            "0.9",
+            "0.85",
         ]
 
         return args
@@ -587,7 +584,7 @@ class NcclPrefillVLLMDescriptor(
             "--no-enable-prefix-caching",
             "--disable-mm-preprocessor-cache",
             "--gpu-memory-utilization",
-            "0.9",
+            "0.85",
         ]
         return args
 

@@ -352,7 +352,25 @@ class ExperimentConfig(BaseModel):
     )
     encoder_fission_probability: float = Field(
         default=1.0,
-        description=("Probability of using independent encoder fission during benchmark. "),
+        description="Probability of using independent encoder during benchmark.",
+    )
+    # this probability is used after encoder_fission_probability
+    # so to independently control each modality, set encoder_fission_probability to 1.0
+    image_fission_probability: float = Field(
+        default=1.0,
+        description="Probability of using independent image encoder during benchmark.",
+    )
+    video_fission_probability: float = Field(
+        default=1.0,
+        description="Probability of using independent video encoder during benchmark.",
+    )
+    audio_fission_probability: float = Field(
+        default=1.0,
+        description="Probability of using independent audio encoder during benchmark.",
+    )
+    encoder_fission_block_size: int = Field(
+        default=16,
+        description="Interval based fission block size"
     )
 
     workload_config: SerializeAsAny[WorkloadConfig] | None = None
@@ -384,6 +402,14 @@ class ExperimentConfig(BaseModel):
         if self.use_synthesized_data:
             filename += f"+{self._get_image_config_str()}"
         filename += f"+fission{self.encoder_fission_probability}"
+        if self.encoder_fission_probability > 0.0:
+            filename += f"+fission_block{self.encoder_fission_block_size}"
+        if self.image_fission_probability < 1.0:
+            filename += f"+image_fission{self.image_fission_probability}"
+        if self.video_fission_probability < 1.0:
+            filename += f"+video_fission{self.video_fission_probability}"
+        if self.audio_fission_probability < 1.0:
+            filename += f"+audio_fission{self.audio_fission_probability}"
         if self.workload_config is not None:
             filename += f"+{self.workload_config.to_suffix()}"
 

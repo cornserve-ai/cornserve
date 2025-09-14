@@ -195,6 +195,8 @@ async def get_tasks() -> list[tuple[dict[str, Any], str, str]]:
 
 async def scale_task_with_num_gpus(task_id: str, num_gpus: int) -> None:
     """Scale a task to the specified number of GPUs."""
+    if num_gpus <= 0:
+        return
     print(f"Scaling task {task_id} with {num_gpus} gpus...")
     scale_endpoint = "http://127.0.0.1:30080/task/scale"
     payload = {"task_id": task_id, "num_gpus": num_gpus}
