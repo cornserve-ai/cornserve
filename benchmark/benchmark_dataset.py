@@ -732,6 +732,8 @@ class ServeGenDataset:
                 sampled_req.return_audio = False
             sampled_requests.append(sampled_req)
 
+        print(f"Sampled %s return_audio requests with prob {return_audio_prob}" % sum([1 for r in sampled_requests if r.return_audio]))
+
         return sampled_requests
 
 class SyntheticDiffusionDataset():

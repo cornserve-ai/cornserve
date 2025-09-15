@@ -33,7 +33,7 @@ async def run(
     gpu_type = "A100"
 
     worloads = [
-        (1, 300, 0.0, 0.5, 0.5, 0.1),
+        (1, 300, 0.0, 0.5, 0.5, 0.2),
     ]
     sampled_workloads = {}
     def _try_sample_workload(

@@ -22,7 +22,7 @@ from benchmark_dataset import SampleRequest
 from image_utils import create_dummy_image, get_image_data_uris
 from schema import CornserveQwenImageConfig, DutyCycleConfig, EricConfig, ExperimentConfig, HFOmniConfig, HFQwenImageConfig, OmniServeGenConfig, ServeGenConfig
 
-AIOHTTP_TIMEOUT = aiohttp.ClientTimeout(total=6 * 60 * 60)
+AIOHTTP_TIMEOUT = aiohttp.ClientTimeout(total= 30 * 60)
 MILLISECONDS_TO_SECONDS_CONVERSION = 1000
 
 
@@ -383,7 +383,7 @@ async def cornserve_static_invoke(
                     data = await response.json()
                     if "audio_chunk" in data and data["audio_chunk"] is not None:
                         output.audio_chunks += 1
-                        # print(f"Received audio chunk #{output.audio_chunks}")
+                        print(f"Received audio chunk #{output.audio_chunks}")
                     elif "text_chunk" in data and data["text_chunk"] is not None:
                         text_chunk = data["text_chunk"]
                         output.ttft = timestamp - st
@@ -463,7 +463,7 @@ async def cornserve_invoke(
                         usage = data.get("usage")
                         completion_tokens = usage and usage.get("completion_tokens")
                         # here we do the hack to identify the OmniOutputChunk type
-                        if "audio_chunk" in data:
+                        if "audio_chunk" in data and data["audio_chunk"] is not None:
                             output.audio_chunks += 1
                             print(f"Received audio chunk #{output.audio_chunks} at {timestamp - st:.2f}s")
                         if "text_chunk" in data:
