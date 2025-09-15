@@ -339,7 +339,7 @@ async def cornserve_static_invoke(
                     data = await response.json()
                     if "audio_chunk" in data and data["audio_chunk"] is not None:
                         output.audio_chunks += 1
-                        print(f"Received audio chunk #{output.audio_chunks}")
+                        # print(f"Received audio chunk #{output.audio_chunks}")
                     elif "text_chunk" in data and data["text_chunk"] is not None:
                         text_chunk = data["text_chunk"]
                         output.ttft = timestamp - st
@@ -410,7 +410,7 @@ async def cornserve_invoke(
                     # iterate over lines
                     async for raw_line in response.content:
                         line = raw_line.decode("utf-8").strip()
-                        print(f"Received line: {line}")
+                        # print(f"Received line: {line}")
                         if not line:
                             # empty lines for keep alive
                             continue
