@@ -1,0 +1,26 @@
+"""An app that uses Qwen 2.5 Omni via HuggingFace transformers.
+```
+"""  # noqa: E501
+
+from __future__ import annotations
+
+from cornserve.app.base import AppConfig
+from cornserve.task.builtins.huggingface import (
+    HuggingFaceQwenOmniInput,
+    HuggingFaceQwenOmniOutput,
+    HuggingFaceQwenOmniTask,
+)
+
+# Create the HuggingFace Qwen 2.5 Omni task
+qwen_omni = HuggingFaceQwenOmniTask(model_id="Qwen/Qwen2.5-Omni-7B")
+
+
+class Config(AppConfig):
+    """App configuration model."""
+
+    tasks = {"qwen_omni": qwen_omni}
+
+
+async def serve(request: HuggingFaceQwenOmniInput) -> HuggingFaceQwenOmniOutput:
+    """Main serve function for the app."""
+    return await qwen_omni(request)
