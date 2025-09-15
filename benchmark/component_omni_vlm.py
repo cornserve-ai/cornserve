@@ -49,7 +49,7 @@ async def run(
     llm_request_rate = 2
     input_len = 1000
     # make it short for audio output
-    output_len = 30
+    output_len = 100
     image_width = 800
     image_height = 600
     # 609 image tokens
