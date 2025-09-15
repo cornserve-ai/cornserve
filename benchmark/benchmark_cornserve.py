@@ -227,6 +227,7 @@ async def cornserve_invoke_eric(
     request_input: RequestInput,
     pbar: tqdm | None,
     use_synthetic_data: bool = True,
+    modalities: list[str] = ["image"],
 ) -> RequestOutput:
     """Invoke an Eric app."""
     api_url = request_input.url
@@ -241,12 +242,24 @@ async def cornserve_invoke_eric(
             # parse the data uri from multi_modal_data
             data_urls = []
             for mm_data in request_input.multi_modal_data:
-                if mm_data["type"] == "image_url":
-                    data_urls.append(mm_data["image_url"]["url"])
-                if mm_data["type"] == "video_url":
-                    data_urls.append(mm_data["video_url"]["url"])
-                if mm_data["type"] == "audio_url":
-                    data_urls.append(mm_data["audio_url"]["url"])
+                mm_type = mm_data["type"].split("_")[0]
+                if mm_type not in modalities:
+                    continue
+                data_urls.append(mm_data[f"{mm_type}_url"]["url"])
+            if not data_urls:
+                if pbar:
+                    pbar.update(1)
+
+                now = time.perf_counter()
+                return RequestOutput(
+                    success=True,
+                    input=replace(request_input, multi_modal_data=[]),
+                    prompt_len=request_input.prompt_len,
+                    latency=0.0,
+                    start_timestamp=now,
+                    completion_timestamp=now,
+                    output_tokens=0,
+                )
             request_data = {
                 "model_id": request_input.model,
                 "data_urls": data_urls,
@@ -611,7 +624,12 @@ async def benchmark(
     async def request_func(request_input: RequestInput, pbar: tqdm | None) -> RequestOutput:
         async with semaphore:
             if isinstance(config.backend_config, EricConfig):
-                return await cornserve_invoke_eric(request_input, pbar, config.use_synthesized_data)
+                return await cornserve_invoke_eric(
+                    request_input,
+                    pbar,
+                    config.use_synthesized_data,
+                    [config.backend_config.modality],
+                )
             return await cornserve_invoke(request_input, pbar)
 
     # first test a request
