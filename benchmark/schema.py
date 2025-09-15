@@ -54,6 +54,33 @@ class CornserveOmniConfig(BackendConfig):
                 f"+thinkers{self.num_thinkers}+talker_vocoders{self.num_talker_vocoders}"
         return suffix
 
+
+class CornserveQwenImageConfig(BackendConfig):
+    num_llms: int
+    num_geris: int
+
+    def to_subdir_name(self) -> str:
+        """Return the subdirectory name for the Cornserve configuration."""
+        suffix = f"cornserve_qwen_image+llms{self.num_llms}+geris{self.num_geris}"
+        return suffix
+
+class HFOmniConfig(BackendConfig):
+    num_replicas: int
+
+    def to_subdir_name(self) -> str:
+        """Return the subdirectory name for the Cornserve configuration."""
+        suffix = f"hf_omni+replicas{self.num_replicas}"
+        return suffix
+
+
+class HFQwenImageConfig(BackendConfig):
+    num_replicas: int
+
+    def to_subdir_name(self) -> str:
+        """Return the subdirectory name for the Cornserve configuration."""
+        suffix = f"hf_qwen_image+replicas{self.num_replicas}"
+        return suffix
+
 class VLLMOmniConfig(BackendConfig):
     """Configuration for the  backend with a specific number of erics and vLLMs."""
     num_thinkers: int
@@ -283,6 +310,23 @@ class OmniConfig(WorkloadConfig):
             suffix += f"+return_audio_prob{self.return_audio_prob}"
         return suffix
 
+class OmniServeGenConfig(WorkloadConfig):
+    """Configuration for the Omni ServeGen workload."""
+
+    request_rate: float
+    duration: int
+
+    no_image_prob: float = 0.0
+    audio_prob: float = 0.0
+    video_prob: float = 0.0
+    return_audio_prob: float = 0.0
+
+    def to_suffix(self) -> str:
+        suffix = "omni_servegen"
+        suffix += f"+rate{self.request_rate}+duration{self.duration}"
+        suffix += f"+no_image_prob{self.no_image_prob}+audio_prob{self.audio_prob}+video_prob{self.video_prob}"
+        suffix += f"+return_audio_prob{self.return_audio_prob}"
+        return suffix
 
 
 class ExperimentConfig(BaseModel):

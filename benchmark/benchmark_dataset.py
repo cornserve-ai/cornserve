@@ -632,6 +632,7 @@ class ServeGenDataset:
         no_image_prob: float,
         audio_prob: float,
         video_prob: float,
+        return_audio_prob: float = 0.0,
     ) -> list[SampleRequest]:
 
         np.random.seed(self.random_seed)
@@ -720,6 +721,10 @@ class ServeGenDataset:
                 timestamp=req.timestamp,
                 filenames=filenames,
             )
+            if np.random.rand() < return_audio_prob:
+                sampled_req.return_audio = True
+            else:
+                sampled_req.return_audio = False
             sampled_requests.append(sampled_req)
 
         return sampled_requests

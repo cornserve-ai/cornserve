@@ -21,7 +21,7 @@ async def generate(request: HuggingFaceRequest, raw_request: Request) -> Hugging
     """Generate response for a request."""
     engine: HuggingFaceEngine = raw_request.app.state.engine
 
-    logger.info("Received generation request: %s", request)
+    logger.info("Received generation request")
 
     return await engine.generate(request)
 

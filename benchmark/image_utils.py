@@ -63,6 +63,9 @@ def create_dummy_video(
     """Create a dummy video with fixed color frames based on the id."""
     if height <= 0 or width <= 0 or num_frames <= 0:
         raise ValueError("height, width, and num_frames must be positive")
+    if num_frames < 2:
+        print("Warning: num_frames < 2 is not a valid video; using 2")
+        num_frames = 2  # Minimum for a video
 
     if height > width:
         height, width = width, height
@@ -90,6 +93,7 @@ def create_dummy_video(
     video.release()
 
     return filename
+
 
 def create_dummy_audio(duration_sec: int, id: int = 0) -> str:
     """Create a dummy audio file with a fixed frequency based on the id."""

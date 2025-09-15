@@ -7,10 +7,11 @@ from typing import Any, Literal
 
 import aiohttp
 import requests
-from app_utils import create_eric_app, create_mllm_app, create_omni_app
+from app_utils import create_eric_app, create_mllm_app, create_omni_app, create_hf_omni_app, create_hf_image_app
 from schema import (
     CornserveConfig,
     CornserveOmniConfig,
+    CornserveQwenImageConfig,
     EPDConfig,
     EricConfig,
     ExperimentConfig,
@@ -18,6 +19,8 @@ from schema import (
     PDConfig,
     VLLMConfig,
     VLLMOmniConfig,
+    HFOmniConfig,
+    HFQwenImageConfig,
 )
 
 from cornserve.services.gateway.models import (
@@ -45,6 +48,8 @@ def register_app(
         "nccl-pd",
         "ela", # encoder + llm + audio
         "la", # llm + audio
+        "hf-omni", # hf omni
+        "hf-image", # hf qwen image
     ],
     modalities: list[Literal["IMAGE", "AUDIO", "VIDEO"]] = ["IMAGE"],
     eric_max_batch_size: int = 1,
@@ -102,6 +107,14 @@ def register_app(
             model_id=model_id,
             modalities=modalities,
             encoder_fission=False,
+        )
+    elif app_type == "hf-omni":
+        source_code = create_hf_omni_app(
+            model_id=model_id,
+        )
+    elif app_type == "hf-image":
+        source_code = create_hf_image_app(
+            model_id=model_id,
         )
     else:
         raise NotImplementedError(f"Unsupported app_type: {app_type}.")
@@ -367,6 +380,35 @@ async def scale(config: ExperimentConfig) -> None:
         assert talker_vocoder_task_id, "No talker vocoder task found. Please check the task and app states."
         coros.append(scale_task_with_num_gpus(task_id=vllm_task_id, num_gpus=config.backend_config.num_thinkers))
         coros.append(scale_task_with_num_gpus(task_id=talker_vocoder_task_id, num_gpus=config.backend_config.num_talker_vocoders))
+    elif isinstance(config.backend_config, CornserveQwenImageConfig):
+        for task_def, task_id, state in tasks:
+            if state != "ready":
+                continue
+            elif "llmembeddingunittask" in task_id and model_id == "Qwen/Qwen2.5-VL-7B-Instruct" \
+                and "decode" not in task_id and "prefill" not in task_id:
+                qwen_embedding_task_id = task_id
+            elif "generatortask" in task_id and model_id == task_def["model_id"]:
+                qwen_image_task_id = task_id
+        assert qwen_embedding_task_id, "Qwen Embedding task is not running. Please check the task and app states."
+        assert qwen_image_task_id, "Qwen Image task is not running. Please check the task and app states."
+        coros.append(scale_task_with_num_gpus(task_id=qwen_embedding_task_id, num_gpus=config.backend_config.num_llms))
+        coros.append(scale_task_with_num_gpus(task_id=qwen_image_task_id, num_gpus=config.backend_config.num_geris))
+    elif isinstance(config.backend_config, HFOmniConfig):
+        for task_def, task_id, state in tasks:
+            if state != "ready":
+                continue
+            elif "huggingfaceqwenomnitask" in task_id and model_id == task_def["model_id"]:
+                hf_omni_task_id = task_id
+        assert hf_omni_task_id, "HF Omni task is not running. Please check the task and app states."
+        coros.append(scale_task_with_num_gpus(task_id=hf_omni_task_id, num_gpus=config.backend_config.num_replicas))
+    elif isinstance(config.backend_config, HFQwenImageConfig):
+        for task_def, task_id, state in tasks:
+            if state != "ready":
+                continue
+            elif "huggingfaceqwenimagetask" in task_id and model_id == task_def["model_id"]:
+                hf_image_task_id = task_id
+        assert hf_image_task_id, "HF Qwen Image task is not running. Please check the task and app states."
+        coros.append(scale_task_with_num_gpus(task_id=hf_image_task_id, num_gpus=config.backend_config.num_replicas))
     else:
         raise NotImplementedError(f"Backend config {config.backend_config} is not supported.")
 

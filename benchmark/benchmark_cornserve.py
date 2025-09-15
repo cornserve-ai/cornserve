@@ -20,7 +20,7 @@ from transformers.tokenization_utils_base import PreTrainedTokenizerBase
 
 from benchmark_dataset import SampleRequest
 from image_utils import create_dummy_image, get_image_data_uris
-from schema import DutyCycleConfig, EricConfig, ExperimentConfig, ServeGenConfig
+from schema import DutyCycleConfig, EricConfig, ExperimentConfig, HFOmniConfig, OmniServeGenConfig, ServeGenConfig
 
 AIOHTTP_TIMEOUT = aiohttp.ClientTimeout(total=6 * 60 * 60)
 MILLISECONDS_TO_SECONDS_CONVERSION = 1000
@@ -293,6 +293,74 @@ async def cornserve_invoke_eric(
         pbar.update(1)
     return output
 
+async def cornserve_static_invoke(
+    request_input: RequestInput,
+    pbar: tqdm | None,
+) -> RequestOutput:
+    """Invoke an MLLM app with non-streaming."""
+    api_url = request_input.url
+    async with aiohttp.ClientSession(trust_env=True, timeout=AIOHTTP_TIMEOUT) as session:
+        content = [{"type": "text", "text": request_input.prompt}]
+        for mm_data in request_input.multi_modal_data:
+            content.append(mm_data)
+        request_data = {
+            "model": request_input.model,
+            "messages": [
+                {"role": "user", "content": content},
+            ],
+            "temperature": 0.0,
+            "max_completion_tokens": request_input.output_len,
+            "stream_options": {
+                "include_usage": True,
+                "continuous_usage_stats": True,
+            },
+            "encoder_fission": request_input.encoder_fission,
+            "image_fission": request_input.image_fission,
+            "video_fission": request_input.video_fission,
+            "audio_fission": request_input.audio_fission,
+            "ignore_eos": request_input.ignore_eos,
+        }
+        if request_input.return_audio is not None:
+            request_data["return_audio"] = request_input.return_audio
+
+        payload = {"request_data": request_data}
+
+        output = RequestOutput()
+        output.input = replace(request_input, multi_modal_data=[])
+        output.prompt_len = request_input.prompt_len
+
+        generated_text = ""
+        st = time.perf_counter()
+        output.start_timestamp = st
+        try:
+            async with session.post(url=api_url, json=payload) as response:
+                if response.status == 200:
+                    timestamp = time.perf_counter()
+                    data = await response.json()
+                    if "audio_chunk" in data and data["audio_chunk"] is not None:
+                        output.audio_chunks += 1
+                        print(f"Received audio chunk #{output.audio_chunks}")
+                    elif "text_chunk" in data and data["text_chunk"] is not None:
+                        text_chunk = data["text_chunk"]
+                        output.ttft = timestamp - st
+                        generated_text += text_chunk.get("choices", [{}])[0].get("message", {}).get("content", "") or ""
+
+                    output.generated_text = generated_text
+                    output.success = True
+                    output.latency = timestamp - st
+                    output.completion_timestamp = timestamp
+                else:
+                    output.error = response.reason or ""
+                    output.success = False
+        except Exception:
+            output.success = False
+            exc_info = sys.exc_info()
+            output.error = "".join(traceback.format_exception(*exc_info))
+
+    if pbar:
+        pbar.update(1)
+    return output
+
 
 async def cornserve_invoke(
     request_input: RequestInput,
@@ -342,6 +410,7 @@ async def cornserve_invoke(
                     # iterate over lines
                     async for raw_line in response.content:
                         line = raw_line.decode("utf-8").strip()
+                        print(f"Received line: {line}")
                         if not line:
                             # empty lines for keep alive
                             continue
@@ -630,6 +699,8 @@ async def benchmark(
                     config.use_synthesized_data,
                     [config.backend_config.modality],
                 )
+            elif isinstance(config.backend_config, HFOmniConfig):
+                return await cornserve_static_invoke(request_input, pbar)
             return await cornserve_invoke(request_input, pbar)
 
     # first test a request
@@ -676,7 +747,9 @@ async def benchmark(
         async for request in duty_cycle_get_request(request_inputs, config.workload_config):
             task = asyncio.create_task(request_func(request_input=request, pbar=pbar))
             tasks.append(task)
-    if config.workload_config is not None and isinstance(config.workload_config, ServeGenConfig):
+    if config.workload_config is not None \
+            and isinstance(config.workload_config, ServeGenConfig) \
+            or isinstance(config.workload_config, OmniServeGenConfig):
         for request in request_inputs:
             task = asyncio.create_task(timestamp_invoke(request_func=request_func, request_input=request, pbar=pbar))
             tasks.append(task)

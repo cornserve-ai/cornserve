@@ -7,6 +7,8 @@ from typing import Literal
 MLLM_TEMPLATE_PATH = "apps/mllm.py.tmpl"
 ERIC_TEMPLATE_PATH = "apps/eric.py.tmpl"
 OMNI_TEMPLATE_PATH = "apps/omni.py.tmpl"
+HF_OMNI_TEMPLATE_PATH = "apps/hf_omni.py.tmpl"
+HF_IMAGE_TEMPLATE_PATH = "apps/hf_image.py.tmpl"
 
 
 def create_mllm_app(
@@ -73,4 +75,32 @@ def create_omni_app(
         MODALITIES=modalitiy_str,
         ENCODER_FISSION=str(encoder_fission),
     )
+    return rendered.strip()
+
+def create_hf_omni_app(
+    model_id: str,
+) -> str:
+    """Create an Omni app source code from a template.
+
+    Args:
+        model_id (str): The model identifier.
+    """
+    if model_id != "Qwen/Qwen2.5-Omni-7B":
+        raise ValueError("Only Qwen/Qwen2.5-Omni-7B is supported for Omni app.")
+    src = Path(HF_OMNI_TEMPLATE_PATH).read_text()
+    rendered = Template(src).substitute()
+    return rendered.strip()
+
+def create_hf_image_app(
+    model_id: str,
+) -> str:
+    """Create an HF image app source code from a template.
+
+    Args:
+        model_id (str): The model identifier.
+    """
+    if model_id != "Qwen/Qwen-Image":
+        raise ValueError("Only Qwen/Qwen-Image is supported for HF image app.")
+    src = Path(HF_IMAGE_TEMPLATE_PATH).read_text()
+    rendered = Template(src).substitute()
     return rendered.strip()

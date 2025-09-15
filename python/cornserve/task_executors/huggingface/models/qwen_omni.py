@@ -1,15 +1,22 @@
 """Qwen 2.5 Omni model wrapper using HuggingFace transformers."""
 
 from __future__ import annotations
-
 import base64
+import os
+import tempfile
 
-import torch
+from openai.types.chat.chat_completion_chunk import Choice, ChoiceDelta
 from qwen_omni_utils import process_mm_info
+import torch
 from transformers import Qwen2_5OmniForConditionalGeneration, Qwen2_5OmniProcessor
 
 from cornserve.logging import get_logger
-from cornserve.task_executors.huggingface.api import HuggingFaceRequest, HuggingFaceResponse, Status
+from cornserve.task.builtins.llm import OpenAIChatCompletionChunk
+from cornserve.task_executors.huggingface.api import (
+    HuggingFaceRequest,
+    HuggingFaceResponse,
+    Status,
+)
 from cornserve.task_executors.huggingface.models.base import HFModel
 
 logger = get_logger(__name__)
@@ -46,15 +53,14 @@ class QwenOmniModel(HFModel):
         """Generate audio from the Qwem Omni model."""
         assert request.messages is not None, "Messages must be provided in the request"
 
-        if not request.return_audio:
-            raise ValueError("Only audio generation is supported for the Qwen 2.5 Omni model")
-
         # Convert messages to the format expected by the processor
         conversations = self._convert_messages(request.messages)
 
         # Process inputs
         text = self.processor.apply_chat_template(conversations, add_generation_prompt=True, tokenize=False)
+        tmpfiles = _materialize_videos_inplace(conversations)
         audios, images, videos = process_mm_info(conversations, use_audio_in_video=False)  # type: ignore
+        _cleanup_tmpfiles(tmpfiles)
         inputs = self.processor(
             text=text,
             audio=audios,
@@ -66,15 +72,57 @@ class QwenOmniModel(HFModel):
         )
         inputs = inputs.to(self.model.device).to(self.model.dtype)
 
-        # Generate response
-        text_ids, audio = self.model.generate(**inputs, use_audio_in_video=False, return_audio=True)
+        max_new_tokens = request.max_completion_tokens
+        min_new_tokens = request.max_completion_tokens if request.ignore_eos else None
 
+        # Generate response
+        if not request.return_audio:
+            text_ids = self.model.generate(
+                **inputs,
+                use_audio_in_video=False,
+                return_audio=False,
+                max_new_tokens=max_new_tokens,
+                min_new_tokens=min_new_tokens,
+            )  # type: ignore
+            text = self.processor.batch_decode(text_ids)[0]
+            logger.info("Generated text: %s / max tokens %s", text, max_new_tokens)
+            # create a dummy text chunk
+            text_chunk = OpenAIChatCompletionChunk(
+                id="ID",
+                choices=[
+                    Choice(
+                        index=0,
+                        finish_reason="stop",
+                        delta=ChoiceDelta(
+                            role="assistant",
+                            content=text[text.rfind("<|im_start|>") :],
+                        ),
+                    )
+                ],
+                created=0,
+                object="chat.completion.chunk",
+                model=self.model_id,
+            )
+            # logger.info("Generated text chunk: %s", text_chunk)
+            return HuggingFaceResponse(
+                status=Status.SUCCESS,
+                text_chunk=text_chunk.model_dump(),
+            )
+
+        text_ids, audio = self.model.generate(
+            **inputs,
+            use_audio_in_video=False,
+            return_audio=request.return_audio,
+            max_new_tokens=max_new_tokens,
+            min_new_tokens=min_new_tokens,
+        )  # type: ignore
         text = self.processor.batch_decode(text_ids)[0]
+
 
         audio_data = audio.reshape(-1).detach().cpu().numpy()  # np.float32
         audio_b64 = base64.b64encode(audio_data.tobytes()).decode("utf-8")
 
-        logger.info("Generated text: %s", text[text.rfind("<|im_start|>") :])
+        logger.info("Generated text: %s / max tokens %s", text, max_new_tokens)
         logger.info(
             "Generated audio length is %f seconds and size after base64 encoding is %.2f MiBs",
             audio.numel() / 24000,
@@ -121,3 +169,43 @@ class QwenOmniModel(HFModel):
                 conversations.append({"role": role, "content": converted_content})
 
         return conversations
+
+
+def _cleanup_tmpfiles(paths: list[str]) -> None:
+    """Helper to remove temporary files."""
+    for p in paths:
+        try:
+            os.remove(p)
+        except OSError:
+            pass
+
+def _materialize_videos_inplace(conversations: list[dict]) -> list[str]:
+    """Helper to convert base64 videos to temporary files. """
+    created: list[str] = []
+
+    for msg in conversations:
+        content = msg.get("content")
+        if not isinstance(content, list):
+            continue
+        for item in content:
+            if not (isinstance(item, dict) and item.get("type") == "video"):
+                continue
+            v = item.get("video")
+            if not (isinstance(v, str) and v.startswith("data:video/mp4")):
+                continue  # leave non-data URLs or paths alone
+
+            # grab the base64 payload after the first comma
+            i = v.find(",")
+            if i == -1:
+                continue
+            b64 = v[i + 1 :]
+
+            fd, path = tempfile.mkstemp(suffix=".mp4")
+            os.close(fd)
+            with open(path, "wb") as f:
+                f.write(base64.b64decode(b64))
+
+            item["video"] = path
+            created.append(path)
+
+    return created

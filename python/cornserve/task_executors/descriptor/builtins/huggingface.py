@@ -16,6 +16,7 @@ from cornserve.task.builtins.huggingface import (
     HuggingFaceQwenOmniOutput,
     HuggingFaceQwenOmniTask,
 )
+from cornserve.task.builtins.llm import OpenAIChatCompletionChunk
 from cornserve.task_executors.descriptor.base import TaskExecutionDescriptor
 from cornserve.task_executors.descriptor.registry import DESCRIPTOR_REGISTRY
 from cornserve.task_executors.huggingface.api import HuggingFaceRequest, HuggingFaceResponse, ModelType, Status
@@ -111,8 +112,6 @@ class HuggingFaceQwenOmniDescriptor(
         task_output: HuggingFaceQwenOmniOutput,
     ) -> dict[str, Any]:
         """Convert TaskInput to a request object for the task executor."""
-        if not task_input.return_audio:
-            raise ValueError("HuggingFace Qwen-Omni tasks must have return_audio=True")
 
         return HuggingFaceRequest(**task_input.model_dump()).model_dump()
 
@@ -129,9 +128,12 @@ class HuggingFaceQwenOmniDescriptor(
             raise RuntimeError(f"Error in HuggingFace Qwen-Omni task: {hf_response.error_message}")
 
         if hf_response.audio_chunk is None:
-            raise RuntimeError("No audio chunk received from HuggingFace Qwen-Omni task")
-
-        return HuggingFaceQwenOmniOutput(audio_chunk=hf_response.audio_chunk)
+            serialized_text_chunk = OpenAIChatCompletionChunk.model_validate(hf_response.text_chunk)
+            return HuggingFaceQwenOmniOutput(
+                audio_chunk=None,
+                text_chunk=serialized_text_chunk,
+            )
+        return HuggingFaceQwenOmniOutput(audio_chunk=hf_response.audio_chunk, text_chunk=None)
 
 
 # Register descriptors with the registry
