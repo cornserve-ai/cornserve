@@ -7,7 +7,7 @@ from typing import Any, Literal
 
 import aiohttp
 import requests
-from app_utils import create_eric_app, create_mllm_app, create_omni_app, create_hf_omni_app, create_hf_image_app
+from app_utils import create_eric_app, create_mllm_app, create_omni_app, create_hf_omni_app, create_hf_image_app, create_qwen_image_app
 from schema import (
     CornserveConfig,
     CornserveOmniConfig,
@@ -48,6 +48,7 @@ def register_app(
         "nccl-pd",
         "ela", # encoder + llm + audio
         "la", # llm + audio
+        "qwen-image",
         "hf-omni", # hf omni
         "hf-image", # hf qwen image
     ],
@@ -114,6 +115,10 @@ def register_app(
         )
     elif app_type == "hf-image":
         source_code = create_hf_image_app(
+            model_id=model_id,
+        )
+    elif app_type == "qwen-image":
+        source_code = create_qwen_image_app(
             model_id=model_id,
         )
     else:
@@ -287,7 +292,9 @@ async def scale(config: ExperimentConfig) -> None:
         for task_def, task_id, state in tasks:
             if state != "ready":
                 continue
-            if "llmunittask" in task_id and model_id == task_def["model_id"] \
+            if ("llmembeddingunittask" in task_id or "llmunittask" in task_id) \
+                    and task_def["model_id"] == "Qwen/Qwen2.5-VL-7B-Instruct" \
+                    and model_id == task_def["model_id"] \
                     and "decode" not in task_id and "prefill" not in task_id:
                 # check recv_embeds based on model_id
                 if model_id in LLMBaseUnitTask.MODEL_IDS_REMOVED_ENCODERS and \
@@ -384,7 +391,8 @@ async def scale(config: ExperimentConfig) -> None:
         for task_def, task_id, state in tasks:
             if state != "ready":
                 continue
-            elif "llmembeddingunittask" in task_id and model_id == "Qwen/Qwen2.5-VL-7B-Instruct" \
+            elif ("llmembeddingunittask" in task_id or "llmunittask" in task_id) \
+                and task_def["model_id"] == "Qwen/Qwen2.5-VL-7B-Instruct" \
                 and "decode" not in task_id and "prefill" not in task_id:
                 qwen_embedding_task_id = task_id
             elif "generatortask" in task_id and model_id == task_def["model_id"]:

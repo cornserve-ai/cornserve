@@ -31,6 +31,7 @@ from servegen.utils import get_scaled_rate_fn, get_constant_rate_fn
 from servegen_distributions import add_update_multimodal_content
 
 from image_utils import create_dummy_image, create_dummy_video, create_dummy_audio, get_image_data_uris
+from transformers import AutoTokenizer
 
 logger = logging.getLogger(__name__)
 
@@ -70,6 +71,10 @@ class SampleRequest:
     audio_fission: bool = False
 
     return_audio: bool | None = None
+
+    output_image_height: int | None = None
+    output_image_width: int | None = None
+    num_inference_steps: int | None = None
 
 
 # -----------------------------------------------------------------------------
@@ -729,6 +734,41 @@ class ServeGenDataset:
 
         return sampled_requests
 
+class SyntheticDiffusionDataset():
+
+    DEFAULT_SEED = 0
+
+    def __init__(
+        self,
+        random_seed: int = DEFAULT_SEED,
+    ) -> None:
+        self.random_seed = random_seed
+        self.tokenizer = AutoTokenizer.from_pretrained("Qwen/Qwen2.5-VL-32B-Instruct", tokenizer_mode="auto", trust_remote_code=True)
+
+    def sample(
+        self,
+        num_requests: int,
+        input_len: int,
+        image_width: int,
+        image_height: int,
+        num_inference_steps: int,
+    ) -> list[SampleRequest]:
+        sampled_requests: list[SampleRequest] = []
+        np.random.seed(self.random_seed)
+        for _ in range(num_requests):
+            prompt = _generate_random_text_with_length(self.tokenizer, input_len)
+            sampled_req = SampleRequest(
+                prompt=prompt,
+                prompt_len=len(self.tokenizer(prompt).input_ids),
+                multi_modal_data_list=[],
+                expected_output_len=0,
+                output_image_height=image_height,
+                output_image_width=image_width,
+                num_inference_steps=num_inference_steps,
+            )
+            sampled_requests.append(sampled_req)
+
+        return sampled_requests
 
 if __name__ == "__main__":
     from transformers import AutoTokenizer

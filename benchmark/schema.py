@@ -280,6 +280,20 @@ class ServeGenConfig(WorkloadConfig):
             basename += f"+no_image_prob{self.no_image_prob}+audio_prob{self.audio_prob}+video_prob{self.video_prob}"
         return basename
 
+class QwenImageConfig(WorkloadConfig):
+    """Configuration for the Qwen-Image workload."""
+
+    output_image_width: int = 512
+    output_image_height: int = 512
+    num_inference_steps: int = 20
+
+    def to_suffix(self) -> str:
+        suffix = "qwen_image"
+        suffix += f"+output_w{self.output_image_width}_h{self.output_image_height}"
+        suffix += f"+steps{self.num_inference_steps}"
+        return suffix
+
+
 class OmniConfig(WorkloadConfig):
     """Configuration for the Omni workload."""
 
@@ -349,7 +363,12 @@ class ExperimentConfig(BaseModel):
     gpu_type: Literal["A40", "A100", "H100"] = "A40"
 
     # workload config
-    dataset: Literal["lmarena-ai/VisionArena-Chat", "servegen", "omni"] = Field(
+    dataset: Literal[
+        "lmarena-ai/VisionArena-Chat",
+        "servegen",
+        "synthetic",
+        "omni",
+    ] = Field(
         default="lmarena-ai/VisionArena-Chat",
         description=("Dataset to use for the benchmark. Currently only supports lmarena-ai/VisionArena-Chat."),
     )

@@ -20,7 +20,7 @@ from transformers.tokenization_utils_base import PreTrainedTokenizerBase
 
 from benchmark_dataset import SampleRequest
 from image_utils import create_dummy_image, get_image_data_uris
-from schema import DutyCycleConfig, EricConfig, ExperimentConfig, HFOmniConfig, OmniServeGenConfig, ServeGenConfig
+from schema import CornserveQwenImageConfig, DutyCycleConfig, EricConfig, ExperimentConfig, HFOmniConfig, HFQwenImageConfig, OmniServeGenConfig, ServeGenConfig
 
 AIOHTTP_TIMEOUT = aiohttp.ClientTimeout(total=6 * 60 * 60)
 MILLISECONDS_TO_SECONDS_CONVERSION = 1000
@@ -48,6 +48,10 @@ class RequestInput:
     # if timestamp, will use the timestamp as the start time
     timestamp: float | None = None
 
+    # qwen-image specific
+    output_image_height: int | None = None
+    output_image_width: int | None = None
+    num_inference_steps: int | None = None
 
 @dataclass
 class RequestOutput:
@@ -221,6 +225,46 @@ def calculate_metrics(
     )
 
     return metrics, actual_output_lens
+
+async def cornserve_invoke_qwen_image(
+    request_input: RequestInput,
+    pbar: tqdm | None,
+) -> RequestOutput:
+    """Invoke an Eric app."""
+    api_url = request_input.url
+    async with aiohttp.ClientSession(trust_env=True, timeout=AIOHTTP_TIMEOUT) as session:
+        request_data = {
+            "prompt": request_input.prompt,
+            "height": request_input.output_image_height,
+            "width": request_input.output_image_width,
+            "num_inference_steps": request_input.num_inference_steps,
+        }
+        payload = {"request_data": request_data}
+        # print(f"Payload: {payload}")
+        st = time.perf_counter()
+        output = RequestOutput()
+        try:
+            async with session.post(url=api_url, json=payload) as response:
+                if response.status == 200:
+                    timestamp = time.perf_counter()
+                    _ = await response.json()
+                    output = RequestOutput(
+                        success=True,
+                        input=replace(request_input, multi_modal_data=[]),
+                        prompt_len=request_input.prompt_len,
+                        latency=timestamp - st,
+                        start_timestamp=st,
+                        completion_timestamp=timestamp,
+                        output_tokens=0,
+                    )
+        except Exception:
+            output.success = False
+            exc_info = sys.exc_info()
+            output.error = "".join(traceback.format_exception(*exc_info))
+
+    if pbar:
+        pbar.update(1)
+    return output
 
 
 async def cornserve_invoke_eric(
@@ -676,6 +720,9 @@ def transform_sampled_requests(
             video_fission=request.video_fission,
             audio_fission=request.audio_fission,
             return_audio=request.return_audio,
+            output_image_height=request.output_image_height,
+            output_image_width=request.output_image_width,
+            num_inference_steps=request.num_inference_steps,
         )
         request_inputs.append(request_input)
     return request_inputs
@@ -701,6 +748,9 @@ async def benchmark(
                 )
             elif isinstance(config.backend_config, HFOmniConfig):
                 return await cornserve_static_invoke(request_input, pbar)
+            elif isinstance(config.backend_config, CornserveQwenImageConfig) \
+                    or isinstance(config.backend_config, HFQwenImageConfig):
+                return await cornserve_invoke_qwen_image(request_input, pbar)
             return await cornserve_invoke(request_input, pbar)
 
     # first test a request
@@ -767,11 +817,12 @@ async def benchmark(
     benchmark_end_time = max([output.completion_timestamp for output in results if output.success])
     benchmark_duration = benchmark_end_time - benchmark_start_time
 
+    model_id = config.model_id if config.model_id != "Qwen/Qwen-Image" else "Qwen/Qwen2.5-VL-7B-Instruct"
     metrics, actual_output_lens = calculate_metrics(
         input_requests=request_inputs,
         outputs=results,
         dur_s=benchmark_duration,
-        tokenizer=AutoTokenizer.from_pretrained(config.model_id),
+        tokenizer=AutoTokenizer.from_pretrained(model_id),
     )
 
     print("{s:{c}^{n}}".format(s=" Serving Benchmark Result ", n=50, c="="))
