@@ -14,13 +14,17 @@ async def run(
     overwrite: bool = False,
 ) -> None:
     # model_ids = ["OpenGVLab/InternVL3-38B", "Qwen/Qwen2.5-VL-32B-Instruct"]
-    model_ids = ["Qwen/Qwen2.5-VL-7B-Instruct"]
+    model_ids = ["Qwen/Qwen2.5-VL-32B-Instruct"]
     # app_types: list[Literal['ev', 'v', 'e', 'epd', 'pd', 'nccl-pd']] = ["e", "ev", "v", "pd", "epd"]
-    app_types: list[Literal['ev', 'v', 'e', 'epd', 'pd', 'nccl-pd']] = ["e"]
+    app_types: list[Literal['ev', 'v', 'e', 'epd', 'pd', 'nccl-pd']] = [
+        "e",
+        "v",
+        "ev",
+    ]
     app_modalities = [
         [["IMAGE"], ["VIDEO"]],  # e
-        # ["image", "video"],  # ev
-        [["VIDEO"], ["IMAGE"]], # v
+        [["VIDEO", "IMAGE"]], # v
+        [["VIDEO", "IMAGE"]], # ev
     ]
     assert len(app_types) == len(app_modalities)
 
@@ -45,7 +49,7 @@ async def run(
     workloads = [
         # one image is not enough to trigger sharing
         # when video prob is low, we need a longer duration for steady state
-        ((0.375, 0.375, 5, 5, 0.375, 0.375), 0.5, 300, 1.0, 1.0),
+        ((0.375, 0.5, 5, 5, 0.375, 0.375), 0.5, 360, 1.0, 1.0),
     ]
 
     vllm_config = VLLMConfig(num_replicas=1, tp_size=2)
@@ -134,7 +138,7 @@ async def run(
                 for modalities in modlities_list:
                     app_id = app_ids[(model_id, app_type, tuple(modalities))]
                     if app_type == "e" and modalities == ["IMAGE"]:
-                        serve_gen_config = build_serve_gen_config(request_rate=e_img_r, duration=duration, video_prob=video_prob)
+                        serve_gen_config = build_serve_gen_config(request_rate=e_img_r, duration=duration, video_prob=0)
                         exp_config = ExperimentConfig(
                             backend_config=img_eric_config,
                             app_id=app_id,
@@ -217,7 +221,7 @@ async def run(
         output_data = await benchmark(request_inputs=request_inputs, config=cfg)
         completed = output_data["metrics"]["completed"]
         total_output_tokens = output_data["metrics"]["total_output"]
-        if completed <= cfg.num_prompts * 0.95:
+        if completed <= len(sampled_requests) * 0.95:
             raise RuntimeError("Insufficient completed requests")
         if not isinstance(cfg.backend_config, EricConfig):
             if total_output_tokens <= sum(r.expected_output_len for r in sampled_requests) * 0.95:

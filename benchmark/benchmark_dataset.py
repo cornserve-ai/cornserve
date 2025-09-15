@@ -728,30 +728,40 @@ class ServeGenDataset:
 if __name__ == "__main__":
     from transformers import AutoTokenizer
 
-    model_id = "Qwen/Qwen2.5-VL-7B-Instruct"
+    model_id = "Qwen/Qwen2.5-VL-32B-Instruct"
     tokenizer = AutoTokenizer.from_pretrained(
         model_id,
         tokenizer_mode="auto",
         trust_remote_code=True,
     )
-    sampled_requests: list[SampleRequest] = VisionArenaDataset(
-        dataset_path="lmarena-ai/VisionArena-Chat",
-        dataset_subset=None,
-        dataset_split="train",
-        random_seed=48105,
-    ).sample(
-        num_requests=2000,
+    workload: list[SampleRequest] = ServeGenDataset(48105).sample(
         tokenizer=tokenizer,
-        output_len=300,
-        input_len=500,
+        request_rate=5,
+        duration=1200,
+        no_image_prob=0,
+        audio_prob=1,
+        video_prob=1,
     )
+    print(f"Sampled {len(workload)} requests.")
 
-    # calculate input len mean and std
-    print(f"Sampled {len(sampled_requests)} requests.")
-    input_lens = []
-    for req in sampled_requests:
-        input_ids = tokenizer(req.prompt)["input_ids"]
-        input_lens.append(len(input_ids))
-    input_len_mean = sum(input_lens) / len(input_lens)
-    input_len_std = (sum((x - input_len_mean) ** 2 for x in input_lens) / len(input_lens)) ** 0.5
-    print(f"Input length mean: {input_len_mean}, std: {input_len_std}")
+    # sampled_requests: list[SampleRequest] = VisionArenaDataset(
+    #     dataset_path="lmarena-ai/VisionArena-Chat",
+    #     dataset_subset=None,
+    #     dataset_split="train",
+    #     random_seed=48105,
+    # ).sample(
+    #     num_requests=2000,
+    #     tokenizer=tokenizer,
+    #     output_len=300,
+    #     input_len=500,
+    # )
+    #
+    # # calculate input len mean and std
+    # print(f"Sampled {len(sampled_requests)} requests.")
+    # input_lens = []
+    # for req in sampled_requests:
+    #     input_ids = tokenizer(req.prompt)["input_ids"]
+    #     input_lens.append(len(input_ids))
+    # input_len_mean = sum(input_lens) / len(input_lens)
+    # input_len_std = (sum((x - input_len_mean) ** 2 for x in input_lens) / len(input_lens)) ** 0.5
+    # print(f"Input length mean: {input_len_mean}, std: {input_len_std}")

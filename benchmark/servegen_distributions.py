@@ -177,11 +177,11 @@ def tokens_to_video_resolution(n_tokens, aspect_ratio=16/9, max_frames_pref=(4,6
 
     if cands:
         cands.sort(key=lambda x: x[0])
-        print(f"Video tokens {n_tokens} -> {cands[0][1]}")
+        # print(f"Video tokens {n_tokens} -> {cands[0][1]}")
         return cands[0][1]
 
     # fallback
-    print(f"[Fallback] Video tokens {n_tokens} -> {min_dim}x{int(min_dim*aspect_ratio)}")
+    # print(f"[Fallback] Video tokens {n_tokens} -> {min_dim}x{int(min_dim*aspect_ratio)}")
     return token_frames, min_dim, int(min_dim*aspect_ratio)
 
 

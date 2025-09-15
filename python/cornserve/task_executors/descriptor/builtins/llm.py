@@ -246,6 +246,7 @@ class PrefillVLLMDescriptor(
             [
                 # ("UCX_LOG_LEVEL", "debug"),
                 # ("VLLM_LOGGING_LEVEL", "DEBUG"),
+                ("UCX_TLS", "^cuda_ipc"),
                 ("VLLM_NIXL_SIDE_CHANNEL_PORT", str(self.NIXL_BASE_PORT + gpus[0].global_rank)),
             ]
         )
@@ -404,6 +405,7 @@ class DecodeVLLMDescriptor(
             [
                 # ("UCX_LOG_LEVEL", "debug"),
                 # ("VLLM_LOGGING_LEVEL", "DEBUG"),
+                ("UCX_TLS", "^cuda_ipc"),
                 ("VLLM_NIXL_SIDE_CHANNEL_PORT", str(self.NIXL_BASE_PORT + gpus[0].global_rank)),
             ]
         )

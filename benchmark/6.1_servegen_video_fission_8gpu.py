@@ -16,7 +16,7 @@ async def run(
         print("WARNING!!!! Overwrite mode is enabled. Existing configurations will be re-evaluated.")
 
     model_ids = ["Qwen/Qwen2.5-VL-32B-Instruct"]
-    app_types: list[Literal['ev', 'v']] = ["ev", "v"]
+    app_types: list[Literal['ev', 'v']] = ["v"]
 
     app_ids = {}
     for model_id in model_ids:
@@ -29,23 +29,26 @@ async def run(
             app_ids[(model_id, app_type)] = app_id
             print(f"Registered {model_id} {app_type} with ID: {app_id}")
 
-    # rates, video_prob, duration, video_fission_probability
+    # rates, video_prob, duration, image_fission_prob, video_fission_probability
     #    (el, l, pd, epd)
     # the request rate is different per model!
     workloads = [
         # one image is not enough to trigger sharing
         # when video prob is low, we need a longer duration for steady state
-        ((3, 3, 3, 3), 0.5, 1200, 0.85),
+        ((1.5, 2, 0.375, 0.375), 0.5, 600, 1, 0.875),
+
+        # ((1.5, 1.5, 1.5, 1.5), 0.5, 720, 1, 0.875),
+        # ((5, 5, 5, 5), 0.7, 1200, 0.85),
     ]
 
-    vllm_config = VLLMConfig(num_replicas=4, tp_size=2)
+    vllm_config = VLLMConfig(num_replicas=1, tp_size=2)
     # we compare single vLLM with disaggregated vLLM, ignoring Eric cost
     cornserve_config = CornserveConfig(
         num_vllms=3,
         vllm_tp_size=2,
         num_erics=2,
-        num_video_erics=2,
-        num_image_erics=0,
+        num_video_erics=1,
+        num_image_erics=1,
         modalities=["image", "video"]
     )
 
@@ -98,7 +101,7 @@ async def run(
     configs = []
     for model_id in model_ids:
         for workload in workloads:
-            rates, video_prob, duration, video_fission_probability = workload
+            rates, video_prob, duration, image_fission_probability, video_fission_probability = workload
             (el, l, pd, epd) = rates
             for app_type in app_types:
                 app_id = app_ids[(model_id, app_type)]
@@ -131,7 +134,7 @@ async def run(
                     gpu_type=gpu_type,
                     dataset="servegen",
                     # encoder_fission_probability=encoder_fission_probability if app_type in ("ev", ) else 1,
-                    image_fission_probability=0 if app_type in ("ev", ) else 1,
+                    image_fission_probability=image_fission_probability if app_type in ("ev", ) else 1,
                     video_fission_probability=video_fission_probability if app_type in ("ev", ) else 1,
                     workload_config=serve_gen_config,
                     use_synthesized_data=False,
