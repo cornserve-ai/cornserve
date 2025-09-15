@@ -465,7 +465,7 @@ def _handle_non_streaming_response(
 ) -> None:
     """Handle non-streaming response."""
     # Collect all data since we opened stream=True but it's actually not streaming
-    content = b"".join(response.iter_content())
+    content = b"".join(response.iter_content(chunk_size=None))
     data = json.loads(content.decode())
 
     # Handle PNG if requested

@@ -1,3 +1,3 @@
 """Built-in tasks."""
 
-from cornserve.task.builtins import encoder, generator, llm, omni
+from cornserve.task.builtins import encoder, generator, huggingface, llm, omni

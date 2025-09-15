@@ -7,6 +7,52 @@ In this case, we don't need a registry.
 Instead, we build containers directly within the containerd runtime of K3s.
 
 First, follow [this guide](https://blog.otvl.org/blog/k3s-loc-sp) (Section "Switching from Docker to Containerd") to set up Nerdctl and BuildKit on your local development machine.
+It should be something like:
+
+```bash
+wget https://github.com/containerd/nerdctl/releases/download/v2.1.3/nerdctl-2.1.3-linux-amd64.tar.gz
+tar -xvf nerdctl-*.gz
+sudo mv nerdctl /usr/bin
+sudo mkdir -p /etc/nerdctl/
+sudo tee /etc/nerdctl/nerdctl.toml > /dev/null <<'EOF'
+address        = "/run/k3s/containerd/containerd.sock"
+namespace      = "k8s.io"
+EOF
+
+wget https://github.com/moby/buildkit/releases/download/v0.24.0/buildkit-v0.24.0.linux-amd64.tar.gz
+tar -xvf buildkit-v0.24.0.linux-amd64.tar.gz
+sudo mv bin/* /usr/bin
+sudo mkdir -p /etc/buildkit/
+sudo tee /etc/buildkit/buildkitd.toml > /dev/null <<'EOF'
+[worker.oci]
+  enabled = false
+
+[worker.containerd]
+  enabled = true
+  address = "/run/k3s/containerd/containerd.sock"
+  namespace = "k8s.io"
+EOF
+
+sudo tee /etc/systemd/system/buildkit.service > /dev/null <<'EOF'
+[Unit]
+Description=BuildKit
+Documentation=https://github.com/moby/buildkit
+
+[Service]
+Type=simple
+TimeoutStartSec=10
+Restart=always
+RestartSec=10
+ExecStart=/usr/bin/buildkitd
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+sudo systemctl daemon-reload
+sudo systemctl enable buildkit.service
+sudo systemctl start buildkit.service
+```
 
 After that, you can use Nerdctl to build images directly within K3s containerd, and no pull is necessary whatsoever.
 Use the `build_export_images.sh` script with the `REGISTRY` environment variable set to `local` (a special case):
