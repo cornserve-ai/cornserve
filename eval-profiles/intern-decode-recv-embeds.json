@@ -6,6 +6,6 @@
     "execution_descriptor_name": null
   },
   "num_gpus_to_profile": {
-    "2": {"launch_args": []}
+    "2": {"launch_args": ["--gpu-memory-utilization", "0.95"]}
   }
 }
