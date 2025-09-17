@@ -17,7 +17,8 @@ async def run(
         print("WARNING!!!! Overwrite mode is enabled. Existing configurations will be re-evaluated.")
 
     model_ids = ["OpenGVLab/InternVL3-38B"]
-    app_types: list[Literal['ev', 'v']] = ["ev", "v"]
+    # app_types: list[Literal['ev', 'v', 'pd', 'epd']] = ["ev", "v", "pd", "epd"]
+    app_types: list[Literal['ev', 'v', 'pd', 'epd']] = ["pd", "epd"]
 
     app_ids = {}
     for model_id in model_ids:
@@ -30,7 +31,15 @@ async def run(
     #    (el, l, pd, epd)
     # the request rate is different per model!
     workloads = [
-        (1920, 1080, 1, 0.6, 100, 100, 2000, (7,7,7,7), 1),
+        # requires edit
+        # Winner!
+        # (1680, 1050, 1, 1, 100, 100, 2000, (7, 7, 7, 7), 0.7),
+
+        (1680, 1050, 1, 1, 1000, 300, 2000, (7.5, 7.5, 7, 7), 1),
+
+        (1920, 1080, 1, 1, 100, 100, 2000, (10, 10, 10, 10), 1),
+
+        (1920, 1080, 1, 0.6, 100, 100, 2000, (10, 10, 10, 10), 1),
         # (1680, 1050, 1, 100, 50, 1500, (7, 7, 7, 7), 0.7),
         # (1920, 1080, 1, 100, 50, 1500, (7, 7, 7, 7), 0.6),
         # (1920, 1080, 1, 100, 50, 1500, (7, 7, 7, 7), 0.65),
@@ -72,8 +81,6 @@ async def run(
 
         # (1680, 1050, 1, 100, 100, 2000, (7, 7, 7, 7), 0.775),
 
-        # Winner!
-        # (1680, 1050, 1, 1, 100, 100, 2000, (7, 7, 7, 7), 0.7),
 
         # (1680, 1050, 1, 100, 100, 2000, (7, 7, 7, 7), 0.7),
         # eric too much work
@@ -86,11 +93,9 @@ async def run(
     # we compare single vLLM with disaggregated vLLM, ignoring Eric cost
     cornserve_config = CornserveConfig(num_vllms=3, vllm_tp_size=2, num_erics=2)
 
-    # set max output tokens to 1 to profile prefill 
-    epd_config = EPDConfig(num_prefills=1, prefill_tp_size=1, num_decodes=1, decode_tp_size=1, num_erics=4)
+    epd_config = EPDConfig(num_prefills=1, prefill_tp_size=2, num_decodes=2, decode_tp_size=2, num_erics=2)
 
-    # set max output tokens to 1 to profile prefill 
-    pd_config = PDConfig(num_prefills=1, prefill_tp_size=1, num_decodes=3, decode_tp_size=1)
+    pd_config = PDConfig(num_prefills=2, prefill_tp_size=2, num_decodes=2, decode_tp_size=2)
 
     configs = []
     gpu_type = "A100"
