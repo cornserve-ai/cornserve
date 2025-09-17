@@ -30,7 +30,8 @@ async def run(
     #    (el, l, pd, epd)
     # the request rate is different per model!
     workloads = [
-        (1920, 1080, 2, 0.6, 100, 300, 2000, (3, 3, 3, 3), 0.8),
+        (1920, 1080, 2, 0.8, 100, 300, 2000, (5,5,5,5), 0.9),
+        (1920, 1080, 1, 0.8, 100, 300, 2000, (5,5,5,5), 0.9),
 
         # one image is not enough to trigger sharing
         # (1920, 1080, 1, 100, 50, 500, (3, 3, 3, 3)),
