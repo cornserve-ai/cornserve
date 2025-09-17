@@ -108,8 +108,8 @@ class VLLMDescriptor(TaskExecutionDescriptor[LLMBaseUnitTask, OpenAIChatCompleti
             # These arguments will be hand tuned during benchmarking
             # When benchmarking, we reuse mm inputs, so we disable the preprocessor cache
             "--disable-mm-preprocessor-cache",
-            "--gpu-memory-utilization",
-            "0.85",
+            # "--gpu-memory-utilization",
+            # "0.93",
         ]
         return args
 
@@ -285,8 +285,8 @@ class PrefillVLLMDescriptor(
             "--enforce-eager",
             "--no-enable-prefix-caching",
             "--disable-mm-preprocessor-cache",
-            "--gpu-memory-utilization",
-            "0.85",
+            # "--gpu-memory-utilization",
+            # "0.93",
         ]
         return args
 
@@ -444,8 +444,8 @@ class DecodeVLLMDescriptor(
             "--enforce-eager",
             "--no-enable-prefix-caching",
             "--disable-mm-preprocessor-cache",
-            "--gpu-memory-utilization",
-            "0.85",
+            # "--gpu-memory-utilization",
+            # "0.93",
         ]
 
         return args
@@ -585,8 +585,8 @@ class NcclPrefillVLLMDescriptor(
             "--enforce-eager",
             "--no-enable-prefix-caching",
             "--disable-mm-preprocessor-cache",
-            "--gpu-memory-utilization",
-            "0.85",
+            # "--gpu-memory-utilization",
+            # "0.93",
         ]
         return args
 
@@ -747,8 +747,8 @@ class NcclDecodeVLLMDescriptor(
             "--enforce-eager",
             "--no-enable-prefix-caching",
             "--disable-mm-preprocessor-cache",
-            "--gpu-memory-utilization",
-            "0.73",
+            # "--gpu-memory-utilization",
+            # "0.73",
         ]
 
         return args

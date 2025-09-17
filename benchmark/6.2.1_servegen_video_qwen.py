@@ -16,7 +16,7 @@ async def run(
         print("WARNING!!!! Overwrite mode is enabled. Existing configurations will be re-evaluated.")
 
     model_ids = ["Qwen/Qwen2.5-VL-32B-Instruct"]
-    app_types: list[Literal['ev', 'v']] = ["ev", "v"]
+    app_types: list[Literal['ev', 'v', "pd", "epd"]] = ["pd", "epd"]
 
     app_ids = {}
     for model_id in model_ids:
@@ -37,30 +37,34 @@ async def run(
         # when video prob is low, we need a longer duration for steady state
         # ((4, 4, 0.375, 0.375), 0.5, 600, 1, 0.875),
         # ((4, 4, 0.375, 0.375), 0.5, 600, 1, 0.875),
-        ((4, 4, 0.375, 0.375), 0.5, 600, 1, 0.5),
-        ((4, 4, 0.375, 0.375), 0.5, 600, 1, 0.75),
-        ((4, 4, 0.375, 0.375), 0.5, 600, 1, 0.875),
+
+        # ((4, 4, 4, 4), 0.5, 600, 1, 0.5),
+        # ((3.5, 3.5, 3.5, 3.5), 1, 600, 0, 0.6),
+        # ((2.15, 2.15, 2.15, 2.15), 1, 600, 0, 0.85),
+
+        # ((2.55, 2.55, 2.55, 2.55), 0.5, 600, 0, 1),
+        ((1.25, 1.25, 0.6, 0.6), 0.5, 600, 0, 1),
+
+        # ((4, 4, 4, 4), 0.5, 600, 1, 0.875),
 
         # ((1.5, 1.5, 1.5, 1.5), 0.5, 720, 1, 0.875),
         # ((5, 5, 5, 5), 0.7, 1200, 0.85),
     ]
 
-    vllm_config = VLLMConfig(num_replicas=8, tp_size=2)
+    vllm_config = VLLMConfig(num_replicas=4, tp_size=2)
     # we compare single vLLM with disaggregated vLLM, ignoring Eric cost
     cornserve_config = CornserveConfig(
         num_vllms=7,
         vllm_tp_size=2,
         num_erics=2,
-        num_video_erics=1,
-        num_image_erics=1,
+        num_video_erics=2,
+        num_image_erics=0,
         modalities=["image", "video"]
     )
 
     # set max output tokens to 1 to profile prefill 
-    epd_config = EPDConfig(num_prefills=1, prefill_tp_size=1, num_decodes=2, decode_tp_size=2, num_erics=2)
-
-    # set max output tokens to 1 to profile prefill 
     pd_config = PDConfig(num_prefills=2, prefill_tp_size=2, num_decodes=2, decode_tp_size=2)
+    epd_config = EPDConfig(num_prefills=1, prefill_tp_size=1, num_decodes=2, decode_tp_size=2, num_erics=2, num_image_erics=1, num_video_erics=1)
 
     configs = []
     gpu_type = "A100"

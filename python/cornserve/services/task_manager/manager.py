@@ -79,7 +79,7 @@ class TaskManager:
             logger.info("Starting load monitoring loop for task manager %s", self.id)
             self.monitoring_task = asyncio.create_task(
                 self.load_monitoring_loop(
-                    interval=0.25,
+                    interval=0.05,
                 ),
             )
 
@@ -328,9 +328,9 @@ class TaskManager:
                     for k, v in self.load_heap.items():
                         logger.info("Load heap item: %s %s", k, v)
                     # when bursting, multiple requests could be routed to the same executor
-                    # to avoid that, we increment the load by 1.0
+                    # to avoid that, we increment the load by 0.1 to break tie
                     # this is unstable
-                    # self.load_heap[executor_id] = (load[0] + 1.0,) + load[1:]
+                    # self.load_heap[executor_id] = (load[0] + 0.1,) + load[1:]
                 else:
                     index = self.rr_counter % len(self.executor_deployments)
                     self.rr_counter += 1

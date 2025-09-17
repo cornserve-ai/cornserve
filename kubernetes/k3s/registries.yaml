@@ -1,4 +1,4 @@
 mirrors:
-  "ampere00.eecs.umich.edu:5000":
+  "172.31.72.50:5000":
     endpoint:
-      - "http://ampere00.eecs.umich.edu:5000"
+      - "http://172.31.72.50:5000"

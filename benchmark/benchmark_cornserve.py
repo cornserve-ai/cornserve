@@ -22,7 +22,7 @@ from benchmark_dataset import SampleRequest
 from image_utils import create_dummy_image, get_image_data_uris
 from schema import CornserveQwenImageConfig, DutyCycleConfig, EricConfig, ExperimentConfig, HFOmniConfig, HFQwenImageConfig, OmniServeGenConfig, ServeGenConfig
 
-AIOHTTP_TIMEOUT = aiohttp.ClientTimeout(total= 30 * 60)
+AIOHTTP_TIMEOUT = aiohttp.ClientTimeout(total=20 * 60)
 MILLISECONDS_TO_SECONDS_CONVERSION = 1000
 
 

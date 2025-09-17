@@ -236,12 +236,15 @@ async def scale(config: ExperimentConfig) -> None:
     model_id = config.model_id
     coros = []
     if isinstance(config.backend_config, EPDConfig):
+        task_ids = {}
         for task_def, task_id, state in tasks:
             if state != "ready":
                 continue
             if "encodertask" in task_id and model_id in task_def["model_ids"] \
                     and "dummyencodertask" not in task_id:
-                encoder_task_id = task_id
+                for modality in config.backend_config.modalities:
+                    if task_def["modality"] == modality:
+                        task_ids[modality] = task_id
             elif "prefillllmunittask" in task_id and model_id == task_def["model_id"] \
                     and task_def["receive_embeddings"] == True \
                     and "nccl" not in task_id:
@@ -250,12 +253,19 @@ async def scale(config: ExperimentConfig) -> None:
                     and task_def["receive_embeddings"] == True \
                     and "nccl" not in task_id:
                 decode_task_id = task_id
-        assert all([prefill_task_id, decode_task_id, encoder_task_id]), (
-            "Not all tasks are running. Please check the task and app states."
-        )
+        for modality in config.backend_config.modalities:
+            assert modality in task_ids, f"No Eric task found for modality {modality}. Please check the task and app states."
+        for modality, eric_task_id in task_ids.items():
+            if modality == "image":
+                num_gpus = config.backend_config.num_image_erics * config.backend_config.eric_tp_size
+            elif modality == "video":
+                num_gpus = config.backend_config.num_video_erics * config.backend_config.eric_tp_size
+            elif modality == "audio":
+                num_gpus = config.backend_config.num_audio_erics * config.backend_config.eric_tp_size
+            coros.append(scale_task_with_num_gpus(task_id=eric_task_id, num_gpus=num_gpus))
+        assert all([prefill_task_id, decode_task_id])
         coros.append(scale_task_with_num_gpus(task_id=prefill_task_id, num_gpus=config.backend_config.num_prefills * config.backend_config.prefill_tp_size))
         coros.append(scale_task_with_num_gpus(task_id=decode_task_id, num_gpus=config.backend_config.num_decodes * config.backend_config.decode_tp_size))
-        coros.append(scale_task_with_num_gpus(task_id=encoder_task_id, num_gpus=config.backend_config.num_erics * config.backend_config.eric_tp_size))
     elif isinstance(config.backend_config, PDConfig):
         for task_def, task_id, state in tasks:
             if state != "ready":
@@ -292,8 +302,9 @@ async def scale(config: ExperimentConfig) -> None:
         for task_def, task_id, state in tasks:
             if state != "ready":
                 continue
+            if model_id == "Qwen/Qwen-Image":
+                model_id = "Qwen/Qwen2.5-VL-7B-Instruct"
             if ("llmembeddingunittask" in task_id or "llmunittask" in task_id) \
-                    and task_def["model_id"] == "Qwen/Qwen2.5-VL-7B-Instruct" \
                     and model_id == task_def["model_id"] \
                     and "decode" not in task_id and "prefill" not in task_id:
                 # check recv_embeds based on model_id

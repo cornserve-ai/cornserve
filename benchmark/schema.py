@@ -212,13 +212,27 @@ class EPDConfig(BackendConfig):
     num_decodes: int
     decode_tp_size: int = 1
 
+    num_image_erics: int = 0
+    num_video_erics: int = 0
+    num_audio_erics: int = 0
+    modalities: list[Literal["image", "video", "audio"]] = ["image"]
+
+    def model_post_init(self, __context: Any) -> None:
+        if self.num_image_erics + self.num_video_erics + self.num_audio_erics == 0:
+            self.num_image_erics = self.num_erics
+
     def to_subdir_name(self) -> str:
         """Return the subdirectory name for the Cornserve configuration."""
-        return (
+        suffix = (
             f"epd+erics{self.num_erics}+tp{self.eric_tp_size}"
             + f"prefills{self.num_prefills}+tp{self.prefill_tp_size}"
             + f"+decodes{self.num_decodes}+tp{self.decode_tp_size}"
         )
+        if set(self.modalities) != {"image"}:
+            suffix += f"+modalities{'-'.join(sorted(self.modalities))}"
+        if self.num_image_erics + self.num_video_erics + self.num_audio_erics > 0:
+            suffix += f"+image_erics{self.num_image_erics}+video_erics{self.num_video_erics}+audio_erics{self.num_audio_erics}"
+        return suffix
 
     @classmethod
     def create_backend_configs(
