@@ -22,7 +22,7 @@ async def run(
 
 
     backend = HFQwenImageConfig(
-        num_replicas=16,
+        num_replicas=8,
     )
 
     gpu_type = "A100"
@@ -31,7 +31,7 @@ async def run(
     # Diffusion DB has very short text input length due to context length limit
     # input_len = 75
     num_requests = 1000
-    request_rate = 3.2
+    request_rate = 5
     output_image_width = 512
     output_image_height = 512
     num_inference_steps = 20

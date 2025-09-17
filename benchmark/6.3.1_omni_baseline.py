@@ -24,7 +24,7 @@ async def run(
 
     # rquest rate, duration, no_image_prob, video_prob, audio_prob, return_audio_prob
     worloads = [
-        (0.5, 300, 0.0, 0.5, 0.5, 0.2),
+        (1, 300, 0.0, 0.5, 0.5, 0.2),
     ]
 
     gpu_type = "A100"
