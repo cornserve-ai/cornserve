@@ -1,6 +1,25 @@
 """An app that runs a Multimodal LLM task.
 
 ```console
+cornserve invoke app-7b5da602b3e44847aa64474e78089b46 --aggregate-keys choices.0.delta.content --data - <<EOF
+model: "Qwen/Qwen2.5-VL-7B-Instruct"
+messages:
+- role: "user"
+  content:
+  - type: text
+    text: "How many images and videos do you see?"
+  - type: image_url
+    image_url:
+      url: "https://picsum.photos/id/12/480/560"
+  - type: video_url
+    video_url:
+      url: "https://dedicated.junzema.com/draw_small.mp4"
+max_completion_tokens: 100
+encoder_fission: True
+image_fission: False
+EOF
+
+
 $ cornserve register examples/mllm.py
 
 $ cornserve invoke mllm --aggregate-keys choices.0.delta.content --data - <<EOF
@@ -17,6 +36,8 @@ EOF
   - type: image_url
     image_url:
       url: "https://picsum.photos/id/234/960/960"
+max_completion_tokens: 100
+encoder_fission: false
 
 $ cornserve invoke mllm --aggregate-keys choices.0.delta.content usage --data - <<EOF
 model: "Qwen/Qwen2-VL-7B-Instruct"
@@ -81,9 +102,9 @@ from collections.abc import AsyncIterator
 
 from cornserve.app.base import AppConfig
 from cornserve.task.builtins.encoder import Modality
-from cornserve.task.builtins.llm import NcclDisaggregatedMLLMTask, OpenAIChatCompletionChunk, OpenAIChatCompletionRequest
+from cornserve.task.builtins.llm import MLLMTask, OpenAIChatCompletionChunk, OpenAIChatCompletionRequest
 
-mllm = NcclDisaggregatedMLLMTask(
+mllm = MLLMTask(
     model_id="Qwen/Qwen2.5-VL-7B-Instruct",
     # model_id="google/gemma-3-4b-it",
     modalities=[Modality.IMAGE],

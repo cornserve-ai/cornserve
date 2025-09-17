@@ -2,6 +2,22 @@
 
 ```console
 $ cornserve register examples/qwen_omni_huggingface.py
+- role: "system"
+  content: "You are Qwen, a virtual human developed by the Qwen Team, Alibaba Group, capable of perceiving auditory and visual inputs, as well as generating text and speech."
+
+cornserve register qwen_omni_huggingface.py
+
+cornserve invoke qwen_omni_huggingface --aggregate-keys audio_chunk text_chunk --data - <<EOF
+model: "Qwen/Qwen2.5-Omni-7B"
+messages:
+- role: "user"
+  content:
+  - type: text
+    text: "Hello, can you introduce yourself and your capabilities?"
+return_audio: true
+max_completion_tokens: 123
+ignore_eos: true
+EOF
 
 $ cornserve invoke qwen_omni_huggingface --aggregate-keys audio_chunk text_chunk --data - <<EOF
 model: "Qwen/Qwen2.5-Omni-7B"

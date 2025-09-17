@@ -41,7 +41,11 @@ from cornserve.task.builtins.omni import OmniInput, OmniOutputChunk, OmniTask
 
 omni = OmniTask(
     model_id="Qwen/Qwen2.5-Omni-7B",
-    modalities=[Modality.VIDEO],
+    modalities=[
+        Modality.VIDEO,
+        Modality.IMAGE,
+        Modality.AUDIO,
+    ],
 )
 
 
