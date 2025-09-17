@@ -81,6 +81,7 @@ def register_app(
         source_code = create_mllm_app(
             model_id=model_id,
             task_class="DisaggregatedMLLMTask",
+            modalities=modalities,
             encoder_fission=True,
         )
     elif app_type == "pd":

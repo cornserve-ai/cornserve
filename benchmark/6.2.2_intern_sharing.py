@@ -32,8 +32,16 @@ async def run(
     #    (el, l, pd, epd)
     # the request rate is different per model!
     workloads = [
-        (1680, 1050, 1, 100, 50, 1500, (7, 7, 7, 7), 0.7),
-        (1920, 1080, 1, 100, 50, 1500, (7, 7, 7, 7), 0.7),
+        # (1680, 1050, 1, 100, 50, 1500, (7, 7, 7, 7), 0.7),
+        # (1920, 1080, 1, 100, 50, 1500, (7, 7, 7, 7), 0.6),
+        # (1920, 1080, 1, 100, 50, 1500, (7, 7, 7, 7), 0.65),
+        # (1920, 1080, 1, 100, 50, 1500, (7, 7, 7, 7), 0.7),
+
+        # Eric slightly too much work => 4.51
+        # (1920, 1080, 1, 100, 100, 1500, (7, 7, 7, 7), 0.7),
+        # 4.63
+        # (1920, 1080, 1, 100, 100, 2000, (7, 7, 7, 7), 0.675),
+        # baseline: 4.40
 
         # (1680, 1050, 2, 100, 50, 4000, (7, 7, 7, 7), 0.6),
         # (1680, 1050, 2, 100, 50, 4000, (7, 7, 7, 7), 0.7),
@@ -61,9 +69,9 @@ async def run(
         # (4032, 3024, 2, 100, 50, 500, (3, 3, 3, 3)),
     ]
 
-    vllm_config = VLLMConfig(num_replicas=8, tp_size=2)
+    vllm_config = VLLMConfig(num_replicas=4, tp_size=2)
     # we compare single vLLM with disaggregated vLLM, ignoring Eric cost
-    cornserve_config = CornserveConfig(num_vllms=7, vllm_tp_size=2, num_erics=2)
+    cornserve_config = CornserveConfig(num_vllms=3, vllm_tp_size=2, num_erics=2)
 
     # set max output tokens to 1 to profile prefill 
     epd_config = EPDConfig(num_prefills=1, prefill_tp_size=1, num_decodes=1, decode_tp_size=1, num_erics=4)
@@ -159,7 +167,7 @@ async def run(
             continue
         # we scale every time to clean up the task executors states just in case
         sampled_requests = _try_sample_workload(cfg)
-        # await scale(cfg)
+        await scale(cfg)
         request_inputs = transform_sampled_requests(config=cfg, sampled_requests=sampled_requests)
         output_data = await benchmark(request_inputs=request_inputs, config=cfg)
         completed = output_data["metrics"]["completed"]

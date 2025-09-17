@@ -26,10 +26,12 @@ async def run(
             app_ids[(model_id, app_type)] = app_id
             print(f"Registered {model_id} {app_type} with ID: {app_id}")
 
-    # image_width, image_height, image_count, input_len, output_len, num_prompts, rates, encoder_fission_probability
+    # image_width, image_height, image_count, image_prob, input_len, output_len, num_prompts, rates, encoder_fission_probability
     #    (el, l, pd, epd)
     # the request rate is different per model!
     workloads = [
+        (1920, 1080, 2, 0.6, 100, 300, 2000, (3, 3, 3, 3), 0.8),
+
         # one image is not enough to trigger sharing
         # (1920, 1080, 1, 100, 50, 500, (3, 3, 3, 3)),
 
@@ -93,7 +95,7 @@ async def run(
         # (1920, 1080, 2, 100, 300, 2000, (3, 3, 3, 3), 0.875),
         # (1920, 1080, 2, 100, 300, 2000, (3, 3, 3, 3), 0.85),
         # (1920, 1080, 2, 100, 300, 2000, (3, 3, 3, 3), 0.825),
-        (1920, 1080, 2, 100, 300, 2000, (3, 3, 3, 3), 0.8),
+        # (1920, 1080, 2, 100, 300, 2000, (3, 3, 3, 3), 0.8),
         # (1920, 1080, 2, 100, 300, 2000, (3, 3, 3, 3), 0.775),
         # (1920, 1080, 2, 100, 300, 2000, (3, 3, 3, 3), 0.75),
 
@@ -160,7 +162,7 @@ async def run(
     configs = []
     for model_id in model_ids:
         for workload in workloads:
-            image_width, image_height, image_count, input_len, output_len, num_prompts, rates, encoder_fission_probability = workload
+            image_width, image_height, image_count, image_prob, input_len, output_len, num_prompts, rates, encoder_fission_probability = workload
             (el, l, pd, epd) = rates
             for app_type in app_types:
                 app_id = app_ids[(model_id, app_type)]
@@ -189,6 +191,7 @@ async def run(
                     num_prompts=num_prompts,
                     image_width=image_width,
                     image_height=image_height,
+                    image_probability=image_prob,
                     gpu_type=gpu_type,
                     encoder_fission_probability=encoder_fission_probability if app_type in ("ev", ) else 1,
                 )
