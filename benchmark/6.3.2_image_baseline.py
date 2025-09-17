@@ -20,18 +20,21 @@ async def run(
     )
     print(f"Registered app {qwen_image_app}")
 
+    N=16
+    print(f"The Cell size is {N} for Qwen-Image model.")
+
 
     backend = HFQwenImageConfig(
-        num_replicas=8,
+        num_replicas=N,
     )
 
     gpu_type = "A100"
 
-    input_len = 1000
+    input_len = 1000 * (N//8)
     # Diffusion DB has very short text input length due to context length limit
     # input_len = 75
     num_requests = 1000
-    request_rate = 5
+    request_rate = 10
     output_image_width = 512
     output_image_height = 512
     num_inference_steps = 20

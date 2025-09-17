@@ -16,7 +16,8 @@ async def run(
         print("WARNING!!!! Overwrite mode is enabled. Existing configurations will be re-evaluated.")
 
     model_ids = ["Qwen/Qwen2.5-VL-32B-Instruct"]
-    app_types: list[Literal['ev', 'v', "pd", "epd"]] = ["pd", "epd"]
+    # model_ids = ["OpenGVLab/InternVL3-38B"]
+    app_types: list[Literal['ev', 'v', "pd", "epd"]] = ["ev", "v", "pd", "epd"]
 
     app_ids = {}
     for model_id in model_ids:
@@ -43,7 +44,8 @@ async def run(
         # ((2.15, 2.15, 2.15, 2.15), 1, 600, 0, 0.85),
 
         # ((2.55, 2.55, 2.55, 2.55), 0.5, 600, 0, 1),
-        ((1.25, 1.25, 0.6, 0.6), 0.5, 600, 0, 1),
+
+        ((1.5, 1.5, 0.6, 0.6), 0.5, 600, 1, 1),
 
         # ((4, 4, 4, 4), 0.5, 600, 1, 0.875),
 
@@ -64,7 +66,16 @@ async def run(
 
     # set max output tokens to 1 to profile prefill 
     pd_config = PDConfig(num_prefills=2, prefill_tp_size=2, num_decodes=2, decode_tp_size=2)
-    epd_config = EPDConfig(num_prefills=1, prefill_tp_size=1, num_decodes=2, decode_tp_size=2, num_erics=2, num_image_erics=1, num_video_erics=1)
+    epd_config = EPDConfig(
+        num_prefills=1,
+        prefill_tp_size=2,
+        num_decodes=2,
+        decode_tp_size=2,
+        num_erics=2,
+        num_image_erics=1,
+        num_video_erics=1,
+        modalities=["image", "video"]
+    )
 
     configs = []
     gpu_type = "A100"

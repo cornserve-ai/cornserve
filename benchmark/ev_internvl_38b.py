@@ -62,8 +62,8 @@ async def run(
 
     # 1920*1080 --> 2304
     # 1680*1050 --> 1796
-    image_width = 1920
-    image_height = 1080
+    image_width = 1680
+    image_height = 1050
     input_len = 1000
     output_len = 300
     image_count = 1

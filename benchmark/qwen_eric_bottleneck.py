@@ -13,8 +13,8 @@ from cornserve.utils import set_ulimit
 async def run(
     overwrite: bool = False,
 ) -> None:
-    # model_ids = ["OpenGVLab/InternVL3-38B", "Qwen/Qwen2.5-VL-32B-Instruct"]
-    model_ids = ["Qwen/Qwen2.5-VL-32B-Instruct"]
+    model_ids = ["OpenGVLab/InternVL3-38B"]
+    # model_ids = ["Qwen/Qwen2.5-VL-32B-Instruct"]
     # app_types: list[Literal['ev', 'v', 'e', 'epd', 'pd', 'nccl-pd']] = ["e", "ev", "v", "pd", "epd"]
     app_types: list[Literal['ev', 'v', 'e', 'epd', 'pd', 'nccl-pd']] = ["e", "ev", "v"]
 
@@ -29,10 +29,12 @@ async def run(
     #    (e,el_l,l, pd_p, pd_d, epd_p, epd_d)
     # the request rate is different per model!
     workloads = [
+        (1680, 1050, 1, 100, 50, 500, (5, 5, 5, 5, 5, 5, 5)),
+
         # (1920, 1080, 1, 100, 50, 500, (3, 3, 3, 3, 3, 3, 3)),
         # (1920, 1080, 2, 100, 50, 500, (3, 3, 3, 3, 3, 3, 3)),
-        (1920, 1080, 2, 100, 50, 500, (5, 5, 5, 5, 5, 5, 5)),
-        (1920, 1080, 3, 100, 50, 500, (5, 5, 5, 5, 5, 5, 5)),
+        # (1920, 1080, 2, 100, 50, 500, (5, 5, 5, 5, 5, 5, 5)),
+        # (1920, 1080, 3, 100, 50, 500, (5, 5, 5, 5, 5, 5, 5)),
         # (1920, 1080, 4, 100, 50, 500, (3, 3, 3, 3, 3, 3, 3)),
         # (1920, 1080, 8, 100, 50, 500, (3, 3, 3, 3, 3, 3, 3)),
 

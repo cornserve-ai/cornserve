@@ -13,8 +13,9 @@ async def run(
 ) -> None:
     model_id = "Qwen/Qwen2.5-Omni-7B"
 
+    N=16
     hf_app = register_app(model_id=model_id, app_type="hf-omni")
-    hf_omni_config = HFOmniConfig(num_replicas=8)
+    hf_omni_config = HFOmniConfig(num_replicas=N)
 
     tokenizer = AutoTokenizer.from_pretrained(
         model_id,

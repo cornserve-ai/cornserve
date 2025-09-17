@@ -19,9 +19,11 @@ async def run(
         modalities=["IMAGE", "VIDEO", "AUDIO"],
     )
 
+    N=16
+
     omni_config = VLLMOmniConfig(
         num_thinkers=1,
-        num_talker_vocoders=7,
+        num_talker_vocoders=N-1,
     )
 
     tokenizer = AutoTokenizer.from_pretrained(
@@ -33,7 +35,7 @@ async def run(
     gpu_type = "A100"
 
     worloads = [
-        (1, 300, 0.0, 0.5, 0.5, 0.2),
+        (1.6, 300, 0.0, 0.5, 0.5, 0.2),
     ]
     sampled_workloads = {}
     def _try_sample_workload(

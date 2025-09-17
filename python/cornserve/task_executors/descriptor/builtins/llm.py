@@ -67,7 +67,7 @@ async def parse_stream_to_completion_chunks(response: aiohttp.ClientResponse) ->
 class VLLMDescriptor(TaskExecutionDescriptor[LLMBaseUnitTask, OpenAIChatCompletionRequest, TaskOutput]):
     """Task execution descriptor using vLLM."""
 
-    enable_load_query: bool = True
+    enable_load_query: bool = False
 
     def create_executor_name(self) -> str:
         """Create a name for the task executor."""

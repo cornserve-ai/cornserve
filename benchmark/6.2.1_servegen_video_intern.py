@@ -17,7 +17,7 @@ async def run(
 
     # model_ids = ["Qwen/Qwen2.5-VL-32B-Instruct"]
     model_ids = ["OpenGVLab/InternVL3-38B"]
-    app_types: list[Literal['ev', 'v', "pd", "epd"]] = ["pd"]
+    app_types: list[Literal['ev', 'v', "pd", "epd"]] = ["v"]
 
     app_ids = {}
     for model_id in model_ids:

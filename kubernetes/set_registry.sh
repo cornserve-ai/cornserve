@@ -29,8 +29,10 @@ fi
 
 echo "Editing registry in $KUSTOMIZATION_FILE and $K3S_REGISTRIES_FILE to $REGISTRY"
 
-sed -i.bak -e "s#localhost:5000#$REGISTRY#g" "$KUSTOMIZATION_FILE"
+sed -i.bak -e "s#ampere00.eecs.umich.edu:5000#$REGISTRY#g" "$KUSTOMIZATION_FILE"
+# sed -i.bak -e "s#localhost:5000#$REGISTRY#g" "$KUSTOMIZATION_FILE"
 rm "$KUSTOMIZATION_FILE.bak"
 
-sed -i.bak -e "s#localhost:5000#$REGISTRY#g" "$K3S_REGISTRIES_FILE"
+sed -i.bak -e "s#ampere00.eecs.umich.edu:5000#$REGISTRY#g" "$K3S_REGISTRIES_FILE"
+# sed -i.bak -e "s#localhost:5000#$REGISTRY#g" "$K3S_REGISTRIES_FILE"
 rm "$K3S_REGISTRIES_FILE.bak"

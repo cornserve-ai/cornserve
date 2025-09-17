@@ -309,9 +309,9 @@ async def scale(config: ExperimentConfig) -> None:
                     and model_id == task_def["model_id"] \
                     and "decode" not in task_id and "prefill" not in task_id:
                 # check recv_embeds based on model_id
-                if model_id in LLMBaseUnitTask.MODEL_IDS_REMOVED_ENCODERS and \
-                    task_def["receive_embeddings"] == True:
-                    continue
+                # if model_id in LLMBaseUnitTask.MODEL_IDS_REMOVED_ENCODERS and \
+                #     task_def["receive_embeddings"] == True:
+                #     continue
                 vllm_task_id = task_id
         assert vllm_task_id, "No vLLM task found. Please check the task and app states."
         coros.append(scale_task_with_num_gpus(task_id=vllm_task_id, num_gpus=config.backend_config.num_replicas * config.backend_config.tp_size))
@@ -327,9 +327,9 @@ async def scale(config: ExperimentConfig) -> None:
                         task_ids[modality] = task_id
             elif "llmunittask" in task_id and model_id == task_def["model_id"] \
                     and "decode" not in task_id and "prefill" not in task_id:
-                if model_id in LLMBaseUnitTask.MODEL_IDS_REMOVED_ENCODERS and \
-                    task_def["receive_embeddings"] == False:
-                    continue
+                # if model_id in LLMBaseUnitTask.MODEL_IDS_REMOVED_ENCODERS and \
+                #     task_def["receive_embeddings"] == False:
+                #     continue
                 vllm_task_id = task_id
         for modality in config.backend_config.modalities:
             assert modality in task_ids, f"No Eric task found for modality {modality}. Please check the task and app states."
