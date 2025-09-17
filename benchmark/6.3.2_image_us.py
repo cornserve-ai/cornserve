@@ -22,7 +22,7 @@ async def run(
 
     backend = CornserveQwenImageConfig(
         num_llms=1,
-        num_geris=15,
+        num_geris=7,
     )
 
     gpu_type = "A100"
@@ -31,7 +31,7 @@ async def run(
     # Diffusion DB has very short text input length due to context length limit
     # input_len = 75
     num_requests = 1000
-    request_rate = 3.2
+    request_rate = 5
     output_image_width = 512
     output_image_height = 512
     num_inference_steps = 20
