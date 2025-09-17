@@ -26,12 +26,11 @@ async def run(
             app_ids[(model_id, app_type)] = app_id
             print(f"Registered {model_id} {app_type} with ID: {app_id}")
 
-    image_probability = 1
-
-    # image_width, image_height, image_count, input_len, output_len, num_prompts, rates, encoder_fission_probability
+    # image_width, image_height, image_count, image_prob, input_len, output_len, num_prompts, rates, encoder_fission_probability
     #    (el, l, pd, epd)
     # the request rate is different per model!
     workloads = [
+        (1920, 1080, 1, 0.6, 100, 100, 2000, (7,7,7,7), 1),
         # (1680, 1050, 1, 100, 50, 1500, (7, 7, 7, 7), 0.7),
         # (1920, 1080, 1, 100, 50, 1500, (7, 7, 7, 7), 0.6),
         # (1920, 1080, 1, 100, 50, 1500, (7, 7, 7, 7), 0.65),
@@ -73,7 +72,10 @@ async def run(
 
         # (1680, 1050, 1, 100, 100, 2000, (7, 7, 7, 7), 0.775),
 
-        (1680, 1050, 1, 100, 100, 2000, (7, 7, 7, 7), 0.7),
+        # Winner!
+        # (1680, 1050, 1, 1, 100, 100, 2000, (7, 7, 7, 7), 0.7),
+
+        # (1680, 1050, 1, 100, 100, 2000, (7, 7, 7, 7), 0.7),
         # eric too much work
         # (1680, 1050, 1, 100, 100, 2000, (7, 7, 7, 7), 0.725),
 
@@ -126,7 +128,7 @@ async def run(
     configs = []
     for model_id in model_ids:
         for workload in workloads:
-            image_width, image_height, image_count, input_len, output_len, num_prompts, rates, encoder_fission_probability = workload
+            image_width, image_height, image_count, image_prob, input_len, output_len, num_prompts, rates, encoder_fission_probability = workload
             (el, l, pd, epd) = rates
             for app_type in app_types:
                 app_id = app_ids[(model_id, app_type)]
@@ -155,7 +157,7 @@ async def run(
                     num_prompts=num_prompts,
                     image_width=image_width,
                     image_height=image_height,
-                    image_probability=image_probability,
+                    image_probability=image_prob,
                     gpu_type=gpu_type,
                     encoder_fission_probability=encoder_fission_probability if app_type in ("ev", ) else 1,
                 )
