@@ -68,6 +68,7 @@ class VLLMDescriptor(TaskExecutionDescriptor[LLMBaseUnitTask, OpenAIChatCompleti
     """Task execution descriptor using vLLM."""
 
     enable_load_query: bool = False
+    dynamic_routing: bool = True
 
     def create_executor_name(self) -> str:
         """Create a name for the task executor."""

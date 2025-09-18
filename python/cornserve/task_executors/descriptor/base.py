@@ -27,6 +27,7 @@ class TaskExecutionDescriptor(BaseModel, ABC, Generic[TaskT, InputT, OutputT]):
 
     task: TaskT
     enable_load_query: bool = False
+    dynamic_routing: bool = False
 
     @abstractmethod
     def create_executor_name(self) -> str:

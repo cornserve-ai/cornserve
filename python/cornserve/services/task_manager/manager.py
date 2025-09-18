@@ -69,6 +69,7 @@ class TaskManager:
         self.rr_counter = 0
 
         self.least_load_routing = self.descriptor.enable_load_query
+        self.use_dynamic_routing = self.descriptor.dynamic_routing
 
         if self.least_load_routing:
             self.load_heap_lock = asyncio.Lock()
@@ -82,6 +83,28 @@ class TaskManager:
                     interval=0.05,
                 ),
             )
+        if self.use_dynamic_routing and not self.least_load_routing:
+            self._client_session = aiohttp.ClientSession(
+                timeout=aiohttp.ClientTimeout(total=2.0),
+            )
+
+    async def find_least_loaded_executor(self) -> str:
+        one_time_heap = heapdict()
+        coros = []
+        async def query_and_store(executor_id: str, deployment: TaskExecutorDeployment):
+            try:
+                load = await self.descriptor.query_load(deployment.url, client=self._client_session)
+                one_time_heap[executor_id] = load
+            except Exception as e:
+                logger.error("Failed to query load from %s: %s", deployment.url, e)
+                one_time_heap[executor_id] = (float("inf"),)
+        for executor_id, deployment in self.executor_deployments.items():
+            asyncio.create_task(query_and_store(executor_id, deployment))
+        await asyncio.gather(*coros)
+        if len(one_time_heap) > 0:
+            return one_time_heap.peekitem()[0]
+        return list(self.executor_deployments.keys())[0]
+
 
     async def load_monitoring_loop(self, interval: float) -> None:
         monitoring_tasks = []
@@ -335,6 +358,10 @@ class TaskManager:
                     index = self.rr_counter % len(self.executor_deployments)
                     self.rr_counter += 1
                     deployment = list(self.executor_deployments.values())[index]
+        elif self.use_dynamic_routing:
+            executor_id = await self.find_least_loaded_executor()
+            deployment = self.executor_deployments[executor_id]
+            logger.info("Dynamic routing selected executor %s %s", executor_id, deployment.url)
         else:
             # index = hash(request_id) % len(self.executor_deployments)
             # Round robin routing
@@ -402,6 +429,8 @@ class TaskManager:
             self.monitoring_task.cancel()
             with suppress(asyncio.CancelledError):
                 await self.monitoring_task
+            await self._client_session.close()
+        if hasattr(self, "_client_session"):
             await self._client_session.close()
 
         logger.info("Task manager %s shut down", self.id)

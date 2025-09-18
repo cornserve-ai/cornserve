@@ -1,0 +1,7 @@
+eric-te-urls:
+  - te-eric-image-qwen2-5-vl-7b-instruct-6:8000
+  - te-eric-image-qwen2-5-vl-7b-instruct-7:8000
+llm-te-urls:
+  - te-vllm-qwen2-5-vl-7b-instruct-0-1:8000
+  - te-vllm-qwen2-5-vl-7b-instruct-2-3:8000
+  - te-vllm-qwen2-5-vl-7b-instruct-4-5:8000

@@ -52,6 +52,8 @@ sidecar = [
 ]
 gateway = [
   "fastapi",
+  "heapdict",
+  "requests",
   "uvicorn[standard]",
   "prometheus_client",
   "opentelemetry-instrumentation-fastapi",
@@ -60,6 +62,7 @@ gateway = [
   "websocket-client",
 ]
 resource-manager = [
+  "heapdict",
   "opentelemetry-instrumentation-grpc",
   "prometheus_client",
 ]
@@ -69,6 +72,7 @@ task-manager = [
 ]
 task-dispatcher = [
   "fastapi",
+  "heapdict",
   "prometheus_client",
   "uvicorn[standard]",
   "opentelemetry-instrumentation-fastapi",

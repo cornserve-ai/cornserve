@@ -15,6 +15,12 @@ from pydantic import BaseModel, Field
 from cornserve.task.base import Stream, Task, TaskInput, TaskOutput, UnitTask
 from cornserve.task.builtins.encoder import EncoderInput, EncoderOutput, EncoderTask, Modality
 from cornserve.task.forward import DataForward, Tensor
+from cornserve.constants import GATEWAY_ROUTING_CONFIG
+
+import requests
+import yaml
+from heapdict import heapdict
+from prometheus_client.parser import text_string_to_metric_families
 
 
 class StreamOptions(BaseModel):
@@ -234,6 +240,7 @@ class MLLMTask(Task[OpenAIChatCompletionRequest, Stream[OpenAIChatCompletionChun
     encoder_fission: bool = True
     coalesce_encoder_invocations: bool = False
     encoder_model_ids: set[str] | None = None
+    dynamic_fission: bool = True
 
     def post_init(self) -> None:
         """Initialize subtasks."""
@@ -244,9 +251,58 @@ class MLLMTask(Task[OpenAIChatCompletionRequest, Stream[OpenAIChatCompletionChun
             }
         self.llm = LLMUnitTask(model_id=self.model_id, receive_embeddings=self.encoder_fission)
 
+    _METRIC_NAMES: tuple[str,...] = (
+        "vllm:num_requests_waiting",
+    )
+
+    def decide_fission(self) -> bool:
+        one_time_heap = heapdict()
+        if self.dynamic_fission:
+            # do query
+            with open(GATEWAY_ROUTING_CONFIG, "r") as f:
+                te_urls = yaml.safe_load(f)
+                erics = te_urls.get("eric-te-urls", [])
+                llms = te_urls.get("llm-te-urls", [])
+            for eric_url in erics:
+                try:
+                    resp = requests.get(f"http://{eric_url}/queue_length", timeout=1)
+                    resp.raise_for_status()
+                    queue_length = int(resp.text)
+                    one_time_heap[eric_url] = (float(queue_length), 1)
+                except Exception as e:
+                    print(f"Failed to query Eric at {eric_url}: {e}")
+                    one_time_heap[eric_url] = (float("inf"),)
+            for llm_url in llms:
+                try:
+                    resp = requests.get(f"http://{llm_url}/metrics", timeout=1)
+                    resp.raise_for_status()
+                    metrics: dict[str, float] = {name: 0.0 for name in self._METRIC_NAMES}
+                    families = text_string_to_metric_families(resp.text)
+                    for family in families:
+                        name = family.name
+                        if name in metrics:
+                            vals = [float(s.value) for s in family.samples]
+                            if name == "vllm:kv_cache_usage_perc":
+                                metrics[name] = max(vals) if vals else 0.0
+                            else:
+                                metrics[name] = sum(vals)
+                    val = tuple(metrics[name] for name in self._METRIC_NAMES)
+                    one_time_heap[llm_url] = val
+                except Exception as e:
+                    print(f"Failed to query vLLM at {llm_url}: {e}")
+                    one_time_heap[llm_url] = (float("inf"),)
+            # decide
+            top_url = one_time_heap.peekitem()[0]
+            do_fission = "vllm" not in top_url
+            print(f"Dynamic fission decision: {do_fission}, top_url: {top_url}, heap: {one_time_heap}")
+            return do_fission
+        return self.encoder_fission
+
     def invoke(self, task_input: OpenAIChatCompletionRequest) -> Stream[OpenAIChatCompletionChunk]:
         """Invoke the task."""
-        if self.encoder_fission and task_input.encoder_fission:
+        do_fission = self.decide_fission()
+        # task_input.encoder_fission
+        if task_input.encoder_fission and do_fission:
             print("Using encoder fission in MLLMTask")
             encoder_input_urls: dict[Modality, list[str]] = defaultdict(list)
             multimodal_contents = extract_multimodal_content(task_input.messages)
@@ -305,6 +361,10 @@ class MLLMTask(Task[OpenAIChatCompletionRequest, Stream[OpenAIChatCompletionChun
             task_input.cornserve_embeddings = embeddings
         else:
             print("Not using encoder fission in MLLMTask")
+
+        # we need to reset encoder_fission for task dispatcher
+        if task_input.encoder_fission and not do_fission:
+            task_input.encoder_fission = False
 
         # Invoke the LLM task.
         return self.llm.invoke(task_input)

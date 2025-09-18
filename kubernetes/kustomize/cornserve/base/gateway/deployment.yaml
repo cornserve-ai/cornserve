@@ -27,3 +27,23 @@ spec:
         envFrom:
         - configMapRef:
             name: cornserve-config
+        volumeMounts:
+        - name: gateway-config-volume
+          mountPath: /etc/cornserve
+          readOnly: true
+      volumes:
+      - name: gateway-config-volume
+        configMap:
+          name: cornserve-gateway-config
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cornserve-gateway-config
+  namespace: cornserve
+data:
+  gateway-routing.yaml: |
+    eric-te-urls:
+      - http://localhost:2379
+    llm-te-urls:
+      - http://localhost:2380

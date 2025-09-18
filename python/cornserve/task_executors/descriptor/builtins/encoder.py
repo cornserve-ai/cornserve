@@ -27,6 +27,7 @@ class EricDescriptor(TaskExecutionDescriptor[EncoderTask, EncoderInput, EncoderO
     This descriptor handles launching Eric (multimodal encoder) tasks and converting between
     the external task API types and internal executor types.
     """
+    dynamic_routing: bool = True
 
     def create_executor_name(self) -> str:
         """Create a name for the task executor."""
@@ -86,6 +87,14 @@ class EricDescriptor(TaskExecutionDescriptor[EncoderTask, EncoderInput, EncoderO
         else:
             raise RuntimeError(f"Error in encoder task: {resp.error_message}")
 
+    async def query_load(self, executor_url: str, client: aiohttp.ClientSession) -> tuple[float, ...]:
+        """Query the current load of the task executor at the given URL."""
+        url = f"{executor_url}/queue_length"
+        async with client.get(url) as resp:
+            resp.raise_for_status()
+            body = await resp.text()
+        queue_length = int(body)
+        return (float(queue_length),)
 
 DESCRIPTOR_REGISTRY.register(EncoderTask, EricDescriptor, default=True)
 
