@@ -14,9 +14,34 @@ from cornserve.task_executors.eric.engine.client import EngineClient
 from cornserve.task_executors.eric.models.registry import MODEL_REGISTRY
 from cornserve.task_executors.eric.router.processor import Processor
 
+import asyncio
+
 router = APIRouter()
 logger = get_logger(__name__)
 tracer = trace.get_tracer(__name__)
+
+class QueueCounter:
+    """A simple queue counter to keep track of the number of items in the queue."""
+
+    def __init__(self) -> None:
+        self.lock = asyncio.Lock()
+        self.count = 0
+
+    async def increment(self) -> None:
+        """Increment the count by 1."""
+        async with self.lock:
+            self.count += 1
+
+    async def decrement(self) -> None:
+        """Decrement the count by 1."""
+        async with self.lock:
+            if self.count > 0:
+                self.count -= 1
+
+    async def get_count(self) -> int:
+        """Get the current count."""
+        async with self.lock:
+            return self.count
 
 
 @router.get("/health")
@@ -43,6 +68,13 @@ async def modalities(raw_request: Request) -> list[Modality]:
     return list(MODEL_REGISTRY[config.model.hf_config.model_type].modality.keys())
 
 
+@router.get("/queue_length")
+async def get_queue_length(raw_request: Request) -> int:
+    """Return the list of modalities supported by this model."""
+    queue_counter: QueueCounter = raw_request.app.state.queue_counter
+    return await queue_counter.get_count()
+
+
 @router.post("/embeddings")
 async def embeddings(
     request: EmbeddingRequest,
@@ -59,6 +91,7 @@ async def embeddings(
 
     # Request validation: model id and modality
     config: EricConfig = raw_request.app.state.config
+    queue_counter: QueueCounter = raw_request.app.state.queue_counter
     supported_model_ids = [config.model.id, *config.model.adapter_model_ids]
     for data_item in request.data:
         if data_item.model_id not in supported_model_ids:
@@ -73,6 +106,7 @@ async def embeddings(
     processor: Processor = raw_request.app.state.processor
     engine_client: EngineClient = raw_request.app.state.engine_client
 
+    await queue_counter.increment()
     # Load data from URLs and apply processing
     processed = await processor.process(request.data)
 
@@ -87,6 +121,7 @@ async def embeddings(
         case _:
             logger.error("Unexpected status: %s", response.status)
             raw_response.status_code = status.HTTP_500_INTERNAL_SERVER_ERROR
+    await queue_counter.decrement()
     return response
 
 
@@ -95,6 +130,7 @@ def init_app_state(app: FastAPI, config: EricConfig) -> None:
     app.state.config = config
     app.state.processor = Processor(config.model.id, config.modality)
     app.state.engine_client = EngineClient(config)
+    app.state.queue_counter = QueueCounter()
 
 
 def create_app(config: EricConfig) -> FastAPI:
