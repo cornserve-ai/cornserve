@@ -30,8 +30,14 @@ async def run(
     #    (el, l, pd, epd)
     # the request rate is different per model!
     workloads = [
-        (1920, 1080, 2, 0.8, 100, 300, 2000, (5,5,5,5), 0.9),
-        (1920, 1080, 1, 0.8, 100, 300, 2000, (5,5,5,5), 0.9),
+        # node 1
+        # (1920, 1080, 2, 0.8, 100, 300, 2000, (5,5,5,5), 0.9),
+        # (1920, 1080, 1, 0.8, 100, 300, 2000, (5,5,5,5), 0.9),
+
+        # node 2
+        (1680, 1050, 2, 0.8, 100, 100, 2000, (5,5,5,5), 0.9),
+        (1680, 1050, 2, 0.8, 100, 100, 2000, (5,5,5,5), 0.9),
+        (1680, 1050, 1, 0.8, 100, 100, 2000, (5,5,5,5), 0.9),
 
         # one image is not enough to trigger sharing
         # (1920, 1080, 1, 100, 50, 500, (3, 3, 3, 3)),
@@ -106,7 +112,7 @@ async def run(
         # (1680, 1050, 2, 100, 200, 4000, (6.25, 6.25, 6.25, 6.25), 0.7),
         # (1680, 1050, 2, 100, 200, 4000, (6.25, 6.25, 6.25, 6.25), 0.8),
 
-        (1920, 1080, 2, 1000, 50, 3000, (7, 7, 7, 7), 0.7),
+        # (1920, 1080, 2, 1000, 50, 3000, (7, 7, 7, 7), 0.7),
 
         # (1680, 1050, 2, 100, 50, 4000, (7, 7, 7, 7), 0.6),
         # (1680, 1050, 2, 100, 50, 4000, (7, 7, 7, 7), 0.7),
@@ -133,9 +139,9 @@ async def run(
         # (4032, 3024, 2, 100, 50, 500, (3, 3, 3, 3)),
     ]
 
-    vllm_config = VLLMConfig(num_replicas=8, tp_size=2)
+    vllm_config = VLLMConfig(num_replicas=4, tp_size=2)
     # we compare single vLLM with disaggregated vLLM, ignoring Eric cost
-    cornserve_config = CornserveConfig(num_vllms=7, vllm_tp_size=2, num_erics=2)
+    cornserve_config = CornserveConfig(num_vllms=3, vllm_tp_size=2, num_erics=2)
 
     # set max output tokens to 1 to profile prefill 
     epd_config = EPDConfig(num_prefills=1, prefill_tp_size=1, num_decodes=1, decode_tp_size=1, num_erics=4)
