@@ -489,8 +489,8 @@ def deploy_tasklib() -> None:
         try:
             rich.print("Deploying unit tasks and descriptors (auto-discovered)...")
             payload = UnitTasksDeploymentRequest(
-                task_definitions=unit_task_entries,  # type: ignore[arg-type]
-                descriptor_definitions=descriptor_entries,  # type: ignore[arg-type]
+                task_definitions=unit_task_entries,
+                descriptor_definitions=descriptor_entries,
             )
             resp = requests.post(f"{GATEWAY_URL}/builtins/deploy-unit-tasks", json=payload.model_dump())
             resp.raise_for_status()
@@ -506,7 +506,7 @@ def deploy_tasklib() -> None:
         try:
             rich.print("Deploying composite tasks (auto-discovered)...")
             payload = CompositeTasksDeploymentRequest(
-                task_definitions=composite_task_entries,  # type: ignore[arg-type]
+                task_definitions=composite_task_entries,
             )
             resp = requests.post(f"{GATEWAY_URL}/builtins/deploy-composite-tasks", json=payload.model_dump())
             resp.raise_for_status()

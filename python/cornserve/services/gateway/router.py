@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import json
 from collections.abc import AsyncGenerator, AsyncIterator
 
@@ -352,7 +353,6 @@ async def deploy_unit_tasks(request: UnitTasksDeploymentRequest):
     """Deploy unit tasks and their descriptors from provided sources."""
     task_registry = TaskRegistry()
     try:
-        import base64
         # Unit tasks
         for spec in request.task_definitions:
             try:
@@ -397,7 +397,6 @@ async def deploy_composite_tasks(request: CompositeTasksDeploymentRequest):
     """Deploy composite tasks from provided sources."""
     task_registry = TaskRegistry()
     try:
-        import base64
         # Composite tasks
         for spec in request.task_definitions:
             try:

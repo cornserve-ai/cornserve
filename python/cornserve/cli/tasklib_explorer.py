@@ -7,7 +7,13 @@ descriptors. The CLI consumes these entries to create requests to the gateway.
 
 from __future__ import annotations
 
-from typing import Any, Tuple, get_args, get_origin
+from typing import TYPE_CHECKING, get_args, get_origin, ForwardRef
+
+if TYPE_CHECKING:
+    from cornserve.services.gateway.models import (
+        TaskDefinitionPayload,
+        DescriptorDefinitionPayload,
+    )
 
 import base64
 import importlib
@@ -27,9 +33,9 @@ def _camel_to_kebab(name: str) -> str:
 
 
 def discover_tasklib() -> tuple[
-    list[dict[str, Any]],
-    list[dict[str, Any]],
-    list[dict[str, Any]],
+    list["TaskDefinitionPayload"],
+    list["TaskDefinitionPayload"],
+    list["DescriptorDefinitionPayload"],
 ]:
     """Discover unit/composite tasks and descriptors from cornserve_tasklib.
 
@@ -42,12 +48,16 @@ def discover_tasklib() -> tuple[
         import cornserve_tasklib  # noqa: F401  # ensure package importable
         from cornserve.task.base import Task, UnitTask
         from cornserve.task_executors.descriptor.base import TaskExecutionDescriptor
+        from cornserve.services.gateway.models import (
+            TaskDefinitionPayload,
+            DescriptorDefinitionPayload,
+        )
     except Exception as e:  # pragma: no cover - bubbled to CLI
         raise ImportError(f"Failed to import cornserve_tasklib or cornserve core modules: {e}") from e
 
-    unit_task_entries: list[dict[str, Any]] = []
-    composite_task_entries: list[dict[str, Any]] = []
-    descriptor_entries: list[dict[str, Any]] = []
+    unit_task_entries: list[TaskDefinitionPayload] = []
+    composite_task_entries: list[TaskDefinitionPayload] = []
+    descriptor_entries: list[DescriptorDefinitionPayload] = []
 
     module_source_cache: dict[str, str] = {}
 
@@ -66,23 +76,23 @@ def discover_tasklib() -> tuple[
                 continue
             if issubclass(obj, UnitTask) and obj is not UnitTask:
                 unit_task_entries.append(
-                    {
-                        "source_b64": get_module_source_b64(module),
-                        "task_class_name": obj.__name__,
-                        "task_definition_name": _camel_to_kebab(obj.__name__),
-                        "module_name": module.__name__,
-                        "is_unit_task": True,
-                    }
+                    TaskDefinitionPayload(
+                        source_b64=get_module_source_b64(module),
+                        task_class_name=obj.__name__,
+                        task_definition_name=_camel_to_kebab(obj.__name__),
+                        module_name=module.__name__,
+                        is_unit_task=True,
+                    )
                 )
             elif issubclass(obj, Task) and (not issubclass(obj, UnitTask)) and obj is not Task:
                 composite_task_entries.append(
-                    {
-                        "source_b64": get_module_source_b64(module),
-                        "task_class_name": obj.__name__,
-                        "task_definition_name": _camel_to_kebab(obj.__name__),
-                        "module_name": module.__name__,
-                        "is_unit_task": False,
-                    }
+                    TaskDefinitionPayload(
+                        source_b64=get_module_source_b64(module),
+                        task_class_name=obj.__name__,
+                        task_definition_name=_camel_to_kebab(obj.__name__),
+                        module_name=module.__name__,
+                        is_unit_task=False,
+                    )
                 )
 
     # Discover descriptors
@@ -93,35 +103,80 @@ def discover_tasklib() -> tuple[
             if obj.__module__ != module.__name__:
                 continue
             if issubclass(obj, TaskExecutionDescriptor) and obj is not TaskExecutionDescriptor:
+                """
+                Why two resolution paths?
+                1) Postponed annotations and Pydantic generics
+                   - With "from __future__ import annotations", annotations are strings at class creation.
+                     So the generic arg in TaskExecutionDescriptor[EncoderTask, ...] may be a string/ForwardRef.
+                   - Pydantic later resolves those to concrete classes and stores them on
+                     __pydantic_generic_metadata__. That metadata can be attached to the class OR to a
+                     Pydantic-generated proxy base, so we walk the MRO to find it.
+                2) __orig_bases__ (original Python generic bases)
+                   - __orig_bases__ records the generic expression exactly as authored. Depending on import
+                     order and subclassing, this can be the only place where a concrete class appears (or where
+                     a ForwardRef remains when Pydantic metadata isn’t populated yet for the current class).
+                   - For those cases, we require __orig_bases__ to already contain a real class object.
+                If neither yields a real class, we consider the descriptor invalid and raise.
+                """
                 task_cls_name = None
-                # Preferred: infer from Pydantic model field annotation (robust under generics)
-                try:
-                    task_field = getattr(obj, "model_fields", {}).get("task")  # type: ignore[attr-defined]
-                    if task_field is not None and getattr(task_field, "annotation", None) is not None:
-                        task_cls = task_field.annotation
-                        task_cls_name = getattr(task_cls, "__name__", None)
-                except Exception:
-                    pass
-                # Fallback: try to infer from generic base declaration
+                # Path 1: Pydantic generic metadata across MRO
+                for base in getattr(obj, "__mro__", (obj,)):
+                    meta = getattr(base, "__pydantic_generic_metadata__", None)
+                    if not (meta and isinstance(meta, dict) and "args" in meta and meta["args"]):
+                        continue
+                    task_arg = meta["args"][0]
+                    if isinstance(task_arg, str):
+                        resolved = getattr(module, task_arg, None)
+                        if not isinstance(resolved, type) and "." in task_arg:
+                            mod_path, _, cls_name = task_arg.rpartition(".")
+                            try:
+                                mod = importlib.import_module(mod_path)
+                                resolved = getattr(mod, cls_name, None)
+                            except Exception:
+                                resolved = None
+                        if isinstance(resolved, type) and getattr(resolved, "__name__", None):
+                            task_cls_name = resolved.__name__
+                            break
+                    elif isinstance(task_arg, ForwardRef):
+                        ref = task_arg.__forward_arg__
+                        resolved = getattr(module, ref, None)
+                        if not isinstance(resolved, type) and "." in ref:
+                            mod_path, _, cls_name = ref.rpartition(".")
+                            try:
+                                mod = importlib.import_module(mod_path)
+                                resolved = getattr(mod, cls_name, None)
+                            except Exception:
+                                resolved = None
+                        if isinstance(resolved, type) and getattr(resolved, "__name__", None):
+                            task_cls_name = resolved.__name__
+                            break
+                    elif isinstance(task_arg, type) and getattr(task_arg, "__name__", None):
+                        task_cls_name = task_arg.__name__
+                        break
+                # Path 2: __orig_bases__ concrete class
                 if task_cls_name is None:
                     for base in getattr(obj, "__orig_bases__", []):
                         origin = get_origin(base)
                         if origin is TaskExecutionDescriptor:
                             args = get_args(base)
-                            if args:
-                                task_cls = args[0]
-                                task_cls_name = getattr(task_cls, "__name__", None)
+                            if not args:
+                                break
+                            task_arg = args[0]
+                            if isinstance(task_arg, type) and getattr(task_arg, "__name__", None):
+                                task_cls_name = task_arg.__name__
                                 break
                 if task_cls_name is None:
-                    continue
+                    raise ValueError(
+                        f"Descriptor {obj.__name__} must derive from TaskExecutionDescriptor[<UnitTask>, ...] with concrete types"
+                    )
                 descriptor_entries.append(
-                    {
-                        "source_b64": get_module_source_b64(module),
-                        "descriptor_class_name": obj.__name__,
-                        "descriptor_definition_name": _camel_to_kebab(obj.__name__),
-                        "module_name": module.__name__,
-                        "task_class_name": task_cls_name,
-                    }
+                    DescriptorDefinitionPayload(
+                        source_b64=get_module_source_b64(module),
+                        descriptor_class_name=obj.__name__,
+                        descriptor_definition_name=_camel_to_kebab(obj.__name__),
+                        module_name=module.__name__,
+                        task_class_name=task_cls_name,
+                    )
                 )
 
     return unit_task_entries, composite_task_entries, descriptor_entries
