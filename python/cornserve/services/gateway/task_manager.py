@@ -84,6 +84,12 @@ class TaskManager:
         task_ids: list[str] = []
         to_deploy: list[str] = []
         async with self.task_lock:
+            # Snapshot current state, used for transactional rollback
+            snapshot_tasks = self.tasks.copy()
+            snapshot_states = self.task_states.copy()
+            snapshot_instance_names = self.unit_task_instance_names.copy()
+            snapshot_uuids = self.task_uuids.copy()
+            snapshot_usage = self.task_usage_counter.copy()
             for task in tasks:
                 # Check if the task is already deployed
                 for task_id, existing_task in self.tasks.items():
@@ -115,25 +121,45 @@ class TaskManager:
             # Deploy tasks by creating instances and passing names to resource manager
             coros = []
             unit_task_instance_names = {}  # Map task_id -> instance name for cleanup if needed
-            
-            for task_id in to_deploy:
-                task = self.tasks[task_id]
-                
-                # Create named task instance for this task
-                task_uuid = self.task_uuids[task_id]
-                unit_task_instance_name = await self.task_registry.create_task_instance_from_task(task, task_uuid)
-                unit_task_instance_names[task_id] = unit_task_instance_name
-                self.unit_task_instance_names[task_id] = unit_task_instance_name  # Store for future teardown
+            try:
+                for task_id in to_deploy:
+                    task = self.tasks[task_id]
 
-                coros.append(
-                    self.resource_manager.DeployUnitTask(
-                        DeployUnitTaskRequest(task_instance_name=unit_task_instance_name)
+                    # Create named task instance for this task
+                    task_uuid = self.task_uuids[task_id]
+                    # This registers the metadata into stable storage (for now, k8s CRs)
+                    unit_task_instance_name = await self.task_registry.create_task_instance_from_task(task, task_uuid)
+                    unit_task_instance_names[task_id] = unit_task_instance_name
+                    self.unit_task_instance_names[task_id] = unit_task_instance_name  # Store for future teardown
+
+                    coros.append(
+                        self.resource_manager.DeployUnitTask(
+                            DeployUnitTaskRequest(task_instance_name=unit_task_instance_name)
+                        )
                     )
-                )
-                
-            responses = await asyncio.gather(*coros, return_exceptions=True)
 
-            # Check for errors
+                responses = await asyncio.gather(*coros, return_exceptions=True)
+            except Exception as e:
+                # Rollback for errors happening before gather (e.g., instance creation failures)
+                cleanup_coros = [
+                    self.resource_manager.TeardownUnitTask(
+                        TeardownUnitTaskRequest(task_instance_name=name)
+                    )
+                    for name in unit_task_instance_names.values()
+                ]
+                if cleanup_coros:
+                    await asyncio.gather(*cleanup_coros, return_exceptions=True)
+
+                # Restore snapshots (preserve defaultdict type)
+                self.tasks.clear(); self.tasks.update(snapshot_tasks)
+                self.task_states.clear(); self.task_states.update(snapshot_states)
+                self.unit_task_instance_names.clear(); self.unit_task_instance_names.update(snapshot_instance_names)
+                self.task_uuids.clear(); self.task_uuids.update(snapshot_uuids)
+                self.task_usage_counter.clear(); self.task_usage_counter.update(snapshot_usage)
+                logger.info("Rolled back deployment due to pre-deploy error: %r", e)
+                raise
+
+            # Check for deployment errors
             errors: list[BaseException] = []
             deployed_tasks: list[str] = []
             for resp, deployed_task in zip(responses, to_deploy, strict=True):
@@ -146,22 +172,22 @@ class TaskManager:
             # Roll back successful deployments if something went wrong.
             # We're treating the whole list of deployments as a single transaction.
             if errors:
-                cleanup_coros = []
-                for task_id in to_deploy:
-                    unit_task_instance_name = unit_task_instance_names[task_id]
-                    cleanup_coros.append(
-                        self.resource_manager.TeardownUnitTask(
-                            TeardownUnitTaskRequest(task_instance_name=unit_task_instance_name)
-                        )
+                cleanup_coros = [
+                    self.resource_manager.TeardownUnitTask(
+                        TeardownUnitTaskRequest(task_instance_name=unit_task_instance_names[task_id])
                     )
-                    del self.tasks[task_id]
-                    del self.task_states[task_id]
-                    del self.unit_task_instance_names[task_id]
-                    del self.task_uuids[task_id]
-                    self.task_usage_counter[task_id] -= 1
-                    if self.task_usage_counter[task_id] == 0:
-                        del self.task_usage_counter[task_id]
-                await asyncio.gather(*cleanup_coros)
+                    for task_id in to_deploy
+                ]
+
+                if cleanup_coros:
+                    await asyncio.gather(*cleanup_coros, return_exceptions=True)
+
+                # Restore snapshots (preserve defaultdict type)
+                self.tasks.clear(); self.tasks.update(snapshot_tasks)
+                self.task_states.clear(); self.task_states.update(snapshot_states)
+                self.unit_task_instance_names.clear(); self.unit_task_instance_names.update(snapshot_instance_names)
+                self.task_uuids.clear(); self.task_uuids.update(snapshot_uuids)
+                self.task_usage_counter.clear(); self.task_usage_counter.update(snapshot_usage)
                 logger.info("Rolled back deployment of all deployed tasks")
                 raise RuntimeError(f"Error while deploying tasks: {errors}")
 
@@ -251,7 +277,9 @@ class TaskManager:
                 ScaleUnitTaskRequest(task_instance_name=unit_task_instance_name, num_gpus=num_gpus)
             )
             if response.status != common_pb2.Status.STATUS_OK:
-                raise RuntimeError(f"Failed to scale task {task} to update {num_gpus} GPUs: {response.message}")
+                raise RuntimeError(
+                    f"Failed to scale task {task_id} to update {num_gpus} GPUs: {response.message}"
+                )
         except Exception as e:
             logger.error("Error while scaling unit task %s", task_id)
             raise RuntimeError(f"Error while scaling unit task {task_id}: {e}") from e

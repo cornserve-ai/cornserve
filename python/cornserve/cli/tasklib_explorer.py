@@ -9,11 +9,12 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, get_args, get_origin, ForwardRef
 
-if TYPE_CHECKING:
-    from cornserve.services.gateway.models import (
-        TaskDefinitionPayload,
-        DescriptorDefinitionPayload,
-    )
+from cornserve.task.base import Task, UnitTask
+from cornserve.task_executors.descriptor.base import TaskExecutionDescriptor
+from cornserve.services.gateway.models import (
+    TaskDefinitionPayload,
+    DescriptorDefinitionPayload,
+)
 
 import base64
 import importlib
@@ -46,14 +47,8 @@ def discover_tasklib() -> tuple[
     """
     try:
         import cornserve_tasklib  # noqa: F401  # ensure package importable
-        from cornserve.task.base import Task, UnitTask
-        from cornserve.task_executors.descriptor.base import TaskExecutionDescriptor
-        from cornserve.services.gateway.models import (
-            TaskDefinitionPayload,
-            DescriptorDefinitionPayload,
-        )
     except Exception as e:  # pragma: no cover - bubbled to CLI
-        raise ImportError(f"Failed to import cornserve_tasklib or cornserve core modules: {e}") from e
+        raise ImportError(f"Failed to import cornserve_tasklib: {e}") from e
 
     unit_task_entries: list[TaskDefinitionPayload] = []
     composite_task_entries: list[TaskDefinitionPayload] = []

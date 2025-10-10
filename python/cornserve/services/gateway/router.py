@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import json
 from collections.abc import AsyncGenerator, AsyncIterator
@@ -27,8 +28,7 @@ from cornserve.services.gateway.app.manager import AppManager
 from cornserve.services.gateway.models import (
     AppInvocationRequest,
     AppRegistrationRequest,
-    UnitTasksDeploymentRequest,
-    CompositeTasksDeploymentRequest,
+    TasksDeploymentRequest,
     RegistrationErrorResponse,
     RegistrationFinalResponse,
     RegistrationInitialResponse,
@@ -348,16 +348,16 @@ def create_app() -> FastAPI:
     return app
 
 
-@router.post("/builtins/deploy-unit-tasks")
-async def deploy_unit_tasks(request: UnitTasksDeploymentRequest):
-    """Deploy unit tasks and their descriptors from provided sources."""
+@router.post("/builtins/deploy-tasks")
+async def deploy_tasks(request: TasksDeploymentRequest):
+    """Deploy tasks (unit or composite) and their descriptors from provided sources."""
     task_registry = TaskRegistry()
     try:
-        # Unit tasks
-        for spec in request.task_definitions:
+        # Create task definitions and descriptors concurrently
+        async def create_task_definition(spec):
+            source = base64.b64decode(spec.source_b64).decode("utf-8")
             try:
-                source = base64.b64decode(spec.source_b64).decode("utf-8")
-                await task_registry.create_task_definition(
+                return await task_registry.create_task_definition(
                     name=spec.task_definition_name,
                     task_class_name=spec.task_class_name,
                     module_name=spec.module_name,
@@ -365,58 +365,38 @@ async def deploy_unit_tasks(request: UnitTasksDeploymentRequest):
                     is_unit_task=spec.is_unit_task,
                 )
             except ValueError as e:
-                if "already exists" not in str(e):
-                    raise
+                # For composite tasks, ignore duplicate definition errors to match previous behavior
+                if (not getattr(spec, "is_unit_task", True)) and ("already exists" in str(e)):
+                    return None
+                raise
 
-        # Descriptors for unit tasks
-        for spec in request.descriptor_definitions:
-            try:
-                source = base64.b64decode(spec.source_b64).decode("utf-8")
-                await task_registry.create_execution_descriptor(
-                    name=spec.descriptor_definition_name,
-                    task_class_name=spec.task_class_name,
-                    descriptor_class_name=spec.descriptor_class_name,
-                    module_name=spec.module_name,
-                    source_code=source,
-                    is_default=True,
-                )
-            except ValueError as e:
-                if "already exists" not in str(e):
-                    raise
+        async def create_execution_descriptor(spec):
+            source = base64.b64decode(spec.source_b64).decode("utf-8")
+            return await task_registry.create_execution_descriptor(
+                name=spec.descriptor_definition_name,
+                task_class_name=spec.task_class_name,
+                descriptor_class_name=spec.descriptor_class_name,
+                module_name=spec.module_name,
+                source_code=source,
+                is_default=True,
+            )
 
-        await task_registry.shutdown()
-        return {"status": "ok"}
-    except Exception as e:
-        logger.exception("Failed to deploy unit tasks")
-        await task_registry.shutdown()
-        return Response(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, content=str(e))
+        coroutines = [
+            *(create_task_definition(spec) for spec in request.task_definitions),
+            *(create_execution_descriptor(spec) for spec in request.descriptor_definitions),
+        ]
 
-
-@router.post("/builtins/deploy-composite-tasks")
-async def deploy_composite_tasks(request: CompositeTasksDeploymentRequest):
-    """Deploy composite tasks from provided sources."""
-    task_registry = TaskRegistry()
-    try:
-        # Composite tasks
-        for spec in request.task_definitions:
-            try:
-                source = base64.b64decode(spec.source_b64).decode("utf-8")
-                await task_registry.create_task_definition(
-                    name=spec.task_definition_name,
-                    task_class_name=spec.task_class_name,
-                    module_name=spec.module_name,
-                    source_code=source,
-                    is_unit_task=spec.is_unit_task,
-                )
-            except ValueError as e:
-                if "already exists" not in str(e):
-                    raise
+        if coroutines:
+            results = await asyncio.gather(*coroutines, return_exceptions=True)
+            errors = [e for e in results if isinstance(e, Exception)]
+            if errors:
+                # Raise if any creation failed
+                raise errors[0]
 
         await task_registry.shutdown()
         return {"status": "ok"}
     except Exception as e:
-        logger.exception("Failed to deploy composite tasks")
+        logger.exception("Failed to deploy tasks")
         await task_registry.shutdown()
         return Response(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, content=str(e))
-
 

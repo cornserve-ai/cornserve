@@ -25,8 +25,7 @@ from cornserve.cli.log_streamer import LogStreamer
 from cornserve.services.gateway.models import (
     AppInvocationRequest,
     AppRegistrationRequest,
-    UnitTasksDeploymentRequest,
-    CompositeTasksDeploymentRequest,
+    TasksDeploymentRequest,
     RegistrationErrorResponse,
     RegistrationFinalResponse,
     RegistrationInitialResponse,
@@ -471,7 +470,10 @@ def _handle_streaming_response(
 
 @app.command(name="deploy_tasklib")
 def deploy_tasklib() -> None:
-    """Scan cornserve_tasklib and deploy tasks/descriptors automatically."""
+    """Scan cornserve_tasklib and deploy tasks/descriptors automatically.
+    
+    We firstly deploy unit tasks and descriptors because the composite ones depend on them.
+    """
     try:
         from cornserve.cli.tasklib_explorer import discover_tasklib
     except Exception as e:
@@ -488,13 +490,21 @@ def deploy_tasklib() -> None:
     if unit_task_entries or descriptor_entries:
         try:
             rich.print("Deploying unit tasks and descriptors (auto-discovered)...")
-            payload = UnitTasksDeploymentRequest(
+            payload = TasksDeploymentRequest(
                 task_definitions=unit_task_entries,
                 descriptor_definitions=descriptor_entries,
             )
-            resp = requests.post(f"{GATEWAY_URL}/builtins/deploy-unit-tasks", json=payload.model_dump())
+            resp = requests.post(f"{GATEWAY_URL}/builtins/deploy-tasks", json=payload.model_dump())
             resp.raise_for_status()
-            rich.print(Panel("Unit tasks/descriptors deployed.", style="green", expand=False))
+            unit_list = ", ".join(e.task_class_name for e in unit_task_entries) or "-"
+            desc_list = ", ".join(e.descriptor_class_name for e in descriptor_entries) or "-"
+            rich.print(
+                Panel(
+                    f"Unit tasks/descriptors deployed: unit={unit_list}; descriptors={desc_list}",
+                    style="green",
+                    expand=False,
+                )
+            )
         except Exception as e:
             rich.print(Panel(f"Failed to deploy unit tasks/descriptors: {e}", style="red", expand=False))
             return
@@ -505,12 +515,20 @@ def deploy_tasklib() -> None:
     if composite_task_entries:
         try:
             rich.print("Deploying composite tasks (auto-discovered)...")
-            payload = CompositeTasksDeploymentRequest(
+            payload = TasksDeploymentRequest(
                 task_definitions=composite_task_entries,
+                descriptor_definitions=[],
             )
-            resp = requests.post(f"{GATEWAY_URL}/builtins/deploy-composite-tasks", json=payload.model_dump())
+            resp = requests.post(f"{GATEWAY_URL}/builtins/deploy-tasks", json=payload.model_dump())
             resp.raise_for_status()
-            rich.print(Panel("Composite tasks deployed.", style="green", expand=False))
+            comp_list = ", ".join(e.task_class_name for e in composite_task_entries)
+            rich.print(
+                Panel(
+                    f"Composite tasks deployed: {comp_list}",
+                    style="green",
+                    expand=False,
+                )
+            )
         except Exception as e:
             rich.print(Panel(f"Failed to deploy composite tasks: {e}", style="red", expand=False))
             return

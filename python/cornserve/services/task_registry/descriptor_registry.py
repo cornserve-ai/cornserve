@@ -3,15 +3,17 @@ from __future__ import annotations
 import base64
 import importlib.util
 import sys
+import types
+from importlib.machinery import ModuleSpec
 from collections import defaultdict
 from typing import TYPE_CHECKING
 
 from cornserve.logging import get_logger
+from cornserve.task_executors.descriptor.base import TaskExecutionDescriptor
+from cornserve.services.task_registry.task_class_registry import TASK_CLASS_REGISTRY
 
-# Only for type-checkers; avoids runtime imports during dynamic exec
 if TYPE_CHECKING:
     from cornserve.task.base import UnitTask
-    from cornserve.task_executors.descriptor.base import TaskExecutionDescriptor
 
 logger = get_logger(__name__)
 
@@ -51,9 +53,6 @@ class TaskExecutionDescriptorRegistry:
         their corresponding descriptors are loaded. So, if required task class presents, register immediately;
         otherwise put to the pending queue.
         """
-        import types
-        from importlib.machinery import ModuleSpec
-
         decoded_source = base64.b64decode(source_code).decode("utf-8")
 
         created_packages: list[str] = []
@@ -85,7 +84,6 @@ class TaskExecutionDescriptorRegistry:
             exec(decoded_source, module.__dict__)
 
             # Validate descriptor exists and is a subclass
-            from cornserve.task_executors.descriptor.base import TaskExecutionDescriptor
             if not hasattr(module, descriptor_class_name):
                 raise ValueError(f"Descriptor class {descriptor_class_name} not found in source code")
             descriptor_cls = getattr(module, descriptor_class_name)
@@ -102,7 +100,6 @@ class TaskExecutionDescriptorRegistry:
                 setattr(sys.modules[parent], module_name.split('.')[-1], module)
 
             # Register now or queue pending
-            from cornserve.services.task_registry.task_class_registry import TASK_CLASS_REGISTRY
             if task_class_name in TASK_CLASS_REGISTRY:
                 task_cls, _, _ = TASK_CLASS_REGISTRY.get_unit_task(task_class_name)
                 self.register(task_cls, descriptor_cls, descriptor_class_name, default=True)

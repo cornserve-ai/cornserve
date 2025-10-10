@@ -3,12 +3,15 @@ from __future__ import annotations
 import base64
 import importlib.util
 import sys
+import types
+from importlib.machinery import ModuleSpec
 from typing import TYPE_CHECKING
 
 from cornserve.logging import get_logger
+from cornserve.task.base import UnitTask, Task
 
 if TYPE_CHECKING:
-    from cornserve.task.base import TaskInput, TaskOutput, UnitTask, Task
+    from cornserve.task.base import TaskInput, TaskOutput
 
 logger = get_logger(__name__)
 
@@ -96,8 +99,6 @@ class TaskClassRegistry:
             task_cls = getattr(module, task_class_name)
             
             # Import Task classes for validation
-            from cornserve.task.base import UnitTask, Task
-            
             if is_unit_task:
                 if not issubclass(task_cls, UnitTask):
                     raise ValueError(f"Class {task_class_name} is not a UnitTask subclass")

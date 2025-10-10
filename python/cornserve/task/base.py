@@ -388,41 +388,18 @@ class UnitTask(Task, Generic[InputT, OutputT]):
         """Get the task execution descriptor for this task."""
         descriptor_cls = DESCRIPTOR_REGISTRY.get(self.root_unit_task_cls, self.execution_descriptor_name)
         
-        # CRITICAL: We use model_construct instead of normal Pydantic validation here.
-        #
-        # ROOT CAUSE: Class identity mismatch between task instances and descriptor expectations
-        # 
-        # PROBLEM DETAILS:
-        # 1. Task execution descriptors (e.g., EricDescriptor) are loaded from Custom Resources (CRs)
-        #    and registered in DESCRIPTOR_REGISTRY using task classes from TASK_CLASS_REGISTRY
-        # 2. These descriptors are parameterized like: EricDescriptor(TaskExecutionDescriptor[EncoderTask, ...])
-        #    where EncoderTask comes from the CR-loaded task definition
-        # 3. However, when apps are registered, they load their own copy of task classes from
-        #    app source code, creating different class instances with the same name
-        # 4. During execution_descriptor access, we try to create descriptor_cls(task=self)
-        #    where 'self' is a task instance from app source, but descriptor_cls expects
-        #    a task instance from the CR-loaded class
-        # 5. Pydantic's strict type validation fails because it compares exact class identity,
-        #    not just class names or structure
+        # CRITICAL: Use model_construct instead of standard Pydantic validation.
+        # Reason: descriptor types are registered from CR-loaded task classes, while apps
+        # load their own identically named task classes. Strict validation compares class
+        # identity, so passing an app instance is rejected.
         #
         # EXAMPLE:
         # - Descriptor expects: EncoderTask (id: 104678592029536) from TASK_CLASS_REGISTRY  
         # - App provides:       EncoderTask (id: 104678589216976) from app source
         # - Same name, same structure, but different memory addresses → Validation fails
         #
-        # WHY model_construct IS SAFE:
-        # 1. The task data structure is identical (same fields, same validation rules)
-        # 2. Only the class identity differs, not the actual data validity
-        # 3. model_construct bypasses type validation but preserves data integrity
-        # 4. The descriptor methods still work correctly with the task instance
-        #
-        # ALTERNATIVE APPROACHES CONSIDERED:
-        # - String-based registry keys: Already implemented but doesn't solve descriptor instantiation
-        # - Custom validators: Complex and fragile, doesn't address the fundamental issue
-        # - Task instance conversion: Expensive and may lose instance-specific state
-        # 
-        # CONCLUSION: model_construct is the most direct and reliable solution to this
-        # systematic class identity mismatch while preserving type safety where it matters.
+        # So, we use model_construct to bypass identity checks but preserve data integrity.
+        
         return descriptor_cls.model_construct(task=self)
 
     def is_equivalent_to(self, other: object) -> bool:

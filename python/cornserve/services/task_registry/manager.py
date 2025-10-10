@@ -233,8 +233,6 @@ class TaskRegistry:
                     logger.error("Task definition %s missing required fields", name)
                     return
 
-                from cornserve.services.task_registry.task_class_registry import TASK_CLASS_REGISTRY
-
                 TASK_CLASS_REGISTRY.load_from_source(
                     source_code=source_code,
                     task_class_name=task_class_name,
@@ -245,7 +243,6 @@ class TaskRegistry:
                 
                 # Only bind descriptors for unit tasks
                 if is_unit_task:
-                    from cornserve.services.task_registry.descriptor_registry import DESCRIPTOR_REGISTRY
                     try:
                         task_cls, _, _ = TASK_CLASS_REGISTRY.get_unit_task(task_class_name)
                         DESCRIPTOR_REGISTRY.bind_pending_descriptor_for_task_class(task_cls)
@@ -265,8 +262,6 @@ class TaskRegistry:
                 if not descriptor_class_name or not module_name or not source_code or not task_class_name:
                     logger.error("Execution descriptor %s missing required fields", name)
                     return
-
-                from cornserve.services.task_registry.descriptor_registry import DESCRIPTOR_REGISTRY
 
                 DESCRIPTOR_REGISTRY.load_from_source(
                     source_code=source_code,

@@ -89,16 +89,9 @@ class DescriptorDefinitionPayload(BaseModel):
     task_class_name: str
 
 
-class UnitTasksDeploymentRequest(BaseModel):
-    """Request to deploy unit tasks and descriptors from provided sources."""
+class TasksDeploymentRequest(BaseModel):
+    """Request to deploy tasks (unit or composite) and descriptors from provided sources."""
 
     task_definitions: list[TaskDefinitionPayload] = []
     descriptor_definitions: list[DescriptorDefinitionPayload] = []
-
-
-class CompositeTasksDeploymentRequest(BaseModel):
-    """Request to deploy composite tasks from provided sources."""
-
-    task_definitions: list[TaskDefinitionPayload] = []
-
 
