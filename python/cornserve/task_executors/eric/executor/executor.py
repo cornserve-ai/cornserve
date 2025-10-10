@@ -159,6 +159,10 @@ class ModelExecutor:
     def execute_model(self, batch: WorkerBatch) -> BatchResult:
         """Invoke the workers to run inference on the model."""
         logger.info("Executing model with %d items", len(batch.data_ids))
+        logger.info(
+            "Batch data: %s",
+            {k: [t.shape if t.numel() > 10 else t for t in tensor] for k, tensor in batch.data.items()},
+        )
         self.run_workers("execute_model", kwargs={"batch": batch})
         return BatchResult(
             request_ids=batch.request_ids,

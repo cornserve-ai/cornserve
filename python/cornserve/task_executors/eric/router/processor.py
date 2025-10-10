@@ -159,7 +159,9 @@ class ImageLoader(BaseLoader):
 
     def load_bytes(self, data: bytes) -> npt.NDArray:
         """Load image data from bytes."""
-        return np.asarray(Image.open(BytesIO(data)).convert("RGB"))
+        image = Image.open(BytesIO(data)).convert("RGB")
+        logger.info("Loaded image with size: %s", image.size)
+        return np.asarray(image)
 
     def load_base64(self, media_type: str, data: str) -> npt.NDArray:
         """Load image data from base64 string."""
@@ -253,6 +255,8 @@ class VideoLoader(BaseLoader):
                 frames_loaded += 1
 
         assert frames_loaded == len(frame_indices), f"Expected {len(frame_indices)} frames, but got {frames_loaded}."
+
+        logger.info("Loaded video with %d frames of size: %dx%d", frames_loaded, width, height)
 
         return frames
 

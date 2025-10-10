@@ -8,6 +8,7 @@ from transformers.models.qwen2_5_omni.modeling_qwen2_5_omni import Qwen2_5OmniFo
 from cornserve.task_executors.eric.distributed.parallel import destroy_distributed, init_distributed
 from cornserve.task_executors.eric.executor.executor import ModelExecutor
 from cornserve.task_executors.eric.executor.loader import load_model
+from cornserve.task_executors.eric.models.registry import MODEL_REGISTRY
 from cornserve.task_executors.eric.schema import Status
 
 from ..utils import (
@@ -34,8 +35,32 @@ def test_weight_loading() -> None:
     our_model = load_model(model_id, torch_device=torch.device("cpu"))
     destroy_distributed()
 
+    def check_qkv_weight(
+        our_name: str,
+        our_param: torch.Tensor,
+        hf_params: dict[str, torch.Tensor],
+    ):
+        """Check if the qkv weights are the same.
+
+        This is needed because for efficiency, we combine the q, k, v weights into a single matrix.
+        However, the HuggingFace transformer model implementation keeps them separate.
+        """
+        separate_weights = []
+        for key in ["q", "k", "v"]:
+            separate_weights.append(hf_params[our_name.replace("qkv", key)])
+        assert torch.allclose(our_param, torch.cat(separate_weights, dim=0))
+
     # Check if parameters are the same
-    assert_same_weights(hf_model, our_model)
+    assert_same_weights(
+        hf_model,
+        our_model,
+        required_prefixes=MODEL_REGISTRY["qwen2_5_omni"].weight.required_prefixes,
+        ignored_prefixes=MODEL_REGISTRY["qwen2_5_omni"].weight.ignored_prefixes,
+        transformed_weights={
+            "*qkv.weight": check_qkv_weight,
+            "*qkv.bias": check_qkv_weight,
+        },
+    )
 
 
 @param_tp_size
