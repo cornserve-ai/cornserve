@@ -20,9 +20,6 @@ from pydantic import BaseModel, ConfigDict, Field, model_serializer, model_valid
 
 from cornserve.constants import K8S_GATEWAY_SERVICE_HTTP_URL
 from cornserve.logging import get_logger
-from cornserve.services.pb.common_pb2 import UnitTask as UnitTaskProto
-from cornserve.services.task_registry.task_class_registry import TASK_CLASS_REGISTRY
-from cornserve.services.task_registry.descriptor_registry import DESCRIPTOR_REGISTRY
 
 if TYPE_CHECKING:
     from cornserve.services.gateway.task_manager import TaskManager
@@ -386,6 +383,9 @@ class UnitTask(Task, Generic[InputT, OutputT]):
     @property
     def execution_descriptor(self) -> TaskExecutionDescriptor[Self, InputT, OutputT]:
         """Get the task execution descriptor for this task."""
+        # Lazy import to avoid circular import
+        # otherwise: cornserve.task.base -> descriptor_registry -> task_class_registry -> cornserve.task.base
+        from cornserve.services.task_registry.descriptor_registry import DESCRIPTOR_REGISTRY
         descriptor_cls = DESCRIPTOR_REGISTRY.get(self.root_unit_task_cls, self.execution_descriptor_name)
         
         # CRITICAL: Use model_construct instead of standard Pydantic validation.
@@ -513,6 +513,8 @@ class TaskInvocation(BaseModel, Generic[InputT, OutputT]):
             return data
 
         # Now this is likely when we're deserializing the object from the serialized data.
+        # Lazy import to avoid circular import
+        from cornserve.services.task_registry.task_class_registry import TASK_CLASS_REGISTRY
         task_cls, task_input_cls, task_output_cls = TASK_CLASS_REGISTRY.get_unit_task(data["class_name"])
         task = task_cls.model_validate_json(data["body"]["task"])
         task_input = task_input_cls.model_validate_json(data["body"]["task_input"])
@@ -775,6 +777,8 @@ class UnitTaskList(BaseModel):
         tasks = []
         for item in data["_task_list"]:
             task_data = item["task"]
+            # Lazy import to avoid circular import
+            from cornserve.services.task_registry.task_class_registry import TASK_CLASS_REGISTRY
             task_class, _, _ = TASK_CLASS_REGISTRY.get_unit_task(item["class_name"])
             task = task_class.model_validate_json(task_data)
             tasks.append(task)

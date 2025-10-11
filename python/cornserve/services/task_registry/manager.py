@@ -18,9 +18,20 @@ from typing import TYPE_CHECKING, Any
 from kubernetes_asyncio import client, config
 from kubernetes_asyncio.watch import Watch
 
-from cornserve.constants import CRD_GROUP, CRD_VERSION, K8S_NAMESPACE
+from cornserve.constants import (
+    CRD_GROUP,
+    CRD_VERSION,
+    K8S_NAMESPACE,
+    CRD_PLURAL_TASK_DEFINITIONS,
+    CRD_PLURAL_UNIT_TASK_INSTANCES,
+    CRD_PLURAL_EXECUTION_DESCRIPTORS,
+    CRD_KIND_TASK_DEFINITION,
+    CRD_KIND_UNIT_TASK_INSTANCE,
+    CRD_KIND_EXECUTION_DESCRIPTOR,
+)
 from cornserve.logging import get_logger
 from cornserve.services.task_registry.task_class_registry import TASK_CLASS_REGISTRY
+from cornserve.services.task_registry.descriptor_registry import DESCRIPTOR_REGISTRY
 
 if TYPE_CHECKING:
     from cornserve.task.base import UnitTask
@@ -69,7 +80,7 @@ class TaskRegistry:
 
         body = {
             "apiVersion": f"{CRD_GROUP}/{CRD_VERSION}",
-            "kind": "TaskDefinition",
+            "kind": CRD_KIND_TASK_DEFINITION,
             "metadata": {"name": name, "namespace": namespace},
             "spec": {
                 "taskClassName": task_class_name,
@@ -84,11 +95,13 @@ class TaskRegistry:
                 group=CRD_GROUP,
                 version=CRD_VERSION,
                 namespace=namespace,
-                plural="taskdefinitions",
+                plural=CRD_PLURAL_TASK_DEFINITIONS,
                 body=body,
             )
         except client.ApiException as e:
             if e.status == 409:
+                # TODO: think about versioning here. If we have a mechanism to invalidate the
+                # the loaded task definitions, we can allow user to update the CR rather than error out.
                 raise ValueError(f"Task definition {name} already exists") from e
             raise
 
@@ -109,7 +122,7 @@ class TaskRegistry:
 
         body = {
             "apiVersion": f"{CRD_GROUP}/{CRD_VERSION}",
-            "kind": "UnitTaskInstance",
+            "kind": CRD_KIND_UNIT_TASK_INSTANCE,
             "metadata": {"name": instance_name, "namespace": K8S_NAMESPACE},
             "spec": {
                 "definitionRef": task.__class__.__name__,
@@ -123,7 +136,7 @@ class TaskRegistry:
                 group=CRD_GROUP,
                 version=CRD_VERSION,
                 namespace=K8S_NAMESPACE,
-                plural="unittaskinstances",
+                plural=CRD_PLURAL_UNIT_TASK_INSTANCES,
                 body=body,
             )
             logger.info("Created task instance: %s", instance_name)
@@ -150,7 +163,7 @@ class TaskRegistry:
 
         body = {
             "apiVersion": f"{CRD_GROUP}/{CRD_VERSION}",
-            "kind": "ExecutionDescriptor",
+            "kind": CRD_KIND_EXECUTION_DESCRIPTOR,
             "metadata": {"name": name, "namespace": K8S_NAMESPACE},
             "spec": {
                 "taskClassName": task_class_name,
@@ -166,7 +179,7 @@ class TaskRegistry:
                 group=CRD_GROUP,
                 version=CRD_VERSION,
                 namespace=K8S_NAMESPACE,
-                plural="executiondescriptors",
+                plural=CRD_PLURAL_EXECUTION_DESCRIPTORS,
                 body=body,
             )
         except client.ApiException as e:
@@ -186,7 +199,7 @@ class TaskRegistry:
                 group=CRD_GROUP,
                 version=CRD_VERSION,
                 namespace=K8S_NAMESPACE,
-                plural="unittaskinstances",
+                plural=CRD_PLURAL_UNIT_TASK_INSTANCES,
                 name=instance_name,
             )
 
@@ -222,7 +235,7 @@ class TaskRegistry:
         metadata = obj.get("metadata", {})
         name = metadata.get("name")
 
-        if kind == "TaskDefinition" and event_type in ("EXISTING", "ADDED", "MODIFIED"):
+        if kind == CRD_KIND_TASK_DEFINITION and event_type in ("EXISTING", "ADDED", "MODIFIED"):
             try:
                 task_class_name = spec.get("taskClassName")
                 module_name = spec.get("moduleName")
@@ -252,7 +265,7 @@ class TaskRegistry:
             except Exception as e:
                 logger.error("Failed to register task %s from %s: %s", task_class_name if 'task_class_name' in locals() else 'unknown', name, e)
 
-        elif kind == "ExecutionDescriptor" and event_type in ("EXISTING", "ADDED", "MODIFIED"):
+        elif kind == CRD_KIND_EXECUTION_DESCRIPTOR and event_type in ("EXISTING", "ADDED", "MODIFIED"):
             try:
                 descriptor_class_name = spec.get("descriptorClassName")
                 module_name = spec.get("moduleName")
@@ -338,10 +351,10 @@ class TaskRegistry:
                 await asyncio.sleep(5)
 
     async def _watch_taskdefinitions(self) -> None:
-        await self._watch_resource("taskdefinitions", "TaskDefinition")
+        await self._watch_resource(CRD_PLURAL_TASK_DEFINITIONS, CRD_KIND_TASK_DEFINITION)
 
     async def _watch_executiondescriptors(self) -> None:
-        await self._watch_resource("executiondescriptors", "ExecutionDescriptor")
+        await self._watch_resource(CRD_PLURAL_EXECUTION_DESCRIPTORS, CRD_KIND_EXECUTION_DESCRIPTOR)
 
     async def shutdown(self) -> None:
         if self._api_client:

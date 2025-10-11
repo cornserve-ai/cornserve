@@ -10,10 +10,12 @@ import time
 from urllib.parse import urlparse
 
 import websocket
+import requests
 from pydantic import BaseModel
 
 from cornserve.constants import K8S_GATEWAY_SERVICE_HTTP_URL
 from cornserve.task.base import Task, UnitTask, UnitTaskList, discover_unit_tasks
+from cornserve.services.gateway.models import TasksDeploymentRequest
 
 
 class TaskRequestVerb(enum.Enum):
@@ -91,7 +93,8 @@ class CornserveClient:
 
         # reset env
         self.saved_gateway_url = os.environ.get("CORNSERVE_GATEWAY_URL")
-        os.environ["CORNSERVE_GATEWAY_URL"] = dispatcher_url.geturl()
+        self.dispatcher_base_url = dispatcher_url.geturl()
+        os.environ["CORNSERVE_GATEWAY_URL"] = self.dispatcher_base_url
 
         self.url = session_url.geturl() + "/session"
         self.socket = websocket.create_connection(self.url)
@@ -195,6 +198,62 @@ class CornserveClient:
             raise ConnectionError("Not connected to the Cornserve gateway.")
         tasks = discover_unit_tasks([task])
         return self.teardown_unit_tasks(tasks)
+
+    def deploy_tasklib(self) -> TaskResponse:
+        """Discover and deploy tasks/descriptors from cornserve_tasklib via the gateway.
+
+        Returns a TaskResponse summarizing deployment results.
+        """
+        try:
+            from cornserve.cli.tasklib_explorer import discover_tasklib
+        except Exception as e:
+            return TaskResponse(status=500, content=f"Failed to import tasklib explorer: {e}")
+
+        try:
+            unit_task_entries, composite_task_entries, descriptor_entries = discover_tasklib()
+        except Exception as e:
+            return TaskResponse(status=500, content=f"Failed to explore cornserve_tasklib: {e}")
+
+        summaries: list[str] = []
+        try:
+            # Deploy unit tasks + descriptors first
+            if unit_task_entries or descriptor_entries:
+                payload = TasksDeploymentRequest(
+                    task_definitions=unit_task_entries,
+                    descriptor_definitions=descriptor_entries,
+                )
+                resp = requests.post(
+                    f"{self.dispatcher_base_url}/builtins/deploy-tasks",
+                    json=payload.model_dump(),
+                    timeout=60,
+                )
+                resp.raise_for_status()
+                unit_list = ", ".join(e.task_class_name for e in unit_task_entries) or "-"
+                desc_list = ", ".join(e.descriptor_class_name for e in descriptor_entries) or "-"
+                summaries.append(f"unit={unit_list}; descriptors={desc_list}")
+            else:
+                summaries.append("unit=-; descriptors=-")
+
+            # Deploy composite tasks
+            if composite_task_entries:
+                payload = TasksDeploymentRequest(
+                    task_definitions=composite_task_entries,
+                    descriptor_definitions=[],
+                )
+                resp = requests.post(
+                    f"{self.dispatcher_base_url}/builtins/deploy-tasks",
+                    json=payload.model_dump(),
+                    timeout=60,
+                )
+                resp.raise_for_status()
+                comp_list = ", ".join(e.task_class_name for e in composite_task_entries) or "-"
+                summaries.append(f"composite={comp_list}")
+            else:
+                summaries.append("composite=-")
+
+            return TaskResponse(status=200, content=f"Tasklib deployed: {'; '.join(summaries)}")
+        except Exception as e:
+            return TaskResponse(status=500, content=f"Failed to deploy tasklib: {e}")
 
     def close(self) -> None:
         """Close the connection to the Cornserve gateway."""

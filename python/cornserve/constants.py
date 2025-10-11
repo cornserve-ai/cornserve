@@ -85,3 +85,13 @@ if TYPE_CHECKING:
 CRD_GROUP = "cornserve.ai"
 # Note this is the version of CRD definition, where we only define v1
 CRD_VERSION = "v1"
+
+# CR plural names (must match the spec.names.plural in CRD files)
+CRD_PLURAL_TASK_DEFINITIONS = "taskdefinitions"
+CRD_PLURAL_UNIT_TASK_INSTANCES = "unittaskinstances"
+CRD_PLURAL_EXECUTION_DESCRIPTORS = "executiondescriptors"
+
+# CR kind names (must match spec.names.kind in CRD files)
+CRD_KIND_TASK_DEFINITION = "TaskDefinition"
+CRD_KIND_UNIT_TASK_INSTANCE = "UnitTaskInstance"
+CRD_KIND_EXECUTION_DESCRIPTOR = "ExecutionDescriptor"
