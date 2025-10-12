@@ -244,13 +244,11 @@ class ResourceManager:
                 logger.info("All sidecars are online")
 
             resource = Resource(gpus=gpus)
-            resource_manager = ResourceManager(
+            return ResourceManager(
                 api_client=api_client,
                 resource=resource,
                 sidecar_names=[pod.metadata.name for pod in created_pods],
-            )
-            
-            return resource_manager
+            )            
         except Exception as e:
             logger.error("Error during resource initialization: %s", str(e))
             raise

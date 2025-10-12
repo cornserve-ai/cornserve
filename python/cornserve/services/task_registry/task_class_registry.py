@@ -165,6 +165,10 @@ class TaskClassRegistry:
         self._unit_tasks.clear()
         self._composite_tasks.clear()
 
+    def list_registered_unit_tasks(self) -> list[str]:
+        """List names of registered unit tasks."""
+        return list(self._unit_tasks.keys())
+
 
 TASK_CLASS_REGISTRY = TaskClassRegistry()
 

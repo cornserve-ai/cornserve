@@ -1,12 +1,9 @@
-"""Runtime task and descriptor registry service.
+"""Utilities used by services for task/descriptor discovery and registry population.
 
-This module provides a single integration point for all services to:
+Currently, this module provides utilities for interacting with k8s CRDs to:
 - discover task definitions and execution descriptors at runtime
-- register loaded classes into in-process registries and sys.modules
-- create and retrieve task instances by name
-
-Kubernetes specifics (custom resources, watching, etc.) are fully encapsulated
-inside this module and are not exposed through its public API.
+- populate in-process registries and ``sys.modules``
+- create and retrieve unit task instances
 """
 
 from __future__ import annotations
@@ -41,10 +38,6 @@ logger = get_logger(__name__)
 
 
 class TaskRegistry:
-    """Service responsible for runtime registry population and access.
-
-    Public methods avoid leaking any underlying storage concepts.
-    """
 
     def __init__(self) -> None:
         self._api_client: client.ApiClient | None = None
@@ -329,12 +322,9 @@ class TaskRegistry:
                         obj = event["object"]
                         self._handle_object(obj, kind, event_type)
                         # Update resourceVersion
-                        try:
-                            rv = obj.get("metadata", {}).get("resourceVersion")
-                            if rv:
-                                resource_version = rv
-                        except Exception:
-                            logger.error("Failed to get resourceVersion for %s", kind)
+                        rv = obj.get("metadata", {}).get("resourceVersion")
+                        if rv:
+                            resource_version = rv
             except asyncio.CancelledError:
                 raise
             except client.ApiException as e:

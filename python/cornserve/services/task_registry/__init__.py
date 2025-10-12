@@ -1,6 +1,6 @@
-"""Runtime task registry service entrypoint."""
+"""Runtime task registry entrypoint utilities."""
 
-from .manager import TaskRegistry
+from .registry import TaskRegistry
 from .task_class_registry import TASK_CLASS_REGISTRY
 from .descriptor_registry import DESCRIPTOR_REGISTRY
 

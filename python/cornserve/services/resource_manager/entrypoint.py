@@ -43,6 +43,7 @@ async def serve() -> None:
 
     def shutdown() -> None:
         server_task.cancel()
+        cr_watcher_task.cancel()
 
     loop.add_signal_handler(signal.SIGINT, shutdown)
     loop.add_signal_handler(signal.SIGTERM, shutdown)
