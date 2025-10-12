@@ -29,16 +29,15 @@ async def serve() -> None:
 
     configure_otel("gateway")
 
+    app = create_app()
+    
     # Start task watcher to load tasks from Custom Resources BEFORE starting FastAPI
     logger.info("Starting task watcher for Gateway service")
-    task_registry = TaskRegistry()
-    
+    task_registry: TaskRegistry = app.state.task_registry
     cr_watcher_task = asyncio.create_task(
         task_registry.watch_updates(),
         name="gateway_cr_watcher"
     )
-
-    app = create_app()
     FastAPIInstrumentor.instrument_app(app)
     GrpcAioInstrumentorClient().instrument()
     HTTPXClientInstrumentor().instrument()

@@ -349,9 +349,9 @@ def create_app() -> FastAPI:
 
 
 @router.post("/builtins/deploy-tasks")
-async def deploy_tasks(request: TasksDeploymentRequest):
+async def deploy_tasks(request: TasksDeploymentRequest, raw_request: Request):
     """Deploy tasks (unit or composite) and their descriptors from provided sources."""
-    task_registry = TaskRegistry()
+    task_registry: TaskRegistry = raw_request.app.state.task_registry
     try:
         # Create task definitions and descriptors concurrently
         async def create_task_definition(spec):
@@ -393,10 +393,8 @@ async def deploy_tasks(request: TasksDeploymentRequest):
                 # Raise if any creation failed
                 raise errors[0]
 
-        await task_registry.shutdown()
         return {"status": "ok"}
     except Exception as e:
         logger.exception("Failed to deploy tasks")
-        await task_registry.shutdown()
         return Response(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, content=str(e))
 
