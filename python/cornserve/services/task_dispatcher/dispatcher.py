@@ -170,7 +170,6 @@ class TaskDispatcher:
         async with self.task_lock:
             logger.info("TaskDispatcher: registered tasks: %s", list(self.task_infos.keys()))
             for invocation in invocations:
-                matched = False
                 for task_id, task_info in self.task_infos.items():
                     eq = task_info.task.is_equivalent_to(invocation.task)
                     logger.info(
@@ -181,7 +180,6 @@ class TaskDispatcher:
                     )
                     if eq:
                         task_infos.append(task_info)
-                        matched = True
                         break
                 else:
                     logger.error("Task not found for invocation %s (no equivalent registered task)", invocation)
