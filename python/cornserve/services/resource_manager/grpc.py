@@ -39,6 +39,21 @@ class ResourceManagerServicer(resource_manager_pb2_grpc.ResourceManagerServicer)
         """Reconcile a removed app by shutting down task managers if needed."""
         task = await self.task_registry.get_task_instance(request.task_instance_name)
         await self.manager.teardown_unit_task(task, request.task_instance_name)
+        # TODO: theoretically, a resource-manager can fail exactly right here, where the unit task
+        # is already gone, but the CR is still there. So when we implement real failure-recovery,
+        # we still need to double check the executor states against the CRs.
+        try:
+            await self.task_registry.delete_task_instance(request.task_instance_name)
+        except Exception as e:
+            # Propagate an error so the caller can react; other tasks teardown may still proceed
+            logger.exception(
+                "Failed to delete UnitTaskInstance CR %s: %s",
+                request.task_instance_name,
+                e,
+            )
+            raise RuntimeError(
+                f"Failed to delete UnitTaskInstance CR {request.task_instance_name}: {e}"
+            ) from e
         return resource_manager_pb2.TeardownUnitTaskResponse(status=common_pb2.Status.STATUS_OK)
 
     async def ScaleUnitTask(

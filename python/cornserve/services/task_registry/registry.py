@@ -214,6 +214,28 @@ class TaskRegistry:
                 raise ValueError(f"Task instance {instance_name} not found") from e
             raise RuntimeError(f"Failed to get task instance {instance_name}: {e}") from e
 
+    async def delete_task_instance(self, instance_name: str) -> None:
+        """Delete a unit task instance CR by instancename."""
+        await self._load_config()
+        assert self._custom_api is not None
+
+        try:
+            await self._custom_api.delete_namespaced_custom_object(
+                group=CRD_GROUP,
+                version=CRD_VERSION,
+                namespace=K8S_NAMESPACE,
+                plural=CRD_PLURAL_UNIT_TASK_INSTANCES,
+                name=instance_name,
+            )
+            logger.info("Deleted task instance CR: %s", instance_name)
+        except client.ApiException as e:
+            # 404 means it's already gone; treat as success is okay
+            if getattr(e, "status", None) == 404:
+                logger.info("Task instance CR to be deleted is already absent: %s", instance_name)
+                return
+            logger.error("Failed to delete task instance %s: %s", instance_name, e)
+            raise RuntimeError(f"Failed to delete task instance {instance_name}: {e}") from e
+
     async def watch_updates(self) -> None:
         """Background task to populate registries by watching definitions and descriptors."""
         await self._load_config()
