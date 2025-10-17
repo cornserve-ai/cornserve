@@ -9,7 +9,7 @@ import aiohttp
 
 from cornserve import constants
 from cornserve.services.resource import GPU
-from cornserve.task.builtins.encoder import (
+from cornserve_tasklib.task.unit.encoder import (
     DummyEncoderOutput,
     DummyEncoderTask,
     EncoderInput,
@@ -17,7 +17,6 @@ from cornserve.task.builtins.encoder import (
     EncoderTask,
 )
 from cornserve.task_executors.descriptor.base import TaskExecutionDescriptor
-from cornserve.task_executors.descriptor.registry import DESCRIPTOR_REGISTRY
 from cornserve.task_executors.eric.api import EmbeddingData, EmbeddingRequest, EmbeddingResponse, Modality, Status
 
 
@@ -86,10 +85,6 @@ class EricDescriptor(TaskExecutionDescriptor[EncoderTask, EncoderInput, EncoderO
         else:
             raise RuntimeError(f"Error in encoder task: {resp.error_message}")
 
-
-DESCRIPTOR_REGISTRY.register(EncoderTask, EricDescriptor, default=True)
-
-
 class DummyEricDescriptor(TaskExecutionDescriptor[DummyEncoderTask, EncoderInput, DummyEncoderOutput]):
     """Task execution descriptor for Dummy Encoder tasks.
 
@@ -155,5 +150,3 @@ class DummyEricDescriptor(TaskExecutionDescriptor[DummyEncoderTask, EncoderInput
         else:
             raise RuntimeError(f"Error in encoder task: {resp.error_message}")
 
-
-DESCRIPTOR_REGISTRY.register(DummyEncoderTask, DummyEricDescriptor, default=True)

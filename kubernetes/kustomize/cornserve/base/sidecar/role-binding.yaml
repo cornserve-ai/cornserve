@@ -5,7 +5,7 @@ metadata:
   namespace: cornserve
 subjects:
 - kind: ServiceAccount
-  name: sidecar
+  name: sidecar-sa
 roleRef:
   kind: Role
   name: sidecar-role

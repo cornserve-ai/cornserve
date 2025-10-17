@@ -5,8 +5,9 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 
 from cornserve.app.base import AppConfig
-from cornserve.task.builtins.encoder import Modality
-from cornserve.task.builtins.llm import $TASK_CLASS, OpenAIChatCompletionChunk, OpenAIChatCompletionRequest
+from cornserve_tasklib.task.unit.encoder import Modality
+from cornserve_tasklib.task.composite.llm import $TASK_CLASS
+from cornserve_tasklib.task.unit.llm import OpenAIChatCompletionChunk, OpenAIChatCompletionRequest
 
 mllm = $TASK_CLASS(
     model_id="$MODEL_ID",

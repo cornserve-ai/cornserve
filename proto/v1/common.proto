@@ -8,12 +8,3 @@ enum Status {
   STATUS_OK = 1;
   STATUS_ERROR = 2;
 }
-
-// Concrete task instantiated from a unit task class.
-message UnitTask {
-  // UnitTask Python class name.
-  string task_class_name = 1;
-
-  // JSON-serialized task object.
-  string task_config = 2;
-}

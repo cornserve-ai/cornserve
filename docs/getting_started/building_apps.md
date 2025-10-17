@@ -18,8 +18,9 @@ First, let's see how to build a composite task out of built-in unit tasks for th
 
 ```python
 from cornserve.task.base import Task, TaskInput, TaskOutput
-from cornserve.task.builtins.encoder import EncoderTask, Modality, EncoderInput
-from cornserve.task.builtins.llm import LLMTask, LLMInput
+from cornserve_tasklib.task.unit.encoder import EncoderTask, Modality, EncoderInput
+from cornserve_tasklib.task.composite.llm import LLMTask
+from cornserve_tasklib.task.unit.llm import LLMInput
 from cornserve.app.base import AppConfig
 
 

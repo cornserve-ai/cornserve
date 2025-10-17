@@ -1,0 +1,10 @@
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  namespace: cornserve
+  name: gateway-cr-access-role
+rules:
+- apiGroups: ["cornserve.ai"]
+  resources: ["taskdefinitions", "unittaskinstances", "executiondescriptors"]
+  verbs: ["create", "update", "patch", "get", "list", "watch", "delete"]

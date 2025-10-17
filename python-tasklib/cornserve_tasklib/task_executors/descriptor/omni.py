@@ -11,13 +11,12 @@ from cornserve import constants
 from cornserve.logging import get_logger
 from cornserve.services.resource import GPU
 from cornserve.task.base import Stream
-from cornserve.task.builtins.omni import (
+from cornserve_tasklib.task.unit.omni import (
     OmniOutputChunk,
     OmniTalkerVocoderInput,
     OmniTalkerVocoderTask,
 )
 from cornserve.task_executors.descriptor.base import TaskExecutionDescriptor
-from cornserve.task_executors.descriptor.registry import DESCRIPTOR_REGISTRY
 
 logger = get_logger(__name__)
 
@@ -104,5 +103,3 @@ class OmniTalkerVocoderDescriptor(
             response=response,
         )
 
-
-DESCRIPTOR_REGISTRY.register(OmniTalkerVocoderTask, OmniTalkerVocoderDescriptor, default=True)

@@ -20,9 +20,6 @@ from pydantic import BaseModel, ConfigDict, Field, model_serializer, model_valid
 
 from cornserve.constants import K8S_GATEWAY_SERVICE_HTTP_URL
 from cornserve.logging import get_logger
-from cornserve.services.pb.common_pb2 import UnitTask as UnitTaskProto
-from cornserve.task.registry import TASK_REGISTRY
-from cornserve.task_executors.descriptor.registry import DESCRIPTOR_REGISTRY
 
 if TYPE_CHECKING:
     from cornserve.services.gateway.task_manager import TaskManager
@@ -402,35 +399,19 @@ class UnitTask(Task, Generic[InputT, OutputT]):
         """
         super().__init_subclass__(**kwargs)
 
-        # When a subclass is created, add it to the task registry.
-
         def is_proxy_for_unit(base: type) -> bool:
             """True if *base* appears to be the auto‑generated proxy."""
             return UnitTask in getattr(base, "__bases__", ())
 
-        def maybe_register_task(cls: type[UnitTask]) -> None:
-            """Register the unit task to the task registry if it is a unit task.
-
-            Basically, the two generic type arguments must be filled with concrete types.
-            """
-            args = cls.__pydantic_generic_metadata__["args"]
-            if len(args) != 2:
-                return
-            input_arg, output_arg = args
-            if issubclass(input_arg, TaskInput) and issubclass(output_arg, TaskOutput):
-                TASK_REGISTRY.register(cls, input_arg, output_arg)
-
         # If any immediate base (or proxies) is `UnitTask`, cls is the root.
         if any(is_proxy_for_unit(b) for b in cls.__bases__):
             cls.root_unit_task_cls = cls
-            maybe_register_task(cls)
             return
 
         # Otherwise climb the MRO until you meet that condition
         for anc in cls.mro()[1:]:
             if any(is_proxy_for_unit(b) for b in anc.__bases__):
                 cls.root_unit_task_cls = anc
-                maybe_register_task(cls)
                 break
         # Fallback for the intemediate class `UnitTask[SpecificInput, SpecificOutput]`
         # that appears due to generic inheritance.
@@ -440,8 +421,25 @@ class UnitTask(Task, Generic[InputT, OutputT]):
     @property
     def execution_descriptor(self) -> TaskExecutionDescriptor[Self, InputT, OutputT]:
         """Get the task execution descriptor for this task."""
+        # Lazy import to avoid circular import
+        # otherwise: cornserve.task.base -> descriptor_registry -> task_class_registry -> cornserve.task.base
+        from cornserve.services.task_registry.descriptor_registry import DESCRIPTOR_REGISTRY  # noqa: PLC0415
+
         descriptor_cls = DESCRIPTOR_REGISTRY.get(self.root_unit_task_cls, self.execution_descriptor_name)
-        return descriptor_cls(task=self)
+
+        # NOTE: Use model_construct instead of standard Pydantic validation.
+        # Reason: descriptor types are registered from CR-loaded task classes, while apps
+        # load their own identically named task classes. Strict validation compares class
+        # identity, so passing an app instance is rejected.
+        #
+        # Example:
+        # - Descriptor expects: EncoderTask (id: 104678592029536) from TASK_CLASS_REGISTRY
+        # - App provides:       EncoderTask (id: 104678589216976) from app source
+        # - Same name, same structure, but different memory addresses → Validation fails
+        #
+        # So, we use model_construct to bypass identity checks but preserve data integrity.
+
+        return descriptor_cls.model_construct(task=self)
 
     def is_equivalent_to(self, other: object) -> bool:
         """Check if two unit tasks are equivalent.
@@ -516,20 +514,8 @@ class UnitTask(Task, Generic[InputT, OutputT]):
 
         raise AssertionError("Task context is neither in recording nor replay mode.")
 
-    def to_pb(self) -> UnitTaskProto:
-        """Convert this unit task into the UnitTask protobuf message."""
-        return UnitTaskProto(
-            task_class_name=self.__class__.__name__,
-            task_config=self.model_dump_json(),
-        )
-
     @classmethod
-    def from_pb(cls, proto: UnitTaskProto) -> UnitTask:
-        """Create a unit task from the UnitTask protobuf message."""
-        task_cls, _, _ = TASK_REGISTRY.get(proto.task_class_name)
-        return task_cls.model_validate_json(proto.task_config)
-
-    def make_name(self) -> str:
+    def make_name(self) -> str:  # noqa: N804
         """Create a concise string representation of the task."""
         return f"{self.__class__.__name__.lower()}"
 
@@ -568,7 +554,10 @@ class TaskInvocation(BaseModel, Generic[InputT, OutputT]):
             return data
 
         # Now this is likely when we're deserializing the object from the serialized data.
-        task_cls, task_input_cls, task_output_cls = TASK_REGISTRY.get(data["class_name"])
+        # Lazy import to avoid circular import
+        from cornserve.services.task_registry.task_class_registry import TASK_CLASS_REGISTRY  # noqa: PLC0415
+
+        task_cls, task_input_cls, task_output_cls = TASK_CLASS_REGISTRY.get_unit_task(data["class_name"])
         task = task_cls.model_validate_json(data["body"]["task"])
         task_input = task_input_cls.model_validate_json(data["body"]["task_input"])
         task_output = task_output_cls.model_validate_json(data["body"]["task_output"])
@@ -829,7 +818,10 @@ class UnitTaskList(BaseModel):
         tasks = []
         for item in data["_task_list"]:
             task_data = item["task"]
-            task_class, _, _ = TASK_REGISTRY.get(item["class_name"])
+            # Lazy import to avoid circular import
+            from cornserve.services.task_registry.task_class_registry import TASK_CLASS_REGISTRY  # noqa: PLC0415
+
+            task_class, _, _ = TASK_CLASS_REGISTRY.get_unit_task(item["class_name"])
             task = task_class.model_validate_json(task_data)
             tasks.append(task)
         return {"tasks": tasks}

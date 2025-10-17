@@ -4,9 +4,8 @@ from __future__ import annotations
 
 import enum
 
+from cornserve_tasklib.task.unit.llm import StreamOptions
 from pydantic import BaseModel
-
-from cornserve.task.builtins.llm import StreamOptions
 
 
 class ModelType(enum.StrEnum):

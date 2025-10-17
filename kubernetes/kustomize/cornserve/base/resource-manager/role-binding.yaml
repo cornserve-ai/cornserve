@@ -1,12 +1,43 @@
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: resource-manager-cr-access
+  namespace: cornserve
+subjects:
+- kind: ServiceAccount
+  name: resource-manager-sa
+  namespace: cornserve
+roleRef:
+  kind: Role
+  name: resource-manager-cr-access-role
+  apiGroup: rbac.authorization.k8s.io
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: resource-manager-pod-service-access
+  namespace: cornserve
+subjects:
+- kind: ServiceAccount
+  name: resource-manager-sa
+  namespace: cornserve
+roleRef:
+  kind: Role
+  name: resource-manager-pod-service-management-role
+  apiGroup: rbac.authorization.k8s.io
+
+---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
-  name: resource-manager-binding
+  name: resource-manager-nodes-access
 subjects:
 - kind: ServiceAccount
-  name: resource-manager
+  name: resource-manager-sa
   namespace: cornserve
 roleRef:
   kind: ClusterRole
-  name: resource-manager-role
+  name: resource-manager-nodes-role
   apiGroup: rbac.authorization.k8s.io

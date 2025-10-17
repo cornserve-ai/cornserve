@@ -7,7 +7,7 @@ import grpc
 from cornserve.logging import get_logger
 from cornserve.services.pb import common_pb2, resource_manager_pb2, resource_manager_pb2_grpc
 from cornserve.services.resource_manager.manager import ResourceManager
-from cornserve.task.base import UnitTask
+from cornserve.services.task_registry import TaskRegistry
 
 logger = get_logger(__name__)
 
@@ -15,9 +15,10 @@ logger = get_logger(__name__)
 class ResourceManagerServicer(resource_manager_pb2_grpc.ResourceManagerServicer):
     """Resource Manager gRPC service implementation."""
 
-    def __init__(self, manager: ResourceManager) -> None:
+    def __init__(self, manager: ResourceManager, task_registry: TaskRegistry) -> None:
         """Initialize the ResourceManagerServicer."""
         self.manager = manager
+        self.task_registry = task_registry
 
     async def DeployUnitTask(
         self,
@@ -25,7 +26,8 @@ class ResourceManagerServicer(resource_manager_pb2_grpc.ResourceManagerServicer)
         context: grpc.aio.ServicerContext,
     ) -> resource_manager_pb2.DeployUnitTaskResponse:
         """Deploy a unit task in the cluster."""
-        await self.manager.deploy_unit_task(UnitTask.from_pb(request.task))
+        task = await self.task_registry.get_task_instance(request.task_instance_name)
+        await self.manager.deploy_unit_task(task, request.task_instance_name)
         return resource_manager_pb2.DeployUnitTaskResponse(status=common_pb2.Status.STATUS_OK)
 
     async def TeardownUnitTask(
@@ -34,7 +36,21 @@ class ResourceManagerServicer(resource_manager_pb2_grpc.ResourceManagerServicer)
         context: grpc.aio.ServicerContext,
     ) -> resource_manager_pb2.TeardownUnitTaskResponse:
         """Reconcile a removed app by shutting down task managers if needed."""
-        await self.manager.teardown_unit_task(UnitTask.from_pb(request.task))
+        task = await self.task_registry.get_task_instance(request.task_instance_name)
+        await self.manager.teardown_unit_task(task, request.task_instance_name)
+        # TODO: theoretically, a resource-manager can fail exactly right here, where the unit task
+        # is already gone, but the CR is still there. So when we implement real failure-recovery,
+        # we still need to double check the executor states against the CRs.
+        try:
+            await self.task_registry.delete_task_instance(request.task_instance_name)
+        except Exception as e:
+            # Propagate an error so the caller can react; other tasks teardown may still proceed
+            logger.exception(
+                "Failed to delete UnitTaskInstance CR %s: %s",
+                request.task_instance_name,
+                e,
+            )
+            raise RuntimeError(f"Failed to delete UnitTaskInstance CR {request.task_instance_name}: {e}") from e
         return resource_manager_pb2.TeardownUnitTaskResponse(status=common_pb2.Status.STATUS_OK)
 
     async def ScaleUnitTask(
@@ -43,10 +59,12 @@ class ResourceManagerServicer(resource_manager_pb2_grpc.ResourceManagerServicer)
         context: grpc.aio.ServicerContext,
     ) -> resource_manager_pb2.ScaleUnitTaskResponse:
         """Scale a unit task up or down."""
+        task = await self.task_registry.get_task_instance(request.task_instance_name)
+
         if request.num_gpus < 0:
-            await self.manager.scale_down_unit_task(UnitTask.from_pb(request.task), -request.num_gpus)
+            await self.manager.scale_down_unit_task(task, request.task_instance_name, -request.num_gpus)
         elif request.num_gpus > 0:
-            await self.manager.scale_up_unit_task(UnitTask.from_pb(request.task), request.num_gpus)
+            await self.manager.scale_up_unit_task(task, request.task_instance_name, request.num_gpus)
         else:
             raise ValueError("The number of GPUs should not be zero.")
         return resource_manager_pb2.ScaleUnitTaskResponse(status=common_pb2.Status.STATUS_OK)
@@ -65,11 +83,25 @@ class ResourceManagerServicer(resource_manager_pb2_grpc.ResourceManagerServicer)
                 False: common_pb2.Status.STATUS_ERROR,
             }
 
-            # Convert the statuses into proto message format
-            proto_statuses = [
-                resource_manager_pb2.TaskManagerStatus(task=task.to_pb(), status=status_map[status])
-                for task, status in task_manager_statuses
-            ]
+            # Convert the statuses into proto message format using actual CR names
+            proto_statuses = []
+            for task, status in task_manager_statuses:
+                # Find the instance name for this task
+                unit_task_instance_name = None
+                for state_id, state in self.manager.task_states.items():
+                    if state.deployment and state.deployment.task == task:
+                        unit_task_instance_name = self.manager.unit_task_instance_names.get(state_id)
+                        break
+
+                if unit_task_instance_name is None:
+                    logger.warning("No instance name found for task %s in healthcheck", task)
+                    unit_task_instance_name = f"unknown-{task.make_name()}"
+
+                proto_statuses.append(
+                    resource_manager_pb2.TaskManagerStatus(
+                        task_instance_name=unit_task_instance_name, status=status_map[status]
+                    )
+                )
 
             return resource_manager_pb2.HealthcheckResponse(
                 status=status_map[overall_status], task_manager_statuses=proto_statuses
@@ -81,9 +113,9 @@ class ResourceManagerServicer(resource_manager_pb2_grpc.ResourceManagerServicer)
             )
 
 
-def create_server(resource_manager: ResourceManager) -> grpc.aio.Server:
+def create_server(resource_manager: ResourceManager, task_registry: TaskRegistry) -> grpc.aio.Server:
     """Create the gRPC server for the Resource Manager."""
-    servicer = ResourceManagerServicer(resource_manager)
+    servicer = ResourceManagerServicer(resource_manager, task_registry)
     server = grpc.aio.server()
     resource_manager_pb2_grpc.add_ResourceManagerServicer_to_server(servicer, server)
     listen_addr = "[::]:50051"

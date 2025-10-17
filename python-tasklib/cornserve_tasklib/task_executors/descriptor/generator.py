@@ -8,9 +8,8 @@ import aiohttp
 
 from cornserve import constants
 from cornserve.services.resource import GPU
-from cornserve.task.builtins.generator import GeneratorInput, GeneratorOutput, GeneratorTask
+from cornserve_tasklib.task.unit.generator import GeneratorInput, GeneratorOutput, GeneratorTask
 from cornserve.task_executors.descriptor.base import TaskExecutionDescriptor
-from cornserve.task_executors.descriptor.registry import DESCRIPTOR_REGISTRY
 from cornserve.task_executors.geri.api import GenerationRequest, GenerationResponse, Status
 
 
@@ -71,5 +70,3 @@ class GeriDescriptor(TaskExecutionDescriptor[GeneratorTask, GeneratorInput, Gene
         else:
             raise RuntimeError(f"Error in generator task: {resp.error_message}")
 
-
-DESCRIPTOR_REGISTRY.register(GeneratorTask, GeriDescriptor, default=True)

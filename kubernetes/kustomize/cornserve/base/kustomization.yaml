@@ -7,6 +7,7 @@ resources:
 - task-dispatcher
 - task-manager
 - namespace.yaml
+- crds
 images:
 - name: cornserve/gateway
   newName: cornserve/gateway

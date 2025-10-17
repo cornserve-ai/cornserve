@@ -28,7 +28,7 @@ spec:
             matchLabels:
               app: sidecar
       runtimeClassName: nvidia
-      serviceAccountName: sidecar
+      serviceAccountName: sidecar-sa
       containers:
       - name: sidecar
         image: cornserve/sidecar:latest

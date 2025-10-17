@@ -35,9 +35,12 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 
+from cornserve_tasklib.task.composite.llm import MLLMTask
+from cornserve_tasklib.task.unit.encoder import Modality
+from cornserve_tasklib.task.unit.llm import OpenAIChatCompletionChunk, OpenAIChatCompletionRequest
+
 from cornserve.app.base import AppConfig
 from cornserve.task.base import Task
-from cornserve.task.builtins.llm import MLLMTask, Modality, OpenAIChatCompletionChunk, OpenAIChatCompletionRequest
 
 gemma_model_ids = {
     "gemma3-4b": "google/gemma-3-4b-it",

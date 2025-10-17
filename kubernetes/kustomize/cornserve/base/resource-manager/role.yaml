@@ -1,11 +1,31 @@
+---
 apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRole
+kind: Role
 metadata:
-  name: resource-manager-role
+  namespace: cornserve
+  name: resource-manager-cr-access-role
+rules:
+- apiGroups: ["cornserve.ai"]
+  resources: ["taskdefinitions", "unittaskinstances", "executiondescriptors"]
+  verbs: ["create", "update", "patch", "get", "list", "watch", "delete"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  namespace: cornserve
+  name: resource-manager-pod-service-management-role
 rules:
 - apiGroups: [""]
   resources: ["pods", "services"]
-  verbs: ["*"]
+  verbs: ["create", "update", "patch", "get", "list", "watch", "delete"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: resource-manager-nodes-role
+rules:
 - apiGroups: [""]
   resources: ["nodes"]
   verbs: ["list"]

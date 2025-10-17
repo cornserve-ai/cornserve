@@ -2,7 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from cornserve.task.builtins.llm import LLMUnitTask
+from cornserve_tasklib.task.unit.llm import LLMUnitTask
+
 from cornserve.task_executors.profile import ProfileInfo, UnitTaskProfile, UnitTaskProfileManager
 
 GEMMA_3_27B_PROFILE_JSON = """
