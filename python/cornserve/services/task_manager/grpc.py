@@ -9,7 +9,6 @@ from cornserve.services.pb import common_pb2, task_manager_pb2, task_manager_pb2
 from cornserve.services.resource import GPU
 from cornserve.services.task_manager.manager import TaskManager
 from cornserve.services.task_registry import TaskRegistry
-from cornserve.task.base import UnitTask
 
 logger = get_logger(__name__)
 cleanup_coroutines = []

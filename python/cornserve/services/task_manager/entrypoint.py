@@ -6,8 +6,8 @@ import asyncio
 import signal
 
 from cornserve.logging import get_logger
-from cornserve.services.task_registry import TaskRegistry
 from cornserve.services.task_manager.grpc import create_server
+from cornserve.services.task_registry import TaskRegistry
 
 logger = get_logger("cornserve.services.task_manager.entrypoint")
 
@@ -19,10 +19,7 @@ async def serve() -> None:
     # Start registry watcher to load tasks/descriptors before gRPC server starts
     logger.info("Starting registry watcher for Task Manager service")
     task_registry = TaskRegistry()
-    cr_watcher_task = asyncio.create_task(
-        task_registry.watch_updates(),
-        name="task_manager_entrypoint_cr_watcher"
-    )
+    cr_watcher_task = asyncio.create_task(task_registry.watch_updates(), name="task_manager_entrypoint_cr_watcher")
 
     server, servicer = create_server(task_registry)
     await server.start()
@@ -43,7 +40,7 @@ async def serve() -> None:
         await server_task
     except asyncio.CancelledError:
         logger.info("Shutting down Task Manager service")
-        
+
         # Cancel task watcher
         if not cr_watcher_task.done():
             logger.info("Cancelling task watcher task")
@@ -52,10 +49,10 @@ async def serve() -> None:
                 await cr_watcher_task
             except asyncio.CancelledError:
                 logger.info("task watcher task cancelled successfully")
-        
+
         # Close registry
         await task_registry.shutdown()
-        
+
         await server.stop(5)
         if servicer.manager is not None:
             logger.info("Shutting down task manager...")

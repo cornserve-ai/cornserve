@@ -19,12 +19,13 @@ EOF
 
 from __future__ import annotations
 
-from cornserve.app.base import AppConfig
 from cornserve_tasklib.task.unit.huggingface import (
     HuggingFaceQwenOmniInput,
     HuggingFaceQwenOmniOutput,
     HuggingFaceQwenOmniTask,
 )
+
+from cornserve.app.base import AppConfig
 
 # Create the HuggingFace Qwen 2.5 Omni task
 qwen_omni = HuggingFaceQwenOmniTask(model_id="Qwen/Qwen2.5-Omni-7B")

@@ -147,20 +147,23 @@ class TaskManager:
             except Exception as e:
                 # Rollback for errors happening before gather (e.g., instance creation failures)
                 cleanup_coros = [
-                    self.resource_manager.TeardownUnitTask(
-                        TeardownUnitTaskRequest(task_instance_name=name)
-                    )
+                    self.resource_manager.TeardownUnitTask(TeardownUnitTaskRequest(task_instance_name=name))
                     for name in unit_task_instance_names.values()
                 ]
                 if cleanup_coros:
                     await asyncio.gather(*cleanup_coros, return_exceptions=True)
 
                 # Restore snapshots (preserve defaultdict type)
-                self.tasks.clear(); self.tasks.update(snapshot_tasks)
-                self.task_states.clear(); self.task_states.update(snapshot_states)
-                self.unit_task_instance_names.clear(); self.unit_task_instance_names.update(snapshot_instance_names)
-                self.task_uuids.clear(); self.task_uuids.update(snapshot_uuids)
-                self.task_usage_counter.clear(); self.task_usage_counter.update(snapshot_usage)
+                self.tasks.clear()
+                self.tasks.update(snapshot_tasks)
+                self.task_states.clear()
+                self.task_states.update(snapshot_states)
+                self.unit_task_instance_names.clear()
+                self.unit_task_instance_names.update(snapshot_instance_names)
+                self.task_uuids.clear()
+                self.task_uuids.update(snapshot_uuids)
+                self.task_usage_counter.clear()
+                self.task_usage_counter.update(snapshot_usage)
                 logger.info("Rolled back deployment due to pre-deploy error: %r", e)
                 raise
 
@@ -192,11 +195,16 @@ class TaskManager:
                     await asyncio.gather(*cleanup_coros, return_exceptions=True)
 
                 # Restore snapshots (preserve defaultdict type)
-                self.tasks.clear(); self.tasks.update(snapshot_tasks)
-                self.task_states.clear(); self.task_states.update(snapshot_states)
-                self.unit_task_instance_names.clear(); self.unit_task_instance_names.update(snapshot_instance_names)
-                self.task_uuids.clear(); self.task_uuids.update(snapshot_uuids)
-                self.task_usage_counter.clear(); self.task_usage_counter.update(snapshot_usage)
+                self.tasks.clear()
+                self.tasks.update(snapshot_tasks)
+                self.task_states.clear()
+                self.task_states.update(snapshot_states)
+                self.unit_task_instance_names.clear()
+                self.unit_task_instance_names.update(snapshot_instance_names)
+                self.task_uuids.clear()
+                self.task_uuids.update(snapshot_uuids)
+                self.task_usage_counter.clear()
+                self.task_usage_counter.update(snapshot_usage)
                 logger.info("Rolled back deployment of all deployed tasks")
                 # Errors are logged above, so we just raise a generic error here.
                 raise RuntimeError("Error while deploying tasks")
@@ -281,15 +289,13 @@ class TaskManager:
                 raise RuntimeError(f"Unit Task {task_id} is not ready yet. Retry when it's ready.")
             if task_id not in self.unit_task_instance_names:
                 raise RuntimeError(f"No CR name found for task {task_id}")
-            
+
             unit_task_instance_name = self.unit_task_instance_names[task_id]
             response = await self.resource_manager.ScaleUnitTask(
                 ScaleUnitTaskRequest(task_instance_name=unit_task_instance_name, num_gpus=num_gpus)
             )
             if response.status != common_pb2.Status.STATUS_OK:
-                raise RuntimeError(
-                    f"Failed to scale task {task_id} to update {num_gpus} GPUs: {response.message}"
-                )
+                raise RuntimeError(f"Failed to scale task {task_id} to update {num_gpus} GPUs: {response.message}")
         except Exception as e:
             logger.error("Error while scaling unit task %s", task_id)
             raise RuntimeError(f"Error while scaling unit task {task_id}: {e}") from e

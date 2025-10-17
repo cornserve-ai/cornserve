@@ -21,10 +21,11 @@ EOF
 
 from __future__ import annotations
 
-from cornserve.app.base import AppConfig
-from cornserve.task.base import Task, TaskInput, TaskOutput
 from cornserve_tasklib.task.unit.generator import GeneratorInput, GeneratorTask, Modality
 from cornserve_tasklib.task.unit.llm import LLMEmbeddingUnitTask, OpenAIChatCompletionRequest
+
+from cornserve.app.base import AppConfig
+from cornserve.task.base import Task, TaskInput, TaskOutput
 
 
 class QwenImageInput(TaskInput):

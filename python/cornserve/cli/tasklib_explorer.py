@@ -7,27 +7,24 @@ descriptors. The CLI consumes these entries to create requests to the gateway.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, get_args, get_origin, ForwardRef
-
-from cornserve.task.base import Task, UnitTask
-from cornserve.task_executors.descriptor.base import TaskExecutionDescriptor
-from cornserve.services.gateway.models import (
-    TaskDefinitionPayload,
-    DescriptorDefinitionPayload,
-)
-
 import base64
 import importlib
 import inspect
 import pkgutil
+from typing import ForwardRef, get_args, get_origin
+
+from cornserve.services.gateway.models import (
+    DescriptorDefinitionPayload,
+    TaskDefinitionPayload,
+)
+from cornserve.task.base import Task, UnitTask
+from cornserve.task_executors.descriptor.base import TaskExecutionDescriptor
 
 
 def _camel_to_kebab(name: str) -> str:
     out: list[str] = []
     for i, ch in enumerate(name):
-        if ch.isupper() and i > 0 and (
-            not name[i - 1].isupper() or (i + 1 < len(name) and not name[i + 1].isupper())
-        ):
+        if ch.isupper() and i > 0 and (not name[i - 1].isupper() or (i + 1 < len(name) and not name[i + 1].isupper())):
             out.append("-")
         out.append(ch.lower())
     return "".join(out)
@@ -54,9 +51,9 @@ def _sanitize_k8s_name(raw: str) -> str:
 
 
 def discover_tasklib() -> tuple[
-    list["TaskDefinitionPayload"],
-    list["TaskDefinitionPayload"],
-    list["DescriptorDefinitionPayload"],
+    list[TaskDefinitionPayload],
+    list[TaskDefinitionPayload],
+    list[DescriptorDefinitionPayload],
 ]:
     """Discover unit/composite tasks and descriptors from cornserve_tasklib.
 
@@ -66,7 +63,7 @@ def discover_tasklib() -> tuple[
         gateway deployment request payloads.
     """
     try:
-        import cornserve_tasklib  # noqa: F401  # ensure package importable
+        import cornserve_tasklib  # noqa: F401, PLC0415  # the tasklib is an external package, so we import it carefully
     except Exception as e:  # pragma: no cover - bubbled to CLI
         raise ImportError(f"Failed to import cornserve_tasklib: {e}") from e
 
@@ -86,7 +83,7 @@ def discover_tasklib() -> tuple[
     task_pkg = importlib.import_module("cornserve_tasklib.task")
     for modinfo in pkgutil.walk_packages(task_pkg.__path__, prefix=task_pkg.__name__ + "."):
         module = importlib.import_module(modinfo.name)
-        for name, obj in inspect.getmembers(module, inspect.isclass):
+        for _name, obj in inspect.getmembers(module, inspect.isclass):
             if obj.__module__ != module.__name__:
                 continue
             if issubclass(obj, UnitTask) and obj is not UnitTask:
@@ -114,7 +111,7 @@ def discover_tasklib() -> tuple[
     desc_pkg = importlib.import_module("cornserve_tasklib.task_executors.descriptor")
     for modinfo in pkgutil.walk_packages(desc_pkg.__path__, prefix=desc_pkg.__name__ + "."):
         module = importlib.import_module(modinfo.name)
-        for name, obj in inspect.getmembers(module, inspect.isclass):
+        for _name, obj in inspect.getmembers(module, inspect.isclass):
             if obj.__module__ != module.__name__:
                 continue
             if issubclass(obj, TaskExecutionDescriptor) and obj is not TaskExecutionDescriptor:
@@ -182,7 +179,8 @@ def discover_tasklib() -> tuple[
                                 break
                 if task_cls_name is None:
                     raise ValueError(
-                        f"Descriptor {obj.__name__} must derive from TaskExecutionDescriptor[<UnitTask>, ...] with concrete types"
+                        f"Descriptor {obj.__name__} must derive from "
+                        "TaskExecutionDescriptor[<UnitTask>, ...] with concrete types"
                     )
                 descriptor_entries.append(
                     DescriptorDefinitionPayload(

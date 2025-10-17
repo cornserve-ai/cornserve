@@ -8,7 +8,6 @@ from cornserve.logging import get_logger
 from cornserve.services.pb import common_pb2, resource_manager_pb2, resource_manager_pb2_grpc
 from cornserve.services.resource_manager.manager import ResourceManager
 from cornserve.services.task_registry import TaskRegistry
-from cornserve.task.base import UnitTask
 
 logger = get_logger(__name__)
 
@@ -51,9 +50,7 @@ class ResourceManagerServicer(resource_manager_pb2_grpc.ResourceManagerServicer)
                 request.task_instance_name,
                 e,
             )
-            raise RuntimeError(
-                f"Failed to delete UnitTaskInstance CR {request.task_instance_name}: {e}"
-            ) from e
+            raise RuntimeError(f"Failed to delete UnitTaskInstance CR {request.task_instance_name}: {e}") from e
         return resource_manager_pb2.TeardownUnitTaskResponse(status=common_pb2.Status.STATUS_OK)
 
     async def ScaleUnitTask(
@@ -63,7 +60,7 @@ class ResourceManagerServicer(resource_manager_pb2_grpc.ResourceManagerServicer)
     ) -> resource_manager_pb2.ScaleUnitTaskResponse:
         """Scale a unit task up or down."""
         task = await self.task_registry.get_task_instance(request.task_instance_name)
-        
+
         if request.num_gpus < 0:
             await self.manager.scale_down_unit_task(task, request.task_instance_name, -request.num_gpus)
         elif request.num_gpus > 0:
@@ -102,8 +99,7 @@ class ResourceManagerServicer(resource_manager_pb2_grpc.ResourceManagerServicer)
 
                 proto_statuses.append(
                     resource_manager_pb2.TaskManagerStatus(
-                        task_instance_name=unit_task_instance_name,
-                        status=status_map[status]
+                        task_instance_name=unit_task_instance_name, status=status_map[status]
                     )
                 )
 

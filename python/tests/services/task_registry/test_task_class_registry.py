@@ -25,6 +25,7 @@ def teardown_function() -> None:
 def test_loads_and_registers_unit_task_with_io_models() -> None:
     # Use real tasklib classes via a thin wrapper module
     import cornserve_tasklib.task.unit.encoder as encoder_mod
+
     src = textwrap.dedent(
         f"""
         from __future__ import annotations
@@ -72,6 +73,7 @@ def test_missing_generic_args_raises() -> None:
 def test_registers_composite_task_without_io_models() -> None:
     # Use real composite task from tasklib via a thin wrapper
     import cornserve_tasklib.task.composite.llm as mllm_mod
+
     src = textwrap.dedent(
         f"""
         from __future__ import annotations
@@ -92,6 +94,7 @@ def test_registers_composite_task_without_io_models() -> None:
 
 def test_contains_and_list_and_clear() -> None:
     import cornserve_tasklib.task.unit.llm as llm_mod
+
     src = textwrap.dedent(
         f"""
         from __future__ import annotations
@@ -111,6 +114,3 @@ def test_contains_and_list_and_clear() -> None:
 
     TASK_CLASS_REGISTRY.clear()
     assert "LLMUnitTask" not in TASK_CLASS_REGISTRY
-
-
-

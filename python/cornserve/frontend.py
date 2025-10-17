@@ -9,13 +9,14 @@ import threading
 import time
 from urllib.parse import urlparse
 
-import websocket
 import requests
+import websocket
 from pydantic import BaseModel
 
+from cornserve.cli.tasklib_explorer import discover_tasklib
 from cornserve.constants import K8S_GATEWAY_SERVICE_HTTP_URL
-from cornserve.task.base import Task, UnitTask, UnitTaskList, discover_unit_tasks
 from cornserve.services.gateway.models import TasksDeploymentRequest
+from cornserve.task.base import Task, UnitTask, UnitTaskList, discover_unit_tasks
 
 
 class TaskRequestVerb(enum.Enum):
@@ -204,11 +205,6 @@ class CornserveClient:
 
         Returns a TaskResponse summarizing deployment results.
         """
-        try:
-            from cornserve.cli.tasklib_explorer import discover_tasklib
-        except Exception as e:
-            return TaskResponse(status=500, content=f"Failed to import tasklib explorer: {e}")
-
         try:
             unit_task_entries, composite_task_entries, descriptor_entries = discover_tasklib()
         except Exception as e:

@@ -5,8 +5,8 @@ import textwrap
 
 import pytest
 
-from cornserve.services.task_registry.task_class_registry import TASK_CLASS_REGISTRY
 from cornserve.services.task_registry.descriptor_registry import DESCRIPTOR_REGISTRY
+from cornserve.services.task_registry.task_class_registry import TASK_CLASS_REGISTRY
 
 
 def _b64(s: str) -> str:
@@ -27,6 +27,7 @@ def teardown_function() -> None:
 def test_descriptor_registers_immediately_when_task_is_present() -> None:
     # Use real Encoder task via a thin wrapper module
     import cornserve_tasklib.task.unit.encoder as encoder_mod
+
     task_source = textwrap.dedent(
         f"""
         from __future__ import annotations
@@ -111,6 +112,7 @@ def test_descriptor_queued_then_bound_when_task_arrives() -> None:
 
     # Now load a real unit task via a wrapper module
     import cornserve_tasklib.task.unit.llm as llm_mod
+
     task_source = textwrap.dedent(
         f"""
         from __future__ import annotations
@@ -145,6 +147,7 @@ def test_descriptor_errors_are_informative() -> None:
 def test_default_vs_named_descriptor_resolution() -> None:
     # Prepare a real task
     import cornserve_tasklib.task.unit.encoder as encoder_mod
+
     task_source = textwrap.dedent(
         f"""
         from __future__ import annotations
@@ -201,12 +204,14 @@ def test_default_vs_named_descriptor_resolution() -> None:
 
     # Register named variant (non-default) by loading the class without default registration
     task_cls, _, _ = TASK_CLASS_REGISTRY.get_unit_task("EncoderTask")
-    import sys, types
+    import sys
+    import types
     from importlib.machinery import ModuleSpec
+
     module_name = "x.mod.desc_named"
     mod = types.ModuleType(module_name)
     mod.__spec__ = ModuleSpec(module_name, loader=None, is_package=False)
-    mod.__package__ = module_name.rpartition('.')[0] or module_name
+    mod.__package__ = module_name.rpartition(".")[0] or module_name
     mod.__file__ = f"<test:{module_name}>"
     exec(desc_named, mod.__dict__)
     sys.modules[module_name] = mod
@@ -215,5 +220,3 @@ def test_default_vs_named_descriptor_resolution() -> None:
     # Now both should be accessible; default without name
     assert DESCRIPTOR_REGISTRY.get(task_cls).__name__ == "MyDefault"
     assert DESCRIPTOR_REGISTRY.get(task_cls, name="MyNamed").__name__ == "MyNamed"
-
-

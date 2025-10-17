@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING, Any, ClassVar, Generic, Self, TypeVar, final, 
 
 import aiohttp
 from opentelemetry import trace
-from pydantic import BaseModel, ConfigDict, Field, model_serializer, model_validator, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, model_serializer, model_validator
 
 from cornserve.constants import K8S_GATEWAY_SERVICE_HTTP_URL
 from cornserve.logging import get_logger
@@ -423,21 +423,22 @@ class UnitTask(Task, Generic[InputT, OutputT]):
         """Get the task execution descriptor for this task."""
         # Lazy import to avoid circular import
         # otherwise: cornserve.task.base -> descriptor_registry -> task_class_registry -> cornserve.task.base
-        from cornserve.services.task_registry.descriptor_registry import DESCRIPTOR_REGISTRY
+        from cornserve.services.task_registry.descriptor_registry import DESCRIPTOR_REGISTRY  # noqa: PLC0415
+
         descriptor_cls = DESCRIPTOR_REGISTRY.get(self.root_unit_task_cls, self.execution_descriptor_name)
-        
-        # CRITICAL: Use model_construct instead of standard Pydantic validation.
+
+        # NOTE: Use model_construct instead of standard Pydantic validation.
         # Reason: descriptor types are registered from CR-loaded task classes, while apps
         # load their own identically named task classes. Strict validation compares class
         # identity, so passing an app instance is rejected.
         #
-        # EXAMPLE:
-        # - Descriptor expects: EncoderTask (id: 104678592029536) from TASK_CLASS_REGISTRY  
+        # Example:
+        # - Descriptor expects: EncoderTask (id: 104678592029536) from TASK_CLASS_REGISTRY
         # - App provides:       EncoderTask (id: 104678589216976) from app source
         # - Same name, same structure, but different memory addresses → Validation fails
         #
         # So, we use model_construct to bypass identity checks but preserve data integrity.
-        
+
         return descriptor_cls.model_construct(task=self)
 
     def is_equivalent_to(self, other: object) -> bool:
@@ -513,10 +514,8 @@ class UnitTask(Task, Generic[InputT, OutputT]):
 
         raise AssertionError("Task context is neither in recording nor replay mode.")
 
-
     @classmethod
-
-    def make_name(self) -> str:
+    def make_name(self) -> str:  # noqa: N804
         """Create a concise string representation of the task."""
         return f"{self.__class__.__name__.lower()}"
 
@@ -556,7 +555,8 @@ class TaskInvocation(BaseModel, Generic[InputT, OutputT]):
 
         # Now this is likely when we're deserializing the object from the serialized data.
         # Lazy import to avoid circular import
-        from cornserve.services.task_registry.task_class_registry import TASK_CLASS_REGISTRY
+        from cornserve.services.task_registry.task_class_registry import TASK_CLASS_REGISTRY  # noqa: PLC0415
+
         task_cls, task_input_cls, task_output_cls = TASK_CLASS_REGISTRY.get_unit_task(data["class_name"])
         task = task_cls.model_validate_json(data["body"]["task"])
         task_input = task_input_cls.model_validate_json(data["body"]["task_input"])
@@ -819,7 +819,8 @@ class UnitTaskList(BaseModel):
         for item in data["_task_list"]:
             task_data = item["task"]
             # Lazy import to avoid circular import
-            from cornserve.services.task_registry.task_class_registry import TASK_CLASS_REGISTRY
+            from cornserve.services.task_registry.task_class_registry import TASK_CLASS_REGISTRY  # noqa: PLC0415
+
             task_class, _, _ = TASK_CLASS_REGISTRY.get_unit_task(item["class_name"])
             task = task_class.model_validate_json(task_data)
             tasks.append(task)

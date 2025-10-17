@@ -13,8 +13,8 @@ from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 from opentelemetry.instrumentation.grpc import GrpcAioInstrumentorClient
 
 from cornserve.logging import get_logger
-from cornserve.services.task_registry import TaskRegistry
 from cornserve.services.gateway.router import create_app
+from cornserve.services.task_registry import TaskRegistry
 from cornserve.tracing import configure_otel
 from cornserve.utils import set_ulimit
 
@@ -32,14 +32,11 @@ async def serve() -> None:
     configure_otel("gateway")
 
     app = create_app()
-    
+
     # Start task watcher to load tasks from Custom Resources BEFORE starting FastAPI
     logger.info("Starting task watcher for Gateway service")
     task_registry: TaskRegistry = app.state.task_registry
-    cr_watcher_task = asyncio.create_task(
-        task_registry.watch_updates(),
-        name="gateway_cr_watcher"
-    )
+    cr_watcher_task = asyncio.create_task(task_registry.watch_updates(), name="gateway_cr_watcher")
     FastAPIInstrumentor.instrument_app(app)
     GrpcAioInstrumentorClient().instrument()
     AioHttpClientInstrumentor().instrument()
@@ -79,7 +76,7 @@ async def serve() -> None:
         await server_task
     except asyncio.CancelledError:
         logger.info("Shutting down Gateway service")
-        
+
         # Cancel task watcher task
         if not cr_watcher_task.done():
             logger.info("Cancelling task watcher task")
@@ -88,10 +85,10 @@ async def serve() -> None:
                 await cr_watcher_task
             except asyncio.CancelledError:
                 logger.info("task watcher task cancelled successfully")
-        
+
         # Close CR manager
         await task_registry.shutdown()
-        
+
         await app_manager.shutdown()
         await server.shutdown()
 

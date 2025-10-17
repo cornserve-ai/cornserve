@@ -17,18 +17,18 @@ from kubernetes_asyncio.watch import Watch
 
 from cornserve.constants import (
     CRD_GROUP,
-    CRD_VERSION,
-    K8S_NAMESPACE,
-    CRD_PLURAL_TASK_DEFINITIONS,
-    CRD_PLURAL_UNIT_TASK_INSTANCES,
-    CRD_PLURAL_EXECUTION_DESCRIPTORS,
+    CRD_KIND_EXECUTION_DESCRIPTOR,
     CRD_KIND_TASK_DEFINITION,
     CRD_KIND_UNIT_TASK_INSTANCE,
-    CRD_KIND_EXECUTION_DESCRIPTOR,
+    CRD_PLURAL_EXECUTION_DESCRIPTORS,
+    CRD_PLURAL_TASK_DEFINITIONS,
+    CRD_PLURAL_UNIT_TASK_INSTANCES,
+    CRD_VERSION,
+    K8S_NAMESPACE,
 )
 from cornserve.logging import get_logger
-from cornserve.services.task_registry.task_class_registry import TASK_CLASS_REGISTRY
 from cornserve.services.task_registry.descriptor_registry import DESCRIPTOR_REGISTRY
+from cornserve.services.task_registry.task_class_registry import TASK_CLASS_REGISTRY
 
 if TYPE_CHECKING:
     from cornserve.task.base import UnitTask
@@ -38,8 +38,10 @@ logger = get_logger(__name__)
 
 
 class TaskRegistry:
+    """Utilities for interacting with k8s CRs for task related classes and instances."""
 
     def __init__(self) -> None:
+        """Initialize lazy Kubernetes API clients."""
         self._api_client: client.ApiClient | None = None
         self._custom_api: client.CustomObjectsApi | None = None
 
@@ -98,11 +100,7 @@ class TaskRegistry:
                 raise ValueError(f"Task definition {name} already exists") from e
             raise
 
-    async def create_task_instance_from_task(
-        self,
-        task: UnitTask,
-        task_uuid: str
-    ) -> str:
+    async def create_task_instance_from_task(self, task: UnitTask, task_uuid: str) -> str:
         """Create a named task instance from a configured task object.
 
         Returns the instance name.
@@ -180,9 +178,7 @@ class TaskRegistry:
                 raise ValueError(f"Execution descriptor {name} already exists") from e
             raise
 
-    async def get_task_instance(
-        self, instance_name: str
-    ) -> UnitTask:
+    async def get_task_instance(self, instance_name: str) -> UnitTask:
         """Reconstruct a configured task from its instance name."""
         await self._load_config()
         assert self._custom_api is not None
@@ -267,7 +263,7 @@ class TaskRegistry:
                     module_name=module_name,
                     is_unit_task=is_unit_task,
                 )
-                
+
                 # Only bind descriptors for unit tasks
                 if is_unit_task:
                     try:
@@ -277,7 +273,12 @@ class TaskRegistry:
                         # If task not fully available, binding will happen on later attempts
                         pass
             except Exception as e:
-                logger.error("Failed to register task %s from %s: %s", task_class_name if 'task_class_name' in locals() else 'unknown', name, e)
+                logger.error(
+                    "Failed to register task %s from %s: %s",
+                    task_class_name if "task_class_name" in locals() else "unknown",
+                    name,
+                    e,
+                )
 
         elif kind == CRD_KIND_EXECUTION_DESCRIPTOR and event_type in ("EXISTING", "ADDED", "MODIFIED"):
             try:
@@ -299,7 +300,7 @@ class TaskRegistry:
             except Exception as e:
                 logger.error(
                     "Failed to register execution descriptor %s from %s: %s",
-                    descriptor_class_name if 'descriptor_class_name' in locals() else 'unknown',
+                    descriptor_class_name if "descriptor_class_name" in locals() else "unknown",
                     name,
                     e,
                 )
@@ -367,9 +368,8 @@ class TaskRegistry:
         await self._watch_resource(CRD_PLURAL_EXECUTION_DESCRIPTORS, CRD_KIND_EXECUTION_DESCRIPTOR)
 
     async def shutdown(self) -> None:
+        """Close underlying Kubernetes client resources."""
         if self._api_client:
             await self._api_client.close()
             self._api_client = None
             self._custom_api = None
-
-

@@ -25,16 +25,17 @@ from rich.text import Text
 from tyro.constructors import PrimitiveConstructorSpec
 
 from cornserve.cli.log_streamer import LogStreamer
+from cornserve.cli.tasklib_explorer import discover_tasklib
 from cornserve.cli.utils.k8s import load_k8s_config
 from cornserve.constants import K8S_NAMESPACE, K8S_UNIT_TASK_PROFILES_CONFIG_MAP_NAME
 from cornserve.services.gateway.models import (
     AppInvocationRequest,
     AppRegistrationRequest,
-    TasksDeploymentRequest,
     RegistrationErrorResponse,
     RegistrationFinalResponse,
     RegistrationInitialResponse,
     RegistrationStatusEvent,
+    TasksDeploymentRequest,
 )
 
 try:
@@ -551,12 +552,6 @@ def deploy_tasklib() -> None:
     We firstly deploy unit tasks and descriptors because the composite ones depend on them.
     """
     try:
-        from cornserve.cli.tasklib_explorer import discover_tasklib
-    except Exception as e:
-        rich.print(Panel(f"Failed to import tasklib explorer: {e}", style="red", expand=False))
-        return
-
-    try:
         unit_task_entries, composite_task_entries, descriptor_entries = discover_tasklib()
     except Exception as e:
         rich.print(Panel(f"Failed to explore cornserve_tasklib: {e}", style="red", expand=False))
@@ -719,6 +714,8 @@ def profile_deploy(
         rich.print(Panel(f"Kubernetes API error: {e.status} {e.reason}\n{e.body}", style="red", expand=False))
     except Exception as e:
         rich.print(Panel(f"Failed to deploy profiles: {e}", style="red", expand=False))
+
+
 def main() -> None:
     """Main entry point for the Cornserve CLI."""
     app.cli(description="Cornserve CLI")

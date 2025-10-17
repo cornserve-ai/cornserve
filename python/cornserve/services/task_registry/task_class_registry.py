@@ -1,15 +1,16 @@
+"""Registry for task classes dynamically loaded from k8s CRs (unit and composite)."""
+
 from __future__ import annotations
 
 import base64
-import importlib.util
 import sys
 import types
 from importlib.machinery import ModuleSpec
 from typing import TYPE_CHECKING
 
 from cornserve.logging import get_logger
-from cornserve.task.base import UnitTask, Task
 from cornserve.services.task_registry.util import create_package_hierarchy_if_missing
+from cornserve.task.base import Task, UnitTask
 
 if TYPE_CHECKING:
     from cornserve.task.base import TaskInput, TaskOutput
@@ -20,14 +21,15 @@ logger = get_logger(__name__)
 class TaskClassRegistry:
     """Registry for dynamically loaded Task classes (both Unit and Composite).
 
-    For unit tasks: store a mapping: task-class-name -> (task class, input model, output model).
-    For composite tasks: store a mapping: task-class-name -> (task class, None, None).
+    For unit tasks: maps name -> (task class, input model, output model).
+    For composite tasks: maps name -> task class.
     """
 
     def __init__(self) -> None:
+        """Initialize registries for unit and composite task classes."""
         self._unit_tasks: dict[str, tuple[type[UnitTask], type[TaskInput], type[TaskOutput]]] = {}
         self._composite_tasks: dict[str, type[Task]] = {}
-        
+
         # Task modules that failed to load due to dependency/order issues
         # each item is (decoded_source, module_name, task_class_name, is_unit_task)
         self._pending: list[tuple[str, str, str, bool]] = []
@@ -54,7 +56,9 @@ class TaskClassRegistry:
         self._composite_tasks[name] = task
         logger.info("Registered composite task: %s", name)
 
-    def load_from_source(self, source_code: str, task_class_name: str, module_name: str, is_unit_task: bool = True) -> None:
+    def load_from_source(
+        self, source_code: str, task_class_name: str, module_name: str, is_unit_task: bool = True
+    ) -> None:
         """Load a Task class from base64-encoded source and register it.
 
         Args:
@@ -76,7 +80,9 @@ class TaskClassRegistry:
         except ModuleNotFoundError as e:
             missing = getattr(e, "name", "") or str(e)
             # If dependency is another CR-backed module, queue for retry
-            if isinstance(missing, str) and (missing.startswith("cornserve_tasklib.") or missing.startswith("cornserve.")):
+            if isinstance(missing, str) and (
+                missing.startswith("cornserve_tasklib.") or missing.startswith("cornserve.")
+            ):
                 self._pending.append((decoded_source, module_name, task_class_name, is_unit_task))
                 logger.info(
                     "Queued task module %s for later due to missing dependency: %s",
@@ -97,7 +103,7 @@ class TaskClassRegistry:
         created_packages: list[str] = []
 
         # Ensure parent packages
-        parent = module_name.rpartition('.')[0]
+        parent = module_name.rpartition(".")[0]
         if parent:
             create_package_hierarchy_if_missing(parent)
             # Track packages created for rollback
@@ -114,7 +120,7 @@ class TaskClassRegistry:
         previous_module = sys.modules.get(module_name)
         sys.modules[module_name] = module
         if parent:
-            setattr(sys.modules[parent], module_name.split('.')[-1], module)
+            setattr(sys.modules[parent], module_name.split(".")[-1], module)
 
         try:
             # Execute the decoded source
@@ -128,9 +134,8 @@ class TaskClassRegistry:
             if is_unit_task:
                 if not issubclass(task_cls, UnitTask):
                     raise ValueError(f"Class {task_class_name} is not a UnitTask subclass")
-            else:
-                if not issubclass(task_cls, Task):
-                    raise ValueError(f"Class {task_class_name} is not a Task subclass")
+            elif not issubclass(task_cls, Task):
+                raise ValueError(f"Class {task_class_name} is not a Task subclass")
 
             if not is_unit_task:
                 self._register_composite(task_cls, task_class_name)
@@ -156,19 +161,22 @@ class TaskClassRegistry:
                 # so to let it goes through, we register it with dummy TaskInput/Output types
                 # TODO: Such special case is definitely not legetimate, what should we do instead?
                 if task_class_name == "LLMBaseUnitTask":
-                    from cornserve.task.base import TaskInput as DummyInput, TaskOutput as DummyOutput
+                    from cornserve.task.base import TaskInput as DummyInput  # noqa: PLC0415
+                    from cornserve.task.base import TaskOutput as DummyOutput  # noqa: PLC0415
+
                     task_input_cls, task_output_cls = DummyInput, DummyOutput
                 else:
                     raise ValueError(
-                        f"Task class {task_class_name} missing generic type arguments. Expected format: class {task_class_name}(UnitTask[InputType, OutputType])"
+                        f"Task class {task_class_name} missing generic type arguments. "
+                        f"Expected format: class {task_class_name}(UnitTask[InputType, OutputType])"
                     )
 
             self._register(task_cls, task_input_cls, task_output_cls, task_class_name)
         except Exception:
             # Roll back package placeholders
             for pkg_name in reversed(created_packages):
-                parent_name = pkg_name.rpartition('.')[0]
-                child_name = pkg_name.split('.')[-1]
+                parent_name = pkg_name.rpartition(".")[0]
+                child_name = pkg_name.split(".")[-1]
                 if parent_name in sys.modules:
                     try:
                         if getattr(sys.modules[parent_name], child_name, None) is sys.modules.get(pkg_name):
@@ -178,8 +186,8 @@ class TaskClassRegistry:
                 sys.modules.pop(pkg_name, None)
             # Roll back pre-inserted module to restore sys.modules state
             try:
-                if parent and getattr(sys.modules.get(parent, None), module_name.split('.')[-1], None) is module:
-                    delattr(sys.modules[parent], module_name.split('.')[-1])
+                if parent and getattr(sys.modules.get(parent, None), module_name.split(".")[-1], None) is module:
+                    delattr(sys.modules[parent], module_name.split(".")[-1])
             except Exception:
                 pass
             if preexisting:
@@ -204,7 +212,9 @@ class TaskClassRegistry:
                 logger.info("Registered pending task class: %s", task_class_name)
             except ModuleNotFoundError as e:
                 missing = getattr(e, "name", "") or str(e)
-                if isinstance(missing, str) and (missing.startswith("cornserve_tasklib.") or missing.startswith("cornserve.")):
+                if isinstance(missing, str) and (
+                    missing.startswith("cornserve_tasklib.") or missing.startswith("cornserve.")
+                ):
                     remaining.append((decoded_source, module_name, task_class_name, is_unit_task))
                 else:
                     logger.error("Failed to load pending task %s: %r", task_class_name, e)
@@ -215,14 +225,17 @@ class TaskClassRegistry:
     def get_unit_task(self, name: str) -> tuple[type[UnitTask], type[TaskInput], type[TaskOutput]]:
         """Return (task class, input model, output model) by registered name for unit tasks."""
         if name not in self._unit_tasks:
-            raise KeyError(f"Unit task with name={name} not found. Available unit tasks: {self.list_registered_unit_tasks()}")
+            raise KeyError(
+                f"Unit task with name={name} not found. Available unit tasks: {self.list_registered_unit_tasks()}"
+            )
         return self._unit_tasks[name]
 
     def __contains__(self, name: str) -> bool:
+        """Return True if a unit or composite task with given name exists."""
         return name in self._unit_tasks or name in self._composite_tasks
 
-
     def clear(self) -> None:
+        """Clear all registered task classes."""
         self._unit_tasks.clear()
         self._composite_tasks.clear()
 
@@ -232,5 +245,3 @@ class TaskClassRegistry:
 
 
 TASK_CLASS_REGISTRY = TaskClassRegistry()
-
-

@@ -12,9 +12,9 @@ from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 from opentelemetry.instrumentation.grpc import GrpcInstrumentorClient, GrpcInstrumentorServer
 
 from cornserve.logging import get_logger
-from cornserve.services.task_registry import TaskRegistry
 from cornserve.services.task_dispatcher.grpc import create_server
 from cornserve.services.task_dispatcher.router import create_app
+from cornserve.services.task_registry import TaskRegistry
 from cornserve.tracing import configure_otel
 from cornserve.utils import set_ulimit
 
@@ -34,10 +34,7 @@ async def serve() -> None:
     # Start task watcher to load tasks/executors from CRs before the server starts
     logger.info("Starting task watcher for Task Dispatcher service")
     task_registry = TaskRegistry()
-    cr_watcher_task = asyncio.create_task(
-        task_registry.watch_updates(),
-        name="task_dispatcher_cr_watcher"
-    )
+    cr_watcher_task = asyncio.create_task(task_registry.watch_updates(), name="task_dispatcher_cr_watcher")
 
     # FastAPI server
     app = create_app()
@@ -83,7 +80,7 @@ async def serve() -> None:
         await uvicorn_server_task
     except asyncio.CancelledError:
         logger.info("Shutting down Task Dispatcher service")
-        
+
         # Cancel task watcher task
         if not cr_watcher_task.done():
             logger.info("Cancelling task watcher task")
@@ -92,10 +89,10 @@ async def serve() -> None:
                 await cr_watcher_task
             except asyncio.CancelledError:
                 logger.info("task watcher task cancelled successfully")
-        
+
         # Close CR manager
         await task_registry.shutdown()
-        
+
         await dispatcher.shutdown()
         await uvicorn_server.shutdown()
         await grpc_server.stop(5)

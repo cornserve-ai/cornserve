@@ -620,12 +620,10 @@ class ResourceManager:
                 return
 
         # First notify ALL Task Dispatcher replicas of the removed task using the UnitTaskInstance name
-        assert (
-            unit_task_instance_name_from_state == task_instance_name
-        ), "ResourceManager state is inconsistent with provided task_instance_name"
-        task_info = task_dispatcher_pb2.NotifyUnitTaskTeardownRequest(
-            task_instance_name=task_instance_name
+        assert unit_task_instance_name_from_state == task_instance_name, (
+            "ResourceManager state is inconsistent with provided task_instance_name"
         )
+        task_info = task_dispatcher_pb2.NotifyUnitTaskTeardownRequest(task_instance_name=task_instance_name)
         results = await asyncio.gather(
             *[stub.NotifyUnitTaskTeardown(task_info) for stub in self.task_dispatcher_stubs], return_exceptions=True
         )
@@ -727,7 +725,9 @@ class ResourceManager:
         await asyncio.gather(*[channel.close() for channel in self.task_dispatcher_channels], return_exceptions=True)
 
     @tracer.start_as_current_span("ResourceManager._spawn_task_manager")
-    async def _spawn_task_manager(self, task: UnitTask, task_instance_name: str, state: TaskManagerState) -> UnitTaskDeployment:
+    async def _spawn_task_manager(
+        self, task: UnitTask, task_instance_name: str, state: TaskManagerState
+    ) -> UnitTaskDeployment:
         """Spawn a new task manager.
 
         If anything goes wrong, side effects are cleaned up and an exception is raised.
@@ -876,4 +876,6 @@ class ResourceManager:
             await state.tear_down(self.kube_core_client)
             raise RuntimeError(f"Failed to initialize spawned task manager for {task}: {e}") from e
 
-        return UnitTaskDeployment(task=task, task_instance_name=task_instance_name, id=state.id, url=f"{state.service_name}:{port}")
+        return UnitTaskDeployment(
+            task=task, task_instance_name=task_instance_name, id=state.id, url=f"{state.service_name}:{port}"
+        )

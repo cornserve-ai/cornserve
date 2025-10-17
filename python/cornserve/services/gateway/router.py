@@ -23,27 +23,25 @@ from pydantic import ValidationError
 
 from cornserve.constants import K8S_RESOURCE_MANAGER_GRPC_URL
 from cornserve.logging import get_logger
-from cornserve.services.task_registry import TaskRegistry
 from cornserve.services.gateway.app.manager import AppManager
 from cornserve.services.gateway.models import (
     AppInvocationRequest,
     AppRegistrationRequest,
-    TasksDeploymentRequest,
     RegistrationErrorResponse,
     RegistrationFinalResponse,
     RegistrationInitialResponse,
     RegistrationStatusEvent,
     ScaleTaskRequest,
+    TasksDeploymentRequest,
 )
 from cornserve.services.gateway.session import SessionManager
 from cornserve.services.gateway.task_manager import TaskManager
+from cornserve.services.task_registry import TaskRegistry
 from cornserve.task.base import Stream, TaskGraphDispatch, TaskOutput, UnitTaskList, task_manager_context
 
 router = APIRouter()
 logger = get_logger(__name__)
 tracer = trace.get_tracer(__name__)
-
-
 
 
 @router.post("/app/register")
@@ -330,7 +328,7 @@ def init_app_state(app: FastAPI) -> None:
     """Initialize the app state with required components."""
     # Create registry for handling unit task instance names
     app.state.task_registry = TaskRegistry()
-    
+
     # Pass registry to TaskManager for task-based deployment
     app.state.task_manager = TaskManager(K8S_RESOURCE_MANAGER_GRPC_URL, app.state.task_registry)
     app.state.app_manager = AppManager(app.state.task_manager)
@@ -403,4 +401,3 @@ async def deploy_tasks(request: TasksDeploymentRequest, raw_request: Request):
     except Exception as e:
         logger.exception("Failed to deploy tasks")
         return Response(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, content=str(e))
-

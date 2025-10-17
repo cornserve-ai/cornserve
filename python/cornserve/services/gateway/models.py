@@ -73,6 +73,7 @@ class RegistrationStatusEvent(BaseModel):
 
 class TaskDefinitionPayload(BaseModel):
     """Payload for a task definition."""
+
     source_b64: str
     task_class_name: str
     task_definition_name: str
@@ -82,6 +83,7 @@ class TaskDefinitionPayload(BaseModel):
 
 class DescriptorDefinitionPayload(BaseModel):
     """Payload for a descriptor definition."""
+
     source_b64: str
     descriptor_class_name: str
     descriptor_definition_name: str
@@ -94,4 +96,3 @@ class TasksDeploymentRequest(BaseModel):
 
     task_definitions: list[TaskDefinitionPayload] = []
     descriptor_definitions: list[DescriptorDefinitionPayload] = []
-

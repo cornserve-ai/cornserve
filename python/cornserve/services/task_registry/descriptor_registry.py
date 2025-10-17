@@ -1,17 +1,18 @@
+"""Registry for execution descriptor classes dynamically loaded from k8s CRs."""
+
 from __future__ import annotations
 
 import base64
-import importlib.util
 import sys
 import types
-from importlib.machinery import ModuleSpec
 from collections import defaultdict
+from importlib.machinery import ModuleSpec
 from typing import TYPE_CHECKING
 
 from cornserve.logging import get_logger
-from cornserve.task_executors.descriptor.base import TaskExecutionDescriptor
 from cornserve.services.task_registry.task_class_registry import TASK_CLASS_REGISTRY
 from cornserve.services.task_registry.util import create_package_hierarchy_if_missing
+from cornserve.task_executors.descriptor.base import TaskExecutionDescriptor
 
 if TYPE_CHECKING:
     from cornserve.task.base import UnitTask
@@ -20,9 +21,10 @@ logger = get_logger(__name__)
 
 
 class TaskExecutionDescriptorRegistry:
-    """Registry for dynamically loaded TaskExecutionDescriptor classes per UnitTask."""
+    """Registry for dynamically loaded `TaskExecutionDescriptor` classes per `UnitTask`."""
 
     def __init__(self) -> None:
+        """Initialize in-memory registries and pending queues."""
         self.registry: dict[str, dict[str, type[TaskExecutionDescriptor]]] = defaultdict(dict)
         self.default_registry: dict[str, type[TaskExecutionDescriptor]] = {}
         # This stores descriptors that arrive before their corresponding task class is loaded
@@ -43,7 +45,7 @@ class TaskExecutionDescriptorRegistry:
         """
         created_packages: list[str] = []
 
-        parent = module_name.rpartition('.')[0]
+        parent = module_name.rpartition(".")[0]
 
         # Create and pre-insert module
         module = types.ModuleType(module_name)
@@ -72,7 +74,7 @@ class TaskExecutionDescriptorRegistry:
             # Install after validation
             sys.modules[module_name] = module
             if parent:
-                setattr(sys.modules[parent], module_name.split('.')[-1], module)
+                setattr(sys.modules[parent], module_name.split(".")[-1], module)
 
             # Get task class from registry
             task_cls, _, _ = TASK_CLASS_REGISTRY.get_unit_task(task_class_name)
@@ -80,8 +82,8 @@ class TaskExecutionDescriptorRegistry:
         except Exception:
             # Roll back any packages we created
             for pkg_name in reversed(created_packages):
-                parent_name = pkg_name.rpartition('.')[0]
-                child_name = pkg_name.split('.')[-1]
+                parent_name = pkg_name.rpartition(".")[0]
+                child_name = pkg_name.split(".")[-1]
                 if parent_name in sys.modules:
                     try:
                         if getattr(sys.modules[parent_name], child_name, None) is sys.modules.get(pkg_name):
@@ -109,9 +111,13 @@ class TaskExecutionDescriptorRegistry:
             if task_name in self.default_registry:
                 raise ValueError(f"Default descriptor already registered for task {task_name}")
             self.default_registry[task_name] = descriptor
-        logger.info("Registered execution descriptor: %s for task: %s%s", name, task_name, " (default)" if default else "")
+        logger.info(
+            "Registered execution descriptor: %s for task: %s%s", name, task_name, " (default)" if default else ""
+        )
 
-    def load_from_source(self, source_code: str, descriptor_class_name: str, module_name: str, task_class_name: str) -> None:
+    def load_from_source(
+        self, source_code: str, descriptor_class_name: str, module_name: str, task_class_name: str
+    ) -> None:
         """Load a descriptor class from base64-encoded source.
 
         Because descriptor code imports task classes, we need to ensure task classes registered before
@@ -122,8 +128,9 @@ class TaskExecutionDescriptorRegistry:
 
         # If the target task is not yet registered, defer execution entirely.
         # We queue the raw decoded source and module metadata to be executed later.
-        from cornserve.services.task_registry.task_class_registry import TASK_CLASS_REGISTRY as _TCR
-        if task_class_name not in _TCR:
+        from cornserve.services.task_registry.task_class_registry import TASK_CLASS_REGISTRY  # noqa: PLC0415
+
+        if task_class_name not in TASK_CLASS_REGISTRY:
             self._pending[task_class_name].append((decoded_source, module_name, descriptor_class_name, True))
             logger.info(
                 "Queued execution descriptor %s for task %s until task class is loaded",
@@ -143,7 +150,7 @@ class TaskExecutionDescriptorRegistry:
 
     def bind_pending_descriptor_for_task_class(self, task: type[UnitTask]) -> None:
         """Bind any queued descriptors to the now-available task class.
-        
+
         This is called by the task class registry, whenever there's new task classes comming in.
         """
         task_name = task.__name__
@@ -161,6 +168,10 @@ class TaskExecutionDescriptorRegistry:
             logger.info("Registered pending execution descriptor: %s for task: %s", descriptor_class_name, task_name)
 
     def get(self, task: type[UnitTask], name: str | None = None) -> type[TaskExecutionDescriptor]:
+        """Return a registered descriptor class for the given task.
+
+        If `name` is None, return the default descriptor for the task.
+        """
         task_name = task.__name__
         if task_name not in self.registry:
             available_tasks = list(self.registry.keys())
@@ -171,24 +182,26 @@ class TaskExecutionDescriptorRegistry:
             if task_name not in self.default_registry:
                 available_descriptors = list(self.registry[task_name].keys())
                 raise ValueError(
-                    f"No default descriptor registered for task {task_name}. Available descriptors: {available_descriptors}."
+                    f"No default descriptor registered for task {task_name}. "
+                    f"Available descriptors: {available_descriptors}."
                 )
             return self.default_registry[task_name]
         if name not in self.registry[task_name]:
             available_descriptors = list(self.registry[task_name].keys())
             raise ValueError(
-                f"Descriptor {name} not registered for task {task_name}. Available descriptors: {available_descriptors}."
+                f"Descriptor {name} not registered for task {task_name}. "
+                f"Available descriptors: {available_descriptors}."
             )
         return self.registry[task_name][name]
 
     def list_registered_descriptors(self) -> dict[str, list[str]]:
+        """List registered descriptors per task name."""
         return {task_name: list(descriptors.keys()) for task_name, descriptors in self.registry.items()}
 
     def clear(self) -> None:
+        """Clear all registrations and defaults."""
         self.registry.clear()
         self.default_registry.clear()
 
 
 DESCRIPTOR_REGISTRY = TaskExecutionDescriptorRegistry()
-
-

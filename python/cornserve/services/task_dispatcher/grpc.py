@@ -9,7 +9,6 @@ import grpc
 from cornserve.logging import get_logger
 from cornserve.services.pb import common_pb2, task_dispatcher_pb2, task_dispatcher_pb2_grpc
 from cornserve.services.task_registry import TaskRegistry
-from cornserve.task.base import UnitTask
 
 if TYPE_CHECKING:
     from cornserve.services.task_dispatcher.dispatcher import TaskDispatcher
