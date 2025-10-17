@@ -1,4 +1,6 @@
-FROM pytorch/pytorch:2.7.0-cuda12.6-cudnn9-runtime AS base
+# UCX-cuda build requires the devel image
+# TODO: Use a multi-stage build to reduce image size
+FROM pytorch/pytorch:2.7.0-cuda12.6-cudnn9-devel AS base
 
 RUN apt-get update -y \
     && apt-get install -y --no-install-recommends \
@@ -15,14 +17,48 @@ RUN apt-get update -y \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 
+########### Install UCX 1.19.0 ###########
+RUN wget https://github.com/openucx/ucx/releases/download/v1.19.0/ucx-1.19.0.tar.gz
+RUN tar xzf ucx-1.19.0.tar.gz
+WORKDIR /workspace/ucx-1.19.0
+RUN mkdir build
+RUN cd build && \
+      ../configure --build=x86_64-unknown-linux-gnu --host=x86_64-unknown-linux-gnu --program-prefix= --disable-dependency-tracking \
+      --prefix=/usr --exec-prefix=/usr --bindir=/usr/bin --sbindir=/usr/sbin --sysconfdir=/etc --datadir=/usr/share --includedir=/usr/include \
+      --libdir=/usr/lib64 --libexecdir=/usr/libexec --localstatedir=/var --sharedstatedir=/var/lib --mandir=/usr/share/man --infodir=/usr/share/info \
+      --disable-logging --disable-debug --disable-assertions --enable-mt --disable-params-check --without-go --without-java --enable-cma \
+      --with-cuda=/usr/local/cuda --with-dm --enable-shared \
+      --with-verbs --with-mlx5 --with-rdmacm --without-rocm --with-xpmem --without-fuse3 --without-ugni --without-mad --without-ze && \
+      make -j$(nproc) && make install
+
+ENV RAPIDS_LIBUCX_PREFER_SYSTEM_LIBRARY=true
+ENV LD_LIBRARY_PATH=/usr/lib64:/usr/lib64/ucx:$LD_LIBRARY_PATH
+ENV LD_LIBRARY_PATH=/opt/conda/lib:$LD_LIBRARY_PATH
+########### End Install UCX ###########
+
+############ Install uv ############
 ENV PATH="/root/.local/bin:$PATH"
 ENV VIRTUAL_ENV="/opt/venv"
 RUN uv venv --python 3.11 --seed ${VIRTUAL_ENV}
 ENV PATH="$VIRTUAL_ENV/bin:$PATH"
 
+############# Install nixl #############
+RUN uv pip install --upgrade pip meson-python ninja pybind11
+RUN mkdir -p /opt/ucx-shim/{lib,include}
+RUN ln -s /usr/lib64        /opt/ucx-shim/lib
+RUN ln -s /usr/include      /opt/ucx-shim/include
+ENV UCX_PREFIX=/opt/ucx-shim
+RUN uv pip install "git+https://github.com/ai-dynamo/nixl@0.5.1" \
+  --config-settings=setup-args="-Ducx_path=$UCX_PREFIX" \
+  --config-settings=setup-args="-Dinstall_headers=false" \
+  --config-settings=setup-args="-Dbuild_docs=false"
+########### End Install nixl ###########
+
 COPY ./python /workspace/cornserve/python
-COPY ./third_party/vllm /workspace/cornserve/third_party/vllm
-WORKDIR /workspace/cornserve/third_party/vllm
+# Toggle between local vllm and remote for development
+COPY ./third_party/vllm /workspace/cornserve/third_party/c-vllm
+# RUN git clone -b jm-pd https://github.com/cornserve-ai/vllm.git /workspace/cornserve/third_party/c-vllm
+WORKDIR /workspace/cornserve/third_party/c-vllm
 
 RUN cd ../.. && uv pip install './python[sidecar-api]'
 

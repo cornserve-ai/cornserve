@@ -73,7 +73,7 @@ class ModalityData:
         self.loader = ModalityDataLoader(self.modality_config)
 
     @cache
-    def processed(self, model_id: str) -> dict[str, npt.NDArray]:
+    def processed(self, model_id: str) -> dict[str, torch.Tensor]:
         """Process the data for the given model."""
         processor = Processor(model_id, self.modality_config)
         return processor._do_process(self.modality, self.url)
@@ -90,6 +90,7 @@ def assert_same_weights(
     required_prefixes: list[str] = [],
     ignored_prefixes: list[str] = [],
     transformed_weights: dict[str, Callable] = {},
+    verbose: bool = False,
 ) -> None:
     """Ensure that parameters in the two models are the same.
 
@@ -101,15 +102,16 @@ def assert_same_weights(
         transformed_patterns: A mapping of patterns to functions that will be
             called to check weight equivalence. The function should take three args:
             our_name (str), our_param (Tensor), and hf_params (dict[str, Tensor]).
+        verbose: If True, print out the names of the parameters being checked.
     """
 
     def filter_weight_dict(weight_dict: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
         """Filter the weight dictionary based on prefixes."""
         for k in list(weight_dict.keys()):
-            if not any(k.startswith(prefix) for prefix in required_prefixes):
+            if required_prefixes and not any(k.startswith(prefix) for prefix in required_prefixes):
                 del weight_dict[k]
                 continue
-            if any(k.startswith(prefix) for prefix in ignored_prefixes):
+            if ignored_prefixes and any(k.startswith(prefix) for prefix in ignored_prefixes):
                 del weight_dict[k]
         return weight_dict
 
@@ -124,6 +126,8 @@ def assert_same_weights(
             raise ValueError(f"Parameter {name} not found in Hugging Face model")
         assert param.shape == hf_param.shape, name
         assert torch.allclose(param, hf_param), name
+        if verbose:
+            print(f"Parameter {name} matches.")
 
     hf_params = filter_weight_dict(dict(hf_model.named_parameters()))
     our_params = filter_weight_dict(dict(our_model.named_parameters()))
@@ -162,8 +166,7 @@ def batch_builder(model_id: str, nickname: str, data: list[ModalityData]) -> Wor
     assert all(item.modality == modality for item in data)
 
     processed_data = {
-        key: [torch.from_numpy(item.processed(model_id)[key]) for item in data]
-        for key in data[0].processed(model_id).keys()
+        key: [item.processed(model_id)[key] for item in data] for key in data[0].processed(model_id).keys()
     }
     batch = WorkerBatch(
         modality=data[0].modality,

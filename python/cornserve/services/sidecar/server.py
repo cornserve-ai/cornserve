@@ -39,6 +39,7 @@ from cornserve.sidecar.constants import (
     ucx_url_from_rank,
 )
 from cornserve.tracing import configure_otel
+from cornserve.utils import set_ulimit
 
 logger = get_logger(__name__, [SidcarAdapter])
 tracer = trace.get_tracer(__name__)
@@ -230,7 +231,7 @@ class SidecarServicer(sidecar_pb2_grpc.SidecarServicer):
 
             new_config = self._build_config(request)
             if self.config is None or self.config != new_config:
-                logger.warning("Registering new sidecar")
+                logger.info("Registering new sidecar with config: %s", new_config)
                 try:
                     self.config = new_config
                     self.sender = SidecarSender(self.config.sender_config())
@@ -253,6 +254,26 @@ class SidecarServicer(sidecar_pb2_grpc.SidecarServicer):
             tb_str = traceback.format_exc()
             logger.exception("Error in Register")
             await context.abort(grpc.StatusCode.INTERNAL, f"Error in Register: {e} \n {tb_str}")
+
+    async def CloseStream(  # noqa: N802
+        self,
+        request: sidecar_pb2.CloseStreamRequest,
+        context: grpc.aio.ServicerContext,
+    ) -> sidecar_pb2.CloseStreamResponse:
+        """Close a stream on the sender sidecar."""
+        try:
+            if not self.live:
+                logger.error("Sidecar not online")
+                await context.abort(grpc.StatusCode.FAILED_PRECONDITION, "Sidecar not online")
+            if self.receiver is None:
+                logger.error("Sidecar not registered")
+                await context.abort(grpc.StatusCode.FAILED_PRECONDITION, "Sidecar not registered")
+            return await self.receiver.close_stream(request, context)
+            # return await self.scheduler.submit(self.receiver.close_stream, request, context)
+        except Exception as e:
+            tb_str = traceback.format_exc()
+            logger.exception("Error in CloseStream")
+            await context.abort(grpc.StatusCode.INTERNAL, f"Error in CloseStream: {e} \n {tb_str}")
 
     async def Send(  # noqa: N802
         self,
@@ -392,7 +413,7 @@ async def main(
     sidecar_rank = int(os.environ.get("SIDECAR_RANK", "-1"))
     assert sidecar_rank >= 0, "Invalid sidecar rank"
     world_size = int(os.environ.get("SIDECAR_WORLD_SIZE", "1"))
-    shm_size = int(os.environ.get("SIDECAR_SHM_SIZE", str(2**30)))
+    shm_size = int(os.environ.get("SIDECAR_SHM_SIZE", str(1 << 35)))
     peer_ranks_str = os.environ.get("SIDECAR_LOCAL_PEER_RANKS")
     if not peer_ranks_str:
         raise ValueError("SIDECAR_LOCAL_PEER_RANKS not set")
@@ -400,6 +421,8 @@ async def main(
     peers = list(map(int, peer_ranks_str.split(",")))
     assert len(peers) > 0, "Invalid SIDECAR_LOCAL_PEER_RANKS"
     assert sidecar_rank in peers, "Sidecar rank not in local peers"
+
+    set_ulimit()
 
     # OpenTelemetry setup
     configure_otel(name=f"sidecar[{sidecar_rank}]")

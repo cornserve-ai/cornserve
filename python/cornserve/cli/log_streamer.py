@@ -4,19 +4,18 @@ from __future__ import annotations
 
 import threading
 import time
-from pathlib import Path
 from typing import cast
 
 import rich
-from kubernetes import client, config
+from kubernetes import client
 from kubernetes.client import V1Pod
 from kubernetes.client.rest import ApiException
-from kubernetes.config.config_exception import ConfigException
 from rich.console import Console
 from rich.text import Text
 from urllib3.exceptions import ProtocolError
 from urllib3.response import HTTPResponse
 
+from cornserve.cli.utils.k8s import load_k8s_config
 from cornserve.constants import K8S_NAMESPACE
 
 # A list of visually distinct colors from rich.
@@ -35,7 +34,7 @@ class LogStreamer:
     """Streams logs from Kubernetes pods related to unit tasks."""
 
     def __init__(
-        self, unit_task_names: list[str], console: Console | None = None, kube_config_path: Path | None = None
+        self, unit_task_names: list[str], console: Console | None = None, kube_config_path: str | None = None
     ) -> None:
         """Initialize the LogStreamer.
 
@@ -62,47 +61,18 @@ class LogStreamer:
     def _check_k8s_access(self) -> bool:
         self.console.print("[bold yellow]LogStreamer: Checking Kubernetes access...[/bold yellow]")
 
-        # If a specific kube config path is provided, use only that
-        if self.kube_config_path:
-            try:
-                config.load_kube_config(config_file=str(self.kube_config_path))
-                self.console.print("LogStreamer: Custom kube config loaded from user-provided config path")
-                client.CoreV1Api().get_api_resources()
-                self.console.print("LogStreamer: Kubernetes access confirmed. Going to stream executor logs ...")
-                return True
-            except (ConfigException, FileNotFoundError):
-                self.console.print("LogStreamer: Could not load kube config from user-provided config path.")
-                return False
-            except Exception as e:
-                self.console.print(f"LogStreamer: Unexpected error with user-provided config: {e}.")
-                return False
+        try:
+            load_k8s_config(self.kube_config_path, ["/etc/rancher/k3s/k3s.yaml"])
+            # Test API access
+            client.CoreV1Api().get_api_resources()
+            self.console.print("LogStreamer: Kubernetes access confirmed. Executor logs will be streamed.")
+            return True
+        except Exception as e:
+            self.console.print(
+                "LogStreamer: Failed to configure Kubernetes access. Executor logs will not be streamed.",
+            )
+            self.console.print(f"Error: '{e}'")
 
-        # Fallback to iterate through possible standard kube config paths.
-        config_loaders = [
-            ("default kube config (for standard k8s and Minikube)", lambda: config.load_kube_config()),
-            ("K3s kube config", lambda: config.load_kube_config(config_file="/etc/rancher/k3s/k3s.yaml")),
-        ]
-
-        for description, loader in config_loaders:
-            try:
-                loader()
-                # If loaded, try to access the API
-                self.console.print(f"LogStreamer: {description.capitalize()} loaded successfully.")
-                client.CoreV1Api().get_api_resources()
-                self.console.print("LogStreamer: Kubernetes access confirmed. Going to stream executor logs ...")
-                return True
-            except (ConfigException, FileNotFoundError):
-                self.console.print(f"LogStreamer: Could not load {description}. Trying next option...")
-                continue
-            except ApiException as e:
-                self.console.print(f"LogStreamer: API error with {description}: {e}. Check aborted.")
-                return False
-            except Exception as e:
-                # Catch all other unexpected errors during loading or API call.
-                self.console.print(f"LogStreamer: Unexpected error with {description}: {e}. Trying next option...")
-                continue
-
-        self.console.print("LogStreamer: Kubernetes access failed. No executor log will be streamed.")
         return False
 
     def _assign_color(self, pod_name: str) -> None:
@@ -192,7 +162,6 @@ class LogStreamer:
             if isinstance(e, ProtocolError) and self.stop_event.is_set():
                 # We only expect this ProtocolError when the response was shut down.
                 return
-
             self.console.print(Text(f"Unexpected error streaming logs for {pod_name}: {e}", style="red"))
 
     def start(self) -> None:

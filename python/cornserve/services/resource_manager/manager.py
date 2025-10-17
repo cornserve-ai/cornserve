@@ -23,14 +23,62 @@ from cornserve.services.pb import (
     task_manager_pb2,
     task_manager_pb2_grpc,
 )
-from cornserve.services.resource_manager.resource import GPU, Resource
+from cornserve.services.resource import GPU, CannotColocateError, Resource
 from cornserve.services.sidecar.launch import SidecarLaunchInfo
 from cornserve.services.utils import to_strict_k8s_name
 from cornserve.sidecar.constants import grpc_url_from_rank
 from cornserve.task.base import UnitTask
+from cornserve.task_executors.profile import UnitTaskProfileManager
+from cornserve.utils import format_grpc_error
 
 logger = get_logger(__name__)
 tracer = trace.get_tracer(__name__)
+
+
+async def discover_task_dispatcher_replicas(kube_client: kclient.CoreV1Api) -> list[str]:
+    """Discover all Task Dispatcher replica endpoints via headless service.
+
+    Uses Kubernetes service discovery to find all Task Dispatcher pod IPs
+    and return their gRPC endpoints for broadcasting notifications.
+
+    Args:
+        kube_client: Kubernetes API client for service discovery
+
+    Returns:
+        List of Task Dispatcher gRPC URLs (e.g., ["10.1.2.3:50051", "10.1.2.4:50051"])
+
+    Raises:
+        RuntimeError: If Task Dispatcher replicas cannot be discovered.
+    """
+    try:
+        # Query the headless service to get all Task Dispatcher pod endpoints
+        endpoints = await kube_client.list_namespaced_endpoints(
+            namespace=constants.K8S_NAMESPACE,
+            field_selector=f"metadata.name={constants.K8S_TASK_DISPATCHER_HEADLESS_SERVICE}",
+        )
+
+        task_dispatcher_urls = []
+        for endpoint in endpoints.items:
+            if endpoint.subsets:
+                for subset in endpoint.subsets:
+                    if subset.addresses and subset.ports:
+                        for address in subset.addresses:
+                            for port in subset.ports:
+                                if port.name == "grpc":
+                                    task_dispatcher_urls.append(f"{address.ip}:{port.port}")
+
+        if not task_dispatcher_urls:
+            raise RuntimeError(
+                f"No Task Dispatcher replicas found in headless service "
+                f"{constants.K8S_TASK_DISPATCHER_HEADLESS_SERVICE}. "
+                "Ensure Task Dispatcher pods are running and healthy."
+            )
+
+        logger.info("Discovered %d Task Dispatcher replicas: %s", len(task_dispatcher_urls), task_dispatcher_urls)
+        return task_dispatcher_urls
+
+    except Exception as e:
+        raise RuntimeError(f"Failed to discover Task Dispatcher replicas: {e}") from e
 
 
 @dataclass
@@ -115,22 +163,48 @@ class TaskManagerState:
 class ResourceManager:
     """The Resource Manager allocates resources for Task Managers."""
 
-    def __init__(self, api_client: kclient.ApiClient, resource: Resource, sidecar_names: list[str]) -> None:
-        """Initialize the ResourceManager."""
+    def __init__(
+        self,
+        api_client: kclient.ApiClient,
+        resource: Resource,
+        sidecar_names: list[str],
+        task_dispatcher_urls: list[str],
+    ) -> None:
+        """Initialize the ResourceManager.
+
+        Args:
+            api_client: Kubernetes API client
+            resource: Resource allocation manager
+            sidecar_names: Names of sidecar pods
+            task_dispatcher_urls: List of Task Dispatcher gRPC URLs for broadcasting notifications
+        """
         self.api_client = api_client
         self.resource = resource
 
         self.kube_core_client = kclient.CoreV1Api(api_client)
         self.sidecar_names = sidecar_names
 
-        # Task dispatcher gRPC handles
-        self.task_dispatcher_channel = grpc.aio.insecure_channel(constants.K8S_TASK_DISPATCHER_GRPC_URL)
-        self.task_dispatcher_stub = task_dispatcher_pb2_grpc.TaskDispatcherStub(self.task_dispatcher_channel)
+        # Task dispatcher gRPC handles (multiple replicas for horizontal scaling)
+        # We broadcast deployment/teardown notifications to ALL Task Dispatcher replicas
+        # to ensure each replica has consistent task registry state. Task invocation
+        # routing is handled by the load balancer service at the HTTP layer.
+        self.task_dispatcher_channels: list[grpc.aio.Channel] = []
+        self.task_dispatcher_stubs: list[task_dispatcher_pb2_grpc.TaskDispatcherStub] = []
+
+        # Create gRPC channels and stubs for all Task Dispatcher replicas
+        for url in task_dispatcher_urls:
+            channel = grpc.aio.insecure_channel(url)
+            stub = task_dispatcher_pb2_grpc.TaskDispatcherStub(channel)
+            self.task_dispatcher_channels.append(channel)
+            self.task_dispatcher_stubs.append(stub)
 
         # Task state
         self.task_states: dict[str, TaskManagerState] = {}
         self.unit_task_instance_names: dict[str, str] = {}  # Map task_manager_id -> unit task instance name
         self.task_states_lock = asyncio.Lock()
+
+        # Profile manager for GPU allocation
+        self.profile_manager = UnitTaskProfileManager()
 
     @staticmethod
     async def init() -> ResourceManager:
@@ -194,11 +268,11 @@ class ResourceManager:
             failed = 0
             for i, result in enumerate(spawn_results):
                 if isinstance(result, BaseException):
-                    logger.error("Failed to spawn sidecar pod for GPU %s: %s", gpus[i], result)
+                    logger.error("Failed to spawn sidecar pod for %s: %s", gpus[i], result)
                     failed += 1
                 else:
                     created_pods.append(result)
-                    logger.info("Successfully spawned sidecar pod for GPU %s", gpus[i])
+                    logger.info("Successfully spawned sidecar pod for %s", gpus[i])
 
             async def cleanup():
                 """Clean up any created pods in case of failure."""
@@ -244,11 +318,16 @@ class ResourceManager:
                 logger.info("All sidecars are online")
 
             resource = Resource(gpus=gpus)
+
+            # Discover all Task Dispatcher replica endpoints
+            task_dispatcher_urls = await discover_task_dispatcher_replicas(core_api)
+
             return ResourceManager(
                 api_client=api_client,
                 resource=resource,
                 sidecar_names=[pod.metadata.name for pod in created_pods],
-            )            
+                task_dispatcher_urls=task_dispatcher_urls,
+            )
         except Exception as e:
             logger.error("Error during resource initialization: %s", str(e))
             raise
@@ -263,6 +342,21 @@ class ResourceManager:
         span.set_attribute("resource_manager.scale_up_unit_task.task", str(task))
         span.set_attribute("resource_manager.scale_up_unit_task.num_gpus", num_gpus)
 
+        # Check if the number of GPUs to scale up is valid
+        profile = self.profile_manager.get_profile(task)
+        if num_gpus < min(profile.num_gpus_to_profile.keys()):
+            logger.warning(
+                "Requested %d GPUs to scale up task %s, but minimum required is %d GPUs according to the profile: %s",
+                num_gpus,
+                task,
+                min(profile.num_gpus_to_profile.keys()),
+                profile,
+            )
+            raise ValueError(
+                f"Cannot scale up task {task} by {num_gpus} GPUs. "
+                f"Minimum required is {min(profile.num_gpus_to_profile.keys())} GPUs according to the profile."
+            )
+
         # Find the task manager state for this task
         task_state = None
         async with self.task_states_lock:
@@ -275,7 +369,32 @@ class ResourceManager:
                 return
 
             # TODO: decide GPU placement strategy & preference
-            resources = self.resource.allocate(num_gpus=num_gpus, owner=task_state.id)
+            resources = []
+            gpus_to_allocate = num_gpus
+            for chunk_size in sorted(profile.num_gpus_to_profile.keys(), reverse=True):
+                num_chunks, gpus_to_allocate = divmod(gpus_to_allocate, chunk_size)
+                if num_chunks == 0:
+                    continue
+                for chunk_allocated in range(num_chunks):
+                    try:
+                        batched_resources = self.resource.allocate(
+                            num_gpus=chunk_size,
+                            owner=task_state.id,
+                        )
+                        resources.extend(batched_resources)
+                    except CannotColocateError:
+                        # If we cannot colocate anymore, try next chunk size
+                        # add back unallocated GPUs
+                        gpus_to_allocate += chunk_size * (num_chunks - chunk_allocated)
+                        continue
+            if gpus_to_allocate > 0:
+                logger.warning(
+                    "Requested %d GPUs to scale up task %s, but only allocated %d GPUs based on the profile: %s",
+                    num_gpus,
+                    task,
+                    len(resources),
+                    profile,
+                )
 
         assert task_state.stub is not None, "Task manager stub is not initialized"
         async with task_state.lock:
@@ -301,6 +420,27 @@ class ResourceManager:
                         task_state.resources = []
                     task_state.resources.extend(resources)
             except Exception as e:
+                gpus = [
+                    task_manager_pb2.GPUResource(
+                        action=task_manager_pb2.ResourceAction.REMOVE,
+                        node_id=gpu.node,
+                        global_rank=gpu.global_rank,
+                        local_rank=gpu.local_rank,
+                    )
+                    for gpu in resources
+                ]
+                update_resource_req = task_manager_pb2.UpdateResourcesRequest(task_manager_id=task_state.id, gpus=gpus)
+                try:
+                    response = await task_state.stub.UpdateResources(update_resource_req)
+                    if response.status != common_pb2.Status.STATUS_OK:
+                        logger.error(
+                            "UpdateResources gRPC error when trying to remove GPUs from task manager %s: %s",
+                            task_state.id,
+                            response,
+                        )
+                        raise RuntimeError("Failed to remove GPUs from task manager") from e
+                except Exception:
+                    logger.error("Failed to remove GPUs from task manager %s: %s", task_state.id, e)
                 async with self.task_states_lock:
                     for gpu in resources:
                         gpu.free()
@@ -413,21 +553,38 @@ class ResourceManager:
                 url=deployment.url,
             ),
         )
-        try:
-            await self.task_dispatcher_stub.NotifyUnitTaskDeployment(task_manager_info)
-        except grpc.aio.AioRpcError as e:
-            logger.error(
-                "Failed to notify task dispatcher of new task %s and task manager %s: %s",
-                task,
-                deployment,
-                e,
-            )
-            # Clean up the task manager since notification failed
+        # Broadcast to ALL Task Dispatcher replicas in parallel
+        results = await asyncio.gather(
+            *[stub.NotifyUnitTaskDeployment(task_manager_info) for stub in self.task_dispatcher_stubs],
+            return_exceptions=True,
+        )
+
+        # Check for any failures
+        failed_notifications = []
+        for i, result in enumerate(results):
+            if isinstance(result, Exception):
+                logger.error(
+                    "Failed to notify Task Dispatcher replica %d of new task %s: %s",
+                    i,
+                    task,
+                    result,
+                )
+                failed_notifications.append((i, result))
+
+        if failed_notifications:
+            # Clean up the task manager since Task Dispatcher notification failed
             async with self.task_states_lock:
                 if task_state := self.task_states.pop(task_manager_id, None):
-                    logger.info("Cleaning up task manager %s", task_state.id)
+                    logger.info(
+                        "Cleaning up task manager %s due to %d Task Dispatcher notification failures",
+                        task_state.id,
+                        len(failed_notifications),
+                    )
                     await task_state.tear_down(self.kube_core_client)
-            raise RuntimeError(f"Failed to notify task dispatcher of new task {task_instance_name}: {e}") from e
+            raise RuntimeError(
+                f"Failed to notify {len(failed_notifications)}/{len(self.task_dispatcher_stubs)} "
+                f"Task Dispatcher replicas of new task {task}: {failed_notifications}"
+            )
 
     @tracer.start_as_current_span("ResourceManager.teardown_unit_task")
     async def teardown_unit_task(self, task: UnitTask, task_instance_name: str) -> None:
@@ -462,19 +619,36 @@ class ResourceManager:
                 logger.info("Task %s is not running, returning immediately", task)
                 return
 
-        # First notify the task dispatcher of the removed task using unit task instance name
-        # Use the instance name from state if available, otherwise use the passed one
-        unit_task_instance_name_to_use = (
-            unit_task_instance_name_from_state if unit_task_instance_name_from_state else task_instance_name
-        )
+        # First notify ALL Task Dispatcher replicas of the removed task using the UnitTaskInstance name
+        assert (
+            unit_task_instance_name_from_state == task_instance_name
+        ), "ResourceManager state is inconsistent with provided task_instance_name"
         task_info = task_dispatcher_pb2.NotifyUnitTaskTeardownRequest(
-            task_instance_name=unit_task_instance_name_to_use
+            task_instance_name=task_instance_name
         )
-        try:
-            await self.task_dispatcher_stub.NotifyUnitTaskTeardown(task_info)
-        except Exception as e:
-            # Do not re-raise the exception but rather continue with the shutdown
-            logger.exception("Failed to notify task dispatcher of removed task %s: %s", task, e)
+        results = await asyncio.gather(
+            *[stub.NotifyUnitTaskTeardown(task_info) for stub in self.task_dispatcher_stubs], return_exceptions=True
+        )
+
+        # Log any failures but continue with teardown (don't re-raise)
+        failed_notifications = []
+        for i, result in enumerate(results):
+            if isinstance(result, Exception):
+                logger.error(
+                    "Failed to notify Task Dispatcher replica %d of removed task %s: %s",
+                    i,
+                    task,
+                    result,
+                )
+                failed_notifications.append((i, result))
+
+        if failed_notifications:
+            logger.warning(
+                "Failed to notify %d/%d Task Dispatcher replicas of removed task %s, continuing with teardown",
+                len(failed_notifications),
+                len(self.task_dispatcher_stubs),
+                task,
+            )
 
         # Clean up the task manager state with its individual lock
         async with task_state.lock:
@@ -548,7 +722,9 @@ class ResourceManager:
                 logger.error("Error occured during shutdown: %s", result)
 
         await self.api_client.close()
-        await self.task_dispatcher_channel.close()
+
+        # Close all Task Dispatcher channels
+        await asyncio.gather(*[channel.close() for channel in self.task_dispatcher_channels], return_exceptions=True)
 
     @tracer.start_as_current_span("ResourceManager._spawn_task_manager")
     async def _spawn_task_manager(self, task: UnitTask, task_instance_name: str, state: TaskManagerState) -> UnitTaskDeployment:
@@ -566,8 +742,18 @@ class ResourceManager:
         span.set_attribute("resource_manager._spawn_task_manager.task_manager_id", state.id)
 
         try:
+            # Get GPU requirements from profile
+            profile = self.profile_manager.get_profile(task)
+
+            # Start off the task manager with the minimum number of GPUs required
+            num_gpus = min(profile.num_gpus_to_profile.keys())
+
+            logger.info("Allocating %d GPUs for task %s based on profile", num_gpus, task)
+
             # Allocate resource starter pack for the task manager
-            state.resources = self.resource.allocate(num_gpus=1, owner=state.id)
+            state.resources = self.resource.allocate(num_gpus=num_gpus, owner=state.id)
+            # uncomment below during benchmarking to speedup
+            # state.resources = []
             span.set_attribute(
                 "resource_manager._spawn_task_manager.gpu_global_ranks",
                 [gpu.global_rank for gpu in state.resources],
@@ -587,6 +773,7 @@ class ResourceManager:
                     },
                 ),
                 spec=kclient.V1PodSpec(
+                    service_account_name="task-manager-sa",
                     containers=[
                         kclient.V1Container(
                             name="task-manager",
@@ -600,9 +787,24 @@ class ResourceManager:
                                     )
                                 ),
                             ],
+                            volume_mounts=[
+                                kclient.V1VolumeMount(
+                                    name="cornserve-profiles",
+                                    mount_path=constants.UNIT_TASK_PROFILES_DIR,
+                                    read_only=True,
+                                ),
+                            ],
                         )
                     ],
-                    service_account_name="task-manager-sa",
+                    volumes=[
+                        kclient.V1Volume(
+                            name="cornserve-profiles",
+                            config_map=kclient.V1ConfigMapVolumeSource(
+                                name=constants.K8S_UNIT_TASK_PROFILES_CONFIG_MAP_NAME,
+                                optional=True,
+                            ),
+                        ),
+                    ],
                 ),
             )
             service = kclient.V1Service(
@@ -663,6 +865,13 @@ class ResourceManager:
                     raise RuntimeError(f"Failed to register task manager: {response}")
 
         except Exception as e:
+            if isinstance(e, grpc.aio.AioRpcError):
+                # pretty print gRPC erros
+                logger.error("gRPC error while spawning task manager: %s", format_grpc_error(e))
+                await state.tear_down(self.kube_core_client)
+                raise RuntimeError(
+                    f"Failed to initialize spawned task manager for {task}: {format_grpc_error(e)}"
+                ) from e
             logger.exception("Failed to spawn task manager: %s", e)
             await state.tear_down(self.kube_core_client)
             raise RuntimeError(f"Failed to initialize spawned task manager for {task}: {e}") from e

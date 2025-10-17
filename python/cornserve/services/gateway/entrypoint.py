@@ -8,14 +8,15 @@ import signal
 from typing import TYPE_CHECKING
 
 import uvicorn
+from opentelemetry.instrumentation.aiohttp_client import AioHttpClientInstrumentor
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 from opentelemetry.instrumentation.grpc import GrpcAioInstrumentorClient
-from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
 
 from cornserve.logging import get_logger
 from cornserve.services.task_registry import TaskRegistry
 from cornserve.services.gateway.router import create_app
 from cornserve.tracing import configure_otel
+from cornserve.utils import set_ulimit
 
 if TYPE_CHECKING:
     from cornserve.services.gateway.app.manager import AppManager
@@ -27,6 +28,7 @@ async def serve() -> None:
     """Serve the Gateway as a FastAPI app."""
     logger.info("Starting Gateway service")
 
+    set_ulimit()
     configure_otel("gateway")
 
     app = create_app()
@@ -40,7 +42,7 @@ async def serve() -> None:
     )
     FastAPIInstrumentor.instrument_app(app)
     GrpcAioInstrumentorClient().instrument()
-    HTTPXClientInstrumentor().instrument()
+    AioHttpClientInstrumentor().instrument()
 
     logger.info("Available routes are:")
     for route in app.routes:

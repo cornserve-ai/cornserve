@@ -348,7 +348,7 @@ def create_app() -> FastAPI:
     return app
 
 
-@router.post("/builtins/deploy-tasks")
+@router.post("/deploy-tasks")
 async def deploy_tasks(request: TasksDeploymentRequest, raw_request: Request):
     """Deploy tasks (unit or composite) and their descriptors from provided sources."""
     task_registry: TaskRegistry = raw_request.app.state.task_registry
@@ -365,21 +365,27 @@ async def deploy_tasks(request: TasksDeploymentRequest, raw_request: Request):
                     is_unit_task=spec.is_unit_task,
                 )
             except ValueError as e:
-                # For composite tasks, ignore duplicate definition errors to match previous behavior
-                if (not getattr(spec, "is_unit_task", True)) and ("already exists" in str(e)):
+                # Ignore duplicate definition errors (idempotent for unit and composite tasks)
+                if "already exists" in str(e):
                     return None
                 raise
 
         async def create_execution_descriptor(spec):
             source = base64.b64decode(spec.source_b64).decode("utf-8")
-            return await task_registry.create_execution_descriptor(
-                name=spec.descriptor_definition_name,
-                task_class_name=spec.task_class_name,
-                descriptor_class_name=spec.descriptor_class_name,
-                module_name=spec.module_name,
-                source_code=source,
-                is_default=True,
-            )
+            try:
+                return await task_registry.create_execution_descriptor(
+                    name=spec.descriptor_definition_name,
+                    task_class_name=spec.task_class_name,
+                    descriptor_class_name=spec.descriptor_class_name,
+                    module_name=spec.module_name,
+                    source_code=source,
+                    is_default=True,
+                )
+            except ValueError as e:
+                # Ignore duplicate descriptor errors (idempotent)
+                if "already exists" in str(e):
+                    return None
+                raise
 
         coroutines = [
             *(create_task_definition(spec) for spec in request.task_definitions),

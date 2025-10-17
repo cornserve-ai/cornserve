@@ -450,17 +450,17 @@ class ModalityProcessor(BaseModalityProcessor):
     def get_image_processor(self) -> Callable | None:
         """Return the image processor."""
 
-        def processor(image: npt.NDArray) -> dict[str, npt.NDArray]:
+        def processor(image: npt.NDArray) -> dict[str, torch.Tensor]:
             """Invoke the HF processor and convert to dict."""
-            return self.hf_processor(images=[image], return_tensors="np").data
+            return self.hf_processor(images=[image], return_tensors="pt").data
 
         return processor
 
     def get_video_processor(self) -> Callable | None:
         """Return the video processor."""
 
-        def processor(video: npt.NDArray) -> dict[str, npt.NDArray]:
+        def processor(video: npt.NDArray) -> dict[str, torch.Tensor]:
             """Invoke the HF processor and convert to dict."""
-            return self.hf_processor(images=None, videos=[video], return_tensors="np").data
+            return self.hf_processor(images=None, videos=[video], return_tensors="pt").data
 
         return processor

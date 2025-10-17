@@ -5,17 +5,18 @@ from __future__ import annotations
 from collections.abc import AsyncGenerator
 from typing import Any, ClassVar
 
-import httpx
+import aiohttp
 import kubernetes_asyncio.client as kclient
 
 from cornserve import constants
 from cornserve.logging import get_logger
-from cornserve.services.resource_manager.resource import GPU
-from cornserve.task.base import Stream
+from cornserve.services.resource import GPU
+from cornserve.task.base import Stream, TaskOutput
 from cornserve_tasklib.task.unit.llm import (
     URL,
     DecodeLLMUnitTask,
-    LLMUnitTask,
+    LLMBaseUnitTask,
+    LLMEmbeddingResponse,
     OpenAIChatCompletionChunk,
     OpenAIChatCompletionRequest,
     PrefillChatCompletionResponse,
@@ -27,13 +28,11 @@ from cornserve.task_executors.descriptor.base import TaskExecutionDescriptor
 logger = get_logger(__name__)
 
 
-async def parse_stream_to_completion_chunks(response: httpx.Response) -> AsyncGenerator[str]:
+async def parse_stream_to_completion_chunks(response: aiohttp.ClientResponse) -> AsyncGenerator[str]:
     """Parse the response stream to OpenAIChatCompletionChunk objects."""
-    assert not response.is_closed, "Response must not be closed when parsing."
-    aiter = response.aiter_lines()
     try:
-        async for line in aiter:
-            line = line.strip()
+        async for line in response.content:
+            line = line.decode().strip()
             if not line:
                 continue
 
@@ -57,15 +56,10 @@ async def parse_stream_to_completion_chunks(response: httpx.Response) -> AsyncGe
             yield line
 
     finally:
-        # Ensure the iterator has been fully consumed
-        async for _ in aiter:
-            pass
-        await response.aclose()
+        response.close()
 
 
-class VLLMDescriptor(
-    TaskExecutionDescriptor[LLMUnitTask, OpenAIChatCompletionRequest, Stream[OpenAIChatCompletionChunk]]
-):
+class VLLMDescriptor(TaskExecutionDescriptor[LLMBaseUnitTask, OpenAIChatCompletionRequest, TaskOutput]):
     """Task execution descriptor using vLLM."""
 
     def create_executor_name(self) -> str:
@@ -76,6 +70,15 @@ class VLLMDescriptor(
         """Get the container image name for the task executor."""
         return constants.CONTAINER_IMAGE_VLLM
 
+    def get_container_envs(self, gpus: list[GPU]) -> list[tuple[str, str]]:
+        """Get the container environment variables for the task executor."""
+        envs = super().get_container_envs(gpus)
+        if self.task.receive_embeddings:
+            envs.append(
+                ("CORNSERVE_VLLM_DISABLE_MULTIMODAL", "1"),
+            )
+        return envs
+
     def get_container_args(self, gpus: list[GPU], port: int) -> list[str]:
         """Get the container command for the task executor."""
         args = [
@@ -84,8 +87,21 @@ class VLLMDescriptor(
             str(len(gpus)),
             "--port",
             str(port),
+            "--trust-remote-code",
             "--cornserve-sidecar-ranks",
             *[str(gpu.global_rank) for gpu in gpus],
+            # XXX: Sending hidden states from vLLM to the sidecar fases device pointer errors
+            # when compilation is enabled. Unsure if it's CUDA graph, torch.compile, or something else.
+            "--enforce-eager",
+            # XXX: When prefix caching is enabled, hidden states of the prefix that hit the cache
+            # are never computed and thus never sent to the sidecar. Ideally, we want to include the
+            # hidden states in the prefix cache, which V1 doesn't support yet.
+            "--no-enable-prefix-caching",
+            # These arguments will be hand tuned during benchmarking
+            # When benchmarking, we reuse mm inputs, so we disable the preprocessor cache
+            "--disable-mm-preprocessor-cache",
+            "--gpu-memory-utilization",
+            "0.93",
         ]
         return args
 
@@ -96,7 +112,7 @@ class VLLMDescriptor(
     def to_request(
         self,
         task_input: OpenAIChatCompletionRequest,
-        task_output: Stream[OpenAIChatCompletionChunk],
+        task_output: TaskOutput,
     ) -> dict[str, Any]:
         """Convert TaskInput to a request object for the task executor."""
         # If `cornserve_embeddings` is empty, the request will be sent to vLLM as is.
@@ -116,7 +132,8 @@ class VLLMDescriptor(
                     task_input.cornserve_embeddings,
                 )
                 raise ValueError(
-                    "The number of multimodal data in messages does not match the number of embeddings provided."
+                    f"The number of multimodal data in messages {len(multimodal_data)} != "
+                    f"{len(task_input.cornserve_embeddings)} the number of embeddings provided."
                 )
             for multimodal_content, forward in zip(multimodal_data, task_input.cornserve_embeddings, strict=True):
                 modality = multimodal_content.type.split("_")[0]  # e.g., "audio", "image", "video"
@@ -124,19 +141,42 @@ class VLLMDescriptor(
                 data_url.url = f"data:{modality}/uuid;data_id={forward.id};url={data_url.url},"
 
         request = task_input.model_dump(exclude={"cornserve_embeddings"})
-        request["stream"] = True
+
+        if isinstance(task_output, Stream):
+            request["stream"] = True
+
+        if isinstance(task_output, LLMEmbeddingResponse):
+            request["cornserve_hidden_states_forward_ranks"] = task_output.embeddings.dst_sidecar_ranks
+            request["cornserve_hidden_states_forward_data_id"] = task_output.embeddings.id
+
         return request
 
-    def from_response(
+    async def from_response(
         self,
-        task_output: Stream[OpenAIChatCompletionChunk],
-        response: httpx.Response,
-    ) -> Stream[OpenAIChatCompletionChunk]:
+        task_output: TaskOutput,
+        response: aiohttp.ClientResponse,
+    ) -> TaskOutput:
         """Convert the response from the task executor to TaskOutput."""
-        return Stream[OpenAIChatCompletionChunk](
-            async_iterator=parse_stream_to_completion_chunks(response),
-            response=response,
-        )
+        if isinstance(task_output, Stream):
+            return Stream[OpenAIChatCompletionChunk](
+                async_iterator=parse_stream_to_completion_chunks(response),
+                response=response,
+            )
+        if isinstance(task_output, LLMEmbeddingResponse):
+            return LLMEmbeddingResponse(embeddings=task_output.embeddings)
+        raise ValueError(f"Expected task output to be Stream or LLMEmbeddingResponse, got {type(task_output)}")
+
+    def get_container_volumes(self) -> list[tuple[str, str, str]]:
+        """Get the container volumes for the task manager.
+
+        Returns:
+            A list of tuples: name, host path, container path.
+        """
+        return [
+            ("hf-cache", constants.VOLUME_HF_CACHE, "/root/.cache/huggingface"),
+            ("shm", constants.VOLUME_SHM, "/dev/shm"),
+            ("torch-compile-cache", constants.VOLUME_VLLM_EXECUTOR_CACHE, "/root/.cache/vllm/torch_compile_cache"),
+        ]
 
 
 class PrefillVLLMDescriptor(
@@ -166,15 +206,19 @@ class PrefillVLLMDescriptor(
 
     def get_container_envs(self, gpus: list[GPU]) -> list[tuple[str, str]]:
         """Get the additional environment variables for the task executor."""
-        return [
-            ("UCX_TLS", "cuda,rc,ib,tcp"),
-            # ("UCX_TLS", "cuda,rc,ib"),
-            ("UCX_NET_DEVICES", "mlx5_0:1"),
-            # ("UCX_LOG_LEVEL", "debug"),
-            ("CUDA_VISIBLE_DEVICES", ",".join(str(gpu.local_rank) for gpu in gpus)),
-            # ("VLLM_LOGGING_LEVEL", "DEBUG"),
-            ("VLLM_NIXL_SIDE_CHANNEL_PORT", str(self.NIXL_BASE_PORT + gpus[0].global_rank)),
-        ]
+        envs = super().get_container_envs(gpus)
+        envs.extend(
+            [
+                # ("UCX_LOG_LEVEL", "debug"),
+                # ("VLLM_LOGGING_LEVEL", "DEBUG"),
+                ("VLLM_NIXL_SIDE_CHANNEL_PORT", str(self.NIXL_BASE_PORT + gpus[0].global_rank)),
+            ]
+        )
+        if self.task.receive_embeddings:
+            envs.append(
+                ("CORNSERVE_VLLM_DISABLE_MULTIMODAL", "1"),
+            )
+        return envs
 
     def get_kubernetes_envs(self, gpus: list[GPU]) -> list[kclient.V1EnvVar]:
         """Get the kubernetes environment variables for the task executor."""
@@ -195,11 +239,18 @@ class PrefillVLLMDescriptor(
             str(len(gpus)),
             "--port",
             str(port),
+            "--trust-remote-code",
             "--kv-transfer-config",
             '{"kv_connector":"NixlConnector","kv_role":"kv_producer"}',
             # need to forward KV transfer parameters to a decode instance
             "--cornserve-sidecar-ranks",
             *[str(gpu.global_rank) for gpu in gpus],
+            # here we synchronize arguments with the base descriptor
+            "--enforce-eager",
+            "--no-enable-prefix-caching",
+            "--disable-mm-preprocessor-cache",
+            "--gpu-memory-utilization",
+            "0.93",
         ]
         return args
 
@@ -214,6 +265,7 @@ class PrefillVLLMDescriptor(
             ("infiniband-dev", "/dev/infiniband", "/dev/infiniband"),
             ("hf-cache", constants.VOLUME_HF_CACHE, "/root/.cache/huggingface"),
             ("shm", constants.VOLUME_SHM, "/dev/shm"),
+            ("torch-compile-cache", constants.VOLUME_VLLM_EXECUTOR_CACHE, "/root/.cache/vllm/torch_compile_cache"),
         ]
 
     def get_api_url(self, base: str) -> str:
@@ -254,30 +306,36 @@ class PrefillVLLMDescriptor(
         request = task_input.model_dump(exclude={"cornserve_embeddings", "stream_options"})
         # overwrite max_completion_tokens
         request["max_completion_tokens"] = 1
-        request["kv_transfer_params"] = {
-            "do_remote_decode": True,
-            "do_remote_prefill": False,
-            "remote_engine_id": None,
-            "remote_block_ids": None,
-            "remote_host": None,
-            "remote_port": None,
-        }
-        request["cornserve_kv_transfer_send_params"] = {
-            "id": task_output.kv_transfer_params.id,
-            "receiver_sidecar_ranks": task_output.kv_transfer_params.dst_sidecar_ranks,
-        }
+
+        if (params := task_output.kv_transfer_params) is not None:
+            request["kv_transfer_params"] = {
+                "do_remote_decode": True,
+                "do_remote_prefill": False,
+                "remote_engine_id": None,
+                "remote_block_ids": None,
+                "remote_host": None,
+                "remote_port": None,
+            }
+            request["cornserve_kv_transfer_send_params"] = {
+                "id": params.id,
+                "receiver_sidecar_ranks": params.dst_sidecar_ranks,
+            }
+
+        if (hidden_states := task_output.hidden_states) is not None:
+            request["cornserve_hidden_states_forward_ranks"] = hidden_states.dst_sidecar_ranks
+
         return request
 
-    def from_response(
+    async def from_response(
         self,
         task_output: PrefillChatCompletionResponse,
-        response: httpx.Response,
+        response: aiohttp.ClientResponse,
     ) -> PrefillChatCompletionResponse:
         """Convert the response from the task executor to TaskOutput."""
-        resp = response.json()
-        if "kv_transfer_params" not in resp:
-            raise ValueError("Response does not contain kv_transfer_params.")
-        return PrefillChatCompletionResponse(kv_transfer_params=task_output.kv_transfer_params)
+        resp_data = await response.json()
+        if "kv_transfer_params" in resp_data:
+            return PrefillChatCompletionResponse(kv_transfer_params=task_output.kv_transfer_params)
+        return PrefillChatCompletionResponse(hidden_states=task_output.hidden_states)
 
 
 class DecodeVLLMDescriptor(
@@ -303,15 +361,18 @@ class DecodeVLLMDescriptor(
 
     def get_container_envs(self, gpus: list[GPU]) -> list[tuple[str, str]]:
         """Get the additional environment variables for the task executor."""
-        return [
-            ("UCX_TLS", "cuda,rc,ib,tcp"),
-            # ("UCX_TLS", "cuda,rc,ib"),
-            ("UCX_NET_DEVICES", "mlx5_0:1"),
-            # ("UCX_LOG_LEVEL", "debug"),
-            ("CUDA_VISIBLE_DEVICES", ",".join(str(gpu.local_rank) for gpu in gpus)),
-            # ("VLLM_LOGGING_LEVEL", "DEBUG"),
-            ("VLLM_NIXL_SIDE_CHANNEL_PORT", str(self.NIXL_BASE_PORT + gpus[0].global_rank)),
-        ]
+        envs = super().get_container_envs(gpus)
+        envs.extend(
+            [
+                # ("UCX_LOG_LEVEL", "debug"),
+                # ("VLLM_LOGGING_LEVEL", "DEBUG"),
+                ("VLLM_NIXL_SIDE_CHANNEL_PORT", str(self.NIXL_BASE_PORT + gpus[0].global_rank)),
+            ]
+        )
+        envs.append(
+            ("CORNSERVE_VLLM_DISABLE_MULTIMODAL", "1"),
+        )
+        return envs
 
     def get_kubernetes_envs(self, gpus: list[GPU]) -> list[kclient.V1EnvVar]:
         """Get the kubernetes environment variables for the task executor."""
@@ -326,17 +387,25 @@ class DecodeVLLMDescriptor(
 
     def get_container_args(self, gpus: list[GPU], port: int) -> list[str]:
         """Get the container command for the task executor."""
+        # TODO: reduce duplication
         args = [
             self.task.model_id,
             "--tensor-parallel-size",
             str(len(gpus)),
             "--port",
             str(port),
+            "--trust-remote-code",
             "--kv-transfer-config",
             '{"kv_connector":"NixlConnector","kv_role":"kv_consumer"}',
             # need to receive KV transfer parameters from a decode instance
             "--cornserve-sidecar-ranks",
             *[str(gpu.global_rank) for gpu in gpus],
+            # here we synchronize arguments with the base descriptor
+            "--enforce-eager",
+            "--no-enable-prefix-caching",
+            "--disable-mm-preprocessor-cache",
+            "--gpu-memory-utilization",
+            "0.93",
         ]
 
         return args
@@ -352,6 +421,7 @@ class DecodeVLLMDescriptor(
             ("infiniband-dev", "/dev/infiniband", "/dev/infiniband"),
             ("hf-cache", constants.VOLUME_HF_CACHE, "/root/.cache/huggingface"),
             ("shm", constants.VOLUME_SHM, "/dev/shm"),
+            ("torch-compile-cache", constants.VOLUME_VLLM_EXECUTOR_CACHE, "/root/.cache/vllm/torch_compile_cache"),
         ]
 
     def get_api_url(self, base: str) -> str:
@@ -392,10 +462,10 @@ class DecodeVLLMDescriptor(
         request["stream"] = True
         return request
 
-    def from_response(
+    async def from_response(
         self,
         task_output: Stream[OpenAIChatCompletionChunk],
-        response: httpx.Response,
+        response: aiohttp.ClientResponse,
     ) -> Stream[OpenAIChatCompletionChunk]:
         """Convert the response from the task executor to TaskOutput."""
         return Stream[OpenAIChatCompletionChunk](

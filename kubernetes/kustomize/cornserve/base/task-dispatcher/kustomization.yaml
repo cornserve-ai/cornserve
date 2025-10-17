@@ -3,6 +3,7 @@ kind: Kustomization
 resources:
 - deployment.yaml
 - service.yaml
+- headless-service.yaml
 - role.yaml
 - role-binding.yaml
 - service-account.yaml

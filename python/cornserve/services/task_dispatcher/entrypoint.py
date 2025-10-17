@@ -7,15 +7,16 @@ import signal
 from typing import TYPE_CHECKING
 
 import uvicorn
+from opentelemetry.instrumentation.aiohttp_client import AioHttpClientInstrumentor
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 from opentelemetry.instrumentation.grpc import GrpcInstrumentorClient, GrpcInstrumentorServer
-from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
 
 from cornserve.logging import get_logger
 from cornserve.services.task_registry import TaskRegistry
 from cornserve.services.task_dispatcher.grpc import create_server
 from cornserve.services.task_dispatcher.router import create_app
 from cornserve.tracing import configure_otel
+from cornserve.utils import set_ulimit
 
 if TYPE_CHECKING:
     from cornserve.services.task_dispatcher.dispatcher import TaskDispatcher
@@ -27,6 +28,7 @@ async def serve() -> None:
     """Serve the Task Dispatcher service."""
     logger.info("Starting Gateway service")
 
+    set_ulimit()
     configure_otel("task_dispatcher")
 
     # Start task watcher to load tasks/executors from CRs before the server starts
@@ -41,7 +43,7 @@ async def serve() -> None:
     app = create_app()
 
     FastAPIInstrumentor.instrument_app(app)
-    HTTPXClientInstrumentor().instrument()
+    AioHttpClientInstrumentor().instrument()
     GrpcInstrumentorClient().instrument()
     GrpcInstrumentorServer().instrument()
 

@@ -25,7 +25,7 @@ dependencies = [
   "tyro",
   "kubernetes",
   "kubernetes_asyncio",
-  "httpx",
+  "aiohttp",
   "pydantic>=2.11",
   "opentelemetry-api",
   "opentelemetry-sdk",
@@ -55,7 +55,7 @@ gateway = [
   "uvicorn[standard]",
   "opentelemetry-instrumentation-fastapi",
   "opentelemetry-instrumentation-grpc",
-  "opentelemetry-instrumentation-httpx",
+  "opentelemetry-instrumentation-aiohttp-client",
   "websocket-client",
 ]
 resource-manager = [
@@ -66,7 +66,7 @@ task-dispatcher = [
   "fastapi",
   "uvicorn[standard]",
   "opentelemetry-instrumentation-fastapi",
-  "opentelemetry-instrumentation-httpx",
+  "opentelemetry-instrumentation-aiohttp-client",
   "opentelemetry-instrumentation-grpc",
 ]
 audio = ["librosa"]
@@ -77,7 +77,8 @@ eric-no-gpu = [
   "msgspec",
   "psutil",
   "torch>=2.5.0, <=2.7.0",
-  "transformers",
+  "torchvision",
+  "transformers==4.55.4",
   "huggingface_hub",
   "pillow",
   "opencv-python-headless",
@@ -88,18 +89,45 @@ eric-no-gpu = [
 ]
 eric = ["flash-attn==2.7.4.post1", "xformers", "cornserve[eric-no-gpu]"]
 eric-audio = ["cornserve[eric,audio]"]
+geri-no-gpu = [
+  "fastapi",
+  "uvicorn[standard]",
+  "pyzmq",
+  "msgspec",
+  "torch>=2.5.0, <=2.7.0",
+  "transformers==4.55.4",
+  "huggingface_hub",
+  "pillow",
+  "diffusers>=0.35.1",
+  "accelerate",
+  "cornserve[sidecar-api]",
+  "opentelemetry-instrumentation-fastapi",
+  "opentelemetry-instrumentation-threading",
+]
+geri = ["cornserve[geri-no-gpu]"]
+huggingface-te = [
+  "fastapi",
+  "uvicorn[standard]",
+  "transformers==4.55.4",
+  "pillow",
+  "diffusers>=0.35.1",
+  "qwen_omni_utils==0.0.8",
+  "accelerate",
+  "opentelemetry-instrumentation-fastapi",
+]
 dev-common = [
   "grpcio-tools",
-  "pyright!=1.1.401",
+  "pyright",
   "ruff",
   "pytest",
   "pytest-asyncio",
   "pytest-dependency",
   "datasets", # for benchmark
+  "timm",
   "cornserve[sidecar-api,gateway,resource-manager,task-manager,task-dispatcher]",
 ]
-dev = ["cornserve[dev-common,sidecar,eric]"]
-dev-no-gpu = ["cornserve[dev-common,eric-no-gpu]"]
+dev = ["cornserve[dev-common,sidecar,eric,geri,huggingface-te]"]
+dev-no-gpu = ["cornserve[dev-common,eric-no-gpu,geri-no-gpu,huggingface-te]"]
 
 [tool.setuptools.dynamic]
 version = { attr = "cornserve.__version__" }

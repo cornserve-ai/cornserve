@@ -5,12 +5,12 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from typing import Any, Generic, TypeVar
 
-import httpx
+import aiohttp
 import kubernetes_asyncio.client as kclient
 from pydantic import BaseModel
 
 from cornserve import constants
-from cornserve.services.resource_manager.resource import GPU
+from cornserve.services.resource import GPU
 from cornserve.task.base import TaskInput, TaskOutput, UnitTask
 
 TaskT = TypeVar("TaskT", bound=UnitTask)
@@ -83,7 +83,7 @@ class TaskExecutionDescriptor(BaseModel, ABC, Generic[TaskT, InputT, OutputT]):
         """
 
     @abstractmethod
-    def from_response(self, task_output: OutputT, response: httpx.Response) -> OutputT:
+    async def from_response(self, task_output: OutputT, response: aiohttp.ClientResponse) -> OutputT:
         """Convert the task executor response to TaskOutput.
 
         In general, the `task_output` object will be deep-copied and concrete values

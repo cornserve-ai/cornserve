@@ -123,6 +123,24 @@ class SidecarReceiver:
         with contextlib.suppress(Exception):
             os.unlink(shm_filename())
 
+    async def close_stream(
+        self,
+        request: sidecar_pb2.CloseStreamRequest,
+        context: grpc.aio.ServicerContext,
+    ) -> sidecar_pb2.CloseStreamResponse:
+        """Close a stream for a given request ID in the receiver."""
+        try:
+            async with self.recv_done_lock:
+                req_state = self.ledger[request.id]
+                logger.info("Closing stream for request %s with %d chunks", request.id, request.num_chunks)
+                # chunk_ids are 0-indexed, so we need to add 1 to get the total number of chunks
+                req_state.num_chunks = request.num_chunks
+                req_state.done_event.set()
+            return sidecar_pb2.CloseStreamResponse(status=common_pb2.Status.STATUS_OK)
+        except Exception:
+            logger.exception("Failed to close stream for request %s with %d chunks", request.id, request.num_chunks)
+            await context.abort(grpc.StatusCode.INTERNAL, "Failed to close stream")
+
     async def prepare_receive(
         self,
         request: sidecar_pb2.PrepareReceiveRequest,
@@ -133,6 +151,7 @@ class SidecarReceiver:
         This function allocates a shared memory buffer if not already allocated,
         and queues up a receive task to receive the tensor.
         """
+        logger.info("Prepare receive request for request id %s, chunk id %s", request.id, request.chunk_id)
         span = trace.get_current_span()
         # malloc is per chunk
         malloc_id = request.id + f"-{request.chunk_id}"
@@ -209,6 +228,11 @@ class SidecarReceiver:
                         chunk_state = req_state.chunks[request.chunk_id]
                         assert isinstance(chunk_state, RecvTensorState)
                         chunk_state.done = True
+                        logger.info(
+                            "Inter node received all shards for request id %s, chunk id %s",
+                            request.id,
+                            request.chunk_id,
+                        )
                         req_state.done_event.set()
 
             asyncio.create_task(recv_task())
@@ -235,6 +259,7 @@ class SidecarReceiver:
                     self.ledger[request.id] = req_state
                 self.ledger[request.id].done_event.set()
 
+            logger.info("Intra node prepare receive done for request id %s", request.id)
             return sidecar_pb2.PrepareReceiveResponse(status=common_pb2.Status.STATUS_OK)
         else:
             span.set_attribute("SidecarReceiver.prepare_receive.type", "Object")
@@ -271,7 +296,7 @@ class SidecarReceiver:
         waken up again, and the already woken ones can still check the chunk_id
         """
         span = trace.get_current_span()
-        logger.info("==> Receive request for request id %s", recv_req.id)
+        logger.info("Receive request for request id %s chunk %s", recv_req.id, recv_req.chunk_id)
         span.set_attribute("SidecarReceiver.receive.id", recv_req.id)
         span.set_attribute("SidecarReceiver.receive.chunk_id", recv_req.chunk_id)
 
@@ -284,8 +309,14 @@ class SidecarReceiver:
         while True:
             await req_state.done_event.wait()
             # some chunk of this request is already received
-            if recv_req.chunk_id > req_state.num_chunks:
+            if req_state.num_chunks and recv_req.chunk_id >= req_state.num_chunks:
                 # check out of bound
+                logger.info(
+                    "receive: chunk_id %d out of bound for request %s >= request.num_chunks %s",
+                    recv_req.chunk_id,
+                    recv_req.id,
+                    req_state.num_chunks,
+                )
                 return sidecar_pb2.ReceiveResponse(
                     status=common_pb2.Status.STATUS_OK,
                     data=self.encoder.encode(None),
@@ -310,6 +341,7 @@ class SidecarReceiver:
                 else:
                     raise ValueError("Unknown chunk state")
 
+                logger.info("Received chunk %s of request %s", recv_req.chunk_id, recv_req.id)
                 return sidecar_pb2.ReceiveResponse(
                     status=common_pb2.Status.STATUS_OK,
                     data=self.encoder.encode(obj),
@@ -368,12 +400,13 @@ class SidecarReceiver:
             if res.status != common_pb2.Status.STATUS_OK:
                 await context.abort(grpc.StatusCode.INTERNAL, "Failed to unlink intra node memory")
         else:
+            await self._free(chunk_state.buffer)
             logger.info(
-                "mark_done: Freeing up %d slots from %s",
+                "mark_done: Freed up %d slots from %s, used slots %s",
                 len(chunk_state.buffer.slots),
                 mark_done_req.id,
+                self.shm_manager.used_slots,
             )
-            await self._free(chunk_state.buffer)
 
         # TODO: make this counter instead of assuming sequential access
         if req_state.num_chunks == mark_done_req.chunk_id + 1:

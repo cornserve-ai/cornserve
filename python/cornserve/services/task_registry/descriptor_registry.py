@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING
 from cornserve.logging import get_logger
 from cornserve.task_executors.descriptor.base import TaskExecutionDescriptor
 from cornserve.services.task_registry.task_class_registry import TASK_CLASS_REGISTRY
+from cornserve.services.task_registry.util import create_package_hierarchy_if_missing
 
 if TYPE_CHECKING:
     from cornserve.task.base import UnitTask
@@ -24,56 +25,27 @@ class TaskExecutionDescriptorRegistry:
     def __init__(self) -> None:
         self.registry: dict[str, dict[str, type[TaskExecutionDescriptor]]] = defaultdict(dict)
         self.default_registry: dict[str, type[TaskExecutionDescriptor]] = {}
-        # Descriptors that arrive before their target task class is loaded
-        self._pending: dict[str, list[tuple[type[TaskExecutionDescriptor], str, bool]]] = defaultdict(list)
+        # This stores descriptors that arrive before their corresponding task class is loaded
+        # each item is (decoded_source, module_name, descriptor_class_name, is_default)
+        self._pending: dict[str, list[tuple[str, str, str, bool]]] = defaultdict(list)
 
-    def register(
+    def _exec_install_and_register(
         self,
-        task: type[UnitTask],
-        descriptor: type[TaskExecutionDescriptor],
-        name: str | None = None,
-        default: bool = False,
+        decoded_source: str,
+        module_name: str,
+        descriptor_class_name: str,
+        task_class_name: str,
+        is_default: bool,
     ) -> None:
-        """Register a descriptor class for a task, optionally as default."""
-        if name is None:
-            name = descriptor.__name__
-        task_name = task.__name__
-        if name in self.registry[task_name]:
-            raise ValueError(f"Descriptor {name} already registered for task {task_name}")
-        self.registry[task_name][name] = descriptor
-        if default:
-            if task_name in self.default_registry:
-                raise ValueError(f"Default descriptor already registered for task {task_name}")
-            self.default_registry[task_name] = descriptor
+        """Execute descriptor module source, validate, install, and register for a task class.
 
-    def load_from_source(self, source_code: str, descriptor_class_name: str, module_name: str, task_class_name: str) -> None:
-        """Load a descriptor class from base64-encoded source.
-
-        Because descriptor code imports task classes, we need to ensure task classes registered before
-        their corresponding descriptors are loaded. So, if required task class presents, register immediately;
-        otherwise put to the pending queue.
+        Shared by both immediate and deferred code paths to avoid duplication.
         """
-        decoded_source = base64.b64decode(source_code).decode("utf-8")
-
         created_packages: list[str] = []
 
-        def ensure_package(name: str) -> None:
-            if name in sys.modules:
-                return
-            pkg = types.ModuleType(name)
-            pkg.__spec__ = ModuleSpec(name, loader=None, is_package=True)
-            pkg.__path__ = []
-            parent = name.rpartition('.')[0]
-            if parent:
-                ensure_package(parent)
-                setattr(sys.modules[parent], name.split('.')[-1], pkg)
-            sys.modules[name] = pkg
-            created_packages.append(name)
-
-        # Determine parent package name (do not create yet)
         parent = module_name.rpartition('.')[0]
 
-        # Prepare the module (do not insert yet)
+        # Create and pre-insert module
         module = types.ModuleType(module_name)
         module.__spec__ = ModuleSpec(module_name, loader=None, is_package=False)
         module.__package__ = parent or module_name
@@ -92,24 +64,19 @@ class TaskExecutionDescriptorRegistry:
 
             # Create parent packages only now, after validation succeeds
             if parent:
-                ensure_package(parent)
+                create_package_hierarchy_if_missing(parent)
+                # Track packages created for rollback
+                if parent in sys.modules:
+                    created_packages.append(parent)
 
             # Install after validation
             sys.modules[module_name] = module
             if parent:
                 setattr(sys.modules[parent], module_name.split('.')[-1], module)
 
-            # Register now or queue pending
-            if task_class_name in TASK_CLASS_REGISTRY:
-                task_cls, _, _ = TASK_CLASS_REGISTRY.get_unit_task(task_class_name)
-                self.register(task_cls, descriptor_cls, descriptor_class_name, default=True)
-            else:
-                self._pending[task_class_name].append((descriptor_cls, descriptor_class_name, True))
-                logger.info(
-                    "Queued execution descriptor %s for task %s until task class is loaded",
-                    descriptor_class_name,
-                    task_class_name,
-                )
+            # Get task class from registry
+            task_cls, _, _ = TASK_CLASS_REGISTRY.get_unit_task(task_class_name)
+            self._register(task_cls, descriptor_cls, descriptor_class_name, default=is_default)
         except Exception:
             # Roll back any packages we created
             for pkg_name in reversed(created_packages):
@@ -124,15 +91,74 @@ class TaskExecutionDescriptorRegistry:
                 sys.modules.pop(pkg_name, None)
             raise
 
+    def _register(
+        self,
+        task: type[UnitTask],
+        descriptor: type[TaskExecutionDescriptor],
+        name: str | None = None,
+        default: bool = False,
+    ) -> None:
+        """Register a descriptor class for a task, optionally as default."""
+        if name is None:
+            name = descriptor.__name__
+        task_name = task.__name__
+        if name in self.registry[task_name]:
+            raise ValueError(f"Descriptor {name} already registered for task {task_name}")
+        self.registry[task_name][name] = descriptor
+        if default:
+            if task_name in self.default_registry:
+                raise ValueError(f"Default descriptor already registered for task {task_name}")
+            self.default_registry[task_name] = descriptor
+        logger.info("Registered execution descriptor: %s for task: %s%s", name, task_name, " (default)" if default else "")
+
+    def load_from_source(self, source_code: str, descriptor_class_name: str, module_name: str, task_class_name: str) -> None:
+        """Load a descriptor class from base64-encoded source.
+
+        Because descriptor code imports task classes, we need to ensure task classes registered before
+        their corresponding descriptors are loaded. So, if required task class presents, register immediately;
+        otherwise put to the pending queue.
+        """
+        decoded_source = base64.b64decode(source_code).decode("utf-8")
+
+        # If the target task is not yet registered, defer execution entirely.
+        # We queue the raw decoded source and module metadata to be executed later.
+        from cornserve.services.task_registry.task_class_registry import TASK_CLASS_REGISTRY as _TCR
+        if task_class_name not in _TCR:
+            self._pending[task_class_name].append((decoded_source, module_name, descriptor_class_name, True))
+            logger.info(
+                "Queued execution descriptor %s for task %s until task class is loaded",
+                descriptor_class_name,
+                task_class_name,
+            )
+            return
+
+        # Task present: execute and register via shared helper
+        self._exec_install_and_register(
+            decoded_source=decoded_source,
+            module_name=module_name,
+            descriptor_class_name=descriptor_class_name,
+            task_class_name=task_class_name,
+            is_default=True,
+        )
+
     def bind_pending_descriptor_for_task_class(self, task: type[UnitTask]) -> None:
-        """Bind any queued descriptors to the now-available task class."""
+        """Bind any queued descriptors to the now-available task class.
+        
+        This is called by the task class registry, whenever there's new task classes comming in.
+        """
         task_name = task.__name__
         if task_name not in self._pending:
             return
-        pending = self._pending.pop(task_name)
-        for descriptor_cls, name, is_default in pending:
-            self.register(task, descriptor_cls, name, default=is_default)
-            logger.info("Registered pending execution descriptor: %s for task: %s", name, task_name)
+        pending_items = self._pending.pop(task_name)
+        for decoded_source, module_name, descriptor_class_name, is_default in pending_items:
+            self._exec_install_and_register(
+                decoded_source=decoded_source,
+                module_name=module_name,
+                descriptor_class_name=descriptor_class_name,
+                task_class_name=task_name,
+                is_default=is_default,
+            )
+            logger.info("Registered pending execution descriptor: %s for task: %s", descriptor_class_name, task_name)
 
     def get(self, task: type[UnitTask], name: str | None = None) -> type[TaskExecutionDescriptor]:
         task_name = task.__name__

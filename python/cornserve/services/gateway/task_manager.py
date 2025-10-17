@@ -8,8 +8,9 @@ import uuid
 from collections import defaultdict
 from typing import Any
 
+import aiohttp
 import grpc
-import httpx
+from grpc.aio import AioRpcError
 from opentelemetry import trace
 
 from cornserve.constants import K8S_TASK_DISPATCHER_HTTP_URL
@@ -23,6 +24,7 @@ from cornserve.services.pb.resource_manager_pb2 import (
 from cornserve.services.pb.resource_manager_pb2_grpc import ResourceManagerStub
 from cornserve.services.task_registry import TaskRegistry
 from cornserve.task.base import TASK_TIMEOUT, TaskGraphDispatch, UnitTask
+from cornserve.utils import format_grpc_error
 
 logger = get_logger(__name__)
 tracer = trace.get_tracer(__name__)
@@ -55,7 +57,10 @@ class TaskManager:
         self.task_lock = asyncio.Lock()
 
         # HTTP client
-        self.client = httpx.AsyncClient(timeout=TASK_TIMEOUT)
+        self.client = aiohttp.ClientSession(
+            timeout=aiohttp.ClientTimeout(total=TASK_TIMEOUT),
+            connector=aiohttp.TCPConnector(limit=0),
+        )
 
         # Task-related state. Key is the task ID.
         self.tasks: dict[str, UnitTask] = {}
@@ -163,7 +168,11 @@ class TaskManager:
             errors: list[BaseException] = []
             deployed_tasks: list[str] = []
             for resp, deployed_task in zip(responses, to_deploy, strict=True):
-                if isinstance(resp, BaseException):
+                if isinstance(resp, AioRpcError):
+                    # If the response is an AioRpcError, pretty print it
+                    logger.error("gRPC error while deploying task %s: \n%s", deployed_task, format_grpc_error(resp))
+                    errors.append(resp)
+                elif isinstance(resp, BaseException):
                     logger.error("Error while deploying task: %s", resp)
                     errors.append(resp)
                 else:
@@ -189,7 +198,8 @@ class TaskManager:
                 self.task_uuids.clear(); self.task_uuids.update(snapshot_uuids)
                 self.task_usage_counter.clear(); self.task_usage_counter.update(snapshot_usage)
                 logger.info("Rolled back deployment of all deployed tasks")
-                raise RuntimeError(f"Error while deploying tasks: {errors}")
+                # Errors are logged above, so we just raise a generic error here.
+                raise RuntimeError("Error while deploying tasks")
 
             # Update task states
             for task_id in task_ids:
@@ -305,8 +315,6 @@ class TaskManager:
         Returns:
             The outputs of all tasks.
         """
-        logger.info("Invoking tasks: %s", dispatch)
-
         # Check if all tasks are deployed
         running_task_ids: list[str] = []
         async with self.task_lock:
@@ -356,5 +364,8 @@ class TaskManager:
 
         # Close the gRPC channel to the resource manager
         await self.resource_manager_channel.close()
+
+        # Close the HTTP client session
+        await self.client.close()
 
         logger.info("Gateway task manager has been shut down")

@@ -29,3 +29,6 @@ rules:
 - apiGroups: [""]
   resources: ["nodes"]
   verbs: ["list"]
+- apiGroups: [""]
+  resources: ["endpoints"]
+  verbs: ["list"]

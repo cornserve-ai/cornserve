@@ -1,4 +1,16 @@
-FROM pytorch/pytorch:2.7.0-cuda12.6-cudnn9-devel
+# Build flash-attn wheel inside the `devel` image which has `nvcc`.
+FROM pytorch/pytorch:2.7.0-cuda12.6-cudnn9-devel AS builder
+
+ARG max_jobs=64
+ENV MAX_JOBS=${max_jobs}
+ENV NVCC_THREADS=8
+RUN pip wheel -w /tmp/wheels --no-build-isolation --no-deps --verbose flash-attn==2.7.4.post1
+
+# Copy over the flash-attn wheel for Eric
+FROM pytorch/pytorch:2.7.0-cuda12.6-cudnn9-runtime AS dev
+
+COPY --from=builder /tmp/wheels/*.whl /tmp/wheels/
+RUN pip install --no-cache-dir /tmp/wheels/*.whl && rm -rf /tmp/wheels
 
 RUN apt-get update && apt-get upgrade -y
 RUN apt-get install wget build-essential librdmacm-dev net-tools -y
@@ -38,5 +50,8 @@ ENV UCXPY_LOG_LEVEL=DEBUG
 
 # Disable OpenTelemetry
 ENV OTEL_SDK_DISABLED=true
+
+# vLLM
+ENV VLLM_LOGGING_LEVEL=DEBUG
 
 CMD ["bash"]

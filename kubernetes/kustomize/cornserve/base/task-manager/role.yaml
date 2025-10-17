@@ -17,5 +17,5 @@ metadata:
   name: task-manager-pod-service-management-role
 rules:
 - apiGroups: [""]
-  resources: ["pods", "services"]
-  verbs: ["create", "update", "patch", "get", "list", "watch", "delete"]
+  resources: ["pods", "pods/log", "services"]
+  verbs: ["*"]

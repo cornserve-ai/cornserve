@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 
 from cornserve.logging import get_logger
 from cornserve.task.base import UnitTask, Task
+from cornserve.services.task_registry.util import create_package_hierarchy_if_missing
 
 if TYPE_CHECKING:
     from cornserve.task.base import TaskInput, TaskOutput
@@ -26,8 +27,12 @@ class TaskClassRegistry:
     def __init__(self) -> None:
         self._unit_tasks: dict[str, tuple[type[UnitTask], type[TaskInput], type[TaskOutput]]] = {}
         self._composite_tasks: dict[str, type[Task]] = {}
+        
+        # Task modules that failed to load due to dependency/order issues
+        # each item is (decoded_source, module_name, task_class_name, is_unit_task)
+        self._pending: list[tuple[str, str, str, bool]] = []
 
-    def register(
+    def _register(
         self,
         task: type[UnitTask],
         task_input: type[TaskInput],
@@ -37,8 +42,9 @@ class TaskClassRegistry:
         """Register a unit task class and its IO models under an optional name."""
         name = name or task.__name__
         self._unit_tasks[name] = (task, task_input, task_output)
+        logger.info("Registered unit task: %s", name)
 
-    def register_composite(
+    def _register_composite(
         self,
         task: type[Task],
         name: str | None = None,
@@ -46,6 +52,7 @@ class TaskClassRegistry:
         """Register a composite task class under an optional name."""
         name = name or task.__name__
         self._composite_tasks[name] = task
+        logger.info("Registered composite task: %s", name)
 
     def load_from_source(self, source_code: str, task_class_name: str, module_name: str, is_unit_task: bool = True) -> None:
         """Load a Task class from base64-encoded source and register it.
@@ -56,49 +63,68 @@ class TaskClassRegistry:
             module_name: Full module path of where the task class is defined
             is_unit_task: True for UnitTask, False otherwise
         """
-        import sys
-        import types
-        from importlib.machinery import ModuleSpec
         decoded_source = base64.b64decode(source_code).decode("utf-8")
+        try:
+            self._exec_install_and_register_task(
+                decoded_source=decoded_source,
+                module_name=module_name,
+                task_class_name=task_class_name,
+                is_unit_task=is_unit_task,
+            )
+            # After success, try to bind any pending tasks that might now resolve
+            self._bind_pending_tasks()
+        except ModuleNotFoundError as e:
+            missing = getattr(e, "name", "") or str(e)
+            # If dependency is another CR-backed module, queue for retry
+            if isinstance(missing, str) and (missing.startswith("cornserve_tasklib.") or missing.startswith("cornserve.")):
+                self._pending.append((decoded_source, module_name, task_class_name, is_unit_task))
+                logger.info(
+                    "Queued task module %s for later due to missing dependency: %s",
+                    module_name,
+                    missing,
+                )
+                return
+            raise
 
+    def _exec_install_and_register_task(
+        self,
+        decoded_source: str,
+        module_name: str,
+        task_class_name: str,
+        is_unit_task: bool,
+    ) -> None:
+        """Execute task module source, validate, install, and register (unit or composite)."""
         created_packages: list[str] = []
 
-        def ensure_package(name: str) -> None:
-            """Create a package module if it doesn't exist, ensuring proper package metadata."""
-            if name in sys.modules:
-                return
-            pkg = types.ModuleType(name)
-            pkg.__spec__ = ModuleSpec(name, loader=None, is_package=True)
-            pkg.__path__ = []  # mark as package
-            parent = name.rpartition('.')[0]
-            if parent:
-                ensure_package(parent)
-                # attach as attribute on parent for 'from parent import child'
-                setattr(sys.modules[parent], name.split('.')[-1], pkg)
-            sys.modules[name] = pkg
-            created_packages.append(name)
-
-        # Ensure parent packages are real packages with proper metadata
+        # Ensure parent packages
         parent = module_name.rpartition('.')[0]
         if parent:
-            ensure_package(parent)
+            create_package_hierarchy_if_missing(parent)
+            # Track packages created for rollback
+            if parent in sys.modules:
+                created_packages.append(parent)
 
-        # Create the target module with proper metadata (do NOT insert into sys.modules yet)
+        # Create and pre-insert module
         module = types.ModuleType(module_name)
         module.__spec__ = ModuleSpec(module_name, loader=None, is_package=False)
         module.__package__ = parent or module_name
         module.__file__ = f"<crd:{module_name}>"
 
+        preexisting = module_name in sys.modules
+        previous_module = sys.modules.get(module_name)
+        sys.modules[module_name] = module
+        if parent:
+            setattr(sys.modules[parent], module_name.split('.')[-1], module)
+
         try:
-            # Execute the decoded source in the module namespace
+            # Execute the decoded source
             exec(decoded_source, module.__dict__)
 
-            # Validate the class exists
+            # Validate class presence and type
             if not hasattr(module, task_class_name):
                 raise ValueError(f"Task class {task_class_name} not found in source code")
             task_cls = getattr(module, task_class_name)
-            
-            # Import Task classes for validation
+
             if is_unit_task:
                 if not issubclass(task_cls, UnitTask):
                     raise ValueError(f"Class {task_class_name} is not a UnitTask subclass")
@@ -106,17 +132,11 @@ class TaskClassRegistry:
                 if not issubclass(task_cls, Task):
                     raise ValueError(f"Class {task_class_name} is not a Task subclass")
 
-            # Now that validation passed, install module into sys.modules and attach to parent
-            sys.modules[module_name] = module
-            if parent:
-                setattr(sys.modules[parent], module_name.split('.')[-1], module)
-
             if not is_unit_task:
-                # For composite tasks, directly register and return
-                self.register_composite(task_cls, task_class_name)
+                self._register_composite(task_cls, task_class_name)
                 return
 
-            # Extract generic types from MRO first (preferred)
+            # Extract generic types from MRO
             task_input_cls = None
             task_output_cls = None
             for base in task_cls.__mro__:
@@ -131,15 +151,22 @@ class TaskClassRegistry:
                         break
 
             if task_input_cls is None or task_output_cls is None:
-                raise ValueError(
-                    f"Task class {task_class_name} missing generic type arguments. Expected format: class {task_class_name}(UnitTask[InputType, OutputType])"
-                )
+                # Special case:  the  "LLMBaseUnitTask" is a generic task class
+                # so it doesn't have concrete input/output types,
+                # so to let it goes through, we register it with dummy TaskInput/Output types
+                # TODO: Such special case is definitely not legetimate, what should we do instead?
+                if task_class_name == "LLMBaseUnitTask":
+                    from cornserve.task.base import TaskInput as DummyInput, TaskOutput as DummyOutput
+                    task_input_cls, task_output_cls = DummyInput, DummyOutput
+                else:
+                    raise ValueError(
+                        f"Task class {task_class_name} missing generic type arguments. Expected format: class {task_class_name}(UnitTask[InputType, OutputType])"
+                    )
 
-            self.register(task_cls, task_input_cls, task_output_cls, task_class_name)
+            self._register(task_cls, task_input_cls, task_output_cls, task_class_name)
         except Exception:
-            # Roll back any packages we created
+            # Roll back package placeholders
             for pkg_name in reversed(created_packages):
-                # remove attribute from its parent if present
                 parent_name = pkg_name.rpartition('.')[0]
                 child_name = pkg_name.split('.')[-1]
                 if parent_name in sys.modules:
@@ -149,7 +176,41 @@ class TaskClassRegistry:
                     except Exception:
                         pass
                 sys.modules.pop(pkg_name, None)
+            # Roll back pre-inserted module to restore sys.modules state
+            try:
+                if parent and getattr(sys.modules.get(parent, None), module_name.split('.')[-1], None) is module:
+                    delattr(sys.modules[parent], module_name.split('.')[-1])
+            except Exception:
+                pass
+            if preexisting:
+                sys.modules[module_name] = previous_module
+            else:
+                sys.modules.pop(module_name, None)
             raise
+
+    def _bind_pending_tasks(self) -> None:
+        """Attempt to load any pending task modules deferred due to missing deps."""
+        if not self._pending:
+            return
+        remaining: list[tuple[str, str, str, bool]] = []
+        for decoded_source, module_name, task_class_name, is_unit_task in self._pending:
+            try:
+                self._exec_install_and_register_task(
+                    decoded_source=decoded_source,
+                    module_name=module_name,
+                    task_class_name=task_class_name,
+                    is_unit_task=is_unit_task,
+                )
+                logger.info("Registered pending task class: %s", task_class_name)
+            except ModuleNotFoundError as e:
+                missing = getattr(e, "name", "") or str(e)
+                if isinstance(missing, str) and (missing.startswith("cornserve_tasklib.") or missing.startswith("cornserve.")):
+                    remaining.append((decoded_source, module_name, task_class_name, is_unit_task))
+                else:
+                    logger.error("Failed to load pending task %s: %r", task_class_name, e)
+            except Exception as e:
+                logger.error("Failed to load pending task %s: %r", task_class_name, e)
+        self._pending = remaining
 
     def get_unit_task(self, name: str) -> tuple[type[UnitTask], type[TaskInput], type[TaskOutput]]:
         """Return (task class, input model, output model) by registered name for unit tasks."""

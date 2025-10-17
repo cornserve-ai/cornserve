@@ -33,6 +33,26 @@ def _camel_to_kebab(name: str) -> str:
     return "".join(out)
 
 
+def _sanitize_k8s_name(raw: str) -> str:
+    """Sanitize an string into a valid K8s metadata.name.
+
+    - Only lowercase alphanumerics, '-' or '.'
+    - Start and end with an alphanumeric
+    - Other characters converted to '-'
+    """
+    sanitized: list[str] = []
+    for ch in raw.lower():
+        if ("a" <= ch <= "z") or ("0" <= ch <= "9") or ch in {"-", "."}:
+            sanitized.append(ch)
+        else:
+            sanitized.append("-")
+    name = "".join(sanitized)
+    while "--" in name:
+        name = name.replace("--", "-")
+    name = name.strip("-.")
+    return name
+
+
 def discover_tasklib() -> tuple[
     list["TaskDefinitionPayload"],
     list["TaskDefinitionPayload"],
@@ -74,7 +94,7 @@ def discover_tasklib() -> tuple[
                     TaskDefinitionPayload(
                         source_b64=get_module_source_b64(module),
                         task_class_name=obj.__name__,
-                        task_definition_name=_camel_to_kebab(obj.__name__),
+                        task_definition_name=_sanitize_k8s_name(_camel_to_kebab(obj.__name__)),
                         module_name=module.__name__,
                         is_unit_task=True,
                     )
@@ -84,7 +104,7 @@ def discover_tasklib() -> tuple[
                     TaskDefinitionPayload(
                         source_b64=get_module_source_b64(module),
                         task_class_name=obj.__name__,
-                        task_definition_name=_camel_to_kebab(obj.__name__),
+                        task_definition_name=_sanitize_k8s_name(_camel_to_kebab(obj.__name__)),
                         module_name=module.__name__,
                         is_unit_task=False,
                     )
@@ -168,7 +188,7 @@ def discover_tasklib() -> tuple[
                     DescriptorDefinitionPayload(
                         source_b64=get_module_source_b64(module),
                         descriptor_class_name=obj.__name__,
-                        descriptor_definition_name=_camel_to_kebab(obj.__name__),
+                        descriptor_definition_name=_sanitize_k8s_name(_camel_to_kebab(obj.__name__)),
                         module_name=module.__name__,
                         task_class_name=task_cls_name,
                     )

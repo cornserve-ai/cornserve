@@ -223,7 +223,7 @@ class CornserveClient:
                     descriptor_definitions=descriptor_entries,
                 )
                 resp = requests.post(
-                    f"{self.dispatcher_base_url}/builtins/deploy-tasks",
+                    f"{self.dispatcher_base_url}/deploy-tasks",
                     json=payload.model_dump(),
                     timeout=60,
                 )
@@ -241,7 +241,7 @@ class CornserveClient:
                     descriptor_definitions=[],
                 )
                 resp = requests.post(
-                    f"{self.dispatcher_base_url}/builtins/deploy-tasks",
+                    f"{self.dispatcher_base_url}/deploy-tasks",
                     json=payload.model_dump(),
                     timeout=60,
                 )

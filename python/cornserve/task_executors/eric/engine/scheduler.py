@@ -174,6 +174,7 @@ class Scheduler:
             )
 
         assert batch.request_ids, "Batch should not be empty"
+        logger.info("Running %s items with %s waiting", len(batch), len(self.queue))
 
         return batch
 

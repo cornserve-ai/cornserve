@@ -5,14 +5,41 @@ package cornserve.sidecar;
 import "common.proto";
 
 service Sidecar {
+  // --> : direct calls
+  // ==> : subroutine calls
+
+  // Any sidecar client --> A dedicated sidecar server.
+  // Initialize or overwrite the current sidecar server cofniguration.
   rpc Register(RegisterRequest) returns (RegisterResponse);
+  
+  // Producer sidecar client --> Its sidecar server ==> Consumer sidecar server(s).
+  // Forward a chunk of data to other sidecars.
   rpc Send(SendRequest) returns (SendResponse);
+
+  // Consumer sidecar client --> Its sidecar server
+  // Receive a chunk data given identifiers, id, chunk_id, etc.
   rpc Receive(ReceiveRequest) returns (ReceiveResponse);
+
+  // Consumer sidecar client --> Its sidecar server (==> Producer sidecar server).
+  // Mark a chunk of forwarded data as done.
   rpc MarkDone(MarkDoneRequest) returns (MarkDoneResponse);
+
+  // Consumer sidecar server --> Producer sidecar server.
+  // Used exclusively during intra-node /dev/shm ping-pong.
+  // Decrement the reference count of a chunk.
   rpc Unlink(UnlinkRequest) returns (UnlinkResponse);
+
+  // Producer sidecar server --> Consumer sidecar server.
+  // Ask the receiver sidecar to prepare for receiving a chunk of data,
+  // e.g., allocate shared memory.
   rpc PrepareReceive(PrepareReceiveRequest) returns (PrepareReceiveResponse);
 
+  // Check the memory pressure of the sidecar server.
   rpc CheckHealth(CheckHealthRequest) returns (CheckHealthResponse);
+
+  // Producer sidecar client --> Receiver 
+  rpc CloseStream(CloseStreamRequest) returns (CloseStreamResponse);
+
   // TODO: add unregister
 }
 
@@ -34,6 +61,17 @@ message RegisterResponse {
 
 message RankGroup {
   repeated int32 ranks = 1;
+}
+
+message CloseStreamRequest {
+  // the id of the stream to close
+  string id = 1;
+  // the total number of chunks in the stream
+  int32 num_chunks = 2;
+}
+
+message CloseStreamResponse {
+  common.Status status = 1;
 }
 
 message SendRequest {

@@ -12,9 +12,9 @@ from collections import defaultdict
 from collections.abc import AsyncGenerator, AsyncIterator, Callable, Generator, Iterable
 from contextlib import contextmanager
 from contextvars import ContextVar
-from typing import TYPE_CHECKING, Any, ClassVar, Generic, Self, TypeVar, final
+from typing import TYPE_CHECKING, Any, ClassVar, Generic, Self, TypeVar, final, get_type_hints
 
-import httpx
+import aiohttp
 from opentelemetry import trace
 from pydantic import BaseModel, ConfigDict, Field, model_serializer, model_validator, ValidationError
 
@@ -28,10 +28,22 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 tracer = trace.get_tracer(__name__)
 
-TASK_TIMEOUT = 300
+TASK_TIMEOUT = 30 * 60
 
 # Global shared HTTP client used when we are outside of the Gateway service.
-CLIENT = httpx.AsyncClient(timeout=TASK_TIMEOUT)
+_CLIENT: aiohttp.ClientSession | None = None
+
+
+def get_client() -> aiohttp.ClientSession:
+    """Get or create the global HTTP client."""
+    global _CLIENT
+    if _CLIENT is None or _CLIENT.closed:
+        _CLIENT = aiohttp.ClientSession(
+            timeout=aiohttp.ClientTimeout(total=TASK_TIMEOUT),
+            connector=aiohttp.TCPConnector(limit=0),
+        )
+    return _CLIENT
+
 
 # This context variable is set inside the top-level task's `__call__` method
 # just before creating an `asyncio.Task` (`_call_impl`) to run the task.
@@ -71,7 +83,7 @@ class Stream(TaskOutput, Generic[OutputT]):
 
     # Each line in the stream should be a JSON string that can be parsed into an `OutputT` object.
     async_iterator: AsyncIterator[str] | None = Field(default=None, exclude=True)
-    response: httpx.Response | None = Field(default=None, exclude=True)
+    response: aiohttp.ClientResponse | None = Field(default=None, exclude=True)
 
     _prev_type: type[TaskOutput] | None = None
     _transform_func: Callable[[TaskOutput], OutputT] | None = None
@@ -97,21 +109,47 @@ class Stream(TaskOutput, Generic[OutputT]):
 
         return item_type  # type: ignore
 
-    def transform(self, transform_func: Callable[[OutputT], TransformT]) -> Stream[TransformT]:
+    def transform(
+        self,
+        transform_func: Callable[[OutputT], TransformT],
+        output_type: type[TaskOutput] | None = None,
+    ) -> Stream[TransformT]:
         """Transform the stream's output items using a transformation function.
 
         Args:
             transform_func: A function that takes an `OutputT` item and returns a `TransformT` item.
+            output_type: If the transform function does not have a return type hint (e.g., Lambda functions),
+                you can specify the output type explicitly. This should be a subclass of `TaskOutput`.
+                If the transform function has a return type hint, this argument is ignored.
         """
-        new_stream = Stream[TransformT](
+        if self._transform_func is not None:
+            raise ValueError("Cannot transform a stream more than once.")
+
+        # Extract the return type from the transform function
+        type_hints = get_type_hints(transform_func)
+        return_type = type_hints.get("return", None)
+
+        # If we can get the return type and it's a TaskOutput, use it
+        if return_type is None:
+            if output_type is None:
+                raise ValueError("Output type must be specified if the transform function has no return type hint.")
+            return_type = output_type
+
+        if not issubclass(return_type, TaskOutput):
+            raise ValueError(f"Return type {return_type} is not a subclass of TaskOutput.")
+
+        # Create a properly typed Stream with the extracted return type
+        new_stream = Stream[return_type](
             async_iterator=self.async_iterator,
             response=self.response,
         )
         new_stream._prev_type = self.item_type
         new_stream._transform_func = transform_func  # type: ignore
+
+        # Clear the original stream's iterators
         self.async_iterator = None
         self.response = None
-        return new_stream
+        return new_stream  # type: ignore
 
     @model_validator(mode="after")
     def _item_type(self) -> Self:
@@ -134,7 +172,7 @@ class Stream(TaskOutput, Generic[OutputT]):
             # Close the connection at exit.
             if self.response is not None:
                 try:
-                    await self.response.aclose()
+                    self.response.close()
                 except Exception as e:
                     logger.warning("Failed to close stream response: %s", e)
 
@@ -420,9 +458,13 @@ class UnitTask(Task, Generic[InputT, OutputT]):
             return False
 
         # Check if all fields defined by the root unit task class are the same.
-        for field_name in self.root_unit_task_cls.model_fields:
+        for field_name, info in self.root_unit_task_cls.model_fields.items():
             if field_name == "id":
                 # Skip the ID field; it can be different for different instances.
+                continue
+            extra_schema = info.json_schema_extra
+            if isinstance(extra_schema, dict) and extra_schema.get("skip_comparison"):
+                # Skip fields that are marked as not comparable.
                 continue
             try:
                 if getattr(self, field_name) != getattr(other, field_name):
@@ -545,7 +587,7 @@ class TaskGraphDispatch(BaseModel):
         self.is_streaming = isinstance(self.invocations[-1].task_output, Stream)
 
     @tracer.start_as_current_span("TaskGraphDispatch.dispatch")
-    async def dispatch(self, url: str, client: httpx.AsyncClient) -> list[Any]:
+    async def dispatch(self, url: str, client: aiohttp.ClientSession) -> list[Any]:
         """Dispatch the task graph and wait for the response.
 
         Returns a list of task outputs. Each task output is deserialized from JSON,
@@ -558,10 +600,9 @@ class TaskGraphDispatch(BaseModel):
 
         try:
             if self.is_streaming:
-                request_obj = client.build_request(method="POST", url=url, json=self.model_dump())
-                response = await client.send(request_obj, stream=True)
+                response = await client.post(url, json=self.model_dump())
                 response.raise_for_status()
-                ait = response.aiter_lines()
+                ait = aiter(response.content)
 
                 # First line is the task outputs of all invocations.
                 try:
@@ -577,15 +618,15 @@ class TaskGraphDispatch(BaseModel):
                 assert issubclass(stream_cls, Stream), "Last invocation output must be a Stream."
                 _ = stream_cls.model_validate(dispatch_outputs[-1])  # validation
             else:
-                response = await client.post(url, json=self.model_dump())
-                response.raise_for_status()
-                dispatch_outputs = response.json()
-        except httpx.RequestError as e:
-            logger.exception("Failed to send dispatch request to %s: %s", url, e)
-            raise RuntimeError(f"Failed to send dispatch request to {url}.") from e
-        except httpx.HTTPStatusError as e:
+                async with client.post(url, json=self.model_dump()) as response:
+                    response.raise_for_status()
+                    dispatch_outputs = await response.json()
+        except aiohttp.ClientResponseError as e:
             logger.exception("Received error response from %s: %s", url, e)
             raise RuntimeError(f"Received error response from {url}.") from e
+        except aiohttp.ClientError as e:
+            logger.exception("Failed to send dispatch request to %s: %s", url, e)
+            raise RuntimeError(f"Failed to send dispatch request to {url}.") from e
 
         if not isinstance(dispatch_outputs, list):
             raise RuntimeError(f"Expected a list of task outputs, but got {type(dispatch_outputs)}.")
@@ -697,7 +738,7 @@ class TaskContext:
 
             logger.info("Dispatching tasks to %s/tasks/invoke", gateway_url)
 
-            dispatch_outputs = await graph_dispatch.dispatch(gateway_url + "/tasks/invoke", client=CLIENT)
+            dispatch_outputs = await graph_dispatch.dispatch(gateway_url + "/tasks/invoke", client=get_client())
 
         # We're inside the Gateway service.
         else:

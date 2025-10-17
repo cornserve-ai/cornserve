@@ -9,8 +9,8 @@ from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import Any
 
+import aiohttp
 import grpc
-import httpx
 from opentelemetry import trace
 from pydantic import BaseModel
 
@@ -97,7 +97,10 @@ class TaskDispatcher:
 
         self.ongoing_task_lock = asyncio.Lock()
         self.ongoing_invokes: dict[str, list[asyncio.Task]] = defaultdict(list)
-        self.client = httpx.AsyncClient(timeout=TASK_TIMEOUT)
+        self.client = aiohttp.ClientSession(
+            timeout=aiohttp.ClientTimeout(total=TASK_TIMEOUT),
+            connector=aiohttp.TCPConnector(limit=0),
+        )
 
     async def notify_task_deployment(self, task: UnitTask, task_manager_url: str) -> None:
         """Register a newly deployed task and its task manager with the dispatcher."""
@@ -143,7 +146,7 @@ class TaskDispatcher:
             if isinstance(result, BaseException):
                 logger.error("Error occured while shutting down task dispatcher: %s", result)
 
-        await self.client.aclose()
+        await self.client.close()
 
         logger.info("Task dispatcher shutdown complete")
 
@@ -251,7 +254,7 @@ class TaskDispatcher:
                 producer_forward.src_sidecar_ranks = execution.executor_sidecar_ranks
                 producer_forwards[producer_forward.id] = producer_forward
 
-        logger.info("Connected all DataForward objects in task invocations: %s", invocations)
+        logger.info("Connected all DataForward objects in task invocations")
 
         # Verify whether all `DataForward` objects are properly connected
         for data_forward in producer_forwards.values():
@@ -279,36 +282,33 @@ class TaskDispatcher:
     async def _execute_unit_task(self, execution: UnitTaskExecution, request: dict[str, Any]) -> TaskOutput:
         """Execute a single task by sending request to executor and processing response."""
         url = execution.invocation.task.execution_descriptor.get_api_url(execution.executor_url)
-        logger.info(
-            "Invoking task %s with request: %s",
+        logger.debug(
+            "Invoking %s task %s by posting request %s to %s",
+            "streaming" if execution.is_streaming else "non-streaming",
             execution.invocation.task.__class__.__name__,
             request,
+            url,
         )
-        request_obj = self.client.build_request(method="POST", url=url, json=request)
         try:
-            if execution.is_streaming:
-                response = await self.client.send(request_obj, stream=True)
-            else:
-                response = await self.client.send(request_obj, stream=False)
+            response = await self.client.post(url, json=request)
             response.raise_for_status()
-        except httpx.HTTPStatusError as e:
+            logger.debug(
+                "Task %s response: %s",
+                execution.invocation.task.__class__.__name__,
+                "[Stream]" if execution.is_streaming else await response.text(),
+            )
+        except aiohttp.ClientResponseError as e:
             logger.exception("Error while invoking task")
             raise RuntimeError(
-                f"HTTP request failed with code {e.response.status_code}: {e.response}",
+                f"HTTP request failed with code {e.status}: {e.message}",
             ) from e
         except Exception as e:
             logger.exception("Error while invoking task")
             raise RuntimeError(f"HTTP request failed: {e}") from e
 
-        logger.info(
-            "Task %s response: %s",
-            execution.invocation.task.__class__.__name__,
-            "[Stream]" if execution.is_streaming else response.content.decode(),
-        )
-
         # HTTP response from the Task Executor is converted to TaskOutput.
         # For streaming tasks, `task_output` is a Stream object.
-        task_output: TaskOutput = execution.invocation.task.execution_descriptor.from_response(
+        task_output: TaskOutput = await execution.invocation.task.execution_descriptor.from_response(
             task_output=execution.invocation.task_output,
             response=response,
         )

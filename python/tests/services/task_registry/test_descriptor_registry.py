@@ -210,7 +210,7 @@ def test_default_vs_named_descriptor_resolution() -> None:
     mod.__file__ = f"<test:{module_name}>"
     exec(desc_named, mod.__dict__)
     sys.modules[module_name] = mod
-    DESCRIPTOR_REGISTRY.register(task_cls, getattr(mod, "MyNamed"), name="MyNamed", default=False)
+    DESCRIPTOR_REGISTRY._register(task_cls, getattr(mod, "MyNamed"), name="MyNamed", default=False)
 
     # Now both should be accessible; default without name
     assert DESCRIPTOR_REGISTRY.get(task_cls).__name__ == "MyDefault"

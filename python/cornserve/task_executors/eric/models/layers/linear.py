@@ -219,8 +219,9 @@ class QKVParallelLinear(ColumnParallelLinear):
             bias can be fused with other element-wise operations. we skip adding
             bias but instead return it.
         params_dtype: Data type for the parameters.
-        gather_from_names: Names of the QKV nn.Linear layers to gather from.
-            Expected to be in the order of Q, K, and V.
+        gather_from_name: Names of the QKV nn.Linear layers to gather from.
+            Expected to be either a tuple in the order of Q, K, and V, or a single
+            string that holds all Q, K, and V weights as a single tensor.
     """
 
     registered_model_hook: bool = False
@@ -234,7 +235,7 @@ class QKVParallelLinear(ColumnParallelLinear):
         bias: bool = True,
         skip_bias_add: bool = False,
         params_dtype: torch.dtype | None = None,
-        gather_from_names: tuple[str, str, str] = ("q_proj", "k_proj", "v_proj"),
+        gather_from_name: tuple[str, str, str] | str = ("q_proj", "k_proj", "v_proj"),
     ) -> None:
         """Initialize the layer."""
         self.hidden_size = hidden_size
@@ -263,11 +264,20 @@ class QKVParallelLinear(ColumnParallelLinear):
             self.num_kv_heads * head_size * self.tp_size,  # v_proj
         ]
 
-        self.qkv_to_module_name: dict[Literal["q", "k", "v"], str] = {
-            "q": gather_from_names[0],
-            "k": gather_from_names[1],
-            "v": gather_from_names[2],
-        }
+        if isinstance(gather_from_name, str):
+            self.fused_qkv_name: str | None = gather_from_name
+            self.qkv_to_module_name: dict[Literal["q", "k", "v"], str] = {
+                "q": "q",
+                "k": "k",
+                "v": "v",
+            }
+        else:
+            self.fused_qkv_name: str | None = None
+            self.qkv_to_module_name: dict[Literal["q", "k", "v"], str] = {
+                "q": gather_from_name[0],
+                "k": gather_from_name[1],
+                "v": gather_from_name[2],
+            }
 
         super().__init__(
             input_size=input_size,
@@ -362,18 +372,32 @@ class QKVParallelLinear(ColumnParallelLinear):
 
         def hook(parent: nn.Module, state_dict: dict[str, Any], prefix: str, *args) -> None:
             """State dict hook to fuse Q, K, and V weights."""
+            # If weights are already fused on disk, separate them into Q, K, and V.
+            if self.fused_qkv_name is not None:
+                for weight_type in (".weight", ".bias"):
+                    weight_name = prefix + self.fused_qkv_name + weight_type
+                    if weight_name in state_dict:
+                        logger.debug(
+                            "Found fused QKV weights (%s) in state dict for %s. Separating them into Q, K, and V.",
+                            weight_name,
+                            registered_name,
+                        )
+                        fused_weights = state_dict.pop(weight_name)
+                        # Split the fused weights into Q, K, and V.
+                        qkv_weights = list(fused_weights.chunk(3, dim=0))
+                        for role, gather_name in self.qkv_to_module_name.items():
+                            state_dict[prefix + gather_name + weight_type] = qkv_weights.pop(0)
+
             # Pop out individual Q, K, and V weights from state dict.
             weights: dict[Literal["q", "k", "v"], torch.Tensor] = {}
             biases: dict[Literal["q", "k", "v"], torch.Tensor] = {}
             for name in list(state_dict.keys()):
                 for role, gather_name in self.qkv_to_module_name.items():
                     if name.startswith(prefix + gather_name):
-                        if name.endswith("weight"):
+                        if name == prefix + gather_name + ".weight":
                             weights[role] = state_dict.pop(name)
-                        elif name.endswith("bias"):
+                        elif name == prefix + gather_name + ".bias":
                             biases[role] = state_dict.pop(name)
-                        else:
-                            raise ValueError(f"Expected {name} to end with either 'weight' or 'bias'")
 
             logger.debug(
                 "Found %s weights and %s biases in state dict for %s",

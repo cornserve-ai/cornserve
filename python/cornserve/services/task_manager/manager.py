@@ -4,18 +4,20 @@ from __future__ import annotations
 
 import asyncio
 import uuid
+from collections import defaultdict
 from contextlib import suppress
 from dataclasses import dataclass
 
-import httpx
+import aiohttp
 import kubernetes_asyncio.client as kclient
 import kubernetes_asyncio.config as kconfig
 
 from cornserve import constants
 from cornserve.logging import get_logger
-from cornserve.services.resource_manager.resource import GPU
+from cornserve.services.resource import GPU
 from cornserve.services.utils import to_strict_k8s_name
 from cornserve.task.base import UnitTask
+from cornserve.task_executors.profile import UnitTaskProfileManager
 
 logger = get_logger(__name__)
 
@@ -49,7 +51,7 @@ class TaskManager:
         self.executor_pod_names: dict[str, str] = {}
         self.executor_service_names: dict[str, str] = {}
 
-        self.http_client = httpx.AsyncClient()
+        self.http_client = aiohttp.ClientSession()
 
         kconfig.load_incluster_config()
         self.k8s_client = kclient.ApiClient()
@@ -57,6 +59,17 @@ class TaskManager:
 
         # Config variables
         self.task_executor_healthy_timeout = constants.K8S_TASK_EXECUTOR_HEALTHY_TIMEOUT
+
+        # We only save the profile manager here so that profiles could be updated dynamically
+        self.task_profile_manager = UnitTaskProfileManager(profile_dir=constants.UNIT_TASK_PROFILES_DIR)
+
+        # Round robin routing
+        self.rr_counter = 0
+
+    @property
+    def task_profile(self):
+        """Get the unit task profile for the managed task."""
+        return self.task_profile_manager.get_profile(self.task)
 
     @classmethod
     async def init(cls, id: str, task: UnitTask, gpus: list[GPU]) -> TaskManager:
@@ -111,6 +124,8 @@ class TaskManager:
             self.gpus.extend(add_gpus)
 
             # First, kill executors that were using the removed GPUs.
+            # If a subset of GPUs of a deployed executor is removed, the whole
+            # executor is killed and all GPUs allocated to it are freed.
             # XXX(J1): Executors should be (1) excluded from routing and then (2)
             # drained (i.e., waiting for all requests to complete) before being killed.
             # Right now, we're just killing them immediately without draining them.
@@ -123,7 +138,7 @@ class TaskManager:
                 if executor_removed_gpu:
                     to_kill.append(executor_id)
                     logger.info(
-                        "Killing task executor %s due to removal of GPU %s",
+                        "Killing task executor %s due to the removal of GPU %s",
                         executor_id,
                         executor_removed_gpu,
                     )
@@ -146,22 +161,79 @@ class TaskManager:
             # GPUs are marked as free inside `_kill_executor` after the executor is killed
             free_gpus = [gpu for gpu in self.gpus if gpu.is_free]
 
+            # The task profile keys are the number of GPUs that a task executor can be deployed with.
+            # The task manager will first divide free GPUs into groups based on their node name, so that
+            # there are no cross-node task executors. Then, it will try to spawn task executors
+            # with the largest number of GPUs first, based on the keys in the task profile.
+            # For instance, let's say the task profile keys are [1, 2, 4]. Then, for the following number
+            # of free GPUs on the same node, task executors will be spawned like this:
+            # |-----------|-------------------------------------|
+            # | Free GPUs |             Task executors to spawn |
+            # |-----------|-------------------------------------|
+            # |         1 |                           1 x 1 GPU |
+            # |         2 |              1 x 2 GPUs             |
+            # |         3 |              1 x 2 GPUs + 1 x 1 GPU |
+            # |         4 | 1 x 4 GPUs                          |
+            # |         5 | 1 x 4 GPUs              + 1 x 1 GPU |
+            # |         6 | 1 x 4 GPUs + 1 x 2 GPUs             |
+            # |         7 | 1 x 4 GPUs + 1 x 2 GPUs + 1 x 1 GPU |
+            # |         8 | 2 x 4 GPUs                          |
+            # |-----------|-------------------------------------|
+            feasible_num_gpus = sorted(self.task_profile.num_gpus_to_profile.keys(), reverse=True)
+            assert feasible_num_gpus, "Task profile must have at least one feasible number of GPUs"
+
+            # Determine task executors to spawn based on the free GPUs
+            node_gpus: dict[str, list[GPU]] = defaultdict(list)
+            for gpu in free_gpus:
+                node_gpus[gpu.node].append(gpu)
+
+            executor_resources: list[list[GPU]] = []
+            for node, gpus in node_gpus.items():
+                # Sort GPUs by global rank to ensure consistent ordering
+                gpus = sorted(gpus, key=lambda gpu: gpu.global_rank)
+
+                # Try to allocate task executors with the largest number of GPUs first
+                node_executor_resources = []
+                for num_gpus in feasible_num_gpus:
+                    while len(gpus) >= num_gpus:
+                        alloc_gpus, gpus = gpus[:num_gpus], gpus[num_gpus:]
+                        node_executor_resources.append(alloc_gpus)
+
+                executor_resources.extend(node_executor_resources)
+
+                logger.info(
+                    "Node %s has %d GPUs. Spawning %d task executors with resources: %s",
+                    node,
+                    len(node_gpus[node]),
+                    len(node_executor_resources),
+                    [f"{len(gpus)} GPUs" for gpus in node_executor_resources],
+                )
+                if gpus:
+                    logger.warning(
+                        "Node %s has %d GPUs left unallocated, likely because the unit task profile "
+                        "does not support finer-grained allocation. "
+                        "These GPUs will not be used: %s",
+                        node,
+                        len(gpus),
+                        [f"{gpu.global_rank} ({gpu.local_rank})" for gpu in gpus],
+                    )
+
             # Spawn new executors with free GPUs
             spawn_results = await asyncio.gather(
-                *[self._spawn_executor([gpu]) for gpu in free_gpus],
+                *[self._spawn_executor(gpus) for gpus in executor_resources],
                 return_exceptions=True,
             )
 
             # Check for errors in spawning
-            failed = 0
+            error_messages = []
             for result in spawn_results:
                 if isinstance(result, BaseException):
                     logger.error("Failed to spawn task executor: %s", result)
-                    failed += 1
+                    error_messages.append(str(result))
 
-            if failed:
-                logger.error("Failed to spawn %d task executors.", failed)
-                raise RuntimeError("Failed to spawn task executors")
+            if error_messages:
+                logger.error("Failed to spawn %d task executors.", len(error_messages))
+                raise RuntimeError("Failed to spawn task executors" + (":\n" + ",\n".join(error_messages)))
 
     async def get_route(self, request_id: str, routing_hint: str) -> tuple[str, list[int]]:
         """Get the URL to the task executor for a request.
@@ -180,7 +252,10 @@ class TaskManager:
         """
         logger.info("Routing request %s with routing hint %s", request_id, routing_hint)
 
-        index = hash(request_id) % len(self.executor_deployments)
+        # index = hash(request_id) % len(self.executor_deployments)
+        # Round robin routing
+        index = self.rr_counter % len(self.executor_deployments)
+        self.rr_counter += 1
         deployment = list(self.executor_deployments.values())[index]
 
         route = deployment.url
@@ -196,11 +271,13 @@ class TaskManager:
         This method assumes that the healthcheck endpoint is `GET /health`.
         """
         try:
-            response = await self.http_client.get(f"{executor_url}/health", timeout=timeout)
+            async with self.http_client.get(
+                f"{executor_url}/health", timeout=aiohttp.ClientTimeout(total=timeout)
+            ) as response:
+                return response.status == 200
         except Exception as e:
             logger.error("Failed to healthcheck %s: %s", executor_url, e)
             return False
-        return response.status_code == 200
 
     async def healthcheck(self) -> dict[str, bool]:
         """Perform healthcheck on all task executors.
@@ -234,7 +311,7 @@ class TaskManager:
                 [r for r in kill_results if r is not None],
             )
 
-        await self.http_client.aclose()
+        await self.http_client.close()
         await self.k8s_client.close()
 
         logger.info("Task manager %s shut down", self.id)
@@ -268,6 +345,25 @@ class TaskManager:
         # executor ID could be longer than that. Therefore, we use a UUID4 label.
         executor_id_label = str(uuid.uuid4())
 
+        # Container arguments are created from the execution descriptor and the task profile
+        container_args = self.descriptor.get_container_args(gpus, port)
+        try:
+            container_args += self.task_profile.num_gpus_to_profile[len(gpus)].launch_args
+        except KeyError as e:
+            raise RuntimeError(
+                f"Cannot spawn task executor with {len(gpus)} GPUs because the unit task profile "
+                f"does not support that number of GPUs. Unit task profile: {self.task_profile}"
+            ) from e
+
+        logger.info(
+            "Spawning task executor %s on node %s with pod name %s, service name %s, and args %s",
+            executor_id,
+            node_name,
+            pod_name,
+            service_name,
+            container_args,
+        )
+
         # Create the pod spec
         pod = kclient.V1Pod(
             metadata=kclient.V1ObjectMeta(
@@ -285,7 +381,7 @@ class TaskManager:
                         name="task-executor",
                         image=self.descriptor.get_container_image(),
                         image_pull_policy=constants.CONTAINER_IMAGE_PULL_POLICY,
-                        args=self.descriptor.get_container_args(gpus, port),
+                        args=container_args,
                         ports=(
                             [kclient.V1ContainerPort(container_port=port, name="http")]
                             + [
@@ -293,6 +389,13 @@ class TaskManager:
                                 for port_name, p in additional_service_ports
                             ]
                         ),
+                        env_from=[
+                            kclient.V1EnvFromSource(
+                                config_map_ref=kclient.V1ConfigMapEnvSource(
+                                    name=constants.K8S_CORNSERVE_CONFIG_MAP_NAME,
+                                )
+                            ),
+                        ],
                         resources=kclient.V1ResourceRequirements(
                             limits={
                                 "nvidia.com/gpu": len(gpus),
@@ -322,9 +425,7 @@ class TaskManager:
                             )
                             for name, _, container_path in self.descriptor.get_container_volumes()
                         ],
-                        security_context=kclient.V1SecurityContext(
-                            privileged=True, capabilities=kclient.V1Capabilities(add=["IPC_LOCK", "NET_ADMIN"])
-                        ),
+                        security_context=kclient.V1SecurityContext(privileged=True),
                     )
                 ],
                 volumes=[
@@ -403,8 +504,19 @@ class TaskManager:
                 )  # type: ignore
                 assert isinstance(pod_status, kclient.V1Pod)
                 if isinstance(pod_status.status, kclient.V1PodStatus) and pod_status.status.phase == "Failed":
+                    # for debugging purposes, we get the last 20 lines of the pod logs
+                    logs = ""
+                    try:
+                        logs = await self.core_client.read_namespaced_pod_log(
+                            name=pod_name,
+                            namespace=constants.K8S_NAMESPACE,
+                            tail_lines=100,
+                            timestamps=True,
+                        )
+                    except kclient.ApiException as e:
+                        logs = f"<no logs available> due to {e}"
                     logger.error("Task executor pod %s is in Error state", pod_name)
-                    raise RuntimeError(f"Task executor pod {pod_name} is in Error state")
+                    raise RuntimeError(f"Task executor pod {pod_name} is in Error state, logs:\n{logs}")
 
                 await asyncio.sleep(0.5)
 
@@ -437,8 +549,6 @@ class TaskManager:
                         name=service_name,
                         namespace=constants.K8S_NAMESPACE,
                     )  # type: ignore
-
-            # self.executor_urls.pop(executor_id, None)
 
             # Wait until the pod and service are gone
             if pod_name is not None:

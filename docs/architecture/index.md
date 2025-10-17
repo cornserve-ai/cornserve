@@ -20,7 +20,9 @@ Currently, a Cornserve app is a single Python file that implements three classes
 from pydantic import BaseModel
 
 from cornserve.app.base import AppConfig
-from cornserve.task.builtins.mllm import MLLMInput, MLLMTask, Modality
+from cornserve_tasklib.task.composite.llm import MLLMTask
+from cornserve_tasklib.task.unit.llm import MLLMInput
+from cornserve_tasklib.task.unit.encoder import Modality
 
 
 class Request(BaseModel):
@@ -66,7 +68,7 @@ async def serve(request: Request) -> Response:
 
 Importantly, in app configurations, apps specify the tasks that they intend to invoke.
 These tasks are *dispatched* to be executed on the data plane.
-There are built-in tasks under `cornserve.task.builtins`, such as `MLLMTask` for multimodal LLM inference, `LLMTask` for LLM inference, and `EncoderTask` for multimodal data embedding, and users can build their own tasks using components from `cornserve.task.base`.
+There are built-in tasks under `cornserve_tasklib.task`, such as `MLLMTask` for multimodal LLM inference, `LLMTask` for LLM inference, and `EncoderTask` for multimodal data embedding, and users can build their own tasks using components from `cornserve.task.base`.
 All other inline Python code is executed in place by the Cornserve Gateway.
 
 See also the dedicated page on [tasks](task.md).

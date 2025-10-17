@@ -122,7 +122,7 @@ class SharedMemoryManager:
         self.slot_size = slot_size
         self.num_slots = self.shm_size // self.slot_size
         self.occupancy = [0 for _ in range(self.num_slots)]
-        logger.info("Shared memory manager initialized with %d slots of slot size%d", self.num_slots, self.slot_size)
+        logger.info("Shared memory manager initialized with %d slots of slot size %d", self.num_slots, self.slot_size)
 
     def allocate(self, size: int) -> SharedMemoryBuffer | None:
         """Allocate a shared memory buffer of the given size.
@@ -158,6 +158,17 @@ class SharedMemoryManager:
         for slot in buffer.slots:
             self.occupancy[slot] = 0
 
+    @property
     def free_slots(self) -> int:
         """Return the number of free slots in the shared memory."""
         return self.num_slots - sum(self.occupancy)
+
+    @property
+    def used_slots(self) -> int:
+        """Return the number of used slots in the shared memory."""
+        return sum(self.occupancy)
+
+    @property
+    def occupancy_ratio(self) -> float:
+        """Return the occupancy ratio of the shared memory."""
+        return self.used_slots / self.num_slots

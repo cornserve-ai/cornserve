@@ -44,9 +44,7 @@ class SidecarLaunchInfo:
                         name="sidecar",
                         image=constants.CONTAINER_IMAGE_SIDECAR,
                         image_pull_policy=constants.CONTAINER_IMAGE_PULL_POLICY,
-                        security_context=kclient.V1SecurityContext(
-                            privileged=True,
-                        ),
+                        security_context=kclient.V1SecurityContext(privileged=True),
                         env=[
                             kclient.V1EnvVar(name=name, value=value)
                             for name, value in SidecarLaunchInfo.get_envs(
@@ -78,7 +76,7 @@ class SidecarLaunchInfo:
                     )
                     for name, host_path, _ in SidecarLaunchInfo.get_container_volumes()
                 ],
-                service_account_name="sidecar",
+                service_account_name="sidecar-sa",
                 node_name=node.metadata.name,
                 host_ipc=True,
                 host_pid=True,

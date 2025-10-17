@@ -267,7 +267,6 @@ class TaskRegistry:
                     module_name=module_name,
                     is_unit_task=is_unit_task,
                 )
-                logger.info("Registered %s task: %s", "unit" if is_unit_task else "composite", task_class_name)
                 
                 # Only bind descriptors for unit tasks
                 if is_unit_task:
@@ -297,7 +296,6 @@ class TaskRegistry:
                     module_name=module_name,
                     task_class_name=task_class_name,
                 )
-                logger.info("Registered execution descriptor: %s", descriptor_class_name)
             except Exception as e:
                 logger.error(
                     "Failed to register execution descriptor %s from %s: %s",
