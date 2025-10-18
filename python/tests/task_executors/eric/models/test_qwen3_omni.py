@@ -148,13 +148,13 @@ def test_hf_reference(
 
     # Test images
     image1 = test_images[0].processed(model_id)
-    pixel_values = torch.asarray(image1["pixel_values"]).cuda()
+    pixel_values = torch.asarray(image1["pixel_values"]).to(torch.bfloat16).cuda()
     image_grid_thw = torch.asarray(image1["image_grid_thw"]).cuda()
     output1 = model.get_image_features(pixel_values=pixel_values, image_grid_thw=image_grid_thw)
     output1 = transform_HF_output(output1, image_grid_thw)[0]
 
     image2 = test_images[1].processed(model_id)
-    pixel_values = torch.asarray(image2["pixel_values"]).cuda()
+    pixel_values = torch.asarray(image2["pixel_values"]).to(torch.bfloat16).cuda()
     image_grid_thw = torch.asarray(image2["image_grid_thw"]).cuda()
     output2 = model.get_image_features(pixel_values=pixel_values, image_grid_thw=image_grid_thw)
     output2 = transform_HF_output(output2, image_grid_thw)[0]
@@ -170,14 +170,14 @@ def test_hf_reference(
 
     # Test videos
     video1 = test_videos[0].processed(model_id)
-    pixel_values_video = torch.asarray(video1["pixel_values_videos"]).cuda()
+    pixel_values_video = torch.asarray(video1["pixel_values_videos"]).to(torch.bfloat16).cuda()
     video_grid_thw = torch.asarray(video1["video_grid_thw"]).cuda()
     output1 = model.get_video_features(pixel_values_videos=pixel_values_video, video_grid_thw=video_grid_thw)
     output1 = transform_HF_output(output1, video_grid_thw)
     output1 = output1[0]
 
     video2 = test_videos[1].processed(model_id)
-    pixel_values_video = torch.asarray(video2["pixel_values_videos"]).cuda()
+    pixel_values_video = torch.asarray(video2["pixel_values_videos"]).to(torch.bfloat16).cuda()
     video_grid_thw = torch.asarray(video2["video_grid_thw"]).cuda()
     output2 = model.get_video_features(pixel_values_videos=pixel_values_video, video_grid_thw=video_grid_thw)
     output2 = transform_HF_output(output2, video_grid_thw)[0]

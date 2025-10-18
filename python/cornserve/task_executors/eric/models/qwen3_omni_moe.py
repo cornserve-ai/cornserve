@@ -168,7 +168,6 @@ class Qwen3_VisionPatchMerger(nn.Module):
 
         if norm_layer is None:
             norm_layer = partial(nn.LayerNorm, eps=1e-6)
-        self.use_postshuffle_norm = use_postshuffle_norm
         self.ln_q = norm_layer(self.hidden_size if use_postshuffle_norm else context_dim)
         self.mlp = nn.ModuleList(
             [
