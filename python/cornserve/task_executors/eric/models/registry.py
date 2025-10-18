@@ -142,6 +142,22 @@ MODEL_REGISTRY: dict[str, RegistryEntry] = {
             Modality.AUDIO: ModalityEntry(),
         },
     ),
+    "qwen3_omni_moe": RegistryEntry(
+        module="qwen3_omni_moe",
+        class_name="Qwen3OmniEncoder",
+        adapter_attr=None,
+        vit_resolution_type=ViTResolutionType.DYNAMIC,
+        weight=WeightInfo(
+            required_prefixes=["thinker."],
+            ignored_prefixes=["model.", "lm_head.", "talker.", "token2wav."],
+            strip_prefixes=True,
+        ),
+        modality={
+            Modality.IMAGE: ModalityEntry(),
+            Modality.VIDEO: ModalityEntry(),
+            Modality.AUDIO: ModalityEntry(),
+        },
+    ),
     "llava_onevision": RegistryEntry(
         module="llava_onevision",
         class_name="LlavaOneVisionEncoder",
