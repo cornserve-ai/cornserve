@@ -76,7 +76,7 @@ class Qwen3_VisionMLP(nn.Module):
         hidden_features: int,
         bias: bool = False,
         act_fn: Callable[[torch.Tensor], torch.Tensor] = F.silu,
-    ):
+    ) -> None:
         super().__init__()
         self.linear_fc1 = ColumnParallelLinear(
             in_features,
@@ -90,7 +90,7 @@ class Qwen3_VisionMLP(nn.Module):
         )
         self.act_fn = act_fn
 
-    def forward(self, x: torch.Tensor):
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         mlp_output = self.linear_fc2(self.act_fn(self.linear_fc1(x)[0]))[0]
         return mlp_output
 
@@ -209,7 +209,7 @@ class Qwen3_VisionTransformer(EricModel):
         self,
         vision_config: Qwen3OmniMoeVisionEncoderConfig,
         rms_norm_eps: float,
-    ):
+    ) -> None:
         super().__init__()
 
         self.in_channels = vision_config.in_channels
@@ -505,7 +505,7 @@ class Qwen3OmniMoeAudioAttention(nn.Module):
         self,
         hidden_states: torch.Tensor,
         cu_seqlens: torch.Tensor,
-    ):
+    ) -> torch.Tensor:
         seq_length, all_dim = hidden_states.size()
         query_states = self.q_proj(hidden_states)[0]
         query_states = query_states.reshape(seq_length, self.num_heads_per_partition, self.head_dim)
@@ -526,7 +526,7 @@ class Qwen3OmniMoeAudioAttention(nn.Module):
 
 
 class Qwen3OmniMoeAudioEncoderLayer(nn.Module):
-    def __init__(self, config: Qwen3OmniMoeAudioEncoderConfig):
+    def __init__(self, config: Qwen3OmniMoeAudioEncoderConfig) -> None:
         super().__init__()
         self.embed_dim = config.d_model
         self.self_attn = Qwen3OmniMoeAudioAttention(config)
@@ -572,7 +572,7 @@ class Qwen3OmniAudioEncoder(nn.Module):
     Qwen3OmniEncoder uses this as a sub-component.
     """
 
-    def __init__(self, config: Qwen3OmniMoeAudioEncoderConfig):
+    def __init__(self, config: Qwen3OmniMoeAudioEncoderConfig) -> None:
         super().__init__()
         self.dropout = config.dropout
 
@@ -615,7 +615,7 @@ class Qwen3OmniAudioEncoder(nn.Module):
         input_features,
         feature_lens=None,
         aftercnn_lens=None,
-    ):
+    ) -> list[torch.Tensor]:
         aftercnn_lens = self._get_feat_extract_output_lengths(feature_lens)
         chunk_num = torch.ceil(feature_lens / (self.n_window * 2)).long()
 
@@ -681,7 +681,7 @@ class Qwen3OmniAudioEncoder(nn.Module):
         unbatched_tuple = torch.split(hidden_states, aftercnn_lens.tolist(), dim=0)
         return list(unbatched_tuple)
 
-    def _get_feat_extract_output_lengths(self, input_lengths: torch.LongTensor):
+    def _get_feat_extract_output_lengths(self, input_lengths: torch.LongTensor) -> torch.LongTensor:
         """
         Computes the output length of the convolutional layers and the output length of the audio encoder
         """
