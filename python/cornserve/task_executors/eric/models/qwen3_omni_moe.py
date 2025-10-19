@@ -250,6 +250,7 @@ class Qwen3_VisionTransformer(EricModel):
             context_dim=self.embed_dim,
             norm_eps=rms_norm_eps,
             spatial_merge_size=self.spatial_merge_size,
+            use_postshuffle_norm=False,
         )
 
         if self.deepstack_visual_indexes is not None:
