@@ -507,7 +507,7 @@ class Qwen3OmniMoeAudioAttention(nn.Module):
 
         max_seqlen = (cu_seqlens[1:] - cu_seqlens[:-1]).max().item()
         attn_output = flash_attn_varlen_func(
-            query_states, key_states, value_states, cu_seqlens, cu_seqlens, max_seqlen, max_seqlen, dropout_p=0.0
+            query_states, key_states, value_states, cu_seqlens, cu_seqlens, max_seqlen, max_seqlen, dropout_p=self.dropout
         )
         attn_output = attn_output.reshape(seq_length, dist_utils.divide(all_dim, self.tp_size))
         attn_output = self.out_proj(attn_output)[0]
