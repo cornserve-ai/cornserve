@@ -1,5 +1,4 @@
 import math
-from functools import partial
 from typing import Callable
 
 import torch
@@ -7,7 +6,6 @@ import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
 import numpy.typing as npt
-from einops import rearrange
 from transformers.models.auto.processing_auto import AutoProcessor
 
 from transformers.models.qwen3_omni_moe.configuration_qwen3_omni_moe import (
@@ -18,7 +16,6 @@ from transformers.models.qwen3_omni_moe.configuration_qwen3_omni_moe import (
 
 from cornserve.task_executors.eric.models.layers.activations import get_act_fn
 from flash_attn import flash_attn_varlen_func
-from flash_attn.layers.rotary import apply_rotary_emb
 from .qwen2_5_vl import Qwen2_5_VisionRotaryEmbedding, Qwen2_5_VisionAttention
 from .qwen2_5_omni import SinusoidsPositionEmbedding
 
