@@ -16,7 +16,6 @@ from pydantic import BaseModel
 from cornserve.constants import UNIT_TASK_PROFILES_DIR
 from cornserve.logging import get_logger
 from cornserve.task.base import UnitTask
-from cornserve.task.registry import TASK_REGISTRY
 
 logger = get_logger(__name__)
 
@@ -60,21 +59,26 @@ class UnitTaskProfile:
             FileNotFoundError: If the file doesn't exist
         """
         try:
-            with open(file_path) as f:
-                data = json.load(f)
+            # with open(file_path) as f:
+            #     data = json.load(f)
 
-            # Parse the task from the JSON data using task registry
-            task_class_name = data["task"]["__class__"]
-            task_cls, _, _ = TASK_REGISTRY.get(task_class_name)
-            task = task_cls.model_validate_json(json.dumps(data["task"]))
+            # # Parse the task from the JSON data using task registry
+            # task_class_name = data["task"]["__class__"]
+            # task_cls, _, _ = TASK_REGISTRY.get(task_class_name)
+            # task = task_cls.model_validate_json(json.dumps(data["task"]))
 
-            # Parse GPU profile information
-            num_gpus_to_profile = {}
-            for gpu_count_str, profile_data in data["num_gpus_to_profile"].items():
-                gpu_count = int(gpu_count_str)
-                num_gpus_to_profile[gpu_count] = ProfileInfo(**profile_data)
+            # # Parse GPU profile information
+            # num_gpus_to_profile = {}
+            # for gpu_count_str, profile_data in data["num_gpus_to_profile"].items():
+            #     gpu_count = int(gpu_count_str)
+            #     num_gpus_to_profile[gpu_count] = ProfileInfo(**profile_data)
 
-            return cls(task=task, num_gpus_to_profile=num_gpus_to_profile)
+            # return cls(task=task, num_gpus_to_profile=num_gpus_to_profile)
+
+            # TODO: Temporarily disabled before integrated with CRD
+            # The task class can be loaded from the Resource Manager's task registry,
+            # and the profile can be loaded from a dedicated CRD in the future.
+            raise ValueError("UnitTaskProfile.from_json_file is disabled until CRD integration")
 
         except (KeyError, json.JSONDecodeError, ValueError) as e:
             raise ValueError(f"Invalid profile file format in {file_path}: {e}") from e

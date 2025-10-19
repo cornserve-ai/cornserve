@@ -1,0 +1,14 @@
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: task-dispatcher-cr-access
+  namespace: cornserve
+subjects:
+- kind: ServiceAccount
+  name: task-dispatcher-sa
+  namespace: cornserve
+roleRef:
+  kind: Role
+  name: task-dispatcher-cr-access-role
+  apiGroup: rbac.authorization.k8s.io

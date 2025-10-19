@@ -64,7 +64,6 @@ K8S_CORNSERVE_CONFIG_MAP_NAME = "cornserve-config"
 K8S_SIDECAR_SERVICE_NAME = "sidecar"
 K8S_GATEWAY_SERVICE_HTTP_URL = "http://gateway:8000"
 K8S_TASK_DISPATCHER_HTTP_URL = "http://task-dispatcher:8000"
-K8S_TASK_DISPATCHER_GRPC_URL = "task-dispatcher:50051"
 K8S_TASK_DISPATCHER_HEADLESS_SERVICE = "task-dispatcher-headless"
 K8S_RESOURCE_MANAGER_GRPC_URL = "resource-manager:50051"
 K8S_OTEL_GRPC_URL = "http://jaeger-collector.cornserve-system.svc.cluster.local:4317"
@@ -90,3 +89,19 @@ if TYPE_CHECKING:
     CONTAINER_IMAGE_VLLM: str
     CONTAINER_IMAGE_VLLM_OMNI_TALKER: str
     CONTAINER_IMAGE_PULL_POLICY: str
+
+
+# CRD constants.
+CRD_GROUP = "cornserve.ai"
+# Note this is the version of CRD definition, where we only define v1
+CRD_VERSION = "v1"
+
+# CR plural names (must match the spec.names.plural in CRD files)
+CRD_PLURAL_TASK_DEFINITIONS = "taskdefinitions"
+CRD_PLURAL_UNIT_TASK_INSTANCES = "unittaskinstances"
+CRD_PLURAL_EXECUTION_DESCRIPTORS = "executiondescriptors"
+
+# CR kind names (must match spec.names.kind in CRD files)
+CRD_KIND_TASK_DEFINITION = "TaskDefinition"
+CRD_KIND_UNIT_TASK_INSTANCE = "UnitTaskInstance"
+CRD_KIND_EXECUTION_DESCRIPTOR = "ExecutionDescriptor"

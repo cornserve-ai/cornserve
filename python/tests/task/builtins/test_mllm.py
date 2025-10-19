@@ -3,18 +3,18 @@ from __future__ import annotations
 import asyncio
 
 import pytest
-
-from cornserve.task.base import Stream, TaskContext, TaskInvocation, task_context
-from cornserve.task.builtins.encoder import Modality
-from cornserve.task.builtins.llm import (
+from cornserve_tasklib.task.composite.llm import MLLMTask
+from cornserve_tasklib.task.unit.encoder import Modality
+from cornserve_tasklib.task.unit.llm import (
     URL,
     ChatCompletionContentPartImageParam,
     ChatCompletionContentPartTextParam,
     ChatCompletionContentPartVideoParam,
     ChatCompletionMessageParam,
-    MLLMTask,
     OpenAIChatCompletionRequest,
 )
+
+from cornserve.task.base import Stream, TaskContext, TaskInvocation, task_context
 from cornserve.task.forward import DataForward, ForwardableType, Tensor
 
 

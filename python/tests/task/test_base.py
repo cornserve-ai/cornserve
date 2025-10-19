@@ -4,12 +4,8 @@ from collections.abc import AsyncGenerator
 from typing import Generic, TypeVar
 
 import pytest
-from openai.types.chat.chat_completion_chunk import Choice, ChoiceDelta
-from pydantic import RootModel
-
-from cornserve.task.base import Stream, TaskGraphDispatch, TaskInput, TaskInvocation, TaskOutput, UnitTask
-from cornserve.task.builtins.encoder import EncoderInput, EncoderOutput, EncoderTask, Modality
-from cornserve.task.builtins.llm import (
+from cornserve_tasklib.task.unit.encoder import EncoderInput, EncoderOutput, EncoderTask, Modality
+from cornserve_tasklib.task.unit.llm import (
     ChatCompletionContentPartTextParam,
     ChatCompletionMessageParam,
     LLMBaseUnitTask,
@@ -18,6 +14,10 @@ from cornserve.task.builtins.llm import (
     OpenAIChatCompletionChunk,
     OpenAIChatCompletionRequest,
 )
+from openai.types.chat.chat_completion_chunk import Choice, ChoiceDelta
+from pydantic import RootModel
+
+from cornserve.task.base import Stream, TaskGraphDispatch, TaskInput, TaskInvocation, TaskOutput, UnitTask
 from cornserve.task.forward import DataForward, Tensor
 
 InputT = TypeVar("InputT", bound=TaskInput)

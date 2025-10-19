@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+from cornserve_tasklib.task.composite.llm import MLLMTask
+from cornserve_tasklib.task.unit.encoder import EncoderTask, Modality
+from cornserve_tasklib.task.unit.llm import LLMUnitTask
+
 from cornserve.task.base import Task, TaskInput, TaskOutput
-from cornserve.task.builtins.encoder import EncoderTask, Modality
-from cornserve.task.builtins.llm import LLMUnitTask, MLLMTask
 
 
 class ArenaInput(TaskInput):

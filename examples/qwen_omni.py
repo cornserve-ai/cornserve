@@ -35,9 +35,10 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 
+from cornserve_tasklib.task.composite.omni import OmniInput, OmniOutputChunk, OmniTask
+from cornserve_tasklib.task.unit.encoder import Modality
+
 from cornserve.app.base import AppConfig
-from cornserve.task.builtins.encoder import Modality
-from cornserve.task.builtins.omni import OmniInput, OmniOutputChunk, OmniTask
 
 omni = OmniTask(
     model_id="Qwen/Qwen2.5-Omni-7B",

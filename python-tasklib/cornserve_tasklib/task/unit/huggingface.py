@@ -8,7 +8,7 @@ from openai.types.chat.chat_completion_chunk import Choice, ChoiceDelta
 from pydantic import Field
 
 from cornserve.task.base import TaskInput, TaskOutput, UnitTask
-from cornserve.task.builtins.llm import (
+from cornserve_tasklib.task.unit.llm import (
     ChatCompletionMessageParam,
     OpenAIChatCompletionChunk,
     StreamOptions,

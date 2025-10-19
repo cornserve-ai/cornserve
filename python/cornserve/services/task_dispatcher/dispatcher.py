@@ -171,13 +171,21 @@ class TaskDispatcher:
         # Check if all tasks are registered with the dispatcher
         task_infos: list[TaskInfo] = []
         async with self.task_lock:
+            logger.info("TaskDispatcher: registered tasks: %s", list(self.task_infos.keys()))
             for invocation in invocations:
-                for task_info in self.task_infos.values():
-                    if task_info.task.is_equivalent_to(invocation.task):
+                for task_id, task_info in self.task_infos.items():
+                    eq = task_info.task.is_equivalent_to(invocation.task)
+                    logger.info(
+                        "TaskDispatcher: compare invocation task=%r to registered task_id=%s eq=%s",
+                        invocation.task,
+                        task_id,
+                        eq,
+                    )
+                    if eq:
                         task_infos.append(task_info)
                         break
                 else:
-                    logger.error("Task not found for invocation %s", invocation)
+                    logger.error("Task not found for invocation %s (no equivalent registered task)", invocation)
                     raise ValueError(f"Task {invocation.task} not found in task dispatcher.")
         assert len(task_infos) == len(invocations), "Task info count mismatch"
 
@@ -264,9 +272,12 @@ class TaskDispatcher:
                         task_output=execution.invocation.task_output,
                     )
                     dispatch_coros.append(tg.create_task(self._execute_unit_task(execution, request)))
-        except* Exception as e:
-            logger.exception("Error while invoking task: %s", e.exceptions)
-            raise RuntimeError(f"Task invocation failed: {e.exceptions}") from e
+        except (ExceptionGroup, Exception) as e:
+            logger.exception("Error while invoking task")
+            if isinstance(e, ExceptionGroup):
+                raise RuntimeError(f"Task invocation failed: {e.exceptions}") from e
+            else:
+                raise RuntimeError(f"Task invocation failed: {e}") from e
 
         # Collect responses from task executors
         return [task.result() for task in dispatch_coros]

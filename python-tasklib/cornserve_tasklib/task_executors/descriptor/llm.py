@@ -12,7 +12,7 @@ from cornserve import constants
 from cornserve.logging import get_logger
 from cornserve.services.resource import GPU
 from cornserve.task.base import Stream, TaskOutput
-from cornserve.task.builtins.llm import (
+from cornserve_tasklib.task.unit.llm import (
     URL,
     DecodeLLMUnitTask,
     LLMBaseUnitTask,
@@ -24,7 +24,6 @@ from cornserve.task.builtins.llm import (
     extract_multimodal_content,
 )
 from cornserve.task_executors.descriptor.base import TaskExecutionDescriptor
-from cornserve.task_executors.descriptor.registry import DESCRIPTOR_REGISTRY
 
 logger = get_logger(__name__)
 
@@ -178,9 +177,6 @@ class VLLMDescriptor(TaskExecutionDescriptor[LLMBaseUnitTask, OpenAIChatCompleti
             ("shm", constants.VOLUME_SHM, "/dev/shm"),
             ("torch-compile-cache", constants.VOLUME_VLLM_EXECUTOR_CACHE, "/root/.cache/vllm/torch_compile_cache"),
         ]
-
-
-DESCRIPTOR_REGISTRY.register(LLMBaseUnitTask, VLLMDescriptor, default=True)
 
 
 class PrefillVLLMDescriptor(
@@ -342,9 +338,6 @@ class PrefillVLLMDescriptor(
         return PrefillChatCompletionResponse(hidden_states=task_output.hidden_states)
 
 
-DESCRIPTOR_REGISTRY.register(PrefillLLMUnitTask, PrefillVLLMDescriptor, default=True)
-
-
 class DecodeVLLMDescriptor(
     TaskExecutionDescriptor[DecodeLLMUnitTask, OpenAIChatCompletionRequest, Stream[OpenAIChatCompletionChunk]]
 ):
@@ -480,5 +473,3 @@ class DecodeVLLMDescriptor(
             response=response,
         )
 
-
-DESCRIPTOR_REGISTRY.register(DecodeLLMUnitTask, DecodeVLLMDescriptor, default=True)

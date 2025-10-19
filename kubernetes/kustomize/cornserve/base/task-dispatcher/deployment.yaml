@@ -15,6 +15,7 @@ spec:
       labels:
         app: task-dispatcher
     spec:
+      serviceAccountName: task-dispatcher-sa
       nodeSelector:
         node-role.kubernetes.io/control-plane: "true"
       containers:

@@ -1,5 +1,8 @@
 """Inter-process broadcast using shared memory and ZMQ."""
 
+# TODO: fixing shared memory issues with pyright
+# pyright: reportOptionalSubscript=false
+
 from __future__ import annotations
 
 import os

@@ -21,12 +21,13 @@ EOF
 
 from __future__ import annotations
 
-from cornserve.app.base import AppConfig
-from cornserve.task.builtins.huggingface import (
+from cornserve_tasklib.task.unit.huggingface import (
     HuggingFaceQwenImageInput,
     HuggingFaceQwenImageOutput,
     HuggingFaceQwenImageTask,
 )
+
+from cornserve.app.base import AppConfig
 
 qwen_image = HuggingFaceQwenImageTask(model_id="Qwen/Qwen-Image")
 

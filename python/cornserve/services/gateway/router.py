@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import base64
 import json
 from collections.abc import AsyncGenerator, AsyncIterator
 
@@ -30,9 +32,11 @@ from cornserve.services.gateway.models import (
     RegistrationInitialResponse,
     RegistrationStatusEvent,
     ScaleTaskRequest,
+    TasksDeploymentRequest,
 )
 from cornserve.services.gateway.session import SessionManager
 from cornserve.services.gateway.task_manager import TaskManager
+from cornserve.services.task_registry import TaskRegistry
 from cornserve.task.base import Stream, TaskGraphDispatch, TaskOutput, UnitTaskList, task_manager_context
 
 router = APIRouter()
@@ -322,7 +326,11 @@ async def health_check():
 
 def init_app_state(app: FastAPI) -> None:
     """Initialize the app state with required components."""
-    app.state.task_manager = TaskManager(K8S_RESOURCE_MANAGER_GRPC_URL)
+    # Create registry for handling unit task instance names
+    app.state.task_registry = TaskRegistry()
+
+    # Pass registry to TaskManager for task-based deployment
+    app.state.task_manager = TaskManager(K8S_RESOURCE_MANAGER_GRPC_URL, app.state.task_registry)
     app.state.app_manager = AppManager(app.state.task_manager)
     app.state.session_manager = SessionManager(app.state.task_manager)
 
@@ -336,3 +344,60 @@ def create_app() -> FastAPI:
     app.include_router(router)
     init_app_state(app)
     return app
+
+
+@router.post("/deploy-tasks")
+async def deploy_tasks(request: TasksDeploymentRequest, raw_request: Request):
+    """Deploy tasks (unit or composite) and their descriptors from provided sources."""
+    task_registry: TaskRegistry = raw_request.app.state.task_registry
+    try:
+        # Create task definitions and descriptors concurrently
+        async def create_task_definition(spec):
+            source = base64.b64decode(spec.source_b64).decode("utf-8")
+            try:
+                return await task_registry.create_task_definition(
+                    name=spec.task_definition_name,
+                    task_class_name=spec.task_class_name,
+                    module_name=spec.module_name,
+                    source_code=source,
+                    is_unit_task=spec.is_unit_task,
+                )
+            except ValueError as e:
+                # Ignore duplicate definition errors (idempotent for unit and composite tasks)
+                if "already exists" in str(e):
+                    return None
+                raise
+
+        async def create_execution_descriptor(spec):
+            source = base64.b64decode(spec.source_b64).decode("utf-8")
+            try:
+                return await task_registry.create_execution_descriptor(
+                    name=spec.descriptor_definition_name,
+                    task_class_name=spec.task_class_name,
+                    descriptor_class_name=spec.descriptor_class_name,
+                    module_name=spec.module_name,
+                    source_code=source,
+                    is_default=True,
+                )
+            except ValueError as e:
+                # Ignore duplicate descriptor errors (idempotent)
+                if "already exists" in str(e):
+                    return None
+                raise
+
+        coroutines = [
+            *(create_task_definition(spec) for spec in request.task_definitions),
+            *(create_execution_descriptor(spec) for spec in request.descriptor_definitions),
+        ]
+
+        if coroutines:
+            results = await asyncio.gather(*coroutines, return_exceptions=True)
+            errors = [e for e in results if isinstance(e, Exception)]
+            if errors:
+                # Raise if any creation failed
+                raise errors[0]
+
+        return {"status": "ok"}
+    except Exception as e:
+        logger.exception("Failed to deploy tasks")
+        return Response(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, content=str(e))

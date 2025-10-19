@@ -8,7 +8,7 @@ import aiohttp
 
 from cornserve import constants
 from cornserve.services.resource import GPU
-from cornserve.task.builtins.huggingface import (
+from cornserve_tasklib.task.unit.huggingface import (
     HuggingFaceQwenImageInput,
     HuggingFaceQwenImageOutput,
     HuggingFaceQwenImageTask,
@@ -17,7 +17,6 @@ from cornserve.task.builtins.huggingface import (
     HuggingFaceQwenOmniTask,
 )
 from cornserve.task_executors.descriptor.base import TaskExecutionDescriptor
-from cornserve.task_executors.descriptor.registry import DESCRIPTOR_REGISTRY
 from cornserve.task_executors.huggingface.api import HuggingFaceRequest, HuggingFaceResponse, ModelType, Status
 
 
@@ -133,7 +132,3 @@ class HuggingFaceQwenOmniDescriptor(
 
         return HuggingFaceQwenOmniOutput(audio_chunk=hf_response.audio_chunk)
 
-
-# Register descriptors with the registry
-DESCRIPTOR_REGISTRY.register(HuggingFaceQwenImageTask, HuggingFaceQwenImageDescriptor, default=True)
-DESCRIPTOR_REGISTRY.register(HuggingFaceQwenOmniTask, HuggingFaceQwenOmniDescriptor, default=True)

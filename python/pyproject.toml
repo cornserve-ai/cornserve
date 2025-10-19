@@ -168,9 +168,12 @@ ignore = [
 "cornserve/services/**/grpc.py" = ["N802"]
 
 [tool.pyright]
+extraPaths = ["../python-tasklib", "../python-tasklib/build/lib"]
 exclude = [
   "**/*_pb2.py",
   "**/*_pb2_grpc.py",
+  "**/*_pb2.pyi",
+  "**/*_pb2_grpc.pyi",
   "cornserve/task_executors/eric/models/*.py",
 ]
 

@@ -14,6 +14,7 @@ from opentelemetry.instrumentation.grpc import GrpcInstrumentorClient, GrpcInstr
 from cornserve.logging import get_logger
 from cornserve.services.task_dispatcher.grpc import create_server
 from cornserve.services.task_dispatcher.router import create_app
+from cornserve.services.task_registry import TaskRegistry
 from cornserve.tracing import configure_otel
 from cornserve.utils import set_ulimit
 
@@ -29,6 +30,11 @@ async def serve() -> None:
 
     set_ulimit()
     configure_otel("task_dispatcher")
+
+    # Start task watcher to load tasks/executors from CRs before the server starts
+    logger.info("Starting task watcher for Task Dispatcher service")
+    task_registry = TaskRegistry()
+    cr_watcher_task = asyncio.create_task(task_registry.watch_updates(), name="task_dispatcher_cr_watcher")
 
     # FastAPI server
     app = create_app()
@@ -57,7 +63,7 @@ async def serve() -> None:
     dispatcher: TaskDispatcher = app.state.dispatcher
 
     # gRPC server
-    grpc_server = create_server(dispatcher)
+    grpc_server = create_server(dispatcher, task_registry)
 
     loop = asyncio.get_running_loop()
     uvicorn_server_task = loop.create_task(uvicorn_server.serve())
@@ -65,6 +71,7 @@ async def serve() -> None:
 
     def shutdown() -> None:
         uvicorn_server_task.cancel()
+        cr_watcher_task.cancel()
 
     loop.add_signal_handler(signal.SIGINT, shutdown)
     loop.add_signal_handler(signal.SIGTERM, shutdown)
@@ -73,6 +80,19 @@ async def serve() -> None:
         await uvicorn_server_task
     except asyncio.CancelledError:
         logger.info("Shutting down Task Dispatcher service")
+
+        # Cancel task watcher task
+        if not cr_watcher_task.done():
+            logger.info("Cancelling task watcher task")
+            cr_watcher_task.cancel()
+            try:
+                await cr_watcher_task
+            except asyncio.CancelledError:
+                logger.info("task watcher task cancelled successfully")
+
+        # Close CR manager
+        await task_registry.shutdown()
+
         await dispatcher.shutdown()
         await uvicorn_server.shutdown()
         await grpc_server.stop(5)

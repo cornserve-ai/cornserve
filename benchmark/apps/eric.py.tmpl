@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 from cornserve.app.base import AppConfig
-from cornserve.task.builtins.encoder import Modality
-from cornserve.task.builtins.encoder import DummyEncoderTask, EncoderInput, DummyEncoderOutput
+from cornserve_tasklib.task.unit.encoder import Modality
+from cornserve_tasklib.task.unit.encoder import DummyEncoderTask, EncoderInput, DummyEncoderOutput
 
 eric = DummyEncoderTask(
     model_ids={"$MODEL_ID"},

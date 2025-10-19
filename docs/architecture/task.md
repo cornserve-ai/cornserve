@@ -64,7 +64,7 @@ Similarly, the `EncoderTask` is compatible with the `EricDescriptor`, which desc
 
 Unit Tasks classes (e.g., `LLMTask`) are registered with the whole system.
 Their source code (concrete class definition) should be available to all services in the system.
-At the moment, we create multiple built-in Unit Task classes under `cornserve.task.builtins`.
+At the moment, we create multiple built-in Unit Task classes under `cornserve_tasklib.task.unit` and compose them under `cornserve_tasklib.task.composite`.
 
 ### Deployment
 

@@ -51,8 +51,8 @@ message RegisterTaskRequest {
   // ID of the task manager
   string task_manager_id = 1;
 
-  // Unit task instance
-  common.UnitTask task = 2;
+  // Name of the UnitTaskInstance CR to register
+  string task_instance_name = 2;
 
   // Initial set of GPU resources
   repeated GPUResource gpus = 3;
