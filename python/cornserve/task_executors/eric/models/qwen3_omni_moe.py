@@ -104,11 +104,11 @@ class Qwen3_VisionBlock(nn.Module):
         num_heads: int,
         mlp_hidden_dim: int,
         act_name: str,
-        norm_layer: Callable[[int], nn.Module] | None = None,
+        norm_eps: float,
     ) -> None:
         super().__init__()
-        self.norm1 = norm_layer(dim)
-        self.norm2 = norm_layer(dim)
+        self.norm1 = nn.LayerNorm(dim, eps=norm_eps)
+        self.norm2 = nn.LayerNorm(dim, eps=norm_eps)
 
         # It's alright to reuse Qwen2.5 vision attention here.
         self.attn = Qwen2_5_VisionAttention(
@@ -152,7 +152,7 @@ class Qwen3_VisionPatchMerger(nn.Module):
         self,
         d_model: int,
         context_dim: int,
-        norm_layer: Callable[[int], nn.Module] | None = None,
+        norm_eps: float,
         spatial_merge_size: int = 2,
         use_postshuffle_norm: bool = False,
     ) -> None:
@@ -163,7 +163,7 @@ class Qwen3_VisionPatchMerger(nn.Module):
         if self.use_postshuffle_norm:
             context_dim = self.hidden_size
 
-        self.ln_q = norm_layer(self.hidden_size if use_postshuffle_norm else context_dim)
+        self.ln_q = nn.LayerNorm(context_dim, eps=norm_eps)
         self.mlp = nn.ModuleList(
             [
                 ColumnParallelLinear(
@@ -233,7 +233,6 @@ class Qwen3_VisionTransformer(EricModel):
             device=self.device, dtype=self.dtype
         )
 
-        norm_layer = partial(nn.LayerNorm, eps=rms_norm_eps)
         head_dim = self.embed_dim // self.num_heads
         self.rotary_pos_emb = Qwen2_5_VisionRotaryEmbedding(head_dim // 2)
 
@@ -244,7 +243,7 @@ class Qwen3_VisionTransformer(EricModel):
                     num_heads=self.num_heads,
                     mlp_hidden_dim=vision_config.intermediate_size,
                     act_name=vision_config.hidden_act,
-                    norm_layer=norm_layer,
+                    norm_eps=rms_norm_eps,
                 )
                 for layer_idx in range(vision_config.depth)
             ]
@@ -252,7 +251,7 @@ class Qwen3_VisionTransformer(EricModel):
         self.merger = Qwen3_VisionPatchMerger(
             d_model=vision_config.out_hidden_size,
             context_dim=self.embed_dim,
-            norm_layer=norm_layer,
+            norm_eps=rms_norm_eps,
             spatial_merge_size=self.spatial_merge_size,
         )
 
@@ -262,9 +261,9 @@ class Qwen3_VisionTransformer(EricModel):
                     Qwen3_VisionPatchMerger(
                         d_model=vision_config.out_hidden_size,
                         context_dim=self.embed_dim,
+                        norm_eps=rms_norm_eps,
                         spatial_merge_size=self.spatial_merge_size,
                         use_postshuffle_norm=True,
-                        norm_layer=norm_layer,
                     )
                     for layer_idx in range(len(self.deepstack_visual_indexes))
                 ]
