@@ -73,10 +73,11 @@ Next, install the Cornserve CLI that helps you interact with Cornserve:
 pip install cornserve
 ```
 
-Try registering a simple example app that defines a Vision-Language Model:
+Deploy the tasklib firs. Then, try registering a simple example app that defines a Vision-Language Model:
 
 ```bash
 export CORNSERVE_GATEWAY_URL=$(minikube service -n cornserve gateway-node-port --url)
+cornserve deploy-tasklib
 cornserve register examples/mllm/app.py --alias mllm
 ```
 

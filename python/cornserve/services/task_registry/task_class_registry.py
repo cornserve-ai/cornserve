@@ -142,6 +142,8 @@ class TaskClassRegistry:
                 return
 
             # Extract generic types from MRO
+            # Assert again for static type checkers
+            assert issubclass(task_cls, UnitTask)
             task_input_cls = None
             task_output_cls = None
             for base in task_cls.__mro__:
@@ -190,7 +192,7 @@ class TaskClassRegistry:
                     delattr(sys.modules[parent], module_name.split(".")[-1])
             except Exception:
                 pass
-            if preexisting:
+            if preexisting and previous_module is not None:
                 sys.modules[module_name] = previous_module
             else:
                 sys.modules.pop(module_name, None)

@@ -1,9 +1,13 @@
+# pyright: reportAttributeAccessIssue=false, reportGeneralTypeIssues=false, reportOptionalMemberAccess=false, reportOptionalSubscript=false, reportPossiblyUnboundVariable=false, reportArgumentType=false
 """Utilities used by services for task/descriptor discovery and registry population.
 
 Currently, this module provides utilities for interacting with k8s CRDs to:
 - discover task definitions and execution descriptors at runtime
 - populate in-process registries and ``sys.modules``
 - create and retrieve unit task instances
+
+NOTE: we disable pyright warnings in this file because the k8s CustomObjectsApi
+return types are defined by the CRD schemas, which pyright does not understand.
 """
 
 from __future__ import annotations

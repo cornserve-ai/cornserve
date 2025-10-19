@@ -272,9 +272,12 @@ class TaskDispatcher:
                         task_output=execution.invocation.task_output,
                     )
                     dispatch_coros.append(tg.create_task(self._execute_unit_task(execution, request)))
-        except Exception as e:
-            logger.exception("Error while invoking task: %s", e.exceptions)
-            raise RuntimeError(f"Task invocation failed: {e.exceptions}") from e
+        except (ExceptionGroup, Exception) as e:
+            logger.exception("Error while invoking task")
+            if isinstance(e, ExceptionGroup):
+                raise RuntimeError(f"Task invocation failed: {e.exceptions}") from e
+            else:
+                raise RuntimeError(f"Task invocation failed: {e}") from e
 
         # Collect responses from task executors
         return [task.result() for task in dispatch_coros]

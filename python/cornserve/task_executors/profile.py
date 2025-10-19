@@ -75,10 +75,10 @@ class UnitTaskProfile:
 
             # return cls(task=task, num_gpus_to_profile=num_gpus_to_profile)
 
-            # TODO: Temperorily disabled before integrated with CRD
+            # TODO: Temporarily disabled before integrated with CRD
             # The task class can be loaded from the Resource Manager's task registry,
             # and the profile can be loaded from a dedicated CRD in the future.
-            return cls(task=None, num_gpus_to_profile={})
+            raise ValueError("UnitTaskProfile.from_json_file is disabled until CRD integration")
 
         except (KeyError, json.JSONDecodeError, ValueError) as e:
             raise ValueError(f"Invalid profile file format in {file_path}: {e}") from e
