@@ -74,8 +74,8 @@ class Qwen3_VisionMLP(nn.Module):
         self,
         in_features: int,
         hidden_features: int,
+        act_name: str,
         bias: bool = False,
-        act_fn: Callable[[torch.Tensor], torch.Tensor] = F.silu,
     ) -> None:
         super().__init__()
         self.linear_fc1 = ColumnParallelLinear(
@@ -88,7 +88,7 @@ class Qwen3_VisionMLP(nn.Module):
             in_features,
             bias=bias,
         )
-        self.act_fn = act_fn
+        self.act_fn = get_act_fn(act_name)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         mlp_output = self.linear_fc2(self.act_fn(self.linear_fc1(x)[0]))[0]
@@ -103,12 +103,10 @@ class Qwen3_VisionBlock(nn.Module):
         dim: int,
         num_heads: int,
         mlp_hidden_dim: int,
-        act_fn: Callable[[torch.Tensor], torch.Tensor] = F.silu,
+        act_name: str,
         norm_layer: Callable[[int], nn.Module] | None = None,
     ) -> None:
         super().__init__()
-        if norm_layer is None:
-            norm_layer = partial(nn.LayerNorm, eps=1e-6)
         self.norm1 = norm_layer(dim)
         self.norm2 = norm_layer(dim)
 
@@ -121,7 +119,7 @@ class Qwen3_VisionBlock(nn.Module):
         self.mlp = Qwen3_VisionMLP(
             dim,
             mlp_hidden_dim,
-            act_fn=act_fn,
+            act_name=act_name,
             bias=True,
         )
 
@@ -131,7 +129,6 @@ class Qwen3_VisionBlock(nn.Module):
         cu_seqlens: torch.Tensor,
         rotary_pos_emb: torch.Tensor,
         max_seqlen: int | None = None,
-        seqlens: list[int] | None = None,
     ) -> torch.Tensor:
         x = x + self.attn(
             self.norm1(x),
@@ -166,8 +163,6 @@ class Qwen3_VisionPatchMerger(nn.Module):
         if self.use_postshuffle_norm:
             context_dim = self.hidden_size
 
-        if norm_layer is None:
-            norm_layer = partial(nn.LayerNorm, eps=1e-6)
         self.ln_q = norm_layer(self.hidden_size if use_postshuffle_norm else context_dim)
         self.mlp = nn.ModuleList(
             [
@@ -248,7 +243,7 @@ class Qwen3_VisionTransformer(EricModel):
                     dim=self.embed_dim,
                     num_heads=self.num_heads,
                     mlp_hidden_dim=vision_config.intermediate_size,
-                    act_fn=get_act_fn(vision_config.hidden_act),
+                    act_name=vision_config.hidden_act,
                     norm_layer=norm_layer,
                 )
                 for layer_idx in range(vision_config.depth)
@@ -347,7 +342,6 @@ class Qwen3_VisionTransformer(EricModel):
                 cu_seqlens=cu_seqlens,
                 rotary_pos_emb=rotary_pos_emb,
                 max_seqlen=max_seqlen,
-                seqlens=None,
             )
             if deepstack_visual_indexes is not None and layer_num in deepstack_visual_indexes:
                 hidden_states_list.append(embeddings)
