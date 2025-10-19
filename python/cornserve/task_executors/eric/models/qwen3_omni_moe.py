@@ -605,8 +605,7 @@ class Qwen3OmniAudioEncoder(nn.Module):
     def forward(
         self,
         input_features,
-        feature_lens=None,
-        aftercnn_lens=None,
+        feature_lens,
     ) -> list[torch.Tensor]:
         aftercnn_lens = self._get_feat_extract_output_lengths(feature_lens)
         chunk_num = torch.ceil(feature_lens / (self.n_window * 2)).long()
@@ -738,13 +737,9 @@ class Qwen3OmniEncoder(EricModel):
                     device=self.device, dtype=self.dtype
                 )
                 audio_feature_lengths = torch.cat(batch["audio_feature_lengths"], dim=0).to(device=self.device)
-                aftercnn_lengths = self.audio_tower._get_feat_extract_output_lengths(
-                    audio_feature_lengths,
-                )
                 audio_features = self.audio_tower(
                     input_features,
-                    feature_lens=audio_feature_lengths,
-                    aftercnn_lens=aftercnn_lengths,
+                    audio_feature_lengths,
                 )
                 return audio_features
             case _:
