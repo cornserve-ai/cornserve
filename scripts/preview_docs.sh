@@ -4,9 +4,7 @@
 # By default it does not build social preview cards. If you want to debug social cards,
 # set the environment variable `BUILD_SOCIAL_CARD=true` to this script.
 
-uv pip list | grep mkdocs-material 2>&1 >/dev/null
-
-if [[ ! $? -eq 0 ]]; then
+if ! uv pip freeze | grep -q "^mkdocs-material=="; then
   echo "Run the following to install documentation build dependnecies:"
   echo "    uv pip install -r docs/requirements.txt"
   exit 1
