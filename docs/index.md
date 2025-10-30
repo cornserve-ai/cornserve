@@ -41,8 +41,20 @@ document.addEventListener('DOMContentLoaded', function() {
 
 </script>
 
-Cornserve is an execution platform for multimodal AI.
-It performs **model fission** and **automatic sharing** of common components across applications on your infrastructure.
+<div align="center" style="border: 2px solid black">
+  <h3 style="margin: 1rem">
+    vLLM : Cornserve = Monolithic : Microservice
+  </h3>
+</div>
+
+**Multimodal AI** models like Qwen 3 Omni are becoming increasingly complex and heterogeneous.
+
+Cornserve is a distributed serving system for multimodal AI.
+Cornserve performs **model fission** and **automatic sharing** of common components (e.g., LLMs, Vision Encoders, Audio Generators) across applications on your infrastructure.
+
+1. **Independent scaling**: Each component of complex multimodal models (e.g., LLMs, vision encoders, audio generators) can be *scaled independently based on incoming request load*.
+2. **Less interference**: For instance, some Vision-Language Model requests may have three images, while some may have none. When all is crammed into a single monolithic server, multimodal embedding and LLM text generation can interfere with and delay each other. Model fission allows *each component to run in isolation*, reducing interference and improving latency.
+3. **Lower complexity**: A *single monolithic server* that handles multimodal inputs, LLM text generation, and multimodal outputs is extremely complex to build and maintain. Cornserve is the substrate that allows the composition of simpler task executors (microservices) into complex multimodal AI applications.
 
 <div class="grid cards" markdown>
 
@@ -66,7 +78,7 @@ It performs **model fission** and **automatic sharing** of common components acr
     Cornserve is built multimodal-native from the ground up. Image, video,
     audio, and text are all first-class citizens.
 
--   :material-kubernetes:{ .lg .middle } **Deploy to K8s with one command**
+-   :material-kubernetes:{ .lg .middle } **Simple K8s deployment**
 
     ---
 

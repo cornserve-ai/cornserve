@@ -79,3 +79,13 @@ There is also a synchronous version called `recv_sync`.
 
 `mark_done` is used to free the backing memory of a received tensor in the Sidecar server.
 As the Sidecar server allows for idempotent receive operations, the data is always held within the server until a corresponding `mark_done` called.
+
+## Comparison with NIXL
+
+It was a beautiful coincidence that the Cornserve Sidecar was designed and built at around the same time as NVIDIA's NIXL, which also provides P2P tensor communication for various purposes like disaggregated LLM inference or RL weight transfer.
+However, there are several differences between the two:
+
+- **Memory management**: Sidecar is a long-running process that manages P2P communication between GPUs in the cluster and manages memory for tensors. On the other hand, NIXL is closer to a communication library and memory management (e.g., passing pre-allocated buffers) is left to the user.
+- **Communication medium**: Sidecar uses shared memory (`/dev/shm`) for intra-node communication. This is to avoid any interference with NVLink/NVSwitch bandwidth that is critical for distributed inference (i.e., tensor parallelism).
+
+Overall, the Sidecar intends to take more responsibility for memmory and communication management, and we intend to tailor it specifically for Cornserve use cases.

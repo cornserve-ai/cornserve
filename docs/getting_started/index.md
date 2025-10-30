@@ -39,6 +39,7 @@ Next, clone the Cornserve GitHub repository and deploy Cornserve on your Minikub
 ```bash
 git clone https://github.com/cornserve-ai/cornserve.git
 cd cornserve
+git checkout v0.0.2  # or the latest release tag
 
 minikube kubectl -- apply -k kubernetes/kustomize/cornserve-system/overlays/minikube
 minikube kubectl -- apply -k kubernetes/kustomize/cornserve/overlays/minikube
@@ -69,21 +70,28 @@ sidecar-3                          1/1     Running   0          3s
 Next, install the Cornserve CLI that helps you interact with Cornserve:
 
 ```bash
-# Configure a virtual environment with Python 3.11+ as needed.
-pip install cornserve
+uv venv --python=3.11
+source .venv/bin/activate
+uv pip install python/
 ```
 
-Deploy the tasklib firs. Then, try registering a simple example app that defines a Vision-Language Model:
+Next, we need to deploy built-in tasks that Cornserve provides to our Cornserve cluster.
 
 ```bash
+uv pip install python-tasklib/
 export CORNSERVE_GATEWAY_URL=$(minikube service -n cornserve gateway-node-port --url)
 cornserve deploy-tasklib
-cornserve register examples/mllm/app.py --alias mllm
 ```
 
-You can check out what the app looks like on [GitHub](https://github.com/cornserve-ai/cornserve/blob/3fbf3c62dc7bd8019af29d1ae260b2cafc071ad8/examples/mllm/app.py).
+Then, try registering a simple example app that defines a Vision-Language Model:
 
-This will take a few minutes. The two large bits are (1) pulling in the Docker images and (2) waiting for vLLM to warm up and start. But eventually, you should see something like this:
+```bash
+cornserve register examples/mllm.py
+```
+
+You can check out example apps on [GitHub](https://github.com/cornserve-ai/cornserve/tree/master/examples).
+
+This will take a few minutes; mainly (1) pulling in the Docker images and (2) waiting for vLLM to warm up and start. But eventually, you should see something like this:
 
 ```console
 $ cornserve register examples/mllm/app.py --alias mllm
@@ -97,31 +105,35 @@ $ cornserve register examples/mllm/app.py --alias mllm
 Now, you can invoke the app using the CLI:
 
 ```console
-$ cornserve invoke mllm - <<EOF
-prompt: "Write a haiku about each image."
-multimodal_data:
-- ["image", "https://picsum.photos/id/12/480/560"]
-- ["image", "https://picsum.photos/id/234/960/960"]
+$ cornserve invoke mllm --aggregate-keys choices.0.delta.content --data - <<EOF
+model: "Qwen/Qwen2-VL-7B-Instruct"
+messages:
+- role: "user"
+  content:
+  - type: text
+    text: "Write a poem about the images you see."
+  - type: image_url
+    image_url:
+      url: "https://picsum.photos/id/12/480/560"
+  - type: image_url
+    image_url:
+      url: "https://picsum.photos/id/234/960/960"
 EOF
-╭──────────┬───────────────────────────────────────────────────────────────────────────╮
-│ response │ Okay, here are haikus for each image:                                     │
-│          │                                                                           │
-│          │ **Image 1: Coastal Landscape**                                            │
-│          │                                                                           │
-│          │ Gray sea meets the shore,                                                 │
-│          │ Rocks stand still, a weathered grace,                                     │
-│          │ Island dreams unfold.                                                     │
-│          │                                                                           │
-│          │ **Image 2: Paris Scene**                                                  │
-│          │                                                                           │
-│          │ Fog veils city’s height,                                                  │
-│          │ Eiffel stands, a ghostly trace,                                           │
-│          │ Winter’s quiet grace.                                                     │
-│          │                                                                           │
-│          │ ---                                                                       │
-│          │                                                                           │
-│          │ Would you like me to create haikus for any other images you have in mind? │
-╰──────────┴───────────────────────────────────────────────────────────────────────────╯
+╭─────────────────────────┬──────────────────────────────────────────╮
+│ choices.0.delta.content │ Okay, here are haikus for each image:    │
+│                         │                                          │
+│                         │ **Image 1: Coastal Landscape**           │
+│                         │                                          │
+│                         │ Gray sea meets the shore,                │
+│                         │ Rocks stand still, a weathered grace,    │
+│                         │ Island dreams unfold.                    │
+│                         │                                          │
+│                         │ **Image 2: Paris Scene**                 │
+│                         │                                          │
+│                         │ Fog veils city’s height,                 │
+│                         │ Eiffel stands, a ghostly trace,          │
+│                         │ Winter’s quiet grace.                    │
+╰─────────────────────────┴──────────────────────────────────────────╯
 ```
 
 The invocation payload and response schema are defined by [the app itself](https://github.com/cornserve-ai/cornserve/blob/3fbf3c62dc7bd8019af29d1ae260b2cafc071ad8/examples/mllm/app.py) as subclasses of `pydantic.BaseModel`.

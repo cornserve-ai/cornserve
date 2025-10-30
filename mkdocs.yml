@@ -86,7 +86,7 @@ nav:
     - architecture/index.md
     - Task: architecture/task.md
     - Sidecar: architecture/sidecar.md
-    - Eric: architecture/eric.md
+    - Eric and Geri: architecture/eric_and_geri.md
   - Contributor Guide:
     - contributor_guide/index.md
     - Developing on Kubernetes: contributor_guide/kubernetes.md
