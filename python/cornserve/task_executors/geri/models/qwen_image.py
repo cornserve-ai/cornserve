@@ -10,14 +10,15 @@ from diffusers.pipelines.qwenimage.pipeline_output import QwenImagePipelineOutpu
 from diffusers.pipelines.qwenimage.pipeline_qwenimage import QwenImagePipeline
 from PIL import Image
 from torch.nn.utils.rnn import pad_sequence
+from transformers.configuration_utils import PretrainedConfig
 
 from cornserve.logging import get_logger
-from cornserve.task_executors.geri.models.base import GeriModel
+from cornserve.task_executors.geri.models.base import BatchGeriModel
 
 logger = get_logger(__name__)
 
 
-class QwenImageModel(GeriModel):
+class QwenImageModel(BatchGeriModel):
     """Qwen-Image model implementation for text-to-image generation.
 
     This model uses the QwenImagePipeline from diffusers, but removes the text encoder
@@ -25,13 +26,20 @@ class QwenImageModel(GeriModel):
     via the sidecar.
     """
 
-    def __init__(self, model_id: str, torch_dtype: torch.dtype, torch_device: torch.device) -> None:
-        """Initialize the QwenImage model.
+    def __init__(
+        self,
+        model_id: str,
+        torch_dtype: torch.dtype,
+        torch_device: torch.device,
+        config: PretrainedConfig | None = None,  # ignore
+    ) -> None:
+        """Initialize the model with its ID and data type.
 
         Args:
-            model_id: Hugging Face model ID (e.g., "Qwen/Qwen-Image").
-            torch_dtype: Data type for model weights.
-            torch_device: Device to load the model on.
+            model_id: Hugging Face model ID.
+            torch_dtype: Data type for model weights (e.g., torch.bfloat16).
+            torch_device: Device to load the model on (e.g., torch.device("cuda")).
+            config: If supplied, may be used to configure the model's components.
         """
         logger.info("Loading QwenImage model from %s", model_id)
 
