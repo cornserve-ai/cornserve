@@ -210,7 +210,7 @@ class Engine:
 
                 # The streaming case
                 streaming_result = None
-                if batch.request_type == EngineRequestType.NON_STREAMING:
+                if batch.request_type == EngineRequestType.STREAMING:
                     # For streaming responses, we can't immediately end individual request spans
                     # since the obtained result simply holds a generator object.
                     streaming_result = self.executor.generate_streaming(
