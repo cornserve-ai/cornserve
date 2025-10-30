@@ -130,7 +130,7 @@ When a composite task is invoked, the following happens:
 How does the Task Dispatcher know how to contact the Task Manager?
 Whenever there is a change to Task Managers (spawning new ones or killing existing ones), the Resource Manager will inform the Task Dispatcher of the mapping between the unit task definition and its corresponding Task Manager's endpoint.
 
-The Task Disaptcher is horizontally replicated (currently default to 3 replicas) to prevent it from being a bottleneck.
+The Task Dispatcher is horizontally replicated (currently default to 3 replicas) to prevent it from being a bottleneck.
 
 
 ## Data Plane

@@ -94,7 +94,7 @@ You can check out example apps on [GitHub](https://github.com/cornserve-ai/corns
 This will take a few minutes; mainly (1) pulling in the Docker images and (2) waiting for vLLM to warm up and start. But eventually, you should see something like this:
 
 ```console
-$ cornserve register examples/mllm/app.py --alias mllm
+$ cornserve register examples/mllm.py
 ╭──────────────────────────────────────┬───────╮
 │ App ID                               │ Alias │
 ├──────────────────────────────────────┼───────┤
@@ -136,7 +136,6 @@ EOF
 ╰─────────────────────────┴──────────────────────────────────────────╯
 ```
 
-The invocation payload and response schema are defined by [the app itself](https://github.com/cornserve-ai/cornserve/blob/3fbf3c62dc7bd8019af29d1ae260b2cafc071ad8/examples/mllm/app.py) as subclasses of `pydantic.BaseModel`.
 You can learn more about defining apps (and tasks) [in our guide](building_apps.md).
 
 Here's how to clean up:

@@ -88,4 +88,4 @@ However, there are several differences between the two:
 - **Memory management**: Sidecar is a long-running process that manages P2P communication between GPUs in the cluster and manages memory for tensors. On the other hand, NIXL is closer to a communication library and memory management (e.g., passing pre-allocated buffers) is left to the user.
 - **Communication medium**: Sidecar uses shared memory (`/dev/shm`) for intra-node communication. This is to avoid any interference with NVLink/NVSwitch bandwidth that is critical for distributed inference (i.e., tensor parallelism).
 
-Overall, the Sidecar intends to take more responsibility for memmory and communication management, and we intend to tailor it specifically for Cornserve use cases.
+Overall, the Sidecar intends to take more responsibility for memory and communication management, and we intend to tailor it specifically for Cornserve use cases.
