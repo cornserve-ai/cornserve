@@ -46,7 +46,7 @@ plugins:
       video_autoplay: True
       css_style:
         width: 60%
-  - mkdocs-jupyter
+  # - mkdocs-jupyter
 
 # Extensions
 markdown_extensions:
@@ -80,7 +80,7 @@ nav:
     - getting_started/index.md
     - Deploying Cornserve: getting_started/cornserve.md
     - Building Apps: getting_started/building_apps.md
-    - Using Jupyter Notebook: getting_started/jupyter.ipynb
+    # - Using Jupyter Notebook: getting_started/jupyter.ipynb
     - Registering and Invoking Apps: getting_started/registering_apps.md
   - Architecture:
     - architecture/index.md

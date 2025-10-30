@@ -43,7 +43,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
 <div align="center" style="border: 2px solid black">
   <h3 style="margin: 1rem">
-    vLLM : Cornserve = Monolithic : Microservice
+    vLLM : Cornserve = Monolith : Microservice
   </h3>
 </div>
 

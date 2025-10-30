@@ -53,6 +53,7 @@ These tasks are *dispatched* to be executed on the data plane.
 Tasks are imported from modules under `cornserve_tasklib.task`, such as `MLLMTask` for multimodal LLM inference, `LLMTask` for LLM inference, and `EncoderTask` for multimodal data embedding, and users can build their own tasks using components from `cornserve.task.base`.
 All other inline Python code is executed imperatively by the Cornserve Gateway, so the app offers the full flexibility of Python programming.
 
+For a more realistic example, see [Building Apps](../getting_started/building_apps.md).
 See also the dedicated page on [tasks](task.md).
 
 

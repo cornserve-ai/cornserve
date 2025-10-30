@@ -1,115 +1,140 @@
-# Building and Deploying Your App
+# Building Apps
 
-Cornserve as two layers of defining *execution*:
+Cornserve has two layers of defining *execution*:
 
 - **App**: This is the highest level of construct, which takes a request and returns a response. Apps are written in Python and can be submitted to the Cornserve Gateway for deployment.
 - **Task**: This is a unit of work that is executed by the Cornserve data plane. There are two types of tasks:
     - **Unit Task**: Unit Tasks are the smallest and most basic type of task. They are executed in a single Kubernetes Pod and are the unit of scaling. For instance, there is the built-in modality embedding unit task which embeds specific modalities (e.g., image, video, audio), which is executed by our Eric server. There is also the built-in LLM text generation task, which generates text from input text prompts and any embedded modalities.
     - **Composite Task**: Composite Tasks are a composition of one or more Unit Tasks. They are defined by the user in Python. For instance, there is the built-in Multimodal LLM composite task which instantiates modality embedding unit tasks as needed, runs then on multimodal data to embeds them, and passes them to the LLM text generation unit task to generate text. Intermediate data produced by unit tasks are forwarded directly to the next unit task in the graph.
 
-## Example: Writing an Image Understanding App
+## Example: Gemma Arena
 
-Apps are written in Python and use Tasks to process requests.
-Let's build a simple example app that takes an image and a text prompt, and generates a response based on the image and the prompt.
-
-### Composite Task
-
-First, let's see how to build a composite task out of built-in unit tasks for this: `#!python ImageChatTask`.
+Let's look at a real example app that demonstrates streaming responses from different Gemma models simultaneously. This `gemmarena.py` app lets users compare different Gemma models side by side, like an arena.
 
 ```python
-from cornserve.task.base import Task, TaskInput, TaskOutput
-from cornserve_tasklib.task.unit.encoder import EncoderTask, Modality, EncoderInput
-from cornserve_tasklib.task.composite.llm import LLMTask
-from cornserve_tasklib.task.unit.llm import LLMInput
-from cornserve.app.base import AppConfig
+import asyncio
+from collections.abc import AsyncIterator
 
-
-class ImageChatInput(TaskInput):
-    prompt: str
-    image_url: str
-
-
-class ImageChatOutput(TaskOutput):
-    response: str
-
-
-class ImageChatTask(Task[ImageChatInput, ImageChatOutput]):
-    model_id: str
-
-    def post_init(self) -> None:
-        """Initialize subtasks."""
-        self.image_encoder = EncoderTask(
-            model_id=self.model_id,
-            modality=Modality.IMAGE,
-        )
-        self.llm = LLMTask(model_id=self.model_id)
-
-    def invoke(self, task_input: ImageChatInput) -> ImageChatOutput:
-        """Invoke the task."""
-        encoder_input = EncoderInput(data_urls=[task_input.image_url])
-        image_embedding = self.image_encoder.invoke(encoder_input)
-        llm_input = LLMInput(
-            prompt=task_input.prompt,
-            multimodal_data=[("image", task_input.image_url)],
-            embeddings=[embedding for embedding in image_embeddings.embeddings],
-        )
-        llm_output = self.llm.invoke(llm_input)
-        return ImageChatOutput(response=llm_output.response)
-```
-
-It was a handful of code, so let's break it down:
-
-1. **Input/Output Models**: We define `ImageChatInput` and `ImageChatOutput` using Pydantic. This allows us to define clear input and output models for our task. These should inherit from `TaskInput` and `TaskOutput`, respectively.
-2. **Task Class**: We define a new composite task class called `ImageChatTask` that inherits from `Task[ImageChatInput, ImageChatOutput]`. This class specifies two things:
-    - **Subtasks**, namely the built-in `EncoderTask` and `LLMTask`, which are instantiated in the `post_init()` method. This is where we define the subtasks that will be used in the task.
-    - **Task logic**. Each unit task (e.g., `EncoderTask`) expects its input data to be an instance of its `TaskInput` (e.g., `EncoderInput`), and returns an instance of its `TaskOutput` (e.g., `EncoderOutput`). The `invoke` method is where we define the logic of how the subtasks are composed together to produce the final output.
-
-### App
-
-With `#!python ImageChatTask` defined, we can now use it in our app:
-
-```python
-from pydantic import BaseModel
+from cornserve_tasklib.task.composite.llm import MLLMTask
+from cornserve_tasklib.task.unit.encoder import Modality
+from cornserve_tasklib.task.unit.llm import OpenAIChatCompletionChunk, OpenAIChatCompletionRequest
+from pydantic import RootModel
 
 from cornserve.app.base import AppConfig
+from cornserve.task.base import Stream
 
-image_chat = ImageChatTask(model_id="Qwen/Qwen2-VL-7B-Instruct")
+# Comment out any Gemma models you don't want to include in the arena.
+gemma_model_ids = {
+    "gemma3-4b": "google/gemma-3-4b-it",
+    "gemma3-12b": "google/gemma-3-12b-it",
+    "gemma3-27b": "google/gemma-3-27b-it",
+}
 
 
-class Request(BaseModel):
-    image_url: str
-    prompt: str
+# All Gemma MLLMTasks will share the same encoder task deployment.
+gemma_tasks = {
+    name: MLLMTask(
+        modalities=[Modality.IMAGE],
+        model_id=model_id,
+        encoder_model_ids=set(gemma_model_ids.values()),
+    )
+    for name, model_id in gemma_model_ids.items()
+}
 
 
-class Response(BaseModel):
-    response: str
+class ArenaOutput(RootModel[dict[str, str]]):
+    """Response model for the app.
+
+    Wrapper around a dictionary that maps model names to generated text chunks.
+    """
 
 
 class Config(AppConfig):
-    tasks: {"image_chat": image_chat}
+    """App configuration model."""
+
+    tasks = {**gemma_tasks}
 
 
-async def serve(request: Request) -> Response:
-    """App's main entry point that serves a request."""
-    image_chat_input = ImageChatInput(
-        prompt=request.prompt,
-        image_url=request.image_url,
-    )
-    image_chat_output = await image_chat(image_chat_input)
-    return Response(response=image_chat_output.response)
+async def serve(request: OpenAIChatCompletionRequest) -> AsyncIterator[ArenaOutput]:
+    """Main serve function for the app."""
+    # NOTE: Doing `await` for each task separately will make them run sequentially.
+    tasks: list[asyncio.Task[Stream[OpenAIChatCompletionChunk]]] = []
+    for task in gemma_tasks.values():
+        # Overwrite the model ID in the request to match the task's model ID.
+        request_ = request.model_copy(update={"model": task.model_id}, deep=True)
+        tasks.append(asyncio.create_task(task(request_)))
+    
+    # An await is needed to actually dispatch the tasks.
+    # Responses will be streamed after this.
+    dispatch_responses = await asyncio.gather(*tasks)
+
+    streams = {
+        asyncio.create_task(anext(stream)): (stream, name)
+        for stream, name in zip(dispatch_responses, gemma_model_ids.keys(), strict=True)
+    }
+
+    while streams:
+        done, _ = await asyncio.wait(streams.keys(), return_when=asyncio.FIRST_COMPLETED)
+
+        for task in done:
+            stream, name = streams.pop(task)
+
+            try:
+                chunk = task.result()
+            except StopAsyncIteration:
+                # This model is done responding.
+                continue
+
+            delta = chunk.choices[0].delta.content
+            if delta is None:
+                continue
+            yield ArenaOutput({name: delta})
+
+            streams[asyncio.create_task(anext(stream))] = (stream, name)
 ```
 
-This app only uses a single composite task, `#!python ImageChatTask`, but it should be easy to see that you can use arbitrary numbers of unit and composite tasks in your app.
+Let's break this down.
 
-Another thing to note is that **the app's main entry point is an async function called `serve`**.
-This is the function that will be called by the Cornserve Gateway when a request is received.
+### Key Components
 
-Finally, notice that when you compose tasks inside composite tasks, you called the `invoke` method of tasks synchronously.
-However, in the context of apps, **you call the `__call__` method of tasks asynchronously**.
-This allows you to run multiple tasks in parallel with usual Python asynchronous programming patterns like `#!python asyncio.gather`.
+1. **Built-in Tasks**: The app uses Cornserve's built-in `MLLMTask` (Multimodal LLM Task) rather than defining custom composite tasks. This task handles both image encoding and text generation.
 
-## Debugging
+2. **Task Declaration**: Multiple Gemma models are configured with shared encoder deployments:
+   ```python
+   gemma_tasks = {
+       name: MLLMTask(
+           modalities=[Modality.IMAGE],
+           model_id=model_id,
+           encoder_model_ids=set(gemma_model_ids.values()),
+       )
+       for name, model_id in gemma_model_ids.items()
+   }
+   ```
 
-We've just showed how to build a simple app.
-However, having the build the entire thing in one shot is not the most convenient.
-In the [next page](jupyter.ipynb), we'll show how you can interactively build and debug your task and app logic in Jupyter Notebook!
+3. **App Configuration**: The `Config` class registers all the tasks with the Cornserve platform:
+   ```python
+   class Config(AppConfig):
+       tasks = {**gemma_tasks}
+   ```
+
+4. **The Async `serve` function**: This is the main entry point of the app, taking a Pydantic model as input (request). It handles incoming requests and orchestrates parallel execution of multiple unit/composite tasks.
+   ```python
+   async def serve(
+       request: OpenAIChatCompletionRequest,
+   ) -> AsyncIterator[ArenaOutput]:
+       # Invoke all Gemma tasks concurrently
+       # Wait for all three concurrently, and yield chunks as they arrive
+       ...
+   ```
+
+5. **App Responses**: The app's `serve` function can either return a single response object (Pydantic model), or instead return an async iterator that yields response chunks (each chunk being a Pydantic model) for streaming responses. The Gemma Arena app demonstrates streaming responses.
+
+### Benefits
+
+- **Flexibility**: The app's asynchronous `serve` function allows the full flexibility of Python programming, including concurrency with `asyncio`. This enables complex orchestration patterns, such as parallel execution and streaming responses.
+- **Automatic Sharing**: In the app, we defined three Gemma `MLLMTask`s. In fact, the three Gemma models share the exact same vision encoder, so we can share a single vision encoder for all three Gemma tasks. Cornserve automatically detects this (by checking whether the `EncoderTask` inside the three `MLLMTask`s are identical) and only deploys a single vision encoder for all three tasks.
+
+
+## Next Steps
+
+Now that you've learned how to build apps with Cornserve, the next step is to deploy and run your app. Head over to [Deploying Apps to Cornserve](registering_apps.md) to learn how to register your `gemmarena.py` app and invoke it with real requests.
