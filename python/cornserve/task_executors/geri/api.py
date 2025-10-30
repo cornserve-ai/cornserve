@@ -33,11 +33,22 @@ class GenerationRequest(BaseModel):
     skip_tokens: int = 0
 
 
+class AudioGenerationRequest(BaseModel):
+    """Request to generate audio content.
+
+    Attributes:
+        embedding_data_id: Sidecar data ID for the audio codes.
+    """
+
+    embedding_data_id: str
+
+
 class Status(enum.IntEnum):
     """Status of various operations."""
 
     SUCCESS = 0
     ERROR = 1
+    FINISHED = 2
 
 
 class GenerationResponse(BaseModel):
@@ -45,11 +56,11 @@ class GenerationResponse(BaseModel):
 
     Attributes:
         status: Status of the generation operation.
-        generated: Base64 encoded bytes of the generated content, if successful.
+        generated: raw or Base64 encoded bytes of the generated content, if successful.
             Bytes are in PNG format for images.
         error_message: Error message if the status is ERROR.
     """
 
     status: Status
-    generated: str | None = None
+    generated: str | bytes | None = None
     error_message: str | None = None

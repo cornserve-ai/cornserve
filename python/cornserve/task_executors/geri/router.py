@@ -5,10 +5,11 @@ from __future__ import annotations
 import uuid
 
 from fastapi import APIRouter, FastAPI, Request, Response, status
+from fastapi.responses import StreamingResponse
 from opentelemetry import trace
 
 from cornserve.logging import get_logger
-from cornserve.task_executors.geri.api import GenerationRequest, GenerationResponse, Status
+from cornserve.task_executors.geri.api import AudioGenerationRequest, GenerationRequest, GenerationResponse, Status
 from cornserve.task_executors.geri.config import GeriConfig
 from cornserve.task_executors.geri.engine.client import EngineClient
 
@@ -61,6 +62,31 @@ async def generate(
         logger.exception("Generation request failed: %s", str(e))
         raw_response.status_code = status.HTTP_500_INTERNAL_SERVER_ERROR
         return GenerationResponse(status=Status.ERROR, error_message=f"Generation failed: {str(e)}")
+
+
+@router.post("/generate-audio")
+async def generate_audio(
+    request: AudioGenerationRequest,
+    raw_request: Request,
+    raw_response: Response,
+) -> StreamingResponse | GenerationResponse:
+    """Handler for audio generation requests, where outputs are streamed."""
+    engine_client: EngineClient = raw_request.app.state.engine_client
+
+    logger.info("Received streaming audio generation request: %s", request)
+
+    try:
+        request_id = uuid.uuid4().hex
+        trace.get_current_span().set_attribute("request_id", request_id)
+
+        # Gets an async generator that returns wav byte chunks as they become ready
+        stream_consumer = await engine_client.generate_audio(request_id, request)
+        return StreamingResponse(stream_consumer(), media_type="audio/wav")
+
+    except Exception as e:
+        logger.exception("Audio generation request failed: %s", str(e))
+        raw_response.status_code = status.HTTP_500_INTERNAL_SERVER_ERROR
+        return GenerationResponse(status=Status.ERROR, error_message=f"Audio generation failed: {str(e)}")
 
 
 def init_app_state(app: FastAPI, config: GeriConfig) -> None:
