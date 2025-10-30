@@ -42,12 +42,14 @@ This is particularly useful for local development and testing.
 2. **Generate and export a mock mapping**. The mapping is a JSON object that maps `{data_id}-{chunk_id}` to file paths where the sidecar will read/write data:
    ```python
    import json
-   import uuid
+
+   tensor_data_id = "audio_code"
+   json_data_id = "metadata"
 
    # Generate mapping
    mock_mapping = {
-       f"{uuid.uuid4().hex}-0": "/path/to/tensor.pt",
-       f"{uuid.uuid4().hex}-0": "/path/to/data.json",
+       f"{tensor_data_id}-0": "/path/to/tensor.pt",
+       f"{json_data_id}-0": "/path/to/data.json",
        # Add more mappings as needed
    }
 
