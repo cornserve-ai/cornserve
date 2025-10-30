@@ -47,8 +47,10 @@ This is particularly useful for local development and testing.
    json_data_id = "metadata"
 
    # Generate mapping
+   # Streaming audio code (two chunks), single-chunk JSON metadata
    mock_mapping = {
-       f"{tensor_data_id}-0": "/path/to/tensor.pt",
+       f"{tensor_data_id}-0": "/path/to/code0.pt",
+       f"{tensor_data_id}-1": "/path/to/code1.pt",
        f"{json_data_id}-0": "/path/to/data.json",
        # Add more mappings as needed
    }
