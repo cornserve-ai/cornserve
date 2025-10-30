@@ -5,7 +5,9 @@ from __future__ import annotations
 import asyncio
 import warnings
 from asyncio.futures import Future
+from collections.abc import AsyncGenerator, Callable
 from contextlib import suppress
+from typing import Any
 
 import torch
 
@@ -18,13 +20,14 @@ from opentelemetry import propagate, trace
 from cornserve.logging import get_logger
 from cornserve.sidecar.api import Sidecar
 from cornserve.sidecar.schema import SidecarConfig
-from cornserve.task_executors.geri.api import GenerationRequest, GenerationResponse, Status
+from cornserve.task_executors.geri.api import AudioGenerationRequest, GenerationRequest, GenerationResponse, Status
 from cornserve.task_executors.geri.config import GeriConfig
 from cornserve.task_executors.geri.engine.core import Engine
 from cornserve.task_executors.geri.executor.loader import load_model
 from cornserve.task_executors.geri.schema import (
     EngineOpcode,
     EngineRequest,
+    EngineRequestType,
     EngineResponse,
 )
 from cornserve.task_executors.geri.utils.serde import MsgpackDecoder, MsgpackEncoder
@@ -73,6 +76,9 @@ class EngineClient:
 
         # Track pending requests
         self.pending_requests: dict[str, Future[EngineResponse]] = {}
+
+        # For streaming responses, we need producer-consumer queues
+        self.pending_streams: dict[str, asyncio.Queue[EngineResponse]] = {}
 
         # Initialize the sidecar client
         self.sidecar = Sidecar(
@@ -176,6 +182,78 @@ class EngineClient:
                 error_message=engine_response.error_message,
             )
 
+    @tracer.start_as_current_span("engine_client.generate_audio")
+    async def generate_audio(
+        self,
+        request_id: str,
+        request: AudioGenerationRequest,
+        stream_inputs: bool = False,  # for now, only outputs are streamed
+    ) -> Callable[[], AsyncGenerator[bytes, Any]]:
+        """Generate streamed-output audio using the engine process."""
+        # Propagate trace context
+        span_context = {}
+        propagator.inject(span_context)
+
+        # TODO: handle streaming inputs
+
+        # Wait for *all* embeddings to arrive in the sidecar
+        with tracer.start_as_current_span("engine_client.generate.sidecar_recv_wait"):
+            chunk_id = 0
+            while True:
+                result = await self.sidecar.recv(id=request.embedding_data_id, chunk_id=chunk_id)
+                if result is None:
+                    break
+                chunk_id += 1
+
+        # Create a producer-consumer queue for this request.
+        # Will contain EngineResponse objects which hold bytes of wav data.
+        response_queue: asyncio.Queue[EngineResponse] = asyncio.Queue()
+        self.pending_streams[request_id] = response_queue
+
+        # Create message
+        message = EngineRequest(
+            request_type=EngineRequestType.STREAMING,
+            request_id=request_id,
+            embedding_data_id=request.embedding_data_id,
+            span_context=span_context,
+            # Don't skip any tokens
+            skip_tokens=0,
+            # unused parameters
+            num_inference_steps=0,
+            height=0,
+            width=0,
+        )
+
+        # Send message to engine
+        await self.request_sock.send_multipart(
+            (EngineOpcode.GENERATE.value, self.encoder.encode(message)),
+            copy=False,
+        )
+        logger.info("Sent generate request to engine: %s", message)
+
+        # A generator that keeps consuming from the response queue.
+        # Note that populating the response queue is independent of this
+        # generator accessing it.
+        # This generator will be returned to FastAPI router endpoint, where it
+        # will be used to return a streaming response to the end user.
+        async def stream_consumer():
+            while True:
+                engine_response = await response_queue.get()
+
+                if engine_response.status == Status.SUCCESS:
+                    if isinstance(engine_response.generated, bytes):
+                        yield engine_response.generated
+                    else:
+                        logger.info("Non-byte generated data type detected for request %s", request_id)
+                elif engine_response.status == Status.FINISHED:
+                    logger.info("Successfully finished request %s", request_id)
+                    break
+                else:
+                    logger.info("Error detected for request %s", request_id)
+                    break
+
+        return stream_consumer
+
     async def _response_listener(self) -> None:
         """Listen for responses from the engine process."""
         logger.info("Starting response listener")
@@ -186,12 +264,16 @@ class EngineClient:
                 raw_response = await self.response_sock.recv()
                 response: EngineResponse = self.decoder.decode(raw_response)
 
-                # Find pending request and complete it
-                future = self.pending_requests.pop(response.request_id, None)
-                if future and not future.done():
-                    future.set_result(response)
-                else:
-                    logger.warning("Received response for unknown request: %s", response.request_id)
+                if response.request_type == EngineRequestType.NON_STREAMING:
+                    # Find pending request and complete it
+                    future = self.pending_requests.pop(response.request_id, None)
+                    if future and not future.done():
+                        future.set_result(response)
+                    else:
+                        logger.warning("Received response for unknown request: %s", response.request_id)
+
+                elif response.request_type == EngineRequestType.STREAMING:
+                    await self.pending_streams[response.request_id].put(response)
 
         except asyncio.CancelledError:
             logger.info("Response listener cancelled")

@@ -8,7 +8,7 @@ from opentelemetry import propagate, trace
 from opentelemetry.trace import Span
 
 from cornserve.logging import get_logger
-from cornserve.task_executors.geri.schema import EngineRequest
+from cornserve.task_executors.geri.schema import EngineRequest, EngineRequestType
 
 logger = get_logger(__name__)
 tracer = trace.get_tracer(__name__)
@@ -27,6 +27,38 @@ class ScheduledRequest:
     skip_tokens: int = 0
     span: Span | None = None
 
+    request_type: EngineRequestType = EngineRequestType.NON_STREAMING
+
+
+def requests_compatible(request1: ScheduledRequest, request2: ScheduledRequest) -> bool:
+    """Returns whether two scheduled requests are capable of being the same batch.
+
+    All requests in the same batch must be either streaming or non-streaming requests,
+    indicated by the ScheduledRequest.request_type field.
+
+    For non-streaming requests, these fields are compared:
+        ScheduledRequest.height
+        ScheduledRequest.width
+        ScheduledRequest.num_inference_steps
+
+    For streaming requests:
+        ScheduledRequest.request_id
+    """
+    if request1.request_type != request2.request_type:
+        return False
+
+    if request1.request_type == EngineRequestType.NON_STREAMING:
+        return (
+            request1.height == request2.height
+            and request1.width == request2.width
+            and request1.num_inference_steps == request2.num_inference_steps
+        )
+    elif request1.request_type == EngineRequestType.STREAMING:
+        # streaming requests are batched only if they're from the same source
+        return request1.request_id == request2.request_id
+
+    return False
+
 
 @dataclass
 class SchedulerBatch:
@@ -36,6 +68,7 @@ class SchedulerBatch:
     height: int
     width: int
     num_inference_steps: int
+    request_type: EngineRequestType = EngineRequestType.NON_STREAMING
 
     def __post_init__(self) -> None:
         """Validate that all requests in the batch are compatible."""
@@ -45,11 +78,7 @@ class SchedulerBatch:
         # Verify all requests have the same generation parameters
         first_req = self.requests[0]
         for req in self.requests[1:]:
-            if (
-                req.height != first_req.height
-                or req.width != first_req.width
-                or req.num_inference_steps != first_req.num_inference_steps
-            ):
+            if not requests_compatible(first_req, req):
                 raise ValueError("All requests in a batch must have identical generation parameters")
 
     def __len__(self) -> int:
@@ -88,6 +117,7 @@ class RequestQueue:
     def enqueue(self, request: EngineRequest, span: Span | None = None) -> None:
         """Add a request to the queue in FCFS order."""
         scheduled_req = ScheduledRequest(
+            request_type=request.request_type,
             request_id=request.request_id,
             embedding_data_id=request.embedding_data_id,
             height=request.height,
@@ -116,19 +146,20 @@ class RequestQueue:
         """Check if there are any requests waiting."""
         return len(self._requests) > 0
 
-    def peek_next_batch(self) -> tuple[int, int, int] | None:
-        """Peek at the parameters of the next batch without removing requests."""
+    def peek_next_batch(self) -> ScheduledRequest | None:
+        """Peek at the next request in the next batch without removing requests."""
         if not self._requests:
             return None
 
-        # Always return the parameters of the first request in FCFS order
-        first_request = self._requests[0]
-        return (first_request.height, first_request.width, first_request.num_inference_steps)
+        # Always return the first request in FCFS order
+        return self._requests[0]
 
     def pop_batch(
-        self, height: int, width: int, num_inference_steps: int, max_batch_size: int | None = None
+        self,
+        next_request: ScheduledRequest,
+        max_batch_size: int | None = None,
     ) -> list[ScheduledRequest]:
-        """Pop a batch of consecutive requests with the specified parameters in FCFS order."""
+        """Pop a batch of consecutive requests in FCFS order with the parameters of the given request."""
         if not self._requests:
             return []
 
@@ -137,7 +168,7 @@ class RequestQueue:
         i = 0
         while i < len(self._requests) and (max_batch_size is None or len(batch_requests) < max_batch_size):
             req = self._requests[i]
-            if req.height == height and req.width == width and req.num_inference_steps == num_inference_steps:
+            if requests_compatible(next_request, req):
                 batch_requests.append(req)
                 i += 1
             else:
@@ -148,11 +179,8 @@ class RequestQueue:
         self._requests = self._requests[len(batch_requests) :]
 
         logger.debug(
-            "Popped batch of %d requests with params %dx%d, %d steps",
+            "Popped batch of %d requests",
             len(batch_requests),
-            height,
-            width,
-            num_inference_steps,
         )
 
         return batch_requests
@@ -190,31 +218,27 @@ class Scheduler:
             return None
 
         # Get the parameters for the next batch
-        batch_params = self.queue.peek_next_batch()
-        if not batch_params:
+        next_request = self.queue.peek_next_batch()
+        if not next_request:
             return None
 
-        height, width, num_inference_steps = batch_params
-
         # Pop requests for this batch
-        batch_requests = self.queue.pop_batch(height, width, num_inference_steps, self.max_batch_size)
+        batch_requests = self.queue.pop_batch(next_request, self.max_batch_size)
 
         if not batch_requests:
             return None
 
         logger.info(
-            "Scheduled batch of %d requests with %dx%d, %d steps",
+            "Scheduled batch of %d requests",
             len(batch_requests),
-            height,
-            width,
-            num_inference_steps,
         )
 
         batch = SchedulerBatch(
             requests=batch_requests,
-            height=height,
-            width=width,
-            num_inference_steps=num_inference_steps,
+            height=next_request.height,
+            width=next_request.width,
+            num_inference_steps=next_request.num_inference_steps,
+            request_type=next_request.request_type,
         )
 
         for span in batch.spans:

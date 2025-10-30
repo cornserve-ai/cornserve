@@ -24,6 +24,7 @@ from cornserve.task_executors.geri.executor.loader import load_model
 from cornserve.task_executors.geri.schema import (
     EngineOpcode,
     EngineRequest,
+    EngineRequestType,
     EngineResponse,
 )
 from cornserve.task_executors.geri.utils.serde import MsgpackDecoder, MsgpackEncoder
@@ -190,41 +191,106 @@ class Engine:
                         request_span.set_attribute("geri.batch_size", len(batch))
                         request_spans.append(request_span)
 
-                # Execute the batch
-                result = self.executor.generate(
-                    prompt_embeds=[e.cuda() for e in prompt_embeds],
-                    height=batch.height,
-                    width=batch.width,
-                    num_inference_steps=batch.num_inference_steps,
-                )
+                result = None
+                if batch.request_type == EngineRequestType.NON_STREAMING:
+                    # Execute the batch
+                    result = self.executor.generate(
+                        prompt_embeds=[e.cuda() for e in prompt_embeds],
+                        height=batch.height,
+                        width=batch.width,
+                        num_inference_steps=batch.num_inference_steps,
+                    )
 
-                # End individual request spans with result information
+                    # End individual request spans with result information
+                    for request_span in request_spans:
+                        request_span.set_attribute("geri.batch_status", result.status.value)
+                        if result.error_message:
+                            request_span.set_attribute("geri.batch_error_message", result.error_message)
+                        request_span.end()
+
+                # The streaming case
+                streaming_result = None
+                if batch.request_type == EngineRequestType.NON_STREAMING:
+                    # For streaming responses, we can't immediately end individual request spans
+                    # since the obtained result simply holds a generator object.
+                    streaming_result = self.executor.generate_streaming(
+                        prompt_embeds=[e.cuda() for e in prompt_embeds],
+                    )
+
+            # Non-streaming case
+            if result is not None:
+                # Split the batched results back to individual responses
+                responses: list[EngineResponse] = []
+                for request_id, generated, span in zip(batch.request_ids, result.generated, batch.spans, strict=True):
+                    response = EngineResponse(
+                        request_id=request_id,
+                        status=result.status,
+                        generated=generated,
+                        error_message=result.error_message,
+                    )
+                    responses.append(response)
+
+                    # End the original request span (the top-level span for this request)
+                    if span is not None:
+                        span.set_attribute("geri.status", result.status.value)
+                        if result.error_message:
+                            span.set_attribute("geri.error_message", result.error_message)
+                        span.end()
+
+                logger.info("Processed batch of %d requests", len(batch))
+                return responses
+
+            elif streaming_result is not None:
+                # All requests should all have the same request_id if streaming
+                request_id = batch.requests[0].request_id
+
+                if streaming_result.status == Status.ERROR or streaming_result.streamed_generator is None:
+                    # Use outer error handler to inform all requests in batch of failure
+                    for request_span in request_spans:
+                        request_span.set_attribute("geri.batch_status", streaming_result.status.value)
+                        if streaming_result.error_message:
+                            request_span.set_attribute("geri.batch_error_message", streaming_result.error_message)
+                        request_span.end()
+                    raise ValueError("Generator formation failed.")
+
+                # Note that the i-th yield of streamed_generator no longer corresponds to the
+                # i-th request in the batch, since the streamed_generator yields whenever a
+                # fixed chunk of results become ready, not when it has finished processing
+                # data for a single entire request.
+                if streaming_result.status == Status.SUCCESS:
+                    for wav_chunk in streaming_result.streamed_generator:
+                        response = EngineResponse(
+                            request_id=request_id,
+                            status=Status.SUCCESS,
+                            generated=wav_chunk.cpu().numpy().tobytes(),
+                            request_type=EngineRequestType.STREAMING,
+                        )
+                        self.response_queue.put_nowait(response)
+
+                    # Signal that the stream has ended
+                    response = EngineResponse(
+                        request_id=request_id,
+                        status=Status.FINISHED,
+                        request_type=EngineRequestType.STREAMING,
+                    )
+                    self.response_queue.put_nowait(response)
+
+                # Now end the individual spans we didn't end earlier
                 for request_span in request_spans:
-                    request_span.set_attribute("geri.batch_status", result.status.value)
-                    if result.error_message:
-                        request_span.set_attribute("geri.batch_error_message", result.error_message)
+                    request_span.set_attribute("geri.batch_status", streaming_result.status.value)
+                    if streaming_result.error_message:
+                        request_span.set_attribute("geri.batch_error_message", streaming_result.error_message)
                     request_span.end()
 
-            # Split the batched results back to individual responses
-            responses: list[EngineResponse] = []
-            for request_id, generated, span in zip(batch.request_ids, result.generated, batch.spans, strict=True):
-                response = EngineResponse(
-                    request_id=request_id,
-                    status=result.status,
-                    generated=generated,
-                    error_message=result.error_message,
-                )
-                responses.append(response)
+                for span in batch.spans:
+                    # End the original request span (the top-level span for this request)
+                    if span is not None:
+                        span.set_attribute("geri.status", streaming_result.status.value)
+                        if streaming_result.error_message:
+                            span.set_attribute("geri.error_message", streaming_result.error_message)
+                        span.end()
 
-                # End the original request span (the top-level span for this request)
-                if span is not None:
-                    span.set_attribute("geri.status", result.status.value)
-                    if result.error_message:
-                        span.set_attribute("geri.error_message", result.error_message)
-                    span.end()
-
-            logger.info("Processed batch of %d requests", len(batch))
-            return responses
+            return []
 
         except Exception as e:
             logger.exception("Batch processing failed")
