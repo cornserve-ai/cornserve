@@ -175,6 +175,8 @@ exclude = [
   "**/*_pb2.pyi",
   "**/*_pb2_grpc.pyi",
   "cornserve/task_executors/eric/models/*.py",
+  "cornserve/task_executors/geri/models/*.py",
+  "cornserve/task_executors/huggingface/models/*.py",
 ]
 
 [tool.pytest.ini_options]
