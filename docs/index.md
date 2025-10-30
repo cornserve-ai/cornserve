@@ -47,7 +47,7 @@ document.addEventListener('DOMContentLoaded', function() {
   </h3>
 </div>
 
-**Multimodal AI** models like Qwen 3 Omni are becoming increasingly complex and heterogeneous.
+**Multimodal AI** models like [Qwen 3 Omni](https://qwen.ai/blog?id=65f766fc2dcba7905c1cb69cc4cab90e94126bf4&from=research.latest-advancements-list) are becoming increasingly complex and heterogeneous.
 
 Cornserve is a distributed serving system for multimodal AI.
 Cornserve performs **model fission** and **automatic sharing** of common components (e.g., LLMs, Vision Encoders, Audio Generators) across applications on your infrastructure.

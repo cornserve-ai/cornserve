@@ -27,6 +27,7 @@ from cornserve.app.base import AppConfig
 mllm = MLLMTask(
     model_id="google/gemma-3-4b-it",
     modalities=[Modality.IMAGE],
+    encoder_fission=True,
 )
 
 
@@ -52,6 +53,12 @@ Importantly, in app configurations, apps specify the tasks that they intend to i
 These tasks are *dispatched* to be executed on the data plane.
 Tasks are imported from modules under `cornserve_tasklib.task`, such as `MLLMTask` for multimodal LLM inference, `LLMTask` for LLM inference, and `EncoderTask` for multimodal data embedding, and users can build their own tasks using components from `cornserve.task.base`.
 All other inline Python code is executed imperatively by the Cornserve Gateway, so the app offers the full flexibility of Python programming.
+
+Another part to highlight is `encoder_fission=True` passed into `MLLMTask`.
+When it's `True`, the image encoder and the LLM model will be split and deployed as two separate Task Executors (i.e., two separate unit tasks) on the data plane.
+Each Task Executor in this case will run on dedicated GPUs.
+On the other hand, if `encoder_fission=False`, both the image encoder and the LLM model will be deployed together as a single Task Executor on the data plane, sharing the same GPUs -- this is what monolithic LLM serving systems today do.
+So you can always pick and choose whether you want to use encoder fission or not on a per-app basis based on the characteristics of your workload.
 
 For a more realistic example, see [Building Apps](../getting_started/building_apps.md).
 See also the dedicated page on [tasks](task.md).
