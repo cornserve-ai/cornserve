@@ -5,7 +5,7 @@ Cornserve has two layers of defining *execution*:
 - **App**: This is the highest level of construct, which takes a request and returns a response. Apps are written in Python and can be submitted to the Cornserve Gateway for deployment.
 - **Task**: This is a unit of work that is executed by the Cornserve data plane. There are two types of tasks:
     - **Unit Task**: Unit Tasks are the smallest and most basic type of task. They are executed in a single Kubernetes Pod and are the unit of scaling. For instance, there is the built-in modality embedding unit task which embeds specific modalities (e.g., image, video, audio), which is executed by our Eric server. There is also the built-in LLM text generation task, which generates text from input text prompts and any embedded modalities.
-    - **Composite Task**: Composite Tasks are a composition of one or more Unit Tasks. They are defined by the user in Python. For instance, there is the built-in Multimodal LLM composite task which instantiates modality embedding unit tasks as needed, runs then on multimodal data to embeds them, and passes them to the LLM text generation unit task to generate text. Intermediate data produced by unit tasks are forwarded directly to the next unit task in the graph.
+    - **Composite Task**: Composite Tasks are a composition of one or more Unit Tasks. They are defined by the user in Python. For instance, there is the built-in Multimodal LLM composite task which instantiates modality embedding unit tasks as needed, runs them on multimodal data to embed them, and passes them to the LLM text generation unit task to generate text. Intermediate data produced by unit tasks are forwarded directly to the next unit task in the graph.
 
 ## Example: Gemma Arena
 
