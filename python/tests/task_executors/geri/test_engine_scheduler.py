@@ -65,7 +65,8 @@ def test_request_queue_fcfs_ordering() -> None:
     assert len(queue) == 3
 
     # Should return parameters of first request (FCFS)
-    next_params = queue.peek_next_batch()
+    next_request = queue.peek_next_batch()
+    next_params = next_request.height, next_request.width, next_request.num_inference_steps
     assert next_params == (512, 512, 20)
 
 
@@ -79,7 +80,8 @@ def test_request_queue_pop_batch_consecutive() -> None:
         queue.enqueue(req)
 
     # Pop batch of size 2
-    batch_requests = queue.pop_batch(256, 256, 10, max_batch_size=2)
+    req = queue.peek_next_batch()
+    batch_requests = queue.pop_batch(req, max_batch_size=2)
 
     assert len(batch_requests) == 2
     assert batch_requests[0].request_id == "req0"
@@ -95,7 +97,8 @@ def test_request_queue_pop_batch_nonexistent() -> None:
     queue.enqueue(req)
 
     # Try to pop batch with different parameters
-    batch_requests = queue.pop_batch(512, 512, 20)
+    req = EngineRequest("req2", "embed1", 512, 512, 20)
+    batch_requests = queue.pop_batch(req)
     assert len(batch_requests) == 0
     assert len(queue) == 1  # Original request should remain
 
@@ -114,7 +117,7 @@ def test_request_queue_pop_batch_fcfs_stops_at_mismatch() -> None:
     queue.enqueue(req3)
 
     # Pop batch for 256x256x10 parameters
-    batch_requests = queue.pop_batch(256, 256, 10)
+    batch_requests = queue.pop_batch(req1)
 
     # Should only get req1, not req3, because req2 blocks the batch in FCFS order
     assert len(batch_requests) == 1

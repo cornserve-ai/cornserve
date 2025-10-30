@@ -33,3 +33,25 @@ def assert_valid_png_results_list(results: list[str], expected_batch_size: int =
         assert len(png_bytes) > 0, f"Item {i} should not be empty"
         # Check PNG header
         assert png_bytes.startswith(b"\x89PNG"), f"Item {i} should start with PNG header"
+
+
+def assert_similar(*args: list[torch.Tensor]) -> None:
+    """Asserts that all tensors in the same position across the lists are similar.
+
+    Similar is defined as having a cosine similarity greater than 0.98.
+    """
+    # Make sure all lists are of the same length
+    assert all(len(arg) == len(args[0]) for arg in args), "All input lists must have the same length."
+    n = len(args[0])
+
+    for i in range(n):
+        # Get the tensors at position i from all lists
+        tensors = [arg[i] for arg in args]
+
+        for j in range(len(tensors)):
+            for k in range(j + 1, len(tensors)):
+                # Calculate cosine similarity
+                cos_sim = torch.cosine_similarity(tensors[j], tensors[k]).mean().item()
+                assert cos_sim > 0.98, (
+                    f"Cosine similarity between tensors {j} and {k} at index {i} is too low: {cos_sim}"
+                )
