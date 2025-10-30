@@ -273,7 +273,11 @@ class EngineClient:
                         logger.warning("Received response for unknown request: %s", response.request_id)
 
                 elif response.request_type == EngineRequestType.STREAMING:
-                    await self.pending_streams[response.request_id].put(response)
+                    queue = self.pending_streams.get(response.request_id)
+                    if queue is not None:
+                        await queue.put(response)
+                    else:
+                        logger.warning("Received streaming response for unknown request: %s", response.request_id)
 
         except asyncio.CancelledError:
             logger.info("Response listener cancelled")

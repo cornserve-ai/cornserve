@@ -251,7 +251,11 @@ class Engine:
                         if streaming_result.error_message:
                             request_span.set_attribute("geri.batch_error_message", streaming_result.error_message)
                         request_span.end()
-                    raise ValueError("Generator formation failed.")
+                    raise ValueError(
+                        "Generator formation failed with status "
+                        f"{streaming_result.status}: "
+                        f"{streaming_result.error_message}"
+                    )
 
                 # Note that the i-th yield of streamed_generator no longer corresponds to the
                 # i-th request in the batch, since the streamed_generator yields whenever a

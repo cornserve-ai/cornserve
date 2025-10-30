@@ -61,8 +61,8 @@ class Qwen3OmniMoeCode2Wav(StreamGeriModel, nn.Module):
                     model_id,
                     trust_remote_code=True,
                 )
-                if not isinstance(hf_config, Qwen3OmniMoeCode2WavConfig):
-                    raise TypeError(f"Expected Qwen3OmniMoeCode2WavConfig, but got {type(hf_config).__name__} instead.")
+                if not isinstance(hf_config, Qwen3OmniMoeConfig):
+                    raise TypeError(f"Expected Qwen3OmniMoeConfig, but got {type(hf_config).__name__} instead.")
                 model_config = hf_config.code2wav_config
             except Exception as e:
                 raise FileNotFoundError(f"Could not load model {model_id}: {e}") from e

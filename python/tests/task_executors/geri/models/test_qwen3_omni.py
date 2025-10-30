@@ -5,20 +5,9 @@ import torch
 from torch import nn
 from transformers import (
     Qwen3OmniMoeForConditionalGeneration,
-    Qwen3OmniMoeProcessor,
 )
 from transformers.models.auto.processing_auto import AutoProcessor
-from transformers.models.qwen3_omni_moe.configuration_qwen3_omni_moe import (
-    Qwen3OmniMoeCode2WavConfig,
-)
-from transformers.models.qwen3_omni_moe.modeling_qwen3_omni_moe import (
-    Qwen3OmniMoeCode2Wav as HFCode2Wav,
-)
 
-from cornserve.task_executors.eric.executor.loader import (
-    get_safetensors_weight_dict,
-    set_default_torch_dtype,
-)
 from cornserve.task_executors.geri.executor.loader import load_model
 from cornserve.task_executors.geri.models.base import GeriModel, StreamGeriModel
 from cornserve.task_executors.geri.models.qwen3_omni_moe import Qwen3OmniMoeCode2Wav
@@ -38,6 +27,7 @@ def test_model_loading() -> None:
 
 class CodesExtractor(nn.Module):
     def __init__(self):
+        super().__init__()
         self.codes = None
 
     def get_codes(self):
@@ -67,7 +57,7 @@ def get_talker_codes(model, processor):
 
     # model.generate will call chunked_decode
     with torch.no_grad():
-        text_ids, audio = model.generate(
+        model.generate(
             **inputs,
             return_audio=True,
         )
@@ -120,7 +110,7 @@ def test_hf_reference(hf_model, talker_codes) -> None:
 
     # Generate, but outputs are streamed
     wavs = []
-    for wav_chunk in geri_code2wav.generate(codes=talker_codes):
+    for wav_chunk in geri_code2wav.generate(prompt_embeds=[talker_codes]):
         wavs.append(wav_chunk)
     geri_output = torch.cat(wavs, dim=-1)
 
