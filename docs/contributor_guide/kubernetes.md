@@ -1,12 +1,26 @@
 ## Local and Distributed Development on Kubernetes
 
+### Build and Export Modes
+
+The first step to running Cornserve on Kubernetes is to build container images.
+
+We have `scripts/build_export_images.sh` to build and export container images for Cornserve components.
+Now, *where to push these images* changes based on your development environment, the `REGISTRY` environment variable needs to be set accordingly.
+
+| Dev Environment | `REGISTRY` Value | Description | Use Case |
+|------|-----------------|-------------|----------|
+| **Local K3s** | `local` | Builds images directly in K3s containerd (no pull needed) | Single-node K3s development |
+| **Minikube** | `minikube` | Builds with Docker and loads into Minikube | Minikube development |
+| **Build Only** | `none` | Builds images locally without pushing anywhere | Testing builds |
+| **Registry Push** | Registry URL (e.g., `myregistry.com:5000`) | Builds and pushes to specified registry | Multi-node clusters or distributed development |
+
 ### Local development
 
 You are developing on a single node.
 In this case, we don't need a registry.
 Instead, we build containers directly within the containerd runtime of K3s.
 
-First, follow [this guide](https://blog.otvl.org/blog/k3s-loc-sp) (Section "Switching from Docker to Containerd") to set up Nerdctl and BuildKit on your local development machine.
+To set up your local K3s development environment, first, follow [this guide](https://blog.otvl.org/blog/k3s-loc-sp) (Section "Switching from Docker to Containerd") to set up Nerdctl and BuildKit on your local development machine.
 It should be something like:
 
 ```bash

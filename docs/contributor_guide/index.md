@@ -20,11 +20,22 @@ We have a few principles for developing Cornserve:
 If the feature is not small or requires broad changes over the codebase, please **open an issue** at our GitHub repository to discuss with us.
 
 1. Fork our GitHub repository. Make sure you clone with `--recurse-submodules` to get the submodules.
-1. Create a new Conda environment with something along the lines of `conda create -n cornserve python=3.11` and activate it with something like `conda activate cornserve`.
-1. Install Cornserve in editable mode with `pip install -e 'python[dev]'`. If your environment does not have GPUs, you can use `pip install -e 'python[dev-no-gpu]'`.
-1. Generate Python bindings for Protobuf files with `bash scripts/generate_pb.sh`.
+1. Create a new virtual environment:
+    ```bash
+    uv venv --python=3.12
+    source .venv/bin/activate  # On Windows: .venv\Scripts\activate
+    ```
+1. Install Cornserve in editable mode:
+    ```bash
+    # For environments with GPU and nvcc (to compile FlashAttention)
+    uv pip install -e 'python[dev]' --config-settings editable_mode=strict
+
+    # For environments without GPU (e.g., editor/IDE environment)
+    uv pip install -e 'python[dev-no-gpu]' --config-settings editable_mode=strict
+    ```
+1. Generate Python bindings for Protobuf files with `uv run bash scripts/generate_pb.sh`.
 1. Implement changes in your branch and add tests as needed.
-1. Ensure `bash python/scripts/lint.sh` and `pytest` passes. Note that many of our tests require GPU.
+1. Ensure `uv run bash python/scripts/lint.sh` and `pytest` passes. Note that many of our tests require GPU.
 1. Submit a PR to the main repository. Please ensure that CI (GitHub Actions) passes.
 
 ## Developing on Kubernetes
@@ -40,11 +51,11 @@ We use MkDocs to build the documentation and use the `mkdocs-material` theme.
 To install documentation build dependencies:
 
 ```bash
-pip install -r docs/requirements.txt
+uv pip install -r docs/requirements.txt
 ```
 
 To build and preview the documentation:
 
 ```bash
-mkdocs serve
+uv run bash scripts/preview_docs.sh
 ```

@@ -1,9 +1,11 @@
-# Eric: Multimodal Data Embedding Server
+# Eric and Geri: Multimodal Task Executors
 
-> **Mosharaf**: Hey, what is this "Eric" thing in the architecture diagram?  
-  **Jae-Won**: Oh, uh no, it says "Enc." For Encoder.  
+> **Mosharaf**: Hey what is this "Eric" thing in the architecture diagram?  
+  **Jae-Won**: Oh. Uh, no. It says "Enc." For Encoder.  
   **Mosharaf**: Oh.  
   **Jae-Won**: Now it's Eric.
+
+## Eric: Multimodal Data Embedding Server
 
 Package: `cornserve.task_executors.eric`
 
@@ -38,3 +40,21 @@ The engine currently only batches data of the same modality together. This is be
 There is one worker (`eric.executor.worker.Worker`) process per GPU. The number of workers is the tensor parallelism degree.
 When spawned, the workers initialize PyTorch distributed and instantiate the model from weights downloaded from the Hugging Face Hub.
 It then waits for the model executor to dispatch a batch to it, runs tensor parallel inference, and dispatches tensor communication to the destination Task Executor via the [sidecar](sidecar.md).
+
+## Geri: Multimodal Content Generation Server
+
+Package: `cornserve.task_executors.geri`
+
+Geri (pronounced "Jerry") is a multimodal content generation server that takes in embeddings and generates multimodal content such as images, videos, or audio. It is the counterpart to Eric—where Eric encodes multimodal data into embeddings, Geri decodes embeddings into generated content.
+
+### Architecture
+
+Geri shares the same architectural design as Eric, with components divided at the process boundary:
+
+**Router**: An async FastAPI server (`geri.router`) that receives generation requests via the `/generate` endpoint. The router communicates with the engine through ZMQ sockets using an `EngineClient` (`geri.engine.client.EngineClient`), similar to Eric's design.
+
+**Engine**: A synchronous Python engine (`geri.engine.core`) that receives generation requests from the router, runs the request scheduler to create batches, and invokes the model executor (`geri.executor.executor.ModelExecutor`) to generate the requested content. Like Eric, the engine batches requests and broadcasts input data to workers via shared memory.
+
+**Workers**: One worker process per GPU (`geri.executor.worker.Worker`), matching the tensor parallelism degree. Workers initialize PyTorch distributed, load the generative model from the Hugging Face Hub, and perform tensor parallel inference to generate content. Generated outputs are communicated via the [sidecar](sidecar.md) when needed.
+
+The key difference from Eric is in the task being performed: Geri performs generative inference (embeddings to content) rather than encoding (content to embeddings), but the overall system architecture and communication patterns remain the same.

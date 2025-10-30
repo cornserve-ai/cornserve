@@ -1,55 +1,33 @@
 # Cornserve Architecture
 
-Cornserve is a disaggregated ML serving platform that allows you to implement and deploy ML applications on your infrastructure.
-
-!!! Important
-    This document includes descriptions of Cornserve that has not been developed yet.
-    Please track [issues on GitHub](https://github.com/cornserve-ai/cornserve/issues) for the latest updates.
-
+Cornserve is a distributed multimodal AI application serving platform that allows you to implement and deploy ML applications on your infrastructure.
 
 ## Task and App
 
-Applications are written by developers using the Cornserve frontend library in `cornserve.frontend`.
-Currently, a Cornserve app is a single Python file that implements three classes and an async function:
-- `Request` (inherits from `pydantic.BaseModel`): A single input request for the app.
-- `Response` (inherits from `pydantic.BaseModel`): A single output response for the app.
-- `Config` (inherits from `cornserve.app.base.AppConfig`): Configuration parameters and task definitions for the app.
-- `async def serve(request: Request) -> Response`: The main function that handles the request and returns a response.
+Applications are written by developers using `cornserve.app.base`.
+It must define two things:
+
+- A config class that inherits from `cornserve.app.base.AppConfig`, whose main purpose is to specify the tasks that the app intends to invoke (more on tasks soon).
+- `async def serve(request: RequestT) -> ResponseT`: The main function that handles the request and returns a response. `RequestT` must be a subclass of `pydantic.BaseModel` and `ResponseT` should either be a subclass of `pydantic.BaseModel` (non-streaming response) or an `AsyncIterator` that yields a subclass of `pydantic.BaseModel` (streaming response).
+
+This is a quick example app that provides multimodal LLM inference, and it peeks into the generated tokens to look whether someone mentioned "Cornserve":
 
 ```python
-from pydantic import BaseModel
+from collections.abc import AsyncIterator
+
+from cornserve_tasklib.task.composite.llm import MLLMTask
+from cornserve_tasklib.task.unit.encoder import Modality
+from cornserve_tasklib.task.unit.llm import (
+    OpenAIChatCompletionChunk,
+    OpenAIChatCompletionRequest,
+)
 
 from cornserve.app.base import AppConfig
-from cornserve_tasklib.task.composite.llm import MLLMTask
-from cornserve_tasklib.task.unit.llm import MLLMInput
-from cornserve_tasklib.task.unit.encoder import Modality
-
-
-class Request(BaseModel):
-    """App request model.
-
-    Attributes:
-        prompt: The prompt to send to the LLM.
-        multimodal_data: List of tuples (modality, data URL).
-    """
-
-    prompt: str
-    multimodal_data: list[tuple[str, str]] = []
-
-
-class Response(BaseModel):
-    """App response model.
-
-    Attributes:
-        response: The response from the LLM.
-    """
-
-    response: str
-
 
 mllm = MLLMTask(
-    model_id="Qwen/Qwen2-VL-7B-Instruct",
+    model_id="google/gemma-3-4b-it",
     modalities=[Modality.IMAGE],
+    encoder_fission=True,
 )
 
 
@@ -59,18 +37,30 @@ class Config(AppConfig):
     tasks = {"mllm": mllm}
 
 
-async def serve(request: Request) -> Response:
-    """The function that will be run when a request hits the app."""
-    mllm_input = MLLMInput(prompt=request.prompt, multimodal_data=request.multimodal_data)
-    mllm_output = await mllm(mllm_input)
-    return Response(response=mllm_output.response)
+async def serve(
+    request: OpenAIChatCompletionRequest,
+) -> AsyncIterator[OpenAIChatCompletionChunk]:
+    """Main serve function for the app."""
+    async for chunk in await mllm(request):
+        token = chunk.choices[0].delta.content
+        if token == "Cornserve":
+            print("Yay found Cornserve!")
+        yield chunk
+
 ```
 
 Importantly, in app configurations, apps specify the tasks that they intend to invoke.
 These tasks are *dispatched* to be executed on the data plane.
-There are built-in tasks under `cornserve_tasklib.task`, such as `MLLMTask` for multimodal LLM inference, `LLMTask` for LLM inference, and `EncoderTask` for multimodal data embedding, and users can build their own tasks using components from `cornserve.task.base`.
-All other inline Python code is executed in place by the Cornserve Gateway.
+Tasks are imported from modules under `cornserve_tasklib.task`, such as `MLLMTask` for multimodal LLM inference, `LLMTask` for LLM inference, and `EncoderTask` for multimodal data embedding, and users can build their own tasks using components from `cornserve.task.base`.
+All other inline Python code is executed imperatively by the Cornserve Gateway, so the app offers the full flexibility of Python programming.
 
+Another part to highlight is `encoder_fission=True` passed into `MLLMTask`.
+When it's `True`, the image encoder and the LLM model will be split and deployed as two separate Task Executors (i.e., two separate unit tasks) on the data plane.
+Each Task Executor in this case will run on dedicated GPUs.
+On the other hand, if `encoder_fission=False`, both the image encoder and the LLM model will be deployed together as a single Task Executor on the data plane, sharing the same GPUs -- this is what monolithic LLM serving systems today do.
+So you can always pick and choose whether you want to use encoder fission or not on a per-app basis based on the characteristics of your workload.
+
+For a more realistic example, see [Building Apps](../getting_started/building_apps.md).
 See also the dedicated page on [tasks](task.md).
 
 
@@ -123,8 +113,9 @@ Task Managers spawn one or more Task Executors that will actually perform task e
 The Task Manager is responsible for managing the lifecycle of the Task Executors, including spawning and killing them as needed.
 When there are more than one Task Executors deployed under a Task Manager, the Task Manager will also route and load balance requests across the Task Executors.
 
-For multimodal data embedding tasks, the Task Manager will use [Eric](eric.md) as the Task Executor by default.
-For LLM inference tasks, the Task Manager will use [our fork of vLLM](https://github.com/cornserve-ai/vllm) as the Task Executor.
+For multimodal data embedding tasks, the Task Manager will use [Eric](eric_and_geri.md) as the Task Executor by default.
+For multimodal content generation tasks, the Task Manager will use [Geri](eric_and_geri.md) as the Task Executor by default.
+Finally, for LLM inference tasks, the Task Manager will use [our fork of vLLM](https://github.com/cornserve-ai/vllm) as the Task Executor.
 
 The Task Manager also exposes performance characteristics of the Task Executors.
 For instance, given $N$ GPUs, the Task Manager will profile the Task Executor's throughput and latency and expose the throughput--latency Pareto frontier.
@@ -137,6 +128,7 @@ Package: `cornserve.services.task_dispatcher`
 App Drivers or interactive Jupyter notebook users send task invocation requests to the Task Dispatcher, which is responsible for dispatching the requests to appropriate Task Executors and retrieving the results back to the App Driver.
 
 When a composite task is invoked, the following happens:
+
 1. The composite task's `__call__` method records the unit task invocations and dispatches all of them to the Task Dispatcher.
     - For instance, if the composite task is a Vision-Language Model task, its `__call__` method will record two unit task invocations: one for the image encoder and one for the LLM text generation.
 2. (For each unit task invocation) The Task Dispatcher queries the Task Manager for the Task Executor that is best suited to handle the request.
@@ -145,6 +137,8 @@ When a composite task is invoked, the following happens:
 
 How does the Task Dispatcher know how to contact the Task Manager?
 Whenever there is a change to Task Managers (spawning new ones or killing existing ones), the Resource Manager will inform the Task Dispatcher of the mapping between the unit task definition and its corresponding Task Manager's endpoint.
+
+The Task Dispatcher is horizontally replicated (currently default to 3 replicas) to prevent it from being a bottleneck.
 
 
 ## Data Plane
@@ -157,7 +151,7 @@ Package: `cornserve.task_executors`
 
 As detailed in the [Task](task.md) page, a single unit task class is associated with a Task execution descriptor, which provides information about how to spin up the Task Executor and how to execute the task, among other things.
 
-Refer to [Eric](eric.md) and [vLLM](https://github.com/cornserve-ai/vllm) for more information about built-in Task Executors. Cornserve currently uses vLLM v0.9.0.1.
+Refer to [Eric and Geri](eric_and_geri.md) and [vLLM](https://github.com/cornserve-ai/vllm) for more information about built-in Task Executors. Cornserve currently uses our fork of vLLM v0.11.1.
 
 ### Sidecar
 
