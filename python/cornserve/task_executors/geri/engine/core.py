@@ -172,6 +172,20 @@ class Engine:
                     logger.error("No embedding chunks received for data ID: %s", embedding_data_id)
                     raise RuntimeError(f"No embeddings received for data ID: {embedding_data_id}")
 
+            # Helper functions for ending spans
+            def end_request_span(request_span, result):
+                request_span.set_attribute("geri.batch_status", result.status.value)
+                if result.error_message:
+                    request_span.set_attribute("geri.batch_error_message", result.error_message)
+                request_span.end()
+
+            def end_top_level_span(span, result):
+                if span is not None:
+                    span.set_attribute("geri.status", result.status.value)
+                    if result.error_message:
+                        span.set_attribute("geri.error_message", result.error_message)
+                    span.end()
+
             # Create a batch-level span for the entire generation operation
             with tracer.start_as_current_span("geri.engine.generate_batch") as batch_span:
                 batch_span.set_attribute("geri.batch_size", len(batch))
@@ -203,10 +217,7 @@ class Engine:
 
                     # End individual request spans with result information
                     for request_span in request_spans:
-                        request_span.set_attribute("geri.batch_status", result.status.value)
-                        if result.error_message:
-                            request_span.set_attribute("geri.batch_error_message", result.error_message)
-                        request_span.end()
+                        end_request_span(request_span, result)
 
                 # The streaming case
                 streaming_result = None
@@ -233,65 +244,67 @@ class Engine:
                     responses.append(response)
 
                     # End the original request span (the top-level span for this request)
-                    if span is not None:
-                        span.set_attribute("geri.status", result.status.value)
-                        if result.error_message:
-                            span.set_attribute("geri.error_message", result.error_message)
-                        span.end()
+                    end_top_level_span(span, result)
 
                 logger.info("Processed batch of %d requests", len(batch))
                 return responses
 
             elif streaming_result is not None:
+
+                def signal_stream_end(request_id, error_msg=None):
+                    response = EngineResponse(
+                        request_id=request_id,
+                        status=Status.FINISHED,
+                        request_type=EngineRequestType.STREAMING,
+                        error_message=error_msg,
+                    )
+                    self.response_queue.put_nowait(response)
+
                 if streaming_result.status == Status.ERROR or streaming_result.streamed_generator is None:
-                    # Use outer error handler to inform all requests in batch of failure
+                    # Top-level spans will be ended by outer error handler
                     for request_span in request_spans:
-                        request_span.set_attribute("geri.batch_status", streaming_result.status.value)
-                        if streaming_result.error_message:
-                            request_span.set_attribute("geri.batch_error_message", streaming_result.error_message)
-                        request_span.end()
+                        end_request_span(request_span, streaming_result)
+                    for request_id in batch.request_ids:
+                        # Finish streams, and communicate the error
+                        signal_stream_end(request_id, streaming_result.error_message)
                     raise ValueError(
                         "Generator formation failed with status "
                         f"{streaming_result.status}: "
                         f"{streaming_result.error_message}"
                     )
 
-                # Note that the i-th yield of streamed_generator no longer corresponds to the
-                # i-th request in the batch, since the streamed_generator yields whenever a
-                # fixed chunk of results become ready, not when it has finished processing
-                # data for a single entire request.
-                # if streaming_result.status == Status.SUCCESS:
-                #     for wav_chunk in streaming_result.streamed_generator:
-                #         response = EngineResponse(
-                #             request_id=request_id,
-                #             status=Status.SUCCESS,
-                #             generated=wav_chunk.cpu().numpy().tobytes(),
-                #             request_type=EngineRequestType.STREAMING,
-                #         )
-                #         self.response_queue.put_nowait(response)
+                if streaming_result.status == Status.SUCCESS:
+                    batch_request_ids: list[str] = batch.request_ids
+                    batch_spans: list[trace.Span | None] = batch.spans
+                    request_is_done = [False] * len(batch_request_ids)
 
-                #     # Signal that the stream has ended
-                #     response = EngineResponse(
-                #         request_id=request_id,
-                #         status=Status.FINISHED,
-                #         request_type=EngineRequestType.STREAMING,
-                #     )
-                #     self.response_queue.put_nowait(response)
+                    def handle_finished_request(index):
+                        signal_stream_end(batch_request_ids[index])
+                        end_request_span(request_spans[index], streaming_result)
+                        end_top_level_span(batch_spans[index], streaming_result)
 
-                # Now end the individual spans we didn't end earlier
-                for request_span in request_spans:
-                    request_span.set_attribute("geri.batch_status", streaming_result.status.value)
-                    if streaming_result.error_message:
-                        request_span.set_attribute("geri.batch_error_message", streaming_result.error_message)
-                    request_span.end()
+                    for streamed_chunks in streaming_result.streamed_generator:
+                        for i, wav_chunk in enumerate(streamed_chunks):
+                            request_id = batch_request_ids[i]
+                            # Finished early
+                            if wav_chunk is None:
+                                if not request_is_done[i]:
+                                    handle_finished_request(i)
+                                    request_is_done[i] = True
+                            else:
+                                response = EngineResponse(
+                                    request_id=request_id,
+                                    status=Status.SUCCESS,
+                                    generated=wav_chunk.cpu().numpy().tobytes(),
+                                    request_type=EngineRequestType.STREAMING,
+                                )
+                                self.response_queue.put_nowait(response)
 
-                for span in batch.spans:
-                    # End the original request span (the top-level span for this request)
-                    if span is not None:
-                        span.set_attribute("geri.status", streaming_result.status.value)
-                        if streaming_result.error_message:
-                            span.set_attribute("geri.error_message", streaming_result.error_message)
-                        span.end()
+                    for i, finished in enumerate(request_is_done):
+                        if not finished:
+                            # Means it wasn't finished early during the generator loop.
+                            # But by now, all requests are done, so we end it here.
+                            handle_finished_request(i)
 
             return []
 

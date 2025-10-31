@@ -85,5 +85,5 @@ class StreamGeriModel(GeriModel):
         prompt_embeds: list[torch.Tensor],
         chunk_size: int,
         left_context_size: int,
-    ) -> Generator[torch.Tensor, None, None]:
+    ) -> Generator[list[torch.Tensor | None], None, None]:
         """Generate streamed outputs from prompt embeddings."""

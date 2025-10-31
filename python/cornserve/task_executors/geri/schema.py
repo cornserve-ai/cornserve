@@ -78,5 +78,5 @@ class GenerationResult:
 
     status: Status
     generated: list[str] = field(default_factory=list)
-    streamed_generator: Generator[torch.Tensor, None, None] | None = None
+    streamed_generator: Generator[list[torch.Tensor | None], None, None] | None = None
     error_message: str | None = None

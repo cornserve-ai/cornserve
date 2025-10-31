@@ -111,7 +111,8 @@ def test_hf_reference(hf_model, talker_codes) -> None:
     # Generate, but outputs are streamed
     wavs = []
     for wav_chunk in geri_code2wav.generate(prompt_embeds=[talker_codes]):
-        wavs.append(wav_chunk)
+        assert len(wav_chunk) == 1
+        wavs.append(wav_chunk[0])
     geri_output = torch.cat(wavs, dim=-1)
 
     assert_similar([hf_output], [geri_output])

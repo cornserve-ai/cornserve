@@ -139,19 +139,21 @@ class Qwen3OmniMoeCode2Wav(StreamGeriModel, nn.Module):
             wav = block(wav)
         return wav.clamp(min=-1, max=1)
 
-    # TODO: support input streaming as well (requires state management)
     def generate(
         self,
         prompt_embeds: list[torch.Tensor],
         chunk_size: int = 300,
         left_context_size: int = 25,
-    ) -> Generator[torch.Tensor, None, None]:
-        """Generate streamed outputs from prompt embeddings.
-
-        Generated wav chunks should be concatenated along the last dimension (i.e., dim=-1).
-        """
-        # When inputs are not streamed, prompt_embeds simply holds the full input
-        codes = prompt_embeds[0] if len(prompt_embeds) == 1 else torch.cat(prompt_embeds, dim=-1)
+    ) -> Generator[list[torch.Tensor | None], None, None]:
+        """Generate streamed outputs from prompt embeddings."""
+        # Each element of `prompt_embeds` has shape (1, num_quantizers, seqlen).
+        # To batch, we pad and concatenate them along dim 0.
+        code_lens = [embed.shape[-1] for embed in prompt_embeds]
+        max_seqlen = max(code_lens)
+        prompt_embeds = [
+            nn.functional.pad(embed, (0, max_seqlen - embed.shape[-1]), value=0) for embed in prompt_embeds
+        ]
+        codes = torch.cat(prompt_embeds, dim=0)
 
         start_index = 0
         while start_index < codes.shape[-1]:
@@ -159,8 +161,20 @@ class Qwen3OmniMoeCode2Wav(StreamGeriModel, nn.Module):
             context_size = left_context_size if start_index - left_context_size > 0 else start_index
             codes_chunk = codes[..., start_index - context_size : end_index]
             wav_chunk = self(codes_chunk)
+
+            # Unbatch, and for each sequence, slice up to where it was really supposed to end
+            context_end = context_size * self.total_upsample
+            res = []
+            for i, chunk in enumerate(wav_chunk):
+                if start_index < code_lens[i]:
+                    # slice_size = upsample * (number of real unpadded codes)
+                    slice_size = self.total_upsample * (min(end_index, code_lens[i]) - start_index)
+                    res.append(chunk[..., context_end : context_end + slice_size])
+                else:
+                    # If a request is finished early, indicate with None
+                    res.append(None)
+            yield res
             start_index = end_index
-            yield wav_chunk
 
     @property
     def dtype(self) -> torch.dtype:

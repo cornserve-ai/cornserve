@@ -99,8 +99,7 @@ class ModelExecutor:
             # only pass in non-None arguments
             gen_kwargs = {k: v for k, v in gen_kwargs.items() if v is not None}
 
-            # Generate images using the model (returns PNG bytes directly)
-            streamed_generator: Generator[torch.Tensor, None, None] = self.model.generate(**gen_kwargs)
+            streamed_generator: Generator[list[torch.Tensor | None], None, None] = self.model.generate(**gen_kwargs)
 
             logger.info("Obtained generator object")
             return GenerationResult(status=Status.SUCCESS, streamed_generator=streamed_generator)
