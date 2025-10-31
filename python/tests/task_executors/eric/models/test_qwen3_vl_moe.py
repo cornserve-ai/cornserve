@@ -1,7 +1,7 @@
 """Tests for the Qwen3-VL model's vision encoder."""
 
 import torch
-from transformers.models.qwen3_vl.modeling_qwen3_vl import Qwen3VLForConditionalGeneration
+from transformers.models.qwen3_vl_moe.modeling_qwen3_vl_moe import Qwen3VLMoeForConditionalGeneration
 
 from cornserve.task_executors.eric.distributed.parallel import destroy_distributed, init_distributed
 from cornserve.task_executors.eric.executor.executor import ModelExecutor
@@ -18,13 +18,13 @@ from ..utils import (
     param_tp_size,
 )
 
-model_id = "Qwen/Qwen3-VL-4B-Instruct"
-model_shorthand = "qwen3_vl"
+model_id = "Qwen/Qwen3-VL-30B-A3B-Instruct"
+model_shorthand = "qwen3_vl_moe"
 
 
 def test_weight_loading() -> None:
     """Check if weights are loaded correctly."""
-    hf_model = Qwen3VLForConditionalGeneration.from_pretrained(model_id, dtype="auto").visual
+    hf_model = Qwen3VLMoeForConditionalGeneration.from_pretrained(model_id, dtype="auto").visual
 
     init_distributed(world_size=1, rank=0)
     our_model = load_model(model_id, torch_device=torch.device("cpu"))
@@ -62,7 +62,7 @@ def test_hf_reference(test_images: list[ModalityData], test_videos: list[Modalit
     """Compare outputs with the Hugging Face implementation."""
     torch.set_grad_enabled(False)
 
-    hf_model = Qwen3VLForConditionalGeneration.from_pretrained(
+    hf_model = Qwen3VLMoeForConditionalGeneration.from_pretrained(
         model_id,
         dtype=torch.bfloat16,
         attn_implementation="flash_attention_2",
