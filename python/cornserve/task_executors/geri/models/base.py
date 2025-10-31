@@ -80,5 +80,10 @@ class StreamGeriModel(GeriModel):
 
     # TODO: generalize to handle more flexible inputs
     @abstractmethod
-    def generate(self, prompt_embeds: list[torch.Tensor]) -> Generator[torch.Tensor, None, None]:
+    def generate(
+        self,
+        prompt_embeds: list[torch.Tensor],
+        chunk_size: int,
+        left_context_size: int,
+    ) -> Generator[torch.Tensor, None, None]:
         """Generate streamed outputs from prompt embeddings."""

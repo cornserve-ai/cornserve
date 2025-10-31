@@ -57,6 +57,10 @@ class EngineRequest(msgspec.Struct, array_like=True, omit_defaults=True):
     # Default request type is non-streaming.
     request_type: EngineRequestType = EngineRequestType.NON_STREAMING
 
+    # For streaming audio requests
+    chunk_size: int | None = None
+    left_context_size: int | None = None
+
 
 class EngineResponse(msgspec.Struct, array_like=True, omit_defaults=True):
     """Response from engine process."""

@@ -38,9 +38,15 @@ class AudioGenerationRequest(BaseModel):
 
     Attributes:
         embedding_data_id: Sidecar data ID for the audio codes.
+        chunk_size: number of codes to be processed at a time. If not supplied, the default for
+            the loaded model will be used.
+        left_context_size: number of codes immediately prior to each chunk to be processed as
+            context. If not supplied, the default for the loaded model will be used.
     """
 
     embedding_data_id: str
+    chunk_size: int | None = None
+    left_context_size: int | None = None
 
 
 class Status(enum.IntEnum):

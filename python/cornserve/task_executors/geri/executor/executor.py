@@ -70,11 +70,15 @@ class ModelExecutor:
     def generate_streaming(
         self,
         prompt_embeds: list[torch.Tensor],
+        chunk_size: int | None,
+        left_context_size: int | None,
     ) -> GenerationResult:
         """Execute streamed generation with the model.
 
         Args:
             prompt_embeds: List of text embeddings from the LLM encoder, one per batch item.
+            chunk_size: number of codes to be processed at a time
+            left_context_size: number of codes immediately prior to each chunk to be processed as context
 
         Returns:
             Generator that will iteratively yield results as they become ready.
@@ -87,10 +91,16 @@ class ModelExecutor:
                     f"Expected self.model to be a StreamGeriModel, but got {type(self.model).__name__} instead."
                 )
 
+            gen_kwargs = {
+                "prompt_embeds": prompt_embeds,
+                "chunk_size": chunk_size,
+                "left_context_size": left_context_size,
+            }
+            # only pass in non-None arguments
+            gen_kwargs = {k: v for k, v in gen_kwargs.items() if v is not None}
+
             # Generate images using the model (returns PNG bytes directly)
-            streamed_generator: Generator[torch.Tensor, None, None] = self.model.generate(
-                prompt_embeds=prompt_embeds,
-            )
+            streamed_generator: Generator[torch.Tensor, None, None] = self.model.generate(**gen_kwargs)
 
             logger.info("Obtained generator object")
             return GenerationResult(status=Status.SUCCESS, streamed_generator=streamed_generator)

@@ -215,6 +215,8 @@ class Engine:
                     # since the obtained result simply holds a generator object.
                     streaming_result = self.executor.generate_streaming(
                         prompt_embeds=[e.cuda() for e in prompt_embeds],
+                        chunk_size=batch.chunk_size,
+                        left_context_size=batch.left_context_size,
                     )
 
             # Non-streaming case
@@ -241,9 +243,6 @@ class Engine:
                 return responses
 
             elif streaming_result is not None:
-                # All requests should all have the same request_id if streaming
-                request_id = batch.requests[0].request_id
-
                 if streaming_result.status == Status.ERROR or streaming_result.streamed_generator is None:
                     # Use outer error handler to inform all requests in batch of failure
                     for request_span in request_spans:
@@ -261,23 +260,23 @@ class Engine:
                 # i-th request in the batch, since the streamed_generator yields whenever a
                 # fixed chunk of results become ready, not when it has finished processing
                 # data for a single entire request.
-                if streaming_result.status == Status.SUCCESS:
-                    for wav_chunk in streaming_result.streamed_generator:
-                        response = EngineResponse(
-                            request_id=request_id,
-                            status=Status.SUCCESS,
-                            generated=wav_chunk.cpu().numpy().tobytes(),
-                            request_type=EngineRequestType.STREAMING,
-                        )
-                        self.response_queue.put_nowait(response)
+                # if streaming_result.status == Status.SUCCESS:
+                #     for wav_chunk in streaming_result.streamed_generator:
+                #         response = EngineResponse(
+                #             request_id=request_id,
+                #             status=Status.SUCCESS,
+                #             generated=wav_chunk.cpu().numpy().tobytes(),
+                #             request_type=EngineRequestType.STREAMING,
+                #         )
+                #         self.response_queue.put_nowait(response)
 
-                    # Signal that the stream has ended
-                    response = EngineResponse(
-                        request_id=request_id,
-                        status=Status.FINISHED,
-                        request_type=EngineRequestType.STREAMING,
-                    )
-                    self.response_queue.put_nowait(response)
+                #     # Signal that the stream has ended
+                #     response = EngineResponse(
+                #         request_id=request_id,
+                #         status=Status.FINISHED,
+                #         request_type=EngineRequestType.STREAMING,
+                #     )
+                #     self.response_queue.put_nowait(response)
 
                 # Now end the individual spans we didn't end earlier
                 for request_span in request_spans:

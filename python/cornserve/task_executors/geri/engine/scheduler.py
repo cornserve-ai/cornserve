@@ -28,6 +28,8 @@ class ScheduledRequest:
     span: Span | None = None
 
     request_type: EngineRequestType = EngineRequestType.NON_STREAMING
+    chunk_size: int | None = None
+    left_context_size: int | None = None
 
 
 def requests_compatible(request1: ScheduledRequest, request2: ScheduledRequest) -> bool:
@@ -42,7 +44,8 @@ def requests_compatible(request1: ScheduledRequest, request2: ScheduledRequest) 
         ScheduledRequest.num_inference_steps
 
     For streaming requests:
-        ScheduledRequest.request_id
+        ScheduledRequest.chunk_size
+        ScheduledRequest.left_context_size
     """
     if request1.request_type != request2.request_type:
         return False
@@ -54,8 +57,7 @@ def requests_compatible(request1: ScheduledRequest, request2: ScheduledRequest) 
             and request1.num_inference_steps == request2.num_inference_steps
         )
     elif request1.request_type == EngineRequestType.STREAMING:
-        # streaming requests are batched only if they're from the same source
-        return request1.request_id == request2.request_id
+        return request1.chunk_size == request2.chunk_size and request1.left_context_size == request2.left_context_size
 
     return False
 
@@ -69,6 +71,9 @@ class SchedulerBatch:
     width: int
     num_inference_steps: int
     request_type: EngineRequestType = EngineRequestType.NON_STREAMING
+
+    chunk_size: int | None = None
+    left_context_size: int | None = None
 
     def __post_init__(self) -> None:
         """Validate that all requests in the batch are compatible."""
@@ -125,6 +130,8 @@ class RequestQueue:
             num_inference_steps=request.num_inference_steps,
             skip_tokens=request.skip_tokens,
             span=span,
+            chunk_size=request.chunk_size,
+            left_context_size=request.left_context_size,
         )
 
         self._requests.append(scheduled_req)
@@ -239,6 +246,8 @@ class Scheduler:
             width=next_request.width,
             num_inference_steps=next_request.num_inference_steps,
             request_type=next_request.request_type,
+            chunk_size=next_request.chunk_size,
+            left_context_size=next_request.left_context_size,
         )
 
         for span in batch.spans:

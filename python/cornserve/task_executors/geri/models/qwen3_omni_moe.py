@@ -140,14 +140,16 @@ class Qwen3OmniMoeCode2Wav(StreamGeriModel, nn.Module):
         return wav.clamp(min=-1, max=1)
 
     # TODO: support input streaming as well (requires state management)
-    def generate(self, prompt_embeds: list[torch.Tensor]) -> Generator[torch.Tensor, None, None]:
+    def generate(
+        self,
+        prompt_embeds: list[torch.Tensor],
+        chunk_size: int = 300,
+        left_context_size: int = 25,
+    ) -> Generator[torch.Tensor, None, None]:
         """Generate streamed outputs from prompt embeddings.
 
         Generated wav chunks should be concatenated along the last dimension (i.e., dim=-1).
         """
-        chunk_size = 300
-        left_context_size = 25
-
         # When inputs are not streamed, prompt_embeds simply holds the full input
         codes = prompt_embeds[0] if len(prompt_embeds) == 1 else torch.cat(prompt_embeds, dim=-1)
 

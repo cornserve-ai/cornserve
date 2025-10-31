@@ -215,9 +215,11 @@ class EngineClient:
             request_type=EngineRequestType.STREAMING,
             request_id=request_id,
             embedding_data_id=request.embedding_data_id,
-            span_context=span_context,
+            chunk_size=request.chunk_size,
+            left_context_size=request.left_context_size,
             # Don't skip any tokens
             skip_tokens=0,
+            span_context=span_context,
             # unused parameters
             num_inference_steps=0,
             height=0,
