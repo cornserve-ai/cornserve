@@ -50,11 +50,9 @@ Eric is Cornserve's multimodal data embedding server that computes embeddings fr
 
 #### InternVL3
 
-- **Models**: 
-    - [OpenGVLab/InternVL3-1B](https://huggingface.co/OpenGVLab/InternVL3-1B)
-    - [OpenGVLab/InternVL3-38B](https://huggingface.co/OpenGVLab/InternVL3-38B)
+- **Model**: [OpenGVLab/InternVL3-1B](https://huggingface.co/OpenGVLab/InternVL3-1B) and [OpenGVLab/InternVL3-38B](https://huggingface.co/OpenGVLab/InternVL3-38B)
 - **Modalities**: Image, Video
-- **Description**: InternVL3 series with dynamic resolution support
+- **Description**: InternVL3 series with dynamic resolution support, available in 1B and 38B variants
 
 ## Geri: Multimodal Generators
 
