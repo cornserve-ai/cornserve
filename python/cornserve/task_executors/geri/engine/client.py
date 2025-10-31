@@ -20,7 +20,13 @@ from opentelemetry import propagate, trace
 from cornserve.logging import get_logger
 from cornserve.sidecar.api import Sidecar
 from cornserve.sidecar.schema import SidecarConfig
-from cornserve.task_executors.geri.api import AudioGenerationRequest, GenerationRequest, GenerationResponse, Status
+from cornserve.task_executors.geri.api import (
+    AudioChunk,
+    AudioGenerationRequest,
+    GenerationRequest,
+    GenerationResponse,
+    Status,
+)
 from cornserve.task_executors.geri.config import GeriConfig
 from cornserve.task_executors.geri.engine.core import Engine
 from cornserve.task_executors.geri.executor.loader import load_model
@@ -171,7 +177,7 @@ class EngineClient:
             raise
 
         # Convert engine response to API response
-        if engine_response.status == Status.SUCCESS:
+        if engine_response.status == Status.SUCCESS and isinstance(engine_response.generated, str):
             return GenerationResponse(
                 status=Status.SUCCESS,
                 generated=engine_response.generated,
@@ -188,7 +194,7 @@ class EngineClient:
         request_id: str,
         request: AudioGenerationRequest,
         stream_inputs: bool = False,  # for now, only outputs are streamed
-    ) -> Callable[[], AsyncGenerator[bytes, Any]]:
+    ) -> Callable[[], AsyncGenerator[str, Any]]:
         """Generate streamed-output audio using the engine process."""
         # Propagate trace context
         span_context = {}
@@ -244,7 +250,8 @@ class EngineClient:
 
                 if engine_response.status == Status.SUCCESS:
                     if isinstance(engine_response.generated, bytes):
-                        yield engine_response.generated
+                        chunk = AudioChunk(engine_response.generated)
+                        yield chunk.model_dump_json()
                     else:
                         logger.info("Non-byte generated data type detected for request %s", request_id)
                 elif engine_response.status == Status.FINISHED:

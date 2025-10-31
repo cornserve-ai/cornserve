@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import enum
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, RootModel
 
 
 class Modality(enum.StrEnum):
@@ -62,11 +62,20 @@ class GenerationResponse(BaseModel):
 
     Attributes:
         status: Status of the generation operation.
-        generated: raw or Base64 encoded bytes of the generated content, if successful.
+        generated: Base64 encoded bytes of the generated content, if successful.
             Bytes are in PNG format for images.
         error_message: Error message if the status is ERROR.
     """
 
     status: Status
-    generated: str | bytes | None = None
+    generated: str | None = None
     error_message: str | None = None
+
+
+class AudioChunk(RootModel[bytes]):
+    """Response containing a chunk of generated audio data."""
+
+    model_config = ConfigDict(
+        ser_json_bytes="base64",
+        val_json_bytes="base64",
+    )
