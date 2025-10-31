@@ -82,7 +82,7 @@ nav:
     - Building Apps: getting_started/building_apps.md
     # - Using Jupyter Notebook: getting_started/jupyter.ipynb
     - Registering and Invoking Apps: getting_started/registering_apps.md
-    - Supported Models: getting_started/supported_models.md
+  - Supported Models: supported_models.md
   - Architecture:
     - architecture/index.md
     - Task: architecture/task.md
