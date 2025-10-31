@@ -126,6 +126,34 @@ MODEL_REGISTRY: dict[str, RegistryEntry] = {
             Modality.VIDEO: ModalityEntry(),
         },
     ),
+    "qwen3_vl": RegistryEntry(
+        module="qwen3_vl",
+        class_name="Qwen3_VisionTransformer",
+        adapter_attr=None,
+        vit_resolution_type=ViTResolutionType.DYNAMIC,
+        weight=WeightInfo(
+            required_prefixes=["model.visual."],
+            strip_prefixes=True,
+        ),
+        modality={
+            Modality.IMAGE: ModalityEntry(),
+            Modality.VIDEO: ModalityEntry(),
+        },
+    ),
+    "qwen3_vl_moe": RegistryEntry(
+        module="qwen3_vl",
+        class_name="Qwen3_VisionTransformer",
+        adapter_attr=None,
+        vit_resolution_type=ViTResolutionType.DYNAMIC,
+        weight=WeightInfo(
+            required_prefixes=["model.visual."],
+            strip_prefixes=True,
+        ),
+        modality={
+            Modality.IMAGE: ModalityEntry(),
+            Modality.VIDEO: ModalityEntry(),
+        },
+    ),
     "qwen2_5_omni": RegistryEntry(
         module="qwen2_5_omni",
         class_name="Qwen2_5OmniEncoder",
