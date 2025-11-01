@@ -26,6 +26,7 @@ from cornserve.task_executors.geri.schema import (
     EngineRequest,
     EngineRequestType,
     EngineResponse,
+    GenerationResult,
 )
 from cornserve.task_executors.geri.utils.serde import MsgpackDecoder, MsgpackEncoder
 from cornserve.task_executors.geri.utils.zmq import zmq_sync_socket_ctx
@@ -173,13 +174,13 @@ class Engine:
                     raise RuntimeError(f"No embeddings received for data ID: {embedding_data_id}")
 
             # Helper functions for ending spans
-            def end_request_span(request_span, result):
+            def end_request_span(request_span: trace.Span, result: GenerationResult):
                 request_span.set_attribute("geri.batch_status", result.status.value)
                 if result.error_message:
                     request_span.set_attribute("geri.batch_error_message", result.error_message)
                 request_span.end()
 
-            def end_top_level_span(span, result):
+            def end_top_level_span(span: trace.Span | None, result: GenerationResult):
                 if span is not None:
                     span.set_attribute("geri.status", result.status.value)
                     if result.error_message:
@@ -251,7 +252,7 @@ class Engine:
 
             elif streaming_result is not None:
 
-                def signal_stream_end(request_id, error_msg=None):
+                def signal_stream_end(request_id: str, error_msg: str | None = None):
                     response = EngineResponse(
                         request_id=request_id,
                         status=Status.FINISHED,
