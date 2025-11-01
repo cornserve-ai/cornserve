@@ -295,7 +295,7 @@ class Engine:
                                 response = EngineResponse(
                                     request_id=request_id,
                                     status=Status.SUCCESS,
-                                    generated=wav_chunk.cpu().numpy().tobytes(),
+                                    generate_bytes=wav_chunk.cpu().to(torch.float32).detach().numpy().tobytes(),
                                     request_type=EngineRequestType.STREAMING,
                                 )
                                 self.response_queue.put_nowait(response)
@@ -369,13 +369,14 @@ class Engine:
 
     def _response_send_loop(self, sock_path: str) -> None:
         """Continuously dequeue responses and send them to the router."""
-        buffer = bytearray()  # Reuse buffer
+        # buffer = bytearray()  # Reuse buffer
 
         with zmq_sync_socket_ctx(sock_path, zmq.PUSH) as sock:
             while True:
                 resp = self.response_queue.get()
-                self.encoder.encode_into(resp, buffer)
-                sock.send(buffer, copy=False)
+                # self.encoder.encode_into(resp, buffer)
+                # sock.send(buffer, copy=False)
+                sock.send(self.encoder.encode(resp), copy=False)
 
     def shutdown(self) -> None:
         """Shutdown the engine and clean up resources."""

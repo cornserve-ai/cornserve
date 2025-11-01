@@ -67,7 +67,8 @@ class EngineResponse(msgspec.Struct, array_like=True, omit_defaults=True):
 
     request_id: str
     status: Status
-    generated: str | bytes | None = None
+    generated: str | None = None
+    generate_bytes: bytes | None = None
     error_message: str | None = None
     request_type: EngineRequestType = EngineRequestType.NON_STREAMING
 

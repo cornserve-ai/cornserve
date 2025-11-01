@@ -146,14 +146,17 @@ class Qwen3OmniMoeCode2Wav(StreamGeriModel, nn.Module):
         left_context_size: int = 25,
     ) -> Generator[list[torch.Tensor | None], None, None]:
         """Generate streamed outputs from prompt embeddings."""
-        # Each element of `prompt_embeds` has shape (1, num_quantizers, seqlen).
-        # To batch, we pad and concatenate them along dim 0.
+        # Each element of `prompt_embeds` has shape (seqlen, num_quantizers).
+        # First, we transpose to (num_quantizers, seqlen).
+        prompt_embeds = [torch.transpose(embed, 0, 1) for embed in prompt_embeds]
+
+        # To batch, we pad them all to the same seqlen and then stack them along dim 0.
         code_lens = [embed.shape[-1] for embed in prompt_embeds]
         max_seqlen = max(code_lens)
         prompt_embeds = [
             nn.functional.pad(embed, (0, max_seqlen - embed.shape[-1]), value=0) for embed in prompt_embeds
         ]
-        codes = torch.cat(prompt_embeds, dim=0)
+        codes = torch.stack(prompt_embeds, dim=0)
 
         start_index = 0
         while start_index < codes.shape[-1]:

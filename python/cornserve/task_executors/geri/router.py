@@ -64,7 +64,7 @@ async def generate(
         return GenerationResponse(status=Status.ERROR, error_message=f"Generation failed: {str(e)}")
 
 
-@router.post("/generate-audio")
+@router.post("/generate-audio", response_model=None)
 async def generate_audio(
     request: AudioGenerationRequest,
     raw_request: Request,

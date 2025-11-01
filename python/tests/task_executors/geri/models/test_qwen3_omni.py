@@ -108,7 +108,8 @@ def test_hf_reference(hf_model, talker_codes) -> None:
         config=hf_model.config.code2wav_config,
     )
 
-    # Generate, but outputs are streamed
+    # (1, num_quantizers, seqlen) -> (seqlen, num_quantizers)
+    talker_codes = talker_codes.permute(0, 2, 1).squeeze(0)
     wavs = []
     for wav_chunk in geri_code2wav.generate(prompt_embeds=[talker_codes]):
         assert len(wav_chunk) == 1
