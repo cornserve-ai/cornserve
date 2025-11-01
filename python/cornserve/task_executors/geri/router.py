@@ -81,7 +81,7 @@ async def generate_audio(
 
         # Gets an async generator that returns wav byte chunks as they become ready
         stream_consumer = await engine_client.generate_audio(request_id, request)
-        return StreamingResponse(stream_consumer(), media_type="application/json")
+        return StreamingResponse(stream_consumer(), media_type="text/event-stream")
 
     except Exception as e:
         logger.exception("Audio generation request failed: %s", str(e))
