@@ -251,7 +251,8 @@ class EngineClient:
                 if engine_response.status == Status.SUCCESS:
                     if isinstance(engine_response.generated, bytes):
                         chunk = AudioChunk(engine_response.generated)
-                        yield chunk.model_dump_json()
+                        # Pack it as a SSE event
+                        yield f"data: {chunk.model_dump_json()}\n\n"
                     else:
                         logger.info("Non-byte generated data type detected for request %s", request_id)
                 elif engine_response.status == Status.FINISHED:
