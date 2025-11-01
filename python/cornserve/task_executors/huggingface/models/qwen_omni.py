@@ -60,8 +60,8 @@ class QwenOmniModel(HFModel):
             audio=audios,
             images=images,
             videos=videos,
-            return_tensors="pt",
-            padding=True,
+            return_tensors="pt",  # type: ignore
+            padding=True,  # type: ignore
             use_audio_in_video=False,  # type: ignore
         )
         inputs = inputs.to(self.model.device).to(self.model.dtype)

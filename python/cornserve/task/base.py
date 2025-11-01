@@ -514,10 +514,9 @@ class UnitTask(Task, Generic[InputT, OutputT]):
 
         raise AssertionError("Task context is neither in recording nor replay mode.")
 
-    @classmethod
-    def make_name(self) -> str:  # noqa: N804
+    def make_name(self) -> str:
         """Create a concise string representation of the task."""
-        return f"{self.__class__.__name__.lower()}"
+        return self.__class__.__name__.lower()
 
 
 class TaskInvocation(BaseModel, Generic[InputT, OutputT]):

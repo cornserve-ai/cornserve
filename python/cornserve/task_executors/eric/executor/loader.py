@@ -107,7 +107,7 @@ def load_model(
 
     # Determine dtype and device.
     if torch_dtype is None:
-        hf_dtype = hf_config.torch_dtype
+        hf_dtype = hf_config.dtype or hf_config.text_config.dtype
         if not isinstance(hf_dtype, torch.dtype):
             raise ValueError(
                 f"Expected torch_dtype to be a torch.dtype, but got {type(hf_dtype)}. "
