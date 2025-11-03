@@ -221,8 +221,6 @@ class EngineClient:
         span_context = {}
         propagator.inject(span_context)
 
-        # TODO: handle streaming inputs
-
         # Wait for *all* embeddings to arrive in the sidecar
         with tracer.start_as_current_span("engine_client.generate.sidecar_recv_wait"):
             chunk_id = 0

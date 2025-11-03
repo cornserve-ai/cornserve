@@ -27,7 +27,7 @@ def get_registry_entry(model_id: str) -> tuple[RegistryEntry, PretrainedConfig |
         Registry entry for the model and, if found, the HF model config.
 
     Raises:
-        ValueError: If the model's class name not found in HF.
+        ValueError: If the model's class name is not found in HF.
         KeyError: If the model type is not found in the registry.
     """
     logger.info("Looking up Geri model registry for model %s", model_id)
@@ -95,10 +95,10 @@ def load_model(
         Loaded model instance.
 
     Raises:
-        ImportError: if the module specified in the registry entry could not be imported.
-        AttributeError: if the class in specified in the registry entry does not exist in
+        ImportError: If the module specified in the registry entry could not be imported.
+        AttributeError: If the class in specified in the registry entry does not exist in
             the module specified in the registry entry.
-        ValueError: if the model is invalid.
+        ValueError: If the model is invalid.
     """
     logger.info("Loading model %s", model_id)
 
