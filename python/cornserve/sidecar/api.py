@@ -328,7 +328,8 @@ class Sidecar:
                 raise ValueError(f"Mocking sidecar but key {key} not in mapping")
             local_path = mapping[key]
             if not local_path.exists():
-                raise ValueError(f"Mocking sidecar but file {local_path} does not exist")
+                # we return None to simulate the end of stream
+                return None
             suffix = local_path.suffix.lower()
             if suffix in [".pt", ".pth"]:
                 tensor = torch.load(local_path, map_location="cpu")
