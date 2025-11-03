@@ -19,6 +19,13 @@ class EngineOpcode(Enum):
     SHUTDOWN = b"\x01"
 
 
+class GeriMode(Enum):
+    """Mode of the Engine core (batched vs streaming)."""
+
+    BATCH = b"\x00"
+    STREAMING = b"\x01"
+
+
 @dataclass
 class GenerationRequest:
     """Internal generation request data structure.
@@ -36,11 +43,7 @@ class GenerationRequest:
     num_inference_steps: int
 
 
-class EngineRequestType(Enum):
-    """Engine request types."""
-
-    NON_STREAMING = 0
-    STREAMING = 1
+# ---------------- Base Engine request classes -----------------
 
 
 class EngineRequest(msgspec.Struct, array_like=True, omit_defaults=True):
@@ -48,18 +51,51 @@ class EngineRequest(msgspec.Struct, array_like=True, omit_defaults=True):
 
     request_id: str
     embedding_data_id: str
+    span_context: dict[str, str] | None
+
+
+class BatchEngineRequest(EngineRequest):
+    """Engine request for batched (i.e., non-streaming) generation.
+
+    Important:
+        Modality-specific engine request classes (e.g., ImageEngineRequest) that
+        support batched generation should inherit from this class.
+    """
+
+    pass
+
+
+class StreamEngineRequest(EngineRequest):
+    """Engine request for streamed generation.
+
+    Important:
+        Modality-specific engine request classes (e.g., AudioEngineRequest) that
+        support streamed generation should inherit from this class.
+    """
+
+    pass
+
+
+# ---------- Engine request classes based on modality ----------
+
+
+class ImageEngineRequest(BatchEngineRequest):
+    """Engine generation request for images."""
+
     height: int
     width: int
     num_inference_steps: int
     skip_tokens: int = 0
-    span_context: dict[str, str] | None = None
 
-    # Default request type is non-streaming.
-    request_type: EngineRequestType = EngineRequestType.NON_STREAMING
 
-    # For streaming audio requests
-    chunk_size: int | None = None
-    left_context_size: int | None = None
+class AudioEngineRequest(StreamEngineRequest):
+    """Engine generation request for images."""
+
+    chunk_size: int | None
+    left_context_size: int | None
+
+
+# ------------------ Engine response classes -------------------
 
 
 class EngineResponse(msgspec.Struct, array_like=True, omit_defaults=True):
@@ -67,17 +103,41 @@ class EngineResponse(msgspec.Struct, array_like=True, omit_defaults=True):
 
     request_id: str
     status: Status
-    generated: str | None = None
-    generate_bytes: bytes | None = None
     error_message: str | None = None
-    request_type: EngineRequestType = EngineRequestType.NON_STREAMING
+
+
+class BatchEngineResponse(EngineResponse):
+    """Batched response from engine process."""
+
+    generated: str | None = None
+
+
+class StreamEngineResponse(EngineResponse):
+    """Streamed response from engine process."""
+
+    generate_bytes: bytes | None = None
+
+
+# ------------------ Executor response classes ------------------
 
 
 @dataclass
 class GenerationResult:
-    """Result from model executor (internal, not serialized)."""
+    """Generation result from a base ModelExecutor (internal, not serialized)."""
 
     status: Status
-    generated: list[str] = field(default_factory=list)
-    streamed_generator: Generator[list[torch.Tensor | None], None, None] | None = None
     error_message: str | None = None
+
+
+@dataclass
+class BatchGenerationResult(GenerationResult):
+    """Generation result from a BatchExecutor."""
+
+    generated: list[str] = field(default_factory=list)
+
+
+@dataclass
+class StreamGenerationResult(GenerationResult):
+    """Generation result from a StreamExecutor."""
+
+    generator: Generator[list[torch.Tensor | None], None, None] | None = None

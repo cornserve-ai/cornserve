@@ -2,19 +2,28 @@
 
 from __future__ import annotations
 
+from abc import ABC, abstractmethod
 from collections.abc import Generator
+from typing import Any
 
 import torch
 
 from cornserve.logging import get_logger
 from cornserve.task_executors.geri.api import Status
-from cornserve.task_executors.geri.models.base import BatchGeriModel, GeriModel, StreamGeriModel
-from cornserve.task_executors.geri.schema import GenerationResult
+from cornserve.task_executors.geri.models.base import (
+    BatchGeriModel,
+    GeriModel,
+    StreamGeriModel,
+)
+from cornserve.task_executors.geri.schema import (
+    BatchGenerationResult,
+    StreamGenerationResult,
+)
 
 logger = get_logger(__name__)
 
 
-class ModelExecutor:
+class ModelExecutor(ABC):
     """A class to execute generation with a model.
 
     This is a simplified version compared to Eric's ModelExecutor.
@@ -22,8 +31,29 @@ class ModelExecutor:
     manages a single model instance and executes generation requests.
     """
 
-    def __init__(self, model: GeriModel) -> None:
-        """Initialize the executor."""
+    model: GeriModel
+
+    def shutdown(self) -> None:
+        """Shutdown the executor and clean up resources."""
+        logger.info("Shutting down ModelExecutor")
+
+        if hasattr(self, "model"):
+            del self.model
+
+    @abstractmethod
+    def generate(self, *args, **kwargs) -> Any:
+        """Execute generation with the model.
+
+        The ModelExecutor base class requires that subclasses implement this method, but
+        parameters and return type will vary and therefore left to each subclass to decide.
+        """
+
+
+class BatchExecutor(ModelExecutor):
+    """Executor for batched (i.e., non-streaming) generation requests."""
+
+    def __init__(self, model: BatchGeriModel) -> None:
+        """Initialize the batch executor."""
         self.model = model
 
     def generate(
@@ -32,8 +62,10 @@ class ModelExecutor:
         height: int,
         width: int,
         num_inference_steps: int,
-    ) -> GenerationResult:
-        """Execute generation with the model.
+    ) -> BatchGenerationResult:
+        """Execute batched generation with the model.
+
+        Currently, the primary use case for this class is image generation.
 
         Args:
             prompt_embeds: List of text embeddings from the LLM encoder, one per batch item.
@@ -47,12 +79,8 @@ class ModelExecutor:
         try:
             logger.info("Generating content with size %dx%d, %d inference steps", height, width, num_inference_steps)
 
-            if not isinstance(self.model, BatchGeriModel):
-                raise TypeError(
-                    f"Expected self.model to be a BatchGeriModel, but got {type(self.model).__name__} instead."
-                )
-
             # Generate images using the model (returns PNG bytes directly)
+            assert isinstance(self.model, BatchGeriModel)
             generated_bytes = self.model.generate(
                 prompt_embeds=prompt_embeds,
                 height=height,
@@ -61,19 +89,29 @@ class ModelExecutor:
             )
 
             logger.info("Generation completed successfully, got %d images as PNG bytes", len(generated_bytes))
-            return GenerationResult(status=Status.SUCCESS, generated=generated_bytes)
+            return BatchGenerationResult(status=Status.SUCCESS, generated=generated_bytes)
 
         except Exception as e:
             logger.exception("Generation failed: %s", str(e))
-            return GenerationResult(status=Status.ERROR, error_message=f"Generation failed: {str(e)}")
+            return BatchGenerationResult(status=Status.ERROR, error_message=f"Generation failed: {str(e)}")
 
-    def generate_streaming(
+
+class StreamExecutor(ModelExecutor):
+    """Executor for streamed generation requests."""
+
+    def __init__(self, model: StreamGeriModel):
+        """Initialize the batch executor."""
+        self.model = model
+
+    def generate(
         self,
         prompt_embeds: list[torch.Tensor],
         chunk_size: int | None,
         left_context_size: int | None,
-    ) -> GenerationResult:
+    ) -> StreamGenerationResult:
         """Execute streamed generation with the model.
+
+        Currently, the primary use case for this class is audio generation.
 
         Args:
             prompt_embeds: List of text embeddings from the LLM encoder, one per batch item.
@@ -81,15 +119,10 @@ class ModelExecutor:
             left_context_size: number of codes immediately prior to each chunk to be processed as context
 
         Returns:
-            Generator that will iteratively yield results as they become ready.
+            Result holding a generator that will iteratively yield results as they become ready.
         """
         try:
             logger.info("Beginning streamed generation")
-
-            if not isinstance(self.model, StreamGeriModel):
-                raise TypeError(
-                    f"Expected self.model to be a StreamGeriModel, but got {type(self.model).__name__} instead."
-                )
 
             gen_kwargs = {
                 "prompt_embeds": prompt_embeds,
@@ -98,19 +131,12 @@ class ModelExecutor:
             }
             # only pass in non-None arguments
             gen_kwargs = {k: v for k, v in gen_kwargs.items() if v is not None}
-
+            assert isinstance(self.model, StreamGeriModel)
             streamed_generator: Generator[list[torch.Tensor | None], None, None] = self.model.generate(**gen_kwargs)
 
             logger.info("Obtained generator object")
-            return GenerationResult(status=Status.SUCCESS, streamed_generator=streamed_generator)
+            return StreamGenerationResult(status=Status.SUCCESS, generator=streamed_generator)
 
         except Exception as e:
             logger.exception("Generation failed: %s", str(e))
-            return GenerationResult(status=Status.ERROR, error_message=f"Generation failed: {str(e)}")
-
-    def shutdown(self) -> None:
-        """Shutdown the executor and clean up resources."""
-        logger.info("Shutting down ModelExecutor")
-
-        if hasattr(self, "model"):
-            del self.model
+            return StreamGenerationResult(status=Status.ERROR, error_message=f"Generation failed: {str(e)}")

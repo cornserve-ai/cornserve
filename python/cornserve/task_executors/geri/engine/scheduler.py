@@ -2,13 +2,18 @@
 
 from __future__ import annotations
 
+from abc import ABC, abstractmethod
 from dataclasses import dataclass
 
 from opentelemetry import propagate, trace
 from opentelemetry.trace import Span
 
 from cornserve.logging import get_logger
-from cornserve.task_executors.geri.schema import EngineRequest, EngineRequestType
+from cornserve.task_executors.geri.schema import (
+    AudioEngineRequest,
+    EngineRequest,
+    ImageEngineRequest,
+)
 
 logger = get_logger(__name__)
 tracer = trace.get_tracer(__name__)
@@ -16,50 +21,95 @@ propagator = propagate.get_global_textmap()
 
 
 @dataclass
-class ScheduledRequest:
+class ScheduledRequest(ABC):
     """A request that has been scheduled for execution."""
 
     request_id: str
     embedding_data_id: str
+    span: Span | None
+
+    @classmethod
+    @abstractmethod
+    def from_engine_request(cls, engine_request: EngineRequest, span: trace.Span | None) -> ScheduledRequest:
+        """Creates a scheduled request from an engine request."""
+
+    @staticmethod
+    @abstractmethod
+    def requests_compatible(req1: ScheduledRequest, req2: ScheduledRequest) -> bool:
+        """Returns whether the given requests can be in the same batch."""
+
+
+@dataclass
+class ScheduledImageRequest(ScheduledRequest):
+    """An image generation request that has been scheduled for execution."""
+
     height: int
     width: int
     num_inference_steps: int
     skip_tokens: int = 0
-    span: Span | None = None
 
-    request_type: EngineRequestType = EngineRequestType.NON_STREAMING
+    @classmethod
+    def from_engine_request(cls, engine_request: EngineRequest, span: trace.Span | None) -> ScheduledImageRequest:
+        """Creates a scheduled image request from an engine request."""
+        assert isinstance(engine_request, ImageEngineRequest)
+        return cls(
+            request_id=engine_request.request_id,
+            embedding_data_id=engine_request.embedding_data_id,
+            span=span,
+            height=engine_request.height,
+            width=engine_request.width,
+            num_inference_steps=engine_request.num_inference_steps,
+            skip_tokens=engine_request.skip_tokens,
+        )
+
+    @staticmethod
+    def requests_compatible(req1: ScheduledRequest, req2: ScheduledRequest) -> bool:
+        """Returns whether the given requests can be in the same ImageRequest batch.
+
+        To be compatible, two image requests must be identical in these fields:
+            ScheduledImageRequest.height
+            ScheduledImageRequest.width
+            ScheduledImageRequest.num_inference_steps
+        """
+        if not isinstance(req1, ScheduledImageRequest) or not isinstance(req2, ScheduledImageRequest):
+            return False
+        return (
+            req1.height == req2.height
+            and req1.width == req2.width
+            and req1.num_inference_steps == req2.num_inference_steps
+        )
+
+
+@dataclass
+class ScheduledAudioRequest(ScheduledRequest):
+    """An audio generation request that has been scheduled for execution."""
+
     chunk_size: int | None = None
     left_context_size: int | None = None
 
-
-def requests_compatible(request1: ScheduledRequest, request2: ScheduledRequest) -> bool:
-    """Returns whether two scheduled requests are capable of being the same batch.
-
-    All requests in the same batch must be either streaming or non-streaming requests,
-    indicated by the ScheduledRequest.request_type field.
-
-    For non-streaming requests, these fields are compared:
-        ScheduledRequest.height
-        ScheduledRequest.width
-        ScheduledRequest.num_inference_steps
-
-    For streaming requests:
-        ScheduledRequest.chunk_size
-        ScheduledRequest.left_context_size
-    """
-    if request1.request_type != request2.request_type:
-        return False
-
-    if request1.request_type == EngineRequestType.NON_STREAMING:
-        return (
-            request1.height == request2.height
-            and request1.width == request2.width
-            and request1.num_inference_steps == request2.num_inference_steps
+    @classmethod
+    def from_engine_request(cls, engine_request: EngineRequest, span: trace.Span | None) -> ScheduledAudioRequest:
+        """Creates a scheduled audio request from an engine request."""
+        assert isinstance(engine_request, AudioEngineRequest)
+        return cls(
+            request_id=engine_request.request_id,
+            embedding_data_id=engine_request.embedding_data_id,
+            span=span,
+            chunk_size=engine_request.chunk_size,
+            left_context_size=engine_request.left_context_size,
         )
-    elif request1.request_type == EngineRequestType.STREAMING:
-        return request1.chunk_size == request2.chunk_size and request1.left_context_size == request2.left_context_size
 
-    return False
+    @staticmethod
+    def requests_compatible(req1: ScheduledRequest, req2: ScheduledRequest) -> bool:
+        """Returns whether the given requests can be in the same AudioRequest batch.
+
+        To be compatible, two audio requests must be identical in these fields:
+            ScheduledAudioRequest.chunk_size
+            ScheduledAudioRequest.left_context_size
+        """
+        if not isinstance(req1, ScheduledAudioRequest) or not isinstance(req2, ScheduledAudioRequest):
+            return False
+        return req1.chunk_size == req2.chunk_size and req1.left_context_size == req2.left_context_size
 
 
 @dataclass
@@ -67,13 +117,9 @@ class SchedulerBatch:
     """A batch of requests to be executed together."""
 
     requests: list[ScheduledRequest]
-    height: int
-    width: int
-    num_inference_steps: int
-    request_type: EngineRequestType = EngineRequestType.NON_STREAMING
 
-    chunk_size: int | None = None
-    left_context_size: int | None = None
+    # The type of ScheduledRequest classes to be batched
+    sched_request_type: type[ScheduledRequest]
 
     def __post_init__(self) -> None:
         """Validate that all requests in the batch are compatible."""
@@ -83,7 +129,9 @@ class SchedulerBatch:
         # Verify all requests have the same generation parameters
         first_req = self.requests[0]
         for req in self.requests[1:]:
-            if not requests_compatible(first_req, req):
+            if not isinstance(req, self.sched_request_type):
+                raise TypeError(f"Expected {self.sched_request_type.__name__}, got {type(req).__name__}")
+            if not self.sched_request_type.requests_compatible(first_req, req):
                 raise ValueError("All requests in a batch must have identical generation parameters")
 
     def __len__(self) -> int:
@@ -105,43 +153,53 @@ class SchedulerBatch:
         """Get list of tracing spans for this batch."""
         return [req.span for req in self.requests]
 
+
+@dataclass
+class ImageSchedulerBatch(SchedulerBatch):
+    """A batch of image requests to be executed together.
+
+    Extends the base SchedulerBatch class with fields specific to image batches.
+    """
+
+    height: int
+    width: int
+    num_inference_steps: int
+
     @property
     def skip_tokens(self) -> list[int]:
         """Get list of skip tokens for this batch."""
-        return [req.skip_tokens for req in self.requests]
+        return [getattr(req, "skip_tokens", 0) for req in self.requests]
+
+
+@dataclass
+class AudioSchedulerBatch(SchedulerBatch):
+    """A batch of audio requests to be executed together.
+
+    Extends the base SchedulerBatch class with fields specific to audio batches.
+    """
+
+    chunk_size: int | None = None
+    left_context_size: int | None = None
 
 
 class RequestQueue:
     """A FCFS request queue that allows batching of consecutive requests with same parameters."""
 
-    def __init__(self) -> None:
+    def __init__(self, sched_request_type: type[ScheduledRequest]) -> None:
         """Initialize the queue."""
         # Maintain FCFS order with a simple list
         self._requests: list[ScheduledRequest] = []
+        self.sched_request_type: type[ScheduledRequest] = sched_request_type
 
     def enqueue(self, request: EngineRequest, span: Span | None = None) -> None:
         """Add a request to the queue in FCFS order."""
-        scheduled_req = ScheduledRequest(
-            request_type=request.request_type,
-            request_id=request.request_id,
-            embedding_data_id=request.embedding_data_id,
-            height=request.height,
-            width=request.width,
-            num_inference_steps=request.num_inference_steps,
-            skip_tokens=request.skip_tokens,
-            span=span,
-            chunk_size=request.chunk_size,
-            left_context_size=request.left_context_size,
-        )
+        scheduled_req = self.sched_request_type.from_engine_request(request, span)
 
         self._requests.append(scheduled_req)
 
         logger.debug(
-            "Enqueued request %s with params %dx%d, %d steps (queue length: %d)",
+            "Enqueued request %s (queue length: %d)",
             request.request_id,
-            request.height,
-            request.width,
-            request.num_inference_steps,
             len(self._requests),
         )
 
@@ -175,7 +233,7 @@ class RequestQueue:
         i = 0
         while i < len(self._requests) and (max_batch_size is None or len(batch_requests) < max_batch_size):
             req = self._requests[i]
-            if requests_compatible(next_request, req):
+            if self.sched_request_type.requests_compatible(next_request, req):
                 batch_requests.append(req)
                 i += 1
             else:
@@ -196,6 +254,8 @@ class RequestQueue:
 class Scheduler:
     """Scheduler for batching generation requests."""
 
+    queue: RequestQueue
+
     def __init__(self, max_batch_size: int | None = None) -> None:
         """Initialize the scheduler.
 
@@ -203,7 +263,14 @@ class Scheduler:
             max_batch_size: Maximum number of requests to batch together.
         """
         self.max_batch_size = max_batch_size
-        self.queue = RequestQueue()
+
+    @abstractmethod
+    def schedule(self) -> SchedulerBatch | None:
+        """Schedule the next batch of requests.
+
+        Returns:
+            A batch of requests to execute, or None if no requests are waiting.
+        """
 
     def enqueue(self, request: EngineRequest, span: Span | None = None) -> None:
         """Add a request to the waiting queue."""
@@ -215,39 +282,100 @@ class Scheduler:
         """Check if there are any unfinished requests."""
         return self.queue.has_requests()
 
-    def schedule(self) -> SchedulerBatch | None:
+    def get_next_requests(self) -> list[ScheduledRequest] | None:
+        """Return the next requests to batch."""
+        if not self.queue.has_requests():
+            return None
+
+        next_request = self.queue.peek_next_batch()
+        if not next_request:
+            return None
+
+        batch_requests = self.queue.pop_batch(next_request, self.max_batch_size)
+        if not batch_requests:
+            return None
+
+        return batch_requests
+
+
+class ImageScheduler(Scheduler):
+    """Scheduler for batching image generation requests."""
+
+    def __init__(self, max_batch_size: int | None = None) -> None:
+        """Initialize the scheduler.
+
+        Args:
+            max_batch_size: Maximum number of requests to batch together.
+        """
+        self.queue = RequestQueue(ScheduledImageRequest)
+        super().__init__(max_batch_size)
+
+    def schedule(self) -> ImageSchedulerBatch | None:
         """Schedule the next batch of requests.
 
         Returns:
             A batch of requests to execute, or None if no requests are waiting.
         """
-        if not self.queue.has_requests():
-            return None
-
-        # Get the parameters for the next batch
-        next_request = self.queue.peek_next_batch()
-        if not next_request:
-            return None
-
-        # Pop requests for this batch
-        batch_requests = self.queue.pop_batch(next_request, self.max_batch_size)
-
+        batch_requests = self.get_next_requests()
         if not batch_requests:
             return None
+
+        next_request = batch_requests[0]
+        assert isinstance(next_request, ScheduledImageRequest)
+        batch = ImageSchedulerBatch(
+            requests=batch_requests,
+            sched_request_type=ScheduledImageRequest,
+            height=next_request.height,
+            width=next_request.width,
+            num_inference_steps=next_request.num_inference_steps,
+        )
 
         logger.info(
             "Scheduled batch of %d requests",
             len(batch_requests),
         )
 
-        batch = SchedulerBatch(
+        for span in batch.spans:
+            if span:
+                span.add_event("geri.engine.scheduler.schedule")
+
+        return batch
+
+
+class AudioScheduler(Scheduler):
+    """Scheduler for batching audio generation requests."""
+
+    def __init__(self, max_batch_size: int | None = None) -> None:
+        """Initialize the scheduler.
+
+        Args:
+            max_batch_size: Maximum number of requests to batch together.
+        """
+        self.queue = RequestQueue(ScheduledAudioRequest)
+        super().__init__(max_batch_size)
+
+    def schedule(self) -> AudioSchedulerBatch | None:
+        """Schedule the next batch of requests.
+
+        Returns:
+            A batch of requests to execute, or None if no requests are waiting.
+        """
+        batch_requests = self.get_next_requests()
+        if not batch_requests:
+            return None
+
+        next_request = batch_requests[0]
+        assert isinstance(next_request, ScheduledAudioRequest)
+        batch = AudioSchedulerBatch(
             requests=batch_requests,
-            height=next_request.height,
-            width=next_request.width,
-            num_inference_steps=next_request.num_inference_steps,
-            request_type=next_request.request_type,
+            sched_request_type=ScheduledAudioRequest,
             chunk_size=next_request.chunk_size,
             left_context_size=next_request.left_context_size,
+        )
+
+        logger.info(
+            "Scheduled batch of %d requests",
+            len(batch_requests),
         )
 
         for span in batch.spans:
