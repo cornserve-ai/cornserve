@@ -86,8 +86,8 @@ async def generate_audio(
         trace.get_current_span().set_attribute("request_id", request_id)
 
         # Gets an async generator that returns wav byte chunks as they become ready
-        stream_consumer = await engine_client.generate_streaming(request_id, request)
-        return StreamingResponse(stream_consumer(), media_type="text/event-stream")
+        stream_consumer = engine_client.generate_streaming(request_id, request)
+        return StreamingResponse(stream_consumer, media_type="text/event-stream")
 
     except Exception as e:
         logger.exception("Audio generation request failed: %s", str(e))

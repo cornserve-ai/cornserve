@@ -137,10 +137,10 @@ class BatchGenerationResponse(BaseModel):
     error_message: str | None = None
 
 
-class AudioChunk(RootModel[bytes]):
-    """Response containing a chunk of generated audio data.
+class StreamGeriResponseChunk(RootModel[bytes]):
+    """Response containing a chunk of generated streaming data.
 
-    Unlike ImageGenerationResponse, AudioChunk is meant to carry an individual
+    StreamGeriResponseChunk is meant to carry an individual
     unit of data for a *streamed* response.
     """
 

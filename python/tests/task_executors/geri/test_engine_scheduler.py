@@ -58,7 +58,12 @@ def test_request_queue_enqueue_and_length() -> None:
 
     # Create test engine request
     engine_req = ImageEngineRequest(
-        request_id="test-123", embedding_data_id="embed-456", height=512, width=512, num_inference_steps=20, span_context=None
+        request_id="test-123",
+        embedding_data_id="embed-456",
+        height=512,
+        width=512,
+        num_inference_steps=20,
+        span_context=None,
     )
 
     queue.enqueue(engine_req)
@@ -71,9 +76,15 @@ def test_request_queue_fcfs_ordering() -> None:
     queue = RequestQueue(ScheduledImageRequest)
 
     # Add requests with different parameters in a specific order
-    req1 = ImageEngineRequest("req1", "embed1", height=512, width=512, num_inference_steps=20, span_context=None)  # First request
-    req2 = ImageEngineRequest("req2", "embed2", height=256, width=256, num_inference_steps=10, span_context=None)  # Different params
-    req3 = ImageEngineRequest("req3", "embed3", height=256, width=256, num_inference_steps=10, span_context=None)  # Same as req2
+    req1 = ImageEngineRequest(
+        "req1", "embed1", height=512, width=512, num_inference_steps=20, span_context=None
+    )  # First request
+    req2 = ImageEngineRequest(
+        "req2", "embed2", height=256, width=256, num_inference_steps=10, span_context=None
+    )  # Different params
+    req3 = ImageEngineRequest(
+        "req3", "embed3", height=256, width=256, num_inference_steps=10, span_context=None
+    )  # Same as req2
 
     queue.enqueue(req1)
     queue.enqueue(req2)
@@ -94,7 +105,9 @@ def test_request_queue_pop_batch_consecutive() -> None:
 
     # Add multiple requests with same parameters
     for i in range(3):
-        req = ImageEngineRequest(f"req{i}", f"embed{i}", height=256, width=256, num_inference_steps=10, span_context=None)
+        req = ImageEngineRequest(
+            f"req{i}", f"embed{i}", height=256, width=256, num_inference_steps=10, span_context=None
+        )
         queue.enqueue(req)
 
     # Pop batch of size 2
@@ -129,8 +142,12 @@ def test_request_queue_pop_batch_fcfs_stops_at_mismatch() -> None:
     queue = RequestQueue(ScheduledImageRequest)
 
     # Add requests in specific order: matching, non-matching, matching
-    req1 = ImageEngineRequest("req1", "embed1", height=256, width=256, num_inference_steps=10, span_context=None)  # Matches
-    req2 = ImageEngineRequest("req2", "embed2", height=512, width=512, num_inference_steps=20, span_context=None)  # Different params
+    req1 = ImageEngineRequest(
+        "req1", "embed1", height=256, width=256, num_inference_steps=10, span_context=None
+    )  # Matches
+    req2 = ImageEngineRequest(
+        "req2", "embed2", height=512, width=512, num_inference_steps=20, span_context=None
+    )  # Different params
     req3 = ImageEngineRequest(
         "req3", "embed3", height=256, width=256, num_inference_steps=10, span_context=None
     )  # Matches but after non-match
@@ -192,7 +209,9 @@ def test_scheduler_schedule_batch() -> None:
 
     # Add requests with same parameters
     for i in range(5):
-        req = ImageEngineRequest(f"req{i}", f"embed{i}", height=128, width=128, num_inference_steps=5, span_context=None)
+        req = ImageEngineRequest(
+            f"req{i}", f"embed{i}", height=128, width=128, num_inference_steps=5, span_context=None
+        )
         scheduler.enqueue(req)
 
     # Schedule first batch
@@ -217,11 +236,15 @@ def test_scheduler_schedule_different_params_fcfs() -> None:
     scheduler = ImageScheduler()
 
     # Add requests with different parameters in specific order
-    req1 = ImageEngineRequest("req1", "embed1", height=256, width=256, num_inference_steps=10, span_context=None)  # First
+    req1 = ImageEngineRequest(
+        "req1", "embed1", height=256, width=256, num_inference_steps=10, span_context=None
+    )  # First
     req2 = ImageEngineRequest(
         "req2", "embed2", height=512, width=512, num_inference_steps=20, span_context=None
     )  # Second, different params
-    req3 = ImageEngineRequest("req3", "embed3", height=256, width=256, num_inference_steps=10, span_context=None)  # Third, same as first
+    req3 = ImageEngineRequest(
+        "req3", "embed3", height=256, width=256, num_inference_steps=10, span_context=None
+    )  # Third, same as first
 
     scheduler.enqueue(req1)
     scheduler.enqueue(req2)
