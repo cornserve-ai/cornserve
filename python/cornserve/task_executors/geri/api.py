@@ -148,10 +148,3 @@ class StreamGeriResponseChunk(RootModel[bytes]):
         ser_json_bytes="base64",
         val_json_bytes="base64",
     )
-
-
-class ErrorResponse(BaseModel):
-    """A generic error response."""
-
-    status: Status = Status.ERROR
-    error_message: str | None = None

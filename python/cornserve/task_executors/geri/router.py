@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter, FastAPI, Request, Response, status
+from fastapi import APIRouter, FastAPI, Request, Response, status, HTTPException
 from fastapi.responses import StreamingResponse
 from opentelemetry import trace
 
@@ -12,7 +12,6 @@ from cornserve.logging import get_logger
 from cornserve.task_executors.geri.api import (
     AudioGenerationRequest,
     BatchGenerationResponse,
-    ErrorResponse,
     ImageGenerationRequest,
 )
 from cornserve.task_executors.geri.config import GeriConfig
@@ -70,12 +69,12 @@ async def generate_image(
         return BatchGenerationResponse(status=Status.ERROR, error_message=f"Generation failed: {str(e)}")
 
 
-@router.post("/audio/generate", response_model=None)
+@router.post("/audio/generate")
 async def generate_audio(
     request: AudioGenerationRequest,
     raw_request: Request,
     raw_response: Response,
-) -> StreamingResponse | ErrorResponse:
+) -> StreamingResponse:
     """Handler for audio generation requests, where outputs are streamed."""
     engine_client: EngineClient = raw_request.app.state.engine_client
 
@@ -91,8 +90,10 @@ async def generate_audio(
 
     except Exception as e:
         logger.exception("Audio generation request failed: %s", str(e))
-        raw_response.status_code = status.HTTP_500_INTERNAL_SERVER_ERROR
-        return ErrorResponse(error_message=f"Generation failed: {str(e)}")
+        raise HTTPException(
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Generation failed: {str(e)}"
+        )
 
 
 def init_app_state(app: FastAPI, config: GeriConfig) -> None:
