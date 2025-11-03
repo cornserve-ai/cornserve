@@ -30,7 +30,7 @@ from cornserve.task_executors.geri.engine.core import (
     BatchGeriEngine,
     StreamGeriEngine,
 )
-from cornserve.task_executors.geri.executor.loader import load_model
+from cornserve.task_executors.geri.executor.loader import get_registry_entry, load_model
 
 # from cornserve.task_executors.geri.models.registry import MODEL_REGISTRY
 from cornserve.task_executors.geri.schema import (
@@ -64,6 +64,10 @@ class EngineClient:
         3. Starts the engine process.
         4. Initializes the sidecar client that waits for data to arrive before enqueuing requests.
         """
+        # Acquire model information and Geri mode to run engine in
+        registry_entry, model_config = get_registry_entry(config.model.id)
+        self.geri_mode = registry_entry.geri_mode
+
         # Figure out the embedding dimension from a temporary model instance
         meta_device = torch.device("meta")
         with warnings.catch_warnings():
@@ -73,7 +77,9 @@ class EngineClient:
                 category=UserWarning,
             )
             with meta_device:
-                temp_model = load_model(model_id=config.model.id, torch_device=meta_device)
+                temp_model = load_model(
+                    model_id=config.model.id, torch_device=meta_device, registry_entry=registry_entry
+                )
 
         # Create ZMQ sockets for communication with the engine
         self.ctx = zmq.asyncio.Context(io_threads=2)
@@ -81,10 +87,6 @@ class EngineClient:
         self.request_sock = make_zmq_socket(self.ctx, self.request_sock_path, zmq.PUSH)
         self.response_sock_path = get_open_zmq_ipc_path("geri-engine-response")
         self.response_sock = make_zmq_socket(self.ctx, self.response_sock_path, zmq.PULL)
-
-        # Determine Geri mode to run engine core in
-        # TODO: from laoder
-        self.geri_mode = GeriMode.STREAMING
 
         # Track pending requests
         self.pending_requests: dict[str, Future[BatchEngineResponse]] = {}
@@ -118,10 +120,13 @@ class EngineClient:
             case _:
                 raise ValueError(f"Unsupported Geri mode: {self.geri_mode}")
 
+        logger.info("Engine client launching Engine core in Geri mode: %s", self.geri_mode)
         self.engine_process = engine_type.spawn_engine(
-            config=config,
+            geri_config=config,
             request_sock_path=self.request_sock_path,
             response_sock_path=self.response_sock_path,
+            model_registry_entry=registry_entry,
+            model_config=model_config,
         )
 
         logger.info("EngineClient initialized with engine process PID: %d", self.engine_process.pid)
@@ -279,7 +284,7 @@ class EngineClient:
                 if future and not future.done():
                     future.set_result(response)
                 else:
-                    logger.warning("Received response for unknown request: %s", response.request_id)
+                    logger.warning("Received batch response for unknown request: %s", response.request_id)
 
         except asyncio.CancelledError:
             logger.info("Batch response listener cancelled")

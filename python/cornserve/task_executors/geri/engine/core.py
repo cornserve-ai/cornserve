@@ -13,6 +13,7 @@ from typing import Any
 import torch
 import zmq
 from opentelemetry import propagate, trace
+from transformers.configuration_utils import PretrainedConfig
 
 from cornserve.logging import get_logger
 from cornserve.sidecar.api import Sidecar
@@ -34,8 +35,10 @@ from cornserve.task_executors.geri.executor.executor import (
 from cornserve.task_executors.geri.executor.loader import load_model
 from cornserve.task_executors.geri.models.base import (
     BatchGeriModel,
+    GeriModel,
     StreamGeriModel,
 )
+from cornserve.task_executors.geri.models.registry import RegistryEntry
 from cornserve.task_executors.geri.schema import (
     AudioEngineRequest,
     BatchEngineResponse,
@@ -69,24 +72,47 @@ class Engine(ABC):
     decoder: MsgpackDecoder
     scheduler: Scheduler
 
-    @abstractmethod
     def __init__(
         self,
-        config: GeriConfig,
+        geri_config: GeriConfig,
         request_sock_path: str,
         response_sock_path: str,
+        model_registry_entry: RegistryEntry,
+        model_config: PretrainedConfig | None = None,
     ) -> None:
         """Initialize the engine.
 
-        Subclasses must override this to instantiate the model executor and
-        scheduler based on the configured execution mode (streaming vs batch).
-
         Args:
-            config: Geri configuration.
+            geri_config: Geri configuration.
             request_sock_path: Path for receiving requests from router.
             response_sock_path: Path for sending responses to router.
+            model_registry_entry: Geri Model Registry entry for the model to be loaded.
+            model_config (optional): Configuration for the model to be loaded.
         """
-        self.config = config
+        self.geri_config = geri_config
+
+        # Initialize model executor
+        model = load_model(
+            model_id=geri_config.model.id,
+            torch_device=torch.device("cuda"),
+            registry_entry=model_registry_entry,
+            config=model_config,
+        )
+
+        # Initialize execution mode (i.e., batched vs streaming) specific engine components
+        self.mode_specific_initializer(model=model, geri_config=geri_config)
+
+        # Set up serialization
+        self.encoder = MsgpackEncoder()
+
+        self.sidecar = Sidecar(
+            SidecarConfig(
+                sidecar_rank=sorted(geri_config.sidecar.ranks)[0],
+                group=sorted(geri_config.sidecar.ranks),
+                recv_tensor_dtype=model.dtype,
+                recv_tensor_shape=(-1, model.embedding_dim),
+            )
+        )
 
         # Background thread that continuously receives from the request
         # ZMQ socket and pushes it into the request queue
@@ -107,6 +133,27 @@ class Engine(ABC):
         ).start()
 
         logger.info("Engine core initialized")
+
+    @abstractmethod
+    def mode_specific_initializer(
+        self,
+        model: GeriModel,
+        geri_config: GeriConfig,
+    ) -> None:
+        """Initialize mode-specific (i.e., batch vs stream) components.
+
+        Specifically, components that depend on the mode are:
+            self.executor
+            self.decoder
+            self.scheduler
+
+        Args:
+            model: The model that was initialized for the Engine.
+            geri_config: Geri configuration.
+
+        Raises:
+            TypeError: if the supplied model doesn't match the expected type for this execution mode.
+        """
 
     @abstractmethod
     def step(self) -> None:
@@ -226,9 +273,11 @@ class Engine(ABC):
     @classmethod
     def spawn_engine(
         cls,
-        config: GeriConfig,
+        geri_config: GeriConfig,
         request_sock_path: str,
         response_sock_path: str,
+        model_registry_entry: RegistryEntry,
+        model_config: PretrainedConfig | None = None,
     ) -> SpawnProcess:
         """Spawn the engine process.
 
@@ -244,11 +293,13 @@ class Engine(ABC):
             name="geri_engine",
             target=cls.main,
             kwargs=dict(
-                config=config,
+                geri_config=geri_config,
                 request_sock_path=request_sock_path,
                 response_sock_path=response_sock_path,
                 ready_pipe=writer,
                 ready_message=ready_message,
+                model_registry_entry=model_registry_entry,
+                model_config=model_config,
             ),
         )
         engine_proc.start()
@@ -320,11 +371,13 @@ class Engine(ABC):
     @classmethod
     def main(
         cls,
-        config: GeriConfig,
+        geri_config: GeriConfig,
         request_sock_path: str,
         response_sock_path: str,
         ready_pipe,
         ready_message: bytes,
+        model_registry_entry: RegistryEntry,
+        model_config: PretrainedConfig | None = None,
     ) -> None:
         """Main entry point for the engine process."""
         # Configure OpenTelemetry for this process
@@ -347,9 +400,11 @@ class Engine(ABC):
         try:
             # Create and initialize engine
             engine = cls(
-                config=config,
+                geri_config=geri_config,
                 request_sock_path=request_sock_path,
                 response_sock_path=response_sock_path,
+                model_registry_entry=model_registry_entry,
+                model_config=model_config,
             )
 
             # Signal that we're ready
@@ -375,40 +430,34 @@ class BatchGeriEngine(Engine):
     in a batched, non-streaming manner.
     """
 
-    def __init__(
+    def mode_specific_initializer(
         self,
-        config: GeriConfig,
-        request_sock_path: str,
-        response_sock_path: str,
+        model: GeriModel,
+        geri_config: GeriConfig,
     ) -> None:
-        """Initialize the engine.
+        """Initialize mode-specific (i.e., batch vs stream) components.
+
+        Specifically, components that depend on the mode are:
+            self.executor
+            self.decoder
+            self.scheduler
 
         Args:
-            config: Geri configuration.
-            request_sock_path: Path for receiving requests from router.
-            response_sock_path: Path for sending responses to router.
+            model: The model that was initialized for the Engine.
+            geri_config: Geri configuration.
+
+        Raises:
+            TypeError: if the supplied model doesn't match the expected type for this execution mode.
         """
-        # Initialize model executor
-        model = load_model(model_id=config.model.id, torch_device=torch.device("cuda"))
-        assert isinstance(model, BatchGeriModel)
+        if not isinstance(model, BatchGeriModel):
+            raise TypeError(f"BatchGeriEngine should be initialized with BatchGeriModel, not {type(model).__name__}")
+
         self.executor = BatchExecutor(model=model)
-        self.sidecar = Sidecar(
-            SidecarConfig(
-                sidecar_rank=sorted(config.sidecar.ranks)[0],
-                group=sorted(config.sidecar.ranks),
-                recv_tensor_dtype=model.dtype,
-                recv_tensor_shape=(-1, model.embedding_dim),
-            )
-        )
 
-        # Set up serialization
-        self.encoder = MsgpackEncoder()
-
-        # Currently, the Engine core only supports image requests in batch mode.
+        # Currently, the batch Engine core only supports image requests.
+        # To add more request types, specify it in configs and add a match statement here.
         self.decoder = MsgpackDecoder(ImageEngineRequest)
-        self.scheduler = ImageScheduler(max_batch_size=config.server.max_batch_size)
-
-        super().__init__(config, request_sock_path, response_sock_path)
+        self.scheduler = ImageScheduler(max_batch_size=geri_config.server.max_batch_size)
 
     def step(self) -> None:
         """Step the engine core.
@@ -494,42 +543,34 @@ class StreamGeriEngine(Engine):
     in an streamed manner.
     """
 
-    def __init__(
+    def mode_specific_initializer(
         self,
-        config: GeriConfig,
-        request_sock_path: str,
-        response_sock_path: str,
+        model: GeriModel,
+        geri_config: GeriConfig,
     ) -> None:
-        """Initialize the engine.
+        """Initialize mode-specific (i.e., batch vs stream) components.
+
+        Specifically, components that depend on the mode are:
+            self.executor
+            self.decoder
+            self.scheduler
 
         Args:
-            config: Geri configuration.
-            request_sock_path: Path for receiving requests from router.
-            response_sock_path: Path for sending responses to router.
+            model: The model that was initialized for the Engine.
+            geri_config: Geri configuration.
+
+        Raises:
+            TypeError: if the supplied model doesn't match the expected type for this execution mode.
         """
-        # Initialize model executor
-        model = load_model(model_id=config.model.id, torch_device=torch.device("cuda"))
-        assert isinstance(model, StreamGeriModel)
+        if not isinstance(model, StreamGeriModel):
+            raise TypeError(f"StreamGeriEngine should be initialized with StreamGeriModel, not {type(model).__name__}")
+
         self.executor = StreamExecutor(model=model)
-        self.sidecar = Sidecar(
-            SidecarConfig(
-                sidecar_rank=sorted(config.sidecar.ranks)[0],
-                group=sorted(config.sidecar.ranks),
-                recv_tensor_dtype=model.dtype,
-                recv_tensor_shape=(-1, model.embedding_dim),
-            )
-        )
 
-        # Set up serialization
-        self.encoder = MsgpackEncoder()
-
-        # Currently, the Engine core only supports audio requests in batch mode.
+        # Currently, the batch Engine core only supports audio requests.
+        # To add more request types, specify it in configs and add a match statement here.
         self.decoder = MsgpackDecoder(AudioEngineRequest)
-
-        # Initialize scheduler
-        self.scheduler = AudioScheduler(max_batch_size=config.server.max_batch_size)
-
-        super().__init__(config, request_sock_path, response_sock_path)
+        self.scheduler = AudioScheduler(max_batch_size=geri_config.server.max_batch_size)
 
     def step(self) -> None:
         """Step the engine core.
