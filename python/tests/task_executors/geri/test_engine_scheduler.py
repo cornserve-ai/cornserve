@@ -2,18 +2,29 @@
 
 import pytest
 
-from cornserve.task_executors.geri.engine.scheduler import RequestQueue, ScheduledRequest, Scheduler, SchedulerBatch
-from cornserve.task_executors.geri.schema import EngineRequest
+from cornserve.task_executors.geri.engine.scheduler import (
+    ImageScheduler,
+    ImageSchedulerBatch,
+    RequestQueue,
+    ScheduledImageRequest,
+)
+from cornserve.task_executors.geri.schema import ImageEngineRequest
 
 
 def test_scheduler_batch_validation() -> None:
-    """Test SchedulerBatch validation and properties."""
+    """Test ImageSchedulerBatch validation and properties."""
     requests = [
-        ScheduledRequest("req1", "embed1", 256, 256, 10),
-        ScheduledRequest("req2", "embed2", 256, 256, 10),
+        ScheduledImageRequest("req1", "embed1", span=None, height=256, width=256, num_inference_steps=10),
+        ScheduledImageRequest("req2", "embed2", span=None, height=256, width=256, num_inference_steps=10),
     ]
 
-    batch = SchedulerBatch(requests=requests, height=256, width=256, num_inference_steps=10)
+    batch = ImageSchedulerBatch(
+        requests=requests,
+        sched_request_type=ScheduledImageRequest,
+        height=256,
+        width=256,
+        num_inference_steps=10,
+    )
 
     assert len(batch) == 2
     assert batch.request_ids == ["req1", "req2"]
@@ -23,25 +34,31 @@ def test_scheduler_batch_validation() -> None:
 
 
 def test_scheduler_batch_validation_error() -> None:
-    """Test SchedulerBatch validation with mismatched parameters."""
+    """Test ImageSchedulerBatch validation with mismatched parameters."""
     requests = [
-        ScheduledRequest("req1", "embed1", 256, 256, 10),
-        ScheduledRequest("req2", "embed2", 256, 512, 10),
+        ScheduledImageRequest("req1", "embed1", span=None, height=256, width=256, num_inference_steps=10),
+        ScheduledImageRequest("req2", "embed2", span=None, height=256, width=512, num_inference_steps=10),
     ]
 
     with pytest.raises(ValueError, match="identical generation parameters"):
-        SchedulerBatch(requests=requests, height=256, width=256, num_inference_steps=10)
+        ImageSchedulerBatch(
+            requests=requests,
+            sched_request_type=ScheduledImageRequest,
+            height=256,
+            width=256,
+            num_inference_steps=10,
+        )
 
 
 def test_request_queue_enqueue_and_length() -> None:
     """Test RequestQueue basic enqueue and length operations."""
-    queue = RequestQueue()
+    queue = RequestQueue(ScheduledImageRequest)
     assert len(queue) == 0
     assert not queue.has_requests()
 
     # Create test engine request
-    engine_req = EngineRequest(
-        request_id="test-123", embedding_data_id="embed-456", height=512, width=512, num_inference_steps=20
+    engine_req = ImageEngineRequest(
+        request_id="test-123", embedding_data_id="embed-456", height=512, width=512, num_inference_steps=20, span_context=None
     )
 
     queue.enqueue(engine_req)
@@ -51,12 +68,12 @@ def test_request_queue_enqueue_and_length() -> None:
 
 def test_request_queue_fcfs_ordering() -> None:
     """Test RequestQueue maintains FCFS ordering."""
-    queue = RequestQueue()
+    queue = RequestQueue(ScheduledImageRequest)
 
     # Add requests with different parameters in a specific order
-    req1 = EngineRequest("req1", "embed1", 512, 512, 20)  # First request
-    req2 = EngineRequest("req2", "embed2", 256, 256, 10)  # Different params
-    req3 = EngineRequest("req3", "embed3", 256, 256, 10)  # Same as req2
+    req1 = ImageEngineRequest("req1", "embed1", height=512, width=512, num_inference_steps=20, span_context=None)  # First request
+    req2 = ImageEngineRequest("req2", "embed2", height=256, width=256, num_inference_steps=10, span_context=None)  # Different params
+    req3 = ImageEngineRequest("req3", "embed3", height=256, width=256, num_inference_steps=10, span_context=None)  # Same as req2
 
     queue.enqueue(req1)
     queue.enqueue(req2)
@@ -66,21 +83,23 @@ def test_request_queue_fcfs_ordering() -> None:
 
     # Should return parameters of first request (FCFS)
     next_request = queue.peek_next_batch()
+    assert isinstance(next_request, ScheduledImageRequest)
     next_params = next_request.height, next_request.width, next_request.num_inference_steps
     assert next_params == (512, 512, 20)
 
 
 def test_request_queue_pop_batch_consecutive() -> None:
     """Test RequestQueue batch popping with consecutive matching requests."""
-    queue = RequestQueue()
+    queue = RequestQueue(ScheduledImageRequest)
 
     # Add multiple requests with same parameters
     for i in range(3):
-        req = EngineRequest(f"req{i}", f"embed{i}", 256, 256, 10)
+        req = ImageEngineRequest(f"req{i}", f"embed{i}", height=256, width=256, num_inference_steps=10, span_context=None)
         queue.enqueue(req)
 
     # Pop batch of size 2
     req = queue.peek_next_batch()
+    assert req is not None
     batch_requests = queue.pop_batch(req, max_batch_size=2)
 
     assert len(batch_requests) == 2
@@ -91,33 +110,39 @@ def test_request_queue_pop_batch_consecutive() -> None:
 
 def test_request_queue_pop_batch_nonexistent() -> None:
     """Test RequestQueue pop_batch with nonexistent parameters."""
-    queue = RequestQueue()
+    queue = RequestQueue(ScheduledImageRequest)
 
-    req = EngineRequest("req1", "embed1", 256, 256, 10)
+    req = ImageEngineRequest("req1", "embed1", height=256, width=256, num_inference_steps=10, span_context=None)
     queue.enqueue(req)
 
     # Try to pop batch with different parameters
-    req = EngineRequest("req2", "embed1", 512, 512, 20)
-    batch_requests = queue.pop_batch(req)
+    scheduled_req_to_pop = ScheduledImageRequest(
+        "req2", "embed1", span=None, height=512, width=512, num_inference_steps=20
+    )
+    batch_requests = queue.pop_batch(scheduled_req_to_pop)
     assert len(batch_requests) == 0
     assert len(queue) == 1  # Original request should remain
 
 
 def test_request_queue_pop_batch_fcfs_stops_at_mismatch() -> None:
     """Test RequestQueue pop_batch stops at first non-matching request to maintain FCFS."""
-    queue = RequestQueue()
+    queue = RequestQueue(ScheduledImageRequest)
 
     # Add requests in specific order: matching, non-matching, matching
-    req1 = EngineRequest("req1", "embed1", 256, 256, 10)  # Matches
-    req2 = EngineRequest("req2", "embed2", 512, 512, 20)  # Different params
-    req3 = EngineRequest("req3", "embed3", 256, 256, 10)  # Matches but after non-match
+    req1 = ImageEngineRequest("req1", "embed1", height=256, width=256, num_inference_steps=10, span_context=None)  # Matches
+    req2 = ImageEngineRequest("req2", "embed2", height=512, width=512, num_inference_steps=20, span_context=None)  # Different params
+    req3 = ImageEngineRequest(
+        "req3", "embed3", height=256, width=256, num_inference_steps=10, span_context=None
+    )  # Matches but after non-match
 
     queue.enqueue(req1)
     queue.enqueue(req2)
     queue.enqueue(req3)
 
     # Pop batch for 256x256x10 parameters
-    batch_requests = queue.pop_batch(req1)
+    scheduled_req1 = queue.peek_next_batch()
+    assert scheduled_req1 is not None
+    batch_requests = queue.pop_batch(scheduled_req1)
 
     # Should only get req1, not req3, because req2 blocks the batch in FCFS order
     assert len(batch_requests) == 1
@@ -127,11 +152,11 @@ def test_request_queue_pop_batch_fcfs_stops_at_mismatch() -> None:
 
 def test_scheduler_enqueue() -> None:
     """Test Scheduler enqueue functionality."""
-    scheduler = Scheduler(max_batch_size=4)
+    scheduler = ImageScheduler(max_batch_size=4)
 
     assert not scheduler.has_waiting_requests()
 
-    req = EngineRequest("req1", "embed1", 256, 256, 10)
+    req = ImageEngineRequest("req1", "embed1", height=256, width=256, num_inference_steps=10, span_context=None)
     scheduler.enqueue(req)
 
     assert scheduler.has_waiting_requests()
@@ -139,7 +164,7 @@ def test_scheduler_enqueue() -> None:
 
 def test_scheduler_schedule_empty() -> None:
     """Test Scheduler returns None when no requests are waiting."""
-    scheduler = Scheduler()
+    scheduler = ImageScheduler()
 
     batch = scheduler.schedule()
     assert batch is None
@@ -147,9 +172,9 @@ def test_scheduler_schedule_empty() -> None:
 
 def test_scheduler_schedule_single_request() -> None:
     """Test Scheduler scheduling a single request."""
-    scheduler = Scheduler()
+    scheduler = ImageScheduler()
 
-    req = EngineRequest("req1", "embed1", 512, 256, 15)
+    req = ImageEngineRequest("req1", "embed1", height=512, width=256, num_inference_steps=15, span_context=None)
     scheduler.enqueue(req)
 
     batch = scheduler.schedule()
@@ -163,11 +188,11 @@ def test_scheduler_schedule_single_request() -> None:
 
 def test_scheduler_schedule_batch() -> None:
     """Test Scheduler scheduling multiple requests with same parameters."""
-    scheduler = Scheduler(max_batch_size=3)
+    scheduler = ImageScheduler(max_batch_size=3)
 
     # Add requests with same parameters
     for i in range(5):
-        req = EngineRequest(f"req{i}", f"embed{i}", 128, 128, 5)
+        req = ImageEngineRequest(f"req{i}", f"embed{i}", height=128, width=128, num_inference_steps=5, span_context=None)
         scheduler.enqueue(req)
 
     # Schedule first batch
@@ -189,12 +214,14 @@ def test_scheduler_schedule_batch() -> None:
 
 def test_scheduler_schedule_different_params_fcfs() -> None:
     """Test Scheduler with requests having different parameters maintains FCFS order."""
-    scheduler = Scheduler()
+    scheduler = ImageScheduler()
 
     # Add requests with different parameters in specific order
-    req1 = EngineRequest("req1", "embed1", 256, 256, 10)  # First
-    req2 = EngineRequest("req2", "embed2", 512, 512, 20)  # Second, different params
-    req3 = EngineRequest("req3", "embed3", 256, 256, 10)  # Third, same as first
+    req1 = ImageEngineRequest("req1", "embed1", height=256, width=256, num_inference_steps=10, span_context=None)  # First
+    req2 = ImageEngineRequest(
+        "req2", "embed2", height=512, width=512, num_inference_steps=20, span_context=None
+    )  # Second, different params
+    req3 = ImageEngineRequest("req3", "embed3", height=256, width=256, num_inference_steps=10, span_context=None)  # Third, same as first
 
     scheduler.enqueue(req1)
     scheduler.enqueue(req2)
@@ -227,12 +254,12 @@ def test_scheduler_schedule_different_params_fcfs() -> None:
 
 def test_scheduler_schedule_consecutive_same_params() -> None:
     """Test Scheduler can batch consecutive requests with same parameters."""
-    scheduler = Scheduler()
+    scheduler = ImageScheduler()
 
     # Add consecutive requests with same parameters
-    req1 = EngineRequest("req1", "embed1", 256, 256, 10)
-    req2 = EngineRequest("req2", "embed2", 256, 256, 10)
-    req3 = EngineRequest("req3", "embed3", 256, 256, 10)
+    req1 = ImageEngineRequest("req1", "embed1", height=256, width=256, num_inference_steps=10, span_context=None)
+    req2 = ImageEngineRequest("req2", "embed2", height=256, width=256, num_inference_steps=10, span_context=None)
+    req3 = ImageEngineRequest("req3", "embed3", height=256, width=256, num_inference_steps=10, span_context=None)
 
     scheduler.enqueue(req1)
     scheduler.enqueue(req2)
@@ -254,11 +281,11 @@ def test_scheduler_schedule_consecutive_same_params() -> None:
 
 def test_scheduler_max_batch_size_none() -> None:
     """Test Scheduler with no max_batch_size limit."""
-    scheduler = Scheduler(max_batch_size=None)
+    scheduler = ImageScheduler(max_batch_size=None)
 
     # Add many requests with same parameters
     for i in range(10):
-        req = EngineRequest(f"req{i}", f"embed{i}", 64, 64, 1)
+        req = ImageEngineRequest(f"req{i}", f"embed{i}", height=64, width=64, num_inference_steps=1, span_context=None)
         scheduler.enqueue(req)
 
     # Should batch all requests together

@@ -4,12 +4,18 @@ from __future__ import annotations
 
 from collections.abc import Generator
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import Enum, IntEnum
 
 import msgspec
 import torch
 
-from cornserve.task_executors.geri.api import Status
+
+class Status(IntEnum):
+    """Status of various operations."""
+
+    SUCCESS = 0
+    ERROR = 1
+    FINISHED = 2
 
 
 class EngineOpcode(Enum):

@@ -11,6 +11,7 @@ from cornserve.task_executors.geri.schema import (
     AudioEngineRequest,
     BatchEngineRequest,
     ImageEngineRequest,
+    Status,
     StreamEngineRequest,
 )
 
@@ -119,14 +120,6 @@ class AudioGenerationRequest(StreamGeriRequest):
             left_context_size=self.left_context_size,
             span_context=span_context,
         )
-
-
-class Status(enum.IntEnum):
-    """Status of various operations."""
-
-    SUCCESS = 0
-    ERROR = 1
-    FINISHED = 2
 
 
 class BatchGenerationResponse(BaseModel):

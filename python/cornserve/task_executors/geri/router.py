@@ -14,10 +14,10 @@ from cornserve.task_executors.geri.api import (
     BatchGenerationResponse,
     ErrorResponse,
     ImageGenerationRequest,
-    Status,
 )
 from cornserve.task_executors.geri.config import GeriConfig
 from cornserve.task_executors.geri.engine.client import EngineClient
+from cornserve.task_executors.geri.schema import Status
 
 router = APIRouter()
 logger = get_logger(__name__)

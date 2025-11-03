@@ -9,7 +9,6 @@ from typing import Any
 import torch
 
 from cornserve.logging import get_logger
-from cornserve.task_executors.geri.api import Status
 from cornserve.task_executors.geri.models.base import (
     BatchGeriModel,
     GeriModel,
@@ -17,6 +16,7 @@ from cornserve.task_executors.geri.models.base import (
 )
 from cornserve.task_executors.geri.schema import (
     BatchGenerationResult,
+    Status,
     StreamGenerationResult,
 )
 

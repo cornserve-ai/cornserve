@@ -24,7 +24,6 @@ from cornserve.task_executors.geri.api import (
     AudioChunk,
     BatchGenerationResponse,
     BatchGeriRequest,
-    Status,
     StreamGeriRequest,
 )
 from cornserve.task_executors.geri.config import GeriConfig
@@ -39,6 +38,7 @@ from cornserve.task_executors.geri.schema import (
     BatchEngineResponse,
     EngineOpcode,
     GeriMode,
+    Status,
     StreamEngineRequest,
     StreamEngineResponse,
 )
