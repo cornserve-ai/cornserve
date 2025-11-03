@@ -8,11 +8,11 @@ from abc import ABC, abstractmethod
 from pydantic import BaseModel, ConfigDict, RootModel
 
 from cornserve.task_executors.geri.schema import (
-    Status,
-    BatchEngineRequest,
-    StreamEngineRequest,
-    ImageEngineRequest,
     AudioEngineRequest,
+    BatchEngineRequest,
+    ImageEngineRequest,
+    Status,
+    StreamEngineRequest,
 )
 
 
