@@ -29,7 +29,6 @@ def load_model(model_id: str, torch_device: torch.device) -> GeriModel:
 
     Raises:
         KeyError: If the model type is not found in the registry.
-        FileNotFoundError: If model_index.json is not found.
         ValueError: If the model configuration is invalid.
     """
     logger.info("Loading model %s", model_id)
@@ -63,7 +62,7 @@ def load_model(model_id: str, torch_device: torch.device) -> GeriModel:
 
     # If that didn't work either, abort
     if class_name is None:
-        raise FileNotFoundError(f"Could not load model {model_id}")
+        raise ValueError(f"Could not load model {model_id}")
 
     # Get the registry entry for this class
     try:
