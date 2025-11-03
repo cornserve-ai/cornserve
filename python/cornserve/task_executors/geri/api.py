@@ -33,7 +33,7 @@ class BatchGeriRequest(BaseModel, ABC):
     Attributes:
         embedding_data_id: Sidecar data ID for the audio codes.
 
-    Modality-specific generation request classes (e.g., ImageGenerationRequest)
+    Modality-specific generation request classes (e.g., ImageGeriRequest)
     that support batched generation should inherit from this class.
 
     Given that API requests must eventually be parsed into Engine requests,
@@ -53,7 +53,7 @@ class StreamGeriRequest(BaseModel, ABC):
     Attributes:
         embedding_data_id: Sidecar data ID for the audio codes.
 
-    Modality-specific generation request classes (e.g., AudioGenerationRequest)
+    Modality-specific generation request classes (e.g., AudioGeriRequest)
     that support streamed generation should inherit from this class.
 
     Given that API requests must eventually be parsed into Engine requests,
@@ -70,7 +70,7 @@ class StreamGeriRequest(BaseModel, ABC):
 # ---------- Modality specific generation request classes ----------
 
 
-class ImageGenerationRequest(BatchGeriRequest):
+class ImageGeriRequest(BatchGeriRequest):
     """Request to generate image content.
 
     Attributes:
@@ -98,7 +98,7 @@ class ImageGenerationRequest(BatchGeriRequest):
         )
 
 
-class AudioGenerationRequest(StreamGeriRequest):
+class AudioGeriRequest(StreamGeriRequest):
     """Request to generate audio content.
 
     Attributes:
@@ -122,7 +122,7 @@ class AudioGenerationRequest(StreamGeriRequest):
         )
 
 
-class BatchGenerationResponse(BaseModel):
+class BatchGeriResponse(BaseModel):
     """Response containing the full generated content.
 
     Attributes:
@@ -141,7 +141,7 @@ class StreamGeriResponseChunk(RootModel[bytes]):
     """Response containing a chunk of generated streaming data.
 
     StreamGeriResponseChunk is meant to carry an individual
-    unit of data for a *streamed* response.
+    unit of data for a streamed response.
     """
 
     model_config = ConfigDict(

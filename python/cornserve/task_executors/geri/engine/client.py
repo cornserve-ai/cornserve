@@ -20,8 +20,8 @@ from cornserve.logging import get_logger
 from cornserve.sidecar.api import Sidecar
 from cornserve.sidecar.schema import SidecarConfig
 from cornserve.task_executors.geri.api import (
-    BatchGenerationResponse,
     BatchGeriRequest,
+    BatchGeriResponse,
     StreamGeriRequest,
     StreamGeriResponseChunk,
 )
@@ -152,7 +152,7 @@ class EngineClient:
         self.ctx.destroy()
 
     @tracer.start_as_current_span("engine_client.generate_batch")
-    async def generate_batch(self, request_id: str, request: BatchGeriRequest) -> BatchGenerationResponse:
+    async def generate_batch(self, request_id: str, request: BatchGeriRequest) -> BatchGeriResponse:
         """Generate image content using the engine process."""
         # Propagate trace context
         span_context = {}
@@ -194,12 +194,12 @@ class EngineClient:
 
         # Convert engine response to API response
         if engine_response.status == Status.SUCCESS:
-            return BatchGenerationResponse(
+            return BatchGeriResponse(
                 status=Status.SUCCESS,
                 generated=engine_response.generated,
             )
         else:
-            return BatchGenerationResponse(
+            return BatchGeriResponse(
                 status=Status.ERROR,
                 error_message=engine_response.error_message,
             )

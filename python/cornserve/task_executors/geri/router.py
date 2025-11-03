@@ -4,15 +4,15 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter, FastAPI, Request, Response, status, HTTPException
+from fastapi import APIRouter, FastAPI, HTTPException, Request, Response, status
 from fastapi.responses import StreamingResponse
 from opentelemetry import trace
 
 from cornserve.logging import get_logger
 from cornserve.task_executors.geri.api import (
-    AudioGenerationRequest,
-    BatchGenerationResponse,
-    ImageGenerationRequest,
+    AudioGeriRequest,
+    BatchGeriResponse,
+    ImageGeriRequest,
 )
 from cornserve.task_executors.geri.config import GeriConfig
 from cornserve.task_executors.geri.engine.client import EngineClient
@@ -37,10 +37,10 @@ async def info(raw_request: Request) -> GeriConfig:
 
 @router.post("/image/generate")
 async def generate_image(
-    request: ImageGenerationRequest,
+    request: ImageGeriRequest,
     raw_request: Request,
     raw_response: Response,
-) -> BatchGenerationResponse:
+) -> BatchGeriResponse:
     """Handler for generation requests."""
     engine_client: EngineClient = raw_request.app.state.engine_client
 
@@ -66,12 +66,12 @@ async def generate_image(
     except Exception as e:
         logger.exception("Image generation request failed: %s", str(e))
         raw_response.status_code = status.HTTP_500_INTERNAL_SERVER_ERROR
-        return BatchGenerationResponse(status=Status.ERROR, error_message=f"Generation failed: {str(e)}")
+        return BatchGeriResponse(status=Status.ERROR, error_message=f"Generation failed: {str(e)}")
 
 
 @router.post("/audio/generate")
 async def generate_audio(
-    request: AudioGenerationRequest,
+    request: AudioGeriRequest,
     raw_request: Request,
     raw_response: Response,
 ) -> StreamingResponse:
@@ -90,10 +90,7 @@ async def generate_audio(
 
     except Exception as e:
         logger.exception("Audio generation request failed: %s", str(e))
-        raise HTTPException(
-            status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Generation failed: {str(e)}"
-        )
+        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Generation failed: {str(e)}") from e
 
 
 def init_app_state(app: FastAPI, config: GeriConfig) -> None:
