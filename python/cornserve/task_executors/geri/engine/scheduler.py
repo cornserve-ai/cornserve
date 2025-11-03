@@ -33,10 +33,9 @@ class ScheduledRequest(ABC):
     def from_engine_request(cls, engine_request: EngineRequest, span: trace.Span | None) -> ScheduledRequest:
         """Creates a scheduled request from an engine request."""
 
-    @staticmethod
     @abstractmethod
-    def requests_compatible(req1: ScheduledRequest, req2: ScheduledRequest) -> bool:
-        """Returns whether the given requests can be in the same batch."""
+    def requests_compatible(self, other: ScheduledRequest) -> bool:
+        """Returns whether the given request can be in the same batch."""
 
 
 @dataclass
@@ -62,21 +61,20 @@ class ScheduledImageRequest(ScheduledRequest):
             skip_tokens=engine_request.skip_tokens,
         )
 
-    @staticmethod
-    def requests_compatible(req1: ScheduledRequest, req2: ScheduledRequest) -> bool:
-        """Returns whether the given requests can be in the same ImageRequest batch.
+    def requests_compatible(self, other: ScheduledRequest) -> bool:
+        """Returns whether the given request can be in the same ImageSchedulerBatch.
 
         To be compatible, two image requests must be identical in these fields:
             ScheduledImageRequest.height
             ScheduledImageRequest.width
             ScheduledImageRequest.num_inference_steps
         """
-        if not isinstance(req1, ScheduledImageRequest) or not isinstance(req2, ScheduledImageRequest):
+        if not isinstance(other, ScheduledImageRequest):
             return False
         return (
-            req1.height == req2.height
-            and req1.width == req2.width
-            and req1.num_inference_steps == req2.num_inference_steps
+            self.height == other.height
+            and self.width == other.width
+            and self.num_inference_steps == other.num_inference_steps
         )
 
 
@@ -99,17 +97,16 @@ class ScheduledAudioRequest(ScheduledRequest):
             left_context_size=engine_request.left_context_size,
         )
 
-    @staticmethod
-    def requests_compatible(req1: ScheduledRequest, req2: ScheduledRequest) -> bool:
-        """Returns whether the given requests can be in the same AudioRequest batch.
+    def requests_compatible(self, other: ScheduledRequest) -> bool:
+        """Returns whether the given request can be in the same AudioSchedulerBatch.
 
         To be compatible, two audio requests must be identical in these fields:
             ScheduledAudioRequest.chunk_size
             ScheduledAudioRequest.left_context_size
         """
-        if not isinstance(req1, ScheduledAudioRequest) or not isinstance(req2, ScheduledAudioRequest):
+        if not isinstance(other, ScheduledAudioRequest):
             return False
-        return req1.chunk_size == req2.chunk_size and req1.left_context_size == req2.left_context_size
+        return self.chunk_size == other.chunk_size and self.left_context_size == other.left_context_size
 
 
 @dataclass
@@ -118,7 +115,7 @@ class SchedulerBatch:
 
     requests: list[ScheduledRequest]
 
-    # The type of ScheduledRequest classes to be batched
+    # The type of ScheduledRequest class to be batched
     sched_request_type: type[ScheduledRequest]
 
     def __post_init__(self) -> None:
@@ -126,12 +123,16 @@ class SchedulerBatch:
         if not self.requests:
             raise ValueError("Batch cannot be empty")
 
-        # Verify all requests have the same generation parameters
+        # Verify all requests have the right ScheduledRequest type and
+        # have the same generation parameters
         first_req = self.requests[0]
+        if not isinstance(first_req, self.sched_request_type):
+            raise TypeError(f"Expected {self.sched_request_type.__name__}, got {type(first_req).__name__}")
+
         for req in self.requests[1:]:
             if not isinstance(req, self.sched_request_type):
                 raise TypeError(f"Expected {self.sched_request_type.__name__}, got {type(req).__name__}")
-            if not self.sched_request_type.requests_compatible(first_req, req):
+            if first_req.requests_compatible(req):
                 raise ValueError("All requests in a batch must have identical generation parameters")
 
     def __len__(self) -> int:
@@ -165,6 +166,8 @@ class ImageSchedulerBatch(SchedulerBatch):
     width: int
     num_inference_steps: int
 
+    sched_request_type: type[ScheduledRequest] = ScheduledImageRequest
+
     @property
     def skip_tokens(self) -> list[int]:
         """Get list of skip tokens for this batch."""
@@ -181,6 +184,8 @@ class AudioSchedulerBatch(SchedulerBatch):
     chunk_size: int | None = None
     left_context_size: int | None = None
 
+    sched_request_type: type[ScheduledRequest] = ScheduledAudioRequest
+
 
 class RequestQueue:
     """A FCFS request queue that allows batching of consecutive requests with same parameters."""
@@ -194,7 +199,6 @@ class RequestQueue:
     def enqueue(self, request: EngineRequest, span: Span | None = None) -> None:
         """Add a request to the queue in FCFS order."""
         scheduled_req = self.sched_request_type.from_engine_request(request, span)
-
         self._requests.append(scheduled_req)
 
         logger.debug(
@@ -233,7 +237,7 @@ class RequestQueue:
         i = 0
         while i < len(self._requests) and (max_batch_size is None or len(batch_requests) < max_batch_size):
             req = self._requests[i]
-            if self.sched_request_type.requests_compatible(next_request, req):
+            if next_request.requests_compatible(req):
                 batch_requests.append(req)
                 i += 1
             else:
@@ -324,14 +328,13 @@ class ImageScheduler(Scheduler):
         assert isinstance(next_request, ScheduledImageRequest)
         batch = ImageSchedulerBatch(
             requests=batch_requests,
-            sched_request_type=ScheduledImageRequest,
             height=next_request.height,
             width=next_request.width,
             num_inference_steps=next_request.num_inference_steps,
         )
 
         logger.info(
-            "Scheduled batch of %d requests",
+            "Scheduled image batch of %d requests",
             len(batch_requests),
         )
 
@@ -368,13 +371,12 @@ class AudioScheduler(Scheduler):
         assert isinstance(next_request, ScheduledAudioRequest)
         batch = AudioSchedulerBatch(
             requests=batch_requests,
-            sched_request_type=ScheduledAudioRequest,
             chunk_size=next_request.chunk_size,
             left_context_size=next_request.left_context_size,
         )
 
         logger.info(
-            "Scheduled batch of %d requests",
+            "Scheduled audio batch of %d requests",
             len(batch_requests),
         )
 
