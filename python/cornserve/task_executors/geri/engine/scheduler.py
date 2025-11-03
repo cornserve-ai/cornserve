@@ -133,7 +133,7 @@ class SchedulerBatch:
         for req in self.requests[1:]:
             if not isinstance(req, self.sched_request_type):
                 raise TypeError(f"Expected {self.sched_request_type.__name__}, got {type(req).__name__}")
-            if first_req.requests_compatible(req):
+            if not first_req.requests_compatible(req):
                 raise ValueError("All requests in a batch must have identical generation parameters")
 
     def __len__(self) -> int:
