@@ -10,7 +10,8 @@ from cornserve import constants
 from cornserve.services.resource import GPU
 from cornserve_tasklib.task.unit.generator import GeneratorInput, GeneratorOutput, GeneratorTask
 from cornserve.task_executors.descriptor.base import TaskExecutionDescriptor
-from cornserve.task_executors.geri.api import GenerationRequest, GenerationResponse, Status
+from cornserve.task_executors.geri.api import ImageGeriRequest, BatchGeriResponse
+from cornserve.task_executors.geri.schema import Status
 
 
 class GeriDescriptor(TaskExecutionDescriptor[GeneratorTask, GeneratorInput, GeneratorOutput]):
@@ -49,7 +50,7 @@ class GeriDescriptor(TaskExecutionDescriptor[GeneratorTask, GeneratorInput, Gene
 
     def to_request(self, task_input: GeneratorInput, task_output: GeneratorOutput) -> dict[str, Any]:
         """Convert TaskInput to a request object for the task executor."""
-        req = GenerationRequest(
+        req = ImageGeriRequest(
             embedding_data_id=task_input.embeddings.id,
             height=task_input.height,
             width=task_input.width,
@@ -61,7 +62,7 @@ class GeriDescriptor(TaskExecutionDescriptor[GeneratorTask, GeneratorInput, Gene
     async def from_response(self, task_output: GeneratorOutput, response: aiohttp.ClientResponse) -> GeneratorOutput:
         """Convert the task executor response to TaskOutput."""
         response_data = await response.json()
-        resp = GenerationResponse.model_validate(response_data)
+        resp = BatchGeriResponse.model_validate(response_data)
         if resp.status == Status.SUCCESS:
             if resp.generated is None:
                 raise RuntimeError("No generated content received from Geri")
