@@ -82,16 +82,8 @@ class EngineClient:
         self.response_sock = make_zmq_socket(self.ctx, self.response_sock_path, zmq.PULL)
 
         # Determine Geri mode to run engine core in
-        try:
-            registry_entry = MODEL_REGISTRY[config.model.id]
-        except KeyError:
-            logger.exception(
-                "Pipeline class %s not found in registry. Available classes: %s",
-                config.model.id,
-                list(MODEL_REGISTRY.keys()),
-            )
-            raise
-        self.geri_mode = registry_entry.geri_mode
+        # TODO: from laoder
+        self.geri_mode = GeriMode.STREAMING
 
         # Track pending requests
         self.pending_requests: dict[str, Future[BatchEngineResponse]] = {}

@@ -70,7 +70,7 @@ async def generate_image(
         return BatchGenerationResponse(status=Status.ERROR, error_message=f"Generation failed: {str(e)}")
 
 
-@router.post("/audio/generate")
+@router.post("/audio/generate", response_model=None)
 async def generate_audio(
     request: AudioGenerationRequest,
     raw_request: Request,

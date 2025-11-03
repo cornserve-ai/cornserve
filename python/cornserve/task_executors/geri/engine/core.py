@@ -170,9 +170,8 @@ class Engine(ABC):
             logger.error("No embedding chunks received for data ID: %s", embedding_data_id)
             raise RuntimeError(f"No embeddings received for data ID: {embedding_data_id}")
 
-    @staticmethod
     @abstractmethod
-    def _create_top_level_span(request: EngineRequest) -> trace.Span | None:
+    def _create_top_level_span(self, request: EngineRequest) -> trace.Span | None:
         """Create a top-level span for a client request if context is provided."""
 
     def _handle_client_request(self, opcode: EngineOpcode, request: Any) -> None:
@@ -185,7 +184,7 @@ class Engine(ABC):
                     return
 
                 # Set up tracing span if context is provided
-                span = Engine._create_top_level_span(request)
+                span = self._create_top_level_span(request)
 
                 self.scheduler.enqueue(request, span)
             case EngineOpcode.SHUTDOWN:
@@ -475,8 +474,7 @@ class BatchGeriEngine(Engine):
         logger.info("Processed batch of %d requests", len(batch))
         return responses
 
-    @staticmethod
-    def _create_top_level_span(request: EngineRequest) -> trace.Span | None:
+    def _create_top_level_span(self, request: EngineRequest) -> trace.Span | None:
         """Create a top-level span for a client request if context is provided."""
         if request.span_context is not None:
             context = propagator.extract(request.span_context)
@@ -564,9 +562,6 @@ class StreamGeriEngine(Engine):
         with tracer.start_as_current_span("geri.engine.generate_batch") as batch_span:
             # TODO: change
             batch_span.set_attribute("geri.batch_size", len(batch))
-            batch_span.set_attribute("geri.height", batch.height)
-            batch_span.set_attribute("geri.width", batch.width)
-            batch_span.set_attribute("geri.num_inference_steps", batch.num_inference_steps)
 
             # Create individual spans for each request in the batch as child spans
             request_spans: list[trace.Span] = Engine.create_request_spans(batch)
@@ -607,7 +602,7 @@ class StreamGeriEngine(Engine):
             Engine.end_request_span(request_spans[index], streaming_result)
             Engine.end_top_level_span(batch_spans[index], streaming_result)
 
-        for streamed_chunks in streaming_result.streamed_generator:
+        for streamed_chunks in streaming_result.generator:
             for i, wav_chunk in enumerate(streamed_chunks):
                 request_id = batch_request_ids[i]
                 # Finished early
@@ -629,8 +624,7 @@ class StreamGeriEngine(Engine):
                 # But by now, all requests are done, so we end it here.
                 handle_finished_request(i)
 
-    @staticmethod
-    def _create_top_level_span(request: EngineRequest) -> trace.Span | None:
+    def _create_top_level_span(self, request: EngineRequest) -> trace.Span | None:
         """Create a top-level span for a client request if context is provided."""
         if request.span_context is not None:
             context = propagator.extract(request.span_context)
@@ -641,5 +635,5 @@ class StreamGeriEngine(Engine):
                     span.set_attribute("geri.engine.process_request.chunk_size", request.chunk_size)
                 if request.left_context_size:
                     span.set_attribute("geri.engine.process_request.left_context_size", request.left_context_size)
-                return span
+            return span
         return None
