@@ -31,7 +31,8 @@ from cornserve.task_executors.geri.engine.core import (
     StreamGeriEngine,
 )
 from cornserve.task_executors.geri.executor.loader import load_model
-from cornserve.task_executors.geri.models.registry import MODEL_REGISTRY
+
+# from cornserve.task_executors.geri.models.registry import MODEL_REGISTRY
 from cornserve.task_executors.geri.schema import (
     BatchEngineRequest,
     BatchEngineResponse,
