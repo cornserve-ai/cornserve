@@ -6,7 +6,6 @@ from collections.abc import Generator
 
 import numpy as np
 import torch
-from cornsere.task_executors.utils.weights import get_safetensors_weight_dict, set_default_torch_dtype
 from torch import nn
 from transformers.configuration_utils import PretrainedConfig
 from transformers.models.auto.configuration_auto import AutoConfig
@@ -25,6 +24,7 @@ from transformers.models.qwen3_omni_moe.modeling_qwen3_omni_moe import (
 
 from cornserve.logging import get_logger
 from cornserve.task_executors.geri.models.base import StreamGeriModel
+from cornserve.task_executors.utils.weights import get_safetensors_weight_dict, set_default_torch_dtype
 
 logger = get_logger(__name__)
 

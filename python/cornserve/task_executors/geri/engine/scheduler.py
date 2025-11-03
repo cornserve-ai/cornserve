@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+from typing import ClassVar
 
 from opentelemetry import propagate, trace
 from opentelemetry.trace import Span
@@ -116,7 +117,7 @@ class SchedulerBatch:
     requests: list[ScheduledRequest]
 
     # The type of ScheduledRequest class to be batched
-    sched_request_type: type[ScheduledRequest]
+    sched_request_type: ClassVar[type[ScheduledRequest]]
 
     def __post_init__(self) -> None:
         """Validate that all requests in the batch are compatible."""
@@ -166,7 +167,7 @@ class ImageSchedulerBatch(SchedulerBatch):
     width: int
     num_inference_steps: int
 
-    sched_request_type: type[ScheduledRequest] = ScheduledImageRequest
+    sched_request_type: ClassVar[type[ScheduledRequest]] = ScheduledImageRequest
 
     @property
     def skip_tokens(self) -> list[int]:
@@ -184,7 +185,7 @@ class AudioSchedulerBatch(SchedulerBatch):
     chunk_size: int | None = None
     left_context_size: int | None = None
 
-    sched_request_type: type[ScheduledRequest] = ScheduledAudioRequest
+    sched_request_type: ClassVar[type[ScheduledRequest]] = ScheduledAudioRequest
 
 
 class RequestQueue:
