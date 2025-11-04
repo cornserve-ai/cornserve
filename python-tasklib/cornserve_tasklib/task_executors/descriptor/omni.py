@@ -11,8 +11,8 @@ from cornserve import constants
 from cornserve.logging import get_logger
 from cornserve.services.resource import GPU
 from cornserve.task.base import Stream
+from cornserve_tasklib.task.unit.llm import OpenAIChatCompletionChunk
 from cornserve_tasklib.task.unit.omni import (
-    OmniOutputChunk,
     OmniTalkerVocoderInput,
     OmniTalkerVocoderTask,
 )
@@ -25,27 +25,36 @@ async def parse_stream_to_audio_chunks(response: aiohttp.ClientResponse) -> Asyn
     """Parse the streaming response into audio chunks."""
     assert not response.closed, "Response must not be closed when parsing."
     try:
-        async for line in response.content:
-            line = line.decode().strip()
-            if not line:
-                continue
+        buffer = b""
+        # Read in larger chunks to avoid "Chunk too big" error with large base64-encoded audio
+        async for chunk in response.content.iter_chunked(1024 * 1024):  # 1MB chunks
+            buffer += chunk
+            # Process complete lines from buffer
+            while b"\n" in buffer:
+                line_bytes, buffer = buffer.split(b"\n", 1)
+                line = line_bytes.decode().strip()
 
-            if not line.startswith("data: "):
-                logger.warning("Skipping unexpected line in OpenAI chat completion stream: %s", line)
-                continue
+                if not line:
+                    continue
 
-            line = line[6:].strip()
+                if not line.startswith("data: "):
+                    logger.warning("Skipping unexpected line in OpenAI chat completion stream: %s", line[:100])
+                    continue
 
-            if line.startswith("[DONE]"):
-                break
+                line = line[6:].strip()
 
-            yield OmniOutputChunk(audio_chunk=line).model_dump_json()
+                if line.startswith("[DONE]"):
+                    return
+
+                # each line is a chat completion chunk where some times it has a wav in delta message
+                chunk = OpenAIChatCompletionChunk.model_validate_json(line)
+                yield chunk.model_dump_json()
     finally:
         response.close()
 
 
 class OmniTalkerVocoderDescriptor(
-    TaskExecutionDescriptor[OmniTalkerVocoderTask, OmniTalkerVocoderInput, Stream[OmniOutputChunk]]
+    TaskExecutionDescriptor[OmniTalkerVocoderTask, OmniTalkerVocoderInput, Stream[OpenAIChatCompletionChunk]]
 ):
     """Task execution descriptor for Omni Talker tasks.
 
@@ -71,8 +80,12 @@ class OmniTalkerVocoderDescriptor(
             "--port", str(port),
             "--enforce-eager",
             "--cornserve-sidecar-ranks", *[str(gpu.global_rank) for gpu in gpus],
-            "--talker-devices", *[str(gpu.local_rank) for gpu in gpus],
-            "--code2wav-devices", *[str(gpu.local_rank) for gpu in gpus],
+            "--run-talker",
+            "--run-vocoder",
+            "--no-enable-prefix-caching",
+            "--no-enable-chunked-prefill",
+            "--max-num-batched-tokens", "124000",
+            "--disable-chunked-mm-input",
         ]
         # fmt: on
         return cmd
@@ -84,21 +97,30 @@ class OmniTalkerVocoderDescriptor(
     def to_request(
         self,
         task_input: OmniTalkerVocoderInput,
-        task_output: Stream[OmniOutputChunk],
+        task_output: Stream[OpenAIChatCompletionChunk],
     ) -> dict[str, Any]:
         """Convert TaskInput to a request object for the task executor."""
-        request = task_input.model_dump()
+        request = task_input.model_dump(exclude={
+            "thinker_hidden_states",
+            "cornserve_embeddings",
+            "cornserve_kv_transfer_params",
+            "encoder_fission",
+        })
         request["stream"] = True
-        request["cornserve_hidden_states_forward_data_id"] = task_input.embeddings.id
+        vllm_xargs = {
+            "cornserve_hidden_states_recv_id": task_input.thinker_hidden_states.id,
+        }
+        request["vllm_xargs"] = vllm_xargs
+        logger.info("Omni Talker Vocoder request: %s", request)
         return request
 
     async def from_response(
         self,
-        task_output: Stream[OmniOutputChunk],
+        task_output: Stream[OpenAIChatCompletionChunk],
         response: aiohttp.ClientResponse,
-    ) -> Stream[OmniOutputChunk]:
+    ) -> Stream[OpenAIChatCompletionChunk]:
         """Convert the task executor response to TaskOutput."""
-        return Stream[OmniOutputChunk](
+        return Stream[OpenAIChatCompletionChunk](
             async_iterator=parse_stream_to_audio_chunks(response),
             response=response,
         )

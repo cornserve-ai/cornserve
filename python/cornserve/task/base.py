@@ -601,7 +601,19 @@ class TaskGraphDispatch(BaseModel):
             if self.is_streaming:
                 response = await client.post(url, json=self.model_dump())
                 response.raise_for_status()
-                ait = aiter(response.content)
+
+                # Create a chunked iterator to avoid "chunk too big" error with large audio data
+                async def chunked_line_iterator():
+                    """Read lines from response using chunked reading to handle large lines."""
+                    buffer = b""
+                    async for chunk in response.content.iter_chunked(1024 * 1024):  # 1MB chunks
+                        buffer += chunk
+                        # Process complete lines from buffer
+                        while b"\n" in buffer:
+                            line_bytes, buffer = buffer.split(b"\n", 1)
+                            yield line_bytes
+
+                ait = aiter(chunked_line_iterator())
 
                 # First line is the task outputs of all invocations.
                 try:

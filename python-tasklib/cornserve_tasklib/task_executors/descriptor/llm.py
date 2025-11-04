@@ -140,7 +140,11 @@ class VLLMDescriptor(TaskExecutionDescriptor[LLMBaseUnitTask, OpenAIChatCompleti
                 data_url: URL = getattr(multimodal_content, multimodal_content.type)
                 data_url.url = f"data:{modality}/uuid;data_id={forward.id};url={data_url.url},"
 
-        request = task_input.model_dump(exclude={"cornserve_embeddings"})
+        request = task_input.model_dump(exclude={
+            "cornserve_embeddings",
+            "cornserve_kv_transfer_params",
+            "encoder_fission",
+        })
 
         if isinstance(task_output, Stream):
             request["stream"] = True
