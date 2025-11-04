@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import warnings
 from asyncio.futures import Future
 from collections.abc import AsyncGenerator
 from contextlib import suppress
@@ -30,9 +29,11 @@ from cornserve.task_executors.geri.engine.core import (
     BatchGeriEngine,
     StreamGeriEngine,
 )
-from cornserve.task_executors.geri.executor.loader import get_registry_entry, load_model
-
-# from cornserve.task_executors.geri.models.registry import MODEL_REGISTRY
+from cornserve.task_executors.geri.executor.loader import (
+    get_model_class,
+    get_registry_entry,
+)
+from cornserve.task_executors.geri.models.base import GeriModel
 from cornserve.task_executors.geri.schema import (
     BatchEngineRequest,
     BatchEngineResponse,
@@ -68,18 +69,9 @@ class EngineClient:
         registry_entry, model_config = get_registry_entry(config.model.id)
         self.geri_mode = registry_entry.geri_mode
 
-        # Figure out the embedding dimension from a temporary model instance
-        meta_device = torch.device("meta")
-        with warnings.catch_warnings():
-            warnings.filterwarnings(
-                "ignore",
-                message=".*copying from a non-meta parameter.*",
-                category=UserWarning,
-            )
-            with meta_device:
-                temp_model = load_model(
-                    model_id=config.model.id, torch_device=meta_device, registry_entry=registry_entry
-                )
+        # Determine embedding dimension for the model
+        model_class: type[GeriModel] = get_model_class(registry_entry)
+        embedding_dim = model_class.find_embedding_dim(config.model.id, model_config)
 
         # Create ZMQ sockets for communication with the engine
         self.ctx = zmq.asyncio.Context(io_threads=2)
@@ -99,8 +91,8 @@ class EngineClient:
             SidecarConfig(
                 sidecar_rank=sorted(config.sidecar.ranks)[0],
                 group=sorted(config.sidecar.ranks),
-                recv_tensor_dtype=temp_model.dtype,
-                recv_tensor_shape=(-1, temp_model.embedding_dim),
+                recv_tensor_dtype=registry_entry.torch_dtype,
+                recv_tensor_shape=(-1, embedding_dim),
             )
         )
 

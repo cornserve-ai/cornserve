@@ -75,6 +75,49 @@ def get_registry_entry(model_id: str) -> tuple[RegistryEntry, PretrainedConfig |
     return registry_entry, config
 
 
+def get_model_class(registry_entry: RegistryEntry) -> type[GeriModel]:
+    """Import and return the model class.
+
+    Args:
+        registry_entry: The registry entry for this model.
+
+    Returns:
+        The corresponding GeriModel class.
+
+    Raises:
+        ImportError: If the module specified in the registry entry could not be imported.
+        AttributeError: If the class in specified in the registry entry does not exist in
+            the module specified in the registry entry.
+        ValueError: If the model is invalid.
+    """
+    try:
+        model_class: type[GeriModel] = getattr(
+            importlib.import_module(f"cornserve.task_executors.geri.models.{registry_entry.module}"),
+            registry_entry.class_name,
+        )
+    except ImportError:
+        logger.exception(
+            "Failed to import module `%s`. Registry entry: %s",
+            registry_entry.module,
+            registry_entry,
+        )
+        raise
+    except AttributeError:
+        logger.exception(
+            "Model class %s not found in module `%s`. Registry entry: %s",
+            registry_entry.class_name,
+            f"models.{registry_entry.module}",
+            registry_entry,
+        )
+        raise
+
+    # Ensure that the model class is a GeriModel
+    if not issubclass(model_class, GeriModel):
+        raise ValueError(f"Model class {model_class} is not a subclass of GeriModel. Registry entry: {registry_entry}")
+
+    return model_class
+
+
 def load_model(
     model_id: str,
     torch_device: torch.device,
@@ -102,31 +145,7 @@ def load_model(
     """
     logger.info("Loading model %s", model_id)
 
-    # Import the model class
-    try:
-        model_class: type[GeriModel] = getattr(
-            importlib.import_module(f"cornserve.task_executors.geri.models.{registry_entry.module}"),
-            registry_entry.class_name,
-        )
-    except ImportError:
-        logger.exception(
-            "Failed to import module `%s`. Registry entry: %s",
-            registry_entry.module,
-            registry_entry,
-        )
-        raise
-    except AttributeError:
-        logger.exception(
-            "Model class %s not found in module `%s`. Registry entry: %s",
-            registry_entry.class_name,
-            f"models.{registry_entry.module}",
-            registry_entry,
-        )
-        raise
-
-    # Ensure that the model class is a GeriModel
-    if not issubclass(model_class, GeriModel):
-        raise ValueError(f"Model class {model_class} is not a subclass of GeriModel. Registry entry: {registry_entry}")
+    model_class: type[GeriModel] = get_model_class(registry_entry)
 
     # Instantiate the model
     model = model_class(

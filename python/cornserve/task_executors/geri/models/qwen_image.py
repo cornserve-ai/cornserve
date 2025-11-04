@@ -10,7 +10,9 @@ from diffusers.pipelines.qwenimage.pipeline_output import QwenImagePipelineOutpu
 from diffusers.pipelines.qwenimage.pipeline_qwenimage import QwenImagePipeline
 from PIL import Image
 from torch.nn.utils.rnn import pad_sequence
+from transformers import Qwen2_5_VLConfig
 from transformers.configuration_utils import PretrainedConfig
+from transformers.models.auto.configuration_auto import AutoConfig
 
 from cornserve.logging import get_logger
 from cornserve.task_executors.geri.models.base import BatchGeriModel
@@ -117,3 +119,23 @@ class QwenImageModel(BatchGeriModel):
         logger.info("Generated %d images successfully", len(images_png))
 
         return images_png
+
+    @staticmethod
+    def find_embedding_dim(model_id: str, config: PretrainedConfig | None = None) -> int:
+        """Find the embedding dimension of the model as indicated in HF configs.
+
+        Used for obtaining the embedding dimension without instantiating the model.
+
+        Args:
+            model_id: Will be used to obtain the hidden size from HF.
+            config: If supplied, the lookup to HF using model_id will be skipped, and the
+                hidden size will be extracted directly from config.
+        """
+        if isinstance(config, Qwen2_5_VLConfig):
+            return config.hidden_size
+        config = AutoConfig.from_pretrained(
+            model_id,
+            subfolder="text_encoder",
+            trust_remote_code=True,
+        )
+        return config.hidden_size

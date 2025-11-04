@@ -44,6 +44,19 @@ class GeriModel(ABC):
     def embedding_dim(self) -> int:
         """The dimension of the prompt embeddings used by the model."""
 
+    @staticmethod
+    @abstractmethod
+    def find_embedding_dim(model_id: str, config: PretrainedConfig | None = None) -> int:
+        """Find the embedding dimension of the model as indicated in HF configs.
+
+        Used for obtaining the embedding dimension without instantiating the model.
+
+        Args:
+            model_id: Will be used to obtain the hidden size from HF.
+            config: If supplied, the lookup to HF using model_id will be skipped, and the
+                hidden size will be extracted directly from config.
+        """
+
 
 class BatchGeriModel(GeriModel):
     """Geri Model that does not stream.

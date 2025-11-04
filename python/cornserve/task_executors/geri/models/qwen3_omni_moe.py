@@ -51,22 +51,16 @@ class Qwen3OmniMoeCode2Wav(StreamGeriModel, nn.Module):
         if isinstance(config, Qwen3OmniMoeConfig):
             model_config = config.code2wav_config
 
+        # We already have the right config type
+        elif isinstance(config, Qwen3OmniMoeCode2WavConfig):
+            model_config = config
+
         # Handles None config and any other cases
-        elif not isinstance(config, Qwen3OmniMoeCode2WavConfig):
+        else:
             try:
-                hf_config: PretrainedConfig = AutoConfig.from_pretrained(
-                    model_id,
-                    trust_remote_code=True,
-                )
-                if not isinstance(hf_config, Qwen3OmniMoeConfig):
-                    raise TypeError(f"Expected Qwen3OmniMoeConfig, but got {type(hf_config).__name__} instead.")
-                model_config = hf_config.code2wav_config
+                model_config = Qwen3OmniMoeCode2Wav._get_config(model_id)
             except Exception as e:
                 raise FileNotFoundError(f"Could not load model {model_id}: {e}") from e
-
-        # Otherwise, we already have the right config type
-        else:
-            model_config = config
 
         # Initialize components
         nn.Module.__init__(self)
@@ -190,3 +184,31 @@ class Qwen3OmniMoeCode2Wav(StreamGeriModel, nn.Module):
     def embedding_dim(self) -> int:
         """The dimension of the prompt embeddings used by the model."""
         return self.code_embedding.embedding_dim
+
+    @staticmethod
+    def _get_config(model_id: str) -> Qwen3OmniMoeCode2WavConfig:
+        """Fetches config from HF."""
+        hf_config: PretrainedConfig = AutoConfig.from_pretrained(
+            model_id,
+            trust_remote_code=True,
+        )
+        if not isinstance(hf_config, Qwen3OmniMoeConfig):
+            raise TypeError(f"Expected Qwen3OmniMoeConfig, but got {type(hf_config).__name__} instead.")
+        return hf_config.code2wav_config
+
+    @staticmethod
+    def find_embedding_dim(model_id: str, config: PretrainedConfig | None = None) -> int:
+        """Find the embedding dimension of the model as indicated in HF configs.
+
+        Used for obtaining the embedding dimension without instantiating the model.
+
+        Args:
+            model_id: Will be used to obtain the hidden size from HF.
+            config: If supplied, the lookup to HF using model_id will be skipped, and the
+                hidden size will be extracted directly from config.
+        """
+        if isinstance(config, Qwen3OmniMoeConfig):
+            return config.code2wav_config.hidden_size
+        if isinstance(config, Qwen3OmniMoeCode2WavConfig):
+            return config.hidden_size
+        return Qwen3OmniMoeCode2Wav._get_config(model_id).hidden_size
