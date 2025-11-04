@@ -3,7 +3,7 @@
 ```console
 $ cornserve register examples/qwen3_omni.py
 
-$ cornserve invoke qwen3_omni --data - <<EOF
+$ cornserve invoke qwen3_omni --aggregate-keys choices.0.delta.wav --data - <<EOF
 model: "Qwen/Qwen3-Omni-30B-A3B-Instruct"
 messages:
 - role: "user"
@@ -19,7 +19,7 @@ messages:
 return_audio: true
 EOF
 
-$ cornserve invoke qwen3_omni --aggregate-keys text_chunk.choices.0.delta.content --data - <<EOF
+$ cornserve invoke qwen3_omni --aggregate-keys choices.0.delta.content --data - <<EOF
 model: "Qwen/Qwen3-Omni-30B-A3B-Instruct"
 messages:
 - role: "user"
