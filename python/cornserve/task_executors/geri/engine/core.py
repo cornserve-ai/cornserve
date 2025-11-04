@@ -66,9 +66,9 @@ class Engine(ABC):
     invokes the model executor to launch image generation.
     """
 
+    # Components that depend on the execution mode (i.e., streaming vs batched).
+    # Will be initialized during construction.
     executor: ModelExecutor
-    sidecar: Sidecar
-    encoder: MsgpackEncoder
     decoder: MsgpackDecoder
     scheduler: Scheduler
 
@@ -479,7 +479,7 @@ class BatchGeriEngine(Engine):
         for response in responses:
             self.response_queue.put_nowait(response)
 
-    def _execute_batch(self, batch) -> list[EngineResponse]:
+    def _execute_batch(self, batch: ImageSchedulerBatch) -> list[EngineResponse]:
         """Execute requests in the given batch."""
         prompt_embeds = []
         for embedding_data_id, skip_tokens in zip(batch.embedding_data_ids, batch.skip_tokens, strict=True):
@@ -567,7 +567,7 @@ class StreamGeriEngine(Engine):
 
         self.executor = StreamExecutor(model=model)
 
-        # Currently, the batch Engine core only supports audio requests.
+        # Currently, the stream Engine core only supports audio requests.
         # To add more request types, specify it in configs and add a match statement here.
         self.decoder = MsgpackDecoder(AudioEngineRequest)
         self.scheduler = AudioScheduler(max_batch_size=geri_config.server.max_batch_size)
@@ -593,7 +593,7 @@ class StreamGeriEngine(Engine):
             for response in Engine.handle_batch_error(batch, e, StreamEngineResponse):
                 self.response_queue.put_nowait(response)
 
-    def _execute_batch(self, batch) -> None:
+    def _execute_batch(self, batch: AudioSchedulerBatch) -> None:
         """Execute requests in the given batch."""
         prompt_embeds = []
         for embedding_data_id in batch.embedding_data_ids:
@@ -601,8 +601,11 @@ class StreamGeriEngine(Engine):
 
         # Create a batch-level span for the entire generation operation
         with tracer.start_as_current_span("geri.engine.generate_batch") as batch_span:
-            # TODO: change
             batch_span.set_attribute("geri.batch_size", len(batch))
+            if batch.chunk_size is not None:
+                batch_span.set_attribute("geri.chunk_size", batch.chunk_size)
+            if batch.left_context_size is not None:
+                batch_span.set_attribute("geri.left_context_size", batch.left_context_size)
 
             # Create individual spans for each request in the batch as child spans
             request_spans: list[trace.Span] = Engine.create_request_spans(batch)
@@ -627,8 +630,8 @@ class StreamGeriEngine(Engine):
             # Top-level spans will be ended by outer error handler
             for request_span in request_spans:
                 Engine.end_request_span(request_span, streaming_result)
+            # Finish streams, and communicate the error
             for request_id in batch.request_ids:
-                # Finish streams, and communicate the error
                 signal_stream_end(request_id, streaming_result.error_message)
             raise ValueError(
                 f"Generator formation failed with status {streaming_result.status}: {streaming_result.error_message}"

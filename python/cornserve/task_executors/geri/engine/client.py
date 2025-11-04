@@ -151,6 +151,9 @@ class EngineClient:
     @tracer.start_as_current_span("engine_client.generate_batch")
     async def generate_batch(self, request_id: str, request: BatchGeriRequest) -> BatchGeriResponse:
         """Generate image content using the engine process."""
+        if self.geri_mode != GeriMode.BATCH:
+            raise RuntimeError(f"Wrong type of request ({type(request)}) for Geri mode {self.geri_mode}")
+
         # Propagate trace context
         span_context = {}
         propagator.inject(span_context)
@@ -209,6 +212,9 @@ class EngineClient:
         stream_inputs: bool = False,  # for now, only outputs are streamed
     ) -> AsyncGenerator[str, None]:
         """Generate streamed-output audio using the engine process."""
+        if self.geri_mode != GeriMode.STREAMING:
+            raise RuntimeError(f"Wrong type of request ({type(request)}) for Geri mode {self.geri_mode}")
+
         # Propagate trace context
         span_context = {}
         propagator.inject(span_context)

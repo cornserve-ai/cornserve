@@ -122,6 +122,9 @@ class AudioGeriRequest(StreamGeriRequest):
         )
 
 
+# ---------------------- Response classes ----------------------
+
+
 class BatchGeriResponse(BaseModel):
     """Response containing the full generated content.
 

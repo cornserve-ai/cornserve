@@ -104,6 +104,10 @@ class ScheduledAudioRequest(ScheduledRequest):
         To be compatible, two audio requests must be identical in these fields:
             ScheduledAudioRequest.chunk_size
             ScheduledAudioRequest.left_context_size
+
+        If two corresponding fields are both None, they are considered equal. This is
+        because the Engine's executing model will always default to the same value for
+        parameters that are None.
         """
         if not isinstance(other, ScheduledAudioRequest):
             return False
