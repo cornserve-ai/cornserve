@@ -20,7 +20,6 @@ def test_scheduler_batch_validation() -> None:
 
     batch = ImageSchedulerBatch(
         requests=requests,
-        sched_request_type=ScheduledImageRequest,
         height=256,
         width=256,
         num_inference_steps=10,
@@ -43,7 +42,6 @@ def test_scheduler_batch_validation_error() -> None:
     with pytest.raises(ValueError, match="identical generation parameters"):
         ImageSchedulerBatch(
             requests=requests,
-            sched_request_type=ScheduledImageRequest,
             height=256,
             width=256,
             num_inference_steps=10,

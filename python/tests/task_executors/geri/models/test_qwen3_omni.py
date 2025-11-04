@@ -8,7 +8,7 @@ from transformers import (
 )
 from transformers.models.auto.processing_auto import AutoProcessor
 
-from cornserve.task_executors.geri.executor.loader import load_model
+from cornserve.task_executors.geri.executor.loader import load_model, get_registry_entry
 from cornserve.task_executors.geri.models.base import GeriModel, StreamGeriModel
 from cornserve.task_executors.geri.models.qwen3_omni_moe import Qwen3OmniMoeCode2Wav
 
@@ -20,7 +20,8 @@ model_shorthand = "qwen3_omni_moe"
 
 def test_model_loading() -> None:
     """Test model is correctly configured for model loader."""
-    model = load_model(model_id, torch.device("cuda"))
+    registry_entry, config = get_registry_entry(model_id)
+    model = load_model(model_id, torch.device("cuda"), registry_entry, config)
     assert isinstance(model, GeriModel)
     assert isinstance(model, StreamGeriModel)
 
