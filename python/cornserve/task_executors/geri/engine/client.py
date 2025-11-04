@@ -152,7 +152,7 @@ class EngineClient:
     async def generate_batch(self, request_id: str, request: BatchGeriRequest) -> BatchGeriResponse:
         """Generate image content using the engine process."""
         if self.geri_mode != GeriMode.BATCH:
-            raise RuntimeError(f"Wrong type of request ({type(request)}) for Geri mode {self.geri_mode}")
+            raise RuntimeError(f"Wrong type of request (generate_batch) for Geri mode {self.geri_mode}")
 
         # Propagate trace context
         span_context = {}
@@ -213,7 +213,7 @@ class EngineClient:
     ) -> AsyncGenerator[str, None]:
         """Generate streamed-output audio using the engine process."""
         if self.geri_mode != GeriMode.STREAMING:
-            raise RuntimeError(f"Wrong type of request ({type(request)}) for Geri mode {self.geri_mode}")
+            raise RuntimeError(f"Wrong type of request (generate_streaming) for Geri mode {self.geri_mode}")
 
         # Propagate trace context
         span_context = {}
