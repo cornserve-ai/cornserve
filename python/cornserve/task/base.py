@@ -82,7 +82,7 @@ class Stream(TaskOutput, Generic[OutputT]):
     """
 
     # Each line in the stream should be a JSON string that can be parsed into an `OutputT` object.
-    async_iterator: AsyncIterator[str] | None = Field(default=None, exclude=True)
+    async_iterator: AsyncIterator[str] | AsyncIterator[bytes] | None = Field(default=None, exclude=True)
     response: aiohttp.ClientResponse | None = Field(default=None, exclude=True)
 
     _prev_type: type[TaskOutput] | None = None
