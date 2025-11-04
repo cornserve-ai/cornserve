@@ -486,7 +486,7 @@ class BatchGeriEngine(Engine):
             prompt_embeds.append(self._collect_embed_chunks(embedding_data_id, skip_tokens))
 
         # Create a batch-level span for the entire generation operation
-        with tracer.start_as_current_span("geri.engine.generate_batch") as batch_span:
+        with tracer.start_as_current_span("geri.engine.execute_batch") as batch_span:
             batch_span.set_attribute("geri.batch_size", len(batch))
             batch_span.set_attribute("geri.height", batch.height)
             batch_span.set_attribute("geri.width", batch.width)
@@ -600,7 +600,7 @@ class StreamGeriEngine(Engine):
             prompt_embeds.append(self._collect_embed_chunks(embedding_data_id))
 
         # Create a batch-level span for the entire generation operation
-        with tracer.start_as_current_span("geri.engine.generate_batch") as batch_span:
+        with tracer.start_as_current_span("geri.engine.execute_batch") as batch_span:
             batch_span.set_attribute("geri.batch_size", len(batch))
             if batch.chunk_size is not None:
                 batch_span.set_attribute("geri.chunk_size", batch.chunk_size)
