@@ -150,8 +150,11 @@ class VLLMDescriptor(TaskExecutionDescriptor[LLMBaseUnitTask, OpenAIChatCompleti
             request["stream"] = True
 
         if isinstance(task_output, LLMEmbeddingResponse):
-            request["cornserve_hidden_states_forward_ranks"] = task_output.embeddings.dst_sidecar_ranks
-            request["cornserve_hidden_states_forward_data_id"] = task_output.embeddings.id
+            vllm_xargs = {
+                "cornserve_hidden_states_forward_id": task_output.embeddings.id,
+                "cornserve_hidden_states_forward_ranks": str(task_output.embeddings.dst_sidecar_ranks),
+            }
+            request["vllm_xargs"] = vllm_xargs
 
         return request
 
