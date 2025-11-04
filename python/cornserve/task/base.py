@@ -157,7 +157,7 @@ class Stream(TaskOutput, Generic[OutputT]):
         _ = self.item_type  # Access the property to trigger validation
         return self
 
-    async def get_next(self) -> str | None:
+    async def get_next(self) -> str | bytes | None:
         """Get the next line from the stream.
 
         This is a convenience method to get the next line from the stream.
@@ -204,7 +204,7 @@ class Stream(TaskOutput, Generic[OutputT]):
 
         return self.item_type.model_validate_json(line.strip())
 
-    async def aiter_raw(self) -> AsyncGenerator[str]:
+    async def aiter_raw(self) -> AsyncGenerator[str | bytes, None]:
         """Asynchronously iterate over the raw output of the stream without parsing."""
         if self.async_iterator is None:
             raise ValueError("Stream generator is not initialized.")
