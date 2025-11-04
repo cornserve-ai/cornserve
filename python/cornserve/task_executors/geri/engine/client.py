@@ -170,9 +170,6 @@ class EngineClient:
         # Create message
         message: BatchEngineRequest = request.to_batch_engine_request(request_id, span_context)
 
-        # Fill in parameters not part of the API request itself
-        message.span_context = span_context
-
         # Create future for response
         future: Future[BatchEngineResponse] = asyncio.Future()
         self.pending_requests[request_id] = future
@@ -235,9 +232,6 @@ class EngineClient:
 
         # Create message
         message: StreamEngineRequest = request.to_stream_engine_request(request_id, span_context)
-
-        # Fill in parameters not part of the API request itself
-        message.span_context = span_context
 
         # Send message to engine
         await self.request_sock.send_multipart(

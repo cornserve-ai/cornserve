@@ -79,7 +79,6 @@ class BatchExecutor(ModelExecutor):
         try:
             logger.info("Generating content with size %dx%d, %d inference steps", height, width, num_inference_steps)
 
-            # Generate images using the model (returns PNG bytes directly)
             assert isinstance(self.model, BatchGeriModel)
             generated_bytes = self.model.generate(
                 prompt_embeds=prompt_embeds,
