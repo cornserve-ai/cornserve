@@ -128,27 +128,6 @@ class Engine(EngineModeProtocol, ABC):
         logger.info("Engine core initialized")
 
     @abstractmethod
-    def mode_specific_initializer(
-        self,
-        model: GeriModel,
-        geri_config: GeriConfig,
-    ) -> None:
-        """Initialize mode-specific (i.e., batch vs stream) components.
-
-        Specifically, components that depend on the mode are:
-            self.executor
-            self.decoder
-            self.scheduler
-
-        Args:
-            model: The model that was initialized for the Engine.
-            geri_config: Geri configuration.
-
-        Raises:
-            TypeError: if the supplied model doesn't match the expected type for this execution mode.
-        """
-
-    @abstractmethod
     def step(self) -> None:
         """Step the engine core.
 
