@@ -15,8 +15,8 @@ from pydantic import BaseModel
 
 from cornserve.constants import UNIT_TASK_PROFILES_DIR
 from cornserve.logging import get_logger
-from cornserve.task.base import UnitTask
 from cornserve.services.task_registry.task_class_registry import TASK_CLASS_REGISTRY
+from cornserve.task.base import UnitTask
 
 logger = get_logger(__name__)
 
