@@ -133,10 +133,15 @@ class Qwen3OmniMoeCode2Wav(StreamGeriModel, nn.Module):
     def generate(
         self,
         prompt_embeds: list[torch.Tensor],
-        chunk_size: int = 300,
-        left_context_size: int = 25,
+        chunk_size: int | None = None,
+        left_context_size: int | None = None,
     ) -> Generator[list[torch.Tensor | None], None, None]:
         """Generate streamed outputs from prompt embeddings."""
+        if chunk_size is None:
+            chunk_size = 300
+        if left_context_size is None:
+            left_context_size = 25
+
         # Each element of `prompt_embeds` has shape (seqlen, num_quantizers).
         # First, we transpose to (num_quantizers, seqlen).
         prompt_embeds = [torch.transpose(embed, 0, 1) for embed in prompt_embeds]

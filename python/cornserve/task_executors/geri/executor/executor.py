@@ -126,14 +126,9 @@ class StreamExecutor(ModelExecutor):
         try:
             logger.info("Beginning streamed generation")
 
-            gen_kwargs = {
-                "prompt_embeds": prompt_embeds,
-                "chunk_size": chunk_size,
-                "left_context_size": left_context_size,
-            }
-            # only pass in non-None arguments
-            gen_kwargs = {k: v for k, v in gen_kwargs.items() if v is not None}
-            streamed_generator: Generator[list[torch.Tensor | None], None, None] = self.model.generate(**gen_kwargs)
+            streamed_generator: Generator[list[torch.Tensor | None], None, None] = self.model.generate(
+                prompt_embeds, chunk_size, left_context_size
+            )
 
             logger.info("Obtained generator object")
             return StreamGenerationResult(status=Status.SUCCESS, generator=streamed_generator)
