@@ -13,7 +13,7 @@ from cornserve.logging import get_logger
 from cornserve.task_executors.eric.distributed import parallel
 from cornserve.task_executors.eric.models.base import BaseAdapterModule, EricModel
 from cornserve.task_executors.eric.models.registry import MODEL_REGISTRY
-from cornserve.task_executors.utils.weights import get_safetensors_weight_dict, set_default_torch_dtype
+from cornserve.task_executors.utils import get_safetensors_weight_dict, set_default_torch_dtype
 
 logger = get_logger(__name__)
 

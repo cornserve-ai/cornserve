@@ -24,7 +24,7 @@ from transformers.models.qwen3_omni_moe.modeling_qwen3_omni_moe import (
 
 from cornserve.logging import get_logger
 from cornserve.task_executors.geri.models.base import StreamGeriModel
-from cornserve.task_executors.utils.weights import get_safetensors_weight_dict, set_default_torch_dtype
+from cornserve.task_executors.utils import get_safetensors_weight_dict, set_default_torch_dtype
 
 logger = get_logger(__name__)
 

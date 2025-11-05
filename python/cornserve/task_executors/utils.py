@@ -1,4 +1,4 @@
-"""Utilities for weight loading logic used across task executors."""
+"""Utilities shared across task executors."""
 
 import contextlib
 import fnmatch
