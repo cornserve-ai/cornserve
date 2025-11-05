@@ -140,14 +140,21 @@ class VLLMDescriptor(TaskExecutionDescriptor[LLMBaseUnitTask, OpenAIChatCompleti
                 data_url: URL = getattr(multimodal_content, multimodal_content.type)
                 data_url.url = f"data:{modality}/uuid;data_id={forward.id};url={data_url.url},"
 
-        request = task_input.model_dump(exclude={"cornserve_embeddings"})
+        request = task_input.model_dump(exclude={
+            "cornserve_embeddings",
+            "cornserve_kv_transfer_params",
+            "encoder_fission",
+        })
 
         if isinstance(task_output, Stream):
             request["stream"] = True
 
         if isinstance(task_output, LLMEmbeddingResponse):
-            request["cornserve_hidden_states_forward_ranks"] = task_output.embeddings.dst_sidecar_ranks
-            request["cornserve_hidden_states_forward_data_id"] = task_output.embeddings.id
+            vllm_xargs = {
+                "cornserve_hidden_states_forward_id": task_output.embeddings.id,
+                "cornserve_hidden_states_forward_ranks": str(task_output.embeddings.dst_sidecar_ranks),
+            }
+            request["vllm_xargs"] = vllm_xargs
 
         return request
 

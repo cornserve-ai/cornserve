@@ -1,6 +1,6 @@
 # UCX-cuda build requires the devel image
 # TODO: Use a multi-stage build to reduce image size
-FROM pytorch/pytorch:2.7.0-cuda12.6-cudnn9-devel AS base
+FROM pytorch/pytorch:2.9.0-cuda12.8-cudnn9-devel AS base
 
 RUN apt-get update -y \
     && apt-get install -y --no-install-recommends \
@@ -63,14 +63,16 @@ WORKDIR /workspace/cornserve/third_party/c-vllm
 RUN cd ../.. && uv pip install './python[sidecar-api]'
 
 # Install vLLM requirements and clean up cache
-RUN uv pip install -r requirements/common.txt \
-    && uv pip install -r requirements/cuda.txt \
+RUN uv pip install --prerelease=allow -r requirements/common.txt \
+    && uv pip install --prerelease=allow -r requirements/cuda.txt \
+        --extra-index-url https://download.pytorch.org/whl/cu129 \
+        --index-strategy unsafe-best-match \
     && uv cache clean
 
 # Set environment variables
 ENV SETUPTOOLS_SCM_PRETEND_VERSION=0.0.1.dev
 ENV VLLM_USE_PRECOMPILED=1
-ENV VLLM_COMMIT=c18b3b8e8bdcebaa150311d2c4911a6428480162
+ENV VLLM_COMMIT=00b31a36a2d0de6d197a473280b2304d482714af
 ENV VLLM_PRECOMPILED_WHEEL_LOCATION=https://wheels.vllm.ai/${VLLM_COMMIT}/vllm-1.0.0.dev-cp38-abi3-manylinux1_x86_64.whl
 
 # Intermediate vllm stage without audio

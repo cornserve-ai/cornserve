@@ -40,12 +40,12 @@ cornserve = "cornserve.cli.main:main"
 
 [project.optional-dependencies]
 sidecar-api = [
-  "torch>=2.5.0, <=2.7.0",
+  "torch==2.9.0",
   "opentelemetry-instrumentation-grpc",
   "opentelemetry-instrumentation-threading",
 ]
 sidecar = [
-  "torch>=2.5.0, <=2.7.0",
+  "torch==2.9.0",
   "ucxx-cu12",
   "msgspec",
   "opentelemetry-instrumentation-grpc",
@@ -76,7 +76,7 @@ eric-no-gpu = [
   "pyzmq",
   "msgspec",
   "psutil",
-  "torch>=2.5.0, <=2.7.0",
+  "torch==2.9.0",
   "torchvision",
   "transformers==4.55.4",
   "huggingface_hub",
@@ -94,7 +94,7 @@ geri-no-gpu = [
   "uvicorn[standard]",
   "pyzmq",
   "msgspec",
-  "torch>=2.5.0, <=2.7.0",
+  "torch==2.9.0",
   "transformers==4.55.4",
   "huggingface_hub",
   "pillow",

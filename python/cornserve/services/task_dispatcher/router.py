@@ -25,7 +25,7 @@ async def invoke_task(request: TaskGraphDispatch, raw_request: Request):
 
     logger.info("Task dispatch received")
 
-    async def stream_response(results: list[TaskOutput]) -> AsyncGenerator[str]:
+    async def stream_response(results: list[TaskOutput]) -> AsyncGenerator[str | bytes, None]:
         """Stream the response for a streaming task results."""
         dumped_results = [result.model_dump() for result in results]
         all_outputs = json.dumps(dumped_results)
@@ -37,7 +37,11 @@ async def invoke_task(request: TaskGraphDispatch, raw_request: Request):
             chunk = chunk.strip()
             if not chunk:
                 continue
-            yield chunk + "\n"
+            # Handle both str and bytes
+            if isinstance(chunk, bytes):
+                yield chunk + b"\n"
+            else:
+                yield chunk + "\n"
 
     try:
         results = await dispatcher.invoke(request.invocations)
