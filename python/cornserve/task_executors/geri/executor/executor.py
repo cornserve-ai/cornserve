@@ -83,6 +83,7 @@ class BatchExecutor(ModelExecutor):
         try:
             logger.info("Generating content with size %dx%d, %d inference steps", height, width, num_inference_steps)
 
+            assert isinstance(self.model, BatchGeriModel)
             generated_bytes = self.model.generate(
                 prompt_embeds=prompt_embeds,
                 height=height,
@@ -126,6 +127,7 @@ class StreamExecutor(ModelExecutor):
         try:
             logger.info("Beginning streamed generation")
 
+            assert isinstance(self.model, StreamGeriModel)
             streamed_generator: Generator[list[torch.Tensor | None], None, None] = self.model.generate(
                 prompt_embeds, chunk_size, left_context_size
             )

@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from collections.abc import Generator
-from typing import Any
 
+# from typing import Any
 import torch
 from transformers.configuration_utils import PretrainedConfig
 
@@ -28,14 +28,6 @@ class GeriModel(ABC):
             torch_dtype: Data type for model weights (e.g., torch.bfloat16).
             torch_device: Device to load the model on (e.g., torch.device("cuda")).
             config: If supplied, may be used to configure the model's components.
-        """
-
-    @abstractmethod
-    def generate(self, *args, **kwargs) -> Any:
-        """Execute generation with the model.
-
-        The GeriModel base class requires that subclasses implement this method, but
-        parameters and return type will vary and therefore left to each subclass to decide.
         """
 
     @property
@@ -105,8 +97,8 @@ class StreamGeriModel(GeriModel):
     def generate(
         self,
         prompt_embeds: list[torch.Tensor],
-        chunk_size: int,
-        left_context_size: int,
+        chunk_size: int | None = None,
+        left_context_size: int | None = None,
     ) -> Generator[list[torch.Tensor | None], None, None]:
         """Generate streamed outputs from prompt embeddings.
 
