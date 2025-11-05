@@ -83,12 +83,15 @@ class QualifiedNameInstanceCheckMeta(ModelMetaclass):
         if super().__instancecheck__(instance):
             return True
 
-        # Only apply qualified name checking for cornserve_tasklib classes
-        self_qualname = f"{self.__module__}.{self.__qualname__}"
-        if not self.__module__.startswith("cornserve_tasklib"):
+        # Only apply qualified name checking for cornserve_tasklib or cornserve classes
+        if not self.__module__.startswith("cornserve"):
             return False
 
         instance_class = type(instance)
+        if not instance_class.__module__.startswith("cornserve"):
+            return False
+
+        self_qualname = f"{self.__module__}.{self.__qualname__}"
         instance_qualname = f"{instance_class.__module__}.{instance_class.__qualname__}"
 
         # Check if the instance's class has the same qualified name
@@ -495,10 +498,18 @@ class UnitTask(Task, Generic[InputT, OutputT]):
         if not isinstance(other, UnitTask):
             return False
 
-        if self.root_unit_task_cls != other.root_unit_task_cls:
+        self_root_name = f"{self.root_unit_task_cls.__module__}.{self.root_unit_task_cls.__qualname__}"
+        other_root_name = f"{other.root_unit_task_cls.__module__}.{other.root_unit_task_cls.__qualname__}"
+        if self_root_name != other_root_name:
             return False
 
-        if self.execution_descriptor.__class__ != other.execution_descriptor.__class__:
+        self_desc_name = (
+            f"{self.execution_descriptor.__class__.__module__}.{self.execution_descriptor.__class__.__qualname__}"
+        )
+        other_desc_name = (
+            f"{other.execution_descriptor.__class__.__module__}.{other.execution_descriptor.__class__.__qualname__}"
+        )
+        if self_desc_name != other_desc_name:
             return False
 
         # Check if all fields defined by the root unit task class are the same.
