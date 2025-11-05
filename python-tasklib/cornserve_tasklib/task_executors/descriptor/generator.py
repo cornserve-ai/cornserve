@@ -10,8 +10,7 @@ from cornserve import constants
 from cornserve.services.resource import GPU
 from cornserve_tasklib.task.unit.generator import GeneratorInput, GeneratorOutput, GeneratorTask
 from cornserve.task_executors.descriptor.base import TaskExecutionDescriptor
-from cornserve.task_executors.geri.api import ImageGeriRequest, BatchGeriResponse
-from cornserve.task_executors.geri.schema import Status
+from cornserve.task_executors.geri.api import ImageGeriRequest, BatchGeriResponse, Status
 
 
 class GeriDescriptor(TaskExecutionDescriptor[GeneratorTask, GeneratorInput, GeneratorOutput]):

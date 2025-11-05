@@ -18,6 +18,7 @@ from transformers.configuration_utils import PretrainedConfig
 from cornserve.logging import get_logger
 from cornserve.sidecar.api import Sidecar
 from cornserve.sidecar.schema import SidecarConfig
+from cornserve.task_executors.geri.api import Status
 from cornserve.task_executors.geri.config import GeriConfig
 from cornserve.task_executors.geri.engine.scheduler import (
     AudioScheduler,
@@ -47,7 +48,6 @@ from cornserve.task_executors.geri.schema import (
     EngineResponse,
     GenerationResult,
     ImageEngineRequest,
-    Status,
     StreamEngineResponse,
 )
 from cornserve.task_executors.geri.utils.serde import MsgpackDecoder, MsgpackEncoder

@@ -21,6 +21,7 @@ from cornserve.sidecar.schema import SidecarConfig
 from cornserve.task_executors.geri.api import (
     BatchGeriRequest,
     BatchGeriResponse,
+    Status,
     StreamGeriRequest,
     StreamGeriResponseChunk,
 )
@@ -36,11 +37,12 @@ from cornserve.task_executors.geri.executor.loader import (
 from cornserve.task_executors.geri.models.base import GeriModel
 from cornserve.task_executors.geri.schema import (
     BatchEngineRequest,
+    BatchEngineRequestFactory,
     BatchEngineResponse,
     EngineOpcode,
     GeriMode,
-    Status,
     StreamEngineRequest,
+    StreamEngineRequestFactory,
     StreamEngineResponse,
 )
 from cornserve.task_executors.geri.utils.serde import MsgpackDecoder, MsgpackEncoder
@@ -168,7 +170,7 @@ class EngineClient:
                 chunk_id += 1
 
         # Create message
-        message: BatchEngineRequest = request.to_batch_engine_request(request_id, span_context)
+        message: BatchEngineRequest = BatchEngineRequestFactory.from_geri_request(request, request_id, span_context)
 
         # Create future for response
         future: Future[BatchEngineResponse] = asyncio.Future()
@@ -231,7 +233,7 @@ class EngineClient:
         self.pending_streams[request_id] = response_queue
 
         # Create message
-        message: StreamEngineRequest = request.to_stream_engine_request(request_id, span_context)
+        message: StreamEngineRequest = StreamEngineRequestFactory.from_geri_request(request, request_id, span_context)
 
         # Send message to engine
         await self.request_sock.send_multipart(

@@ -4,18 +4,19 @@ from __future__ import annotations
 
 from collections.abc import Generator
 from dataclasses import dataclass, field
-from enum import Enum, IntEnum
+from enum import Enum
+from typing import Self
 
 import msgspec
 import torch
 
-
-class Status(IntEnum):
-    """Status of various operations."""
-
-    SUCCESS = 0
-    ERROR = 1
-    FINISHED = 2
+from cornserve.task_executors.geri.api import (
+    AudioGeriRequest,
+    BatchGeriRequest,
+    ImageGeriRequest,
+    Status,
+    StreamGeriRequest,
+)
 
 
 class EngineOpcode(Enum):
@@ -93,12 +94,91 @@ class ImageEngineRequest(BatchEngineRequest):
     num_inference_steps: int
     skip_tokens: int = 0
 
+    @classmethod
+    def from_geri_request(
+        cls,
+        geri_request: BatchGeriRequest,
+        request_id: str,
+        span_context: dict[str, str] | None,
+    ) -> Self:
+        """Produce an ImageEngineRequest from an ImageGeriRequest."""
+        if not isinstance(geri_request, ImageGeriRequest):
+            raise TypeError(f"Expected ImageGeriRequest, got {type(geri_request).__name__}")
+        return cls(
+            request_id=request_id,
+            embedding_data_id=geri_request.embedding_data_id,
+            span_context=span_context,
+            height=geri_request.height,
+            width=geri_request.width,
+            num_inference_steps=geri_request.num_inference_steps,
+            skip_tokens=geri_request.skip_tokens,
+        )
+
 
 class AudioEngineRequest(StreamEngineRequest):
     """Engine generation request for images."""
 
     chunk_size: int | None
     left_context_size: int | None
+
+    @classmethod
+    def from_geri_request(
+        cls,
+        geri_request: StreamGeriRequest,
+        request_id: str,
+        span_context: dict[str, str] | None,
+    ) -> Self:
+        """Produce an AudioEngineRequest from an AudioGeriRequest."""
+        if not isinstance(geri_request, AudioGeriRequest):
+            raise TypeError(f"Expected AudioGeriRequest, got {type(geri_request).__name__}")
+        return cls(
+            request_id=request_id,
+            embedding_data_id=geri_request.embedding_data_id,
+            span_context=span_context,
+            chunk_size=geri_request.chunk_size,
+            left_context_size=geri_request.left_context_size,
+        )
+
+
+# -------- Producing Engine requests from API requests ---------
+
+
+class BatchEngineRequestFactory:
+    """Factory for parsing API requests into batch Engine requests."""
+
+    @staticmethod
+    def from_geri_request(
+        geri_request: BatchGeriRequest,
+        request_id: str,
+        span_context: dict[str, str] | None,
+    ) -> BatchEngineRequest:
+        """Produce a BatchEngineRequest given a BatchGeriRequest, request ID, and span context."""
+        match geri_request:
+            case ImageGeriRequest():
+                return ImageEngineRequest.from_geri_request(geri_request, request_id, span_context)
+            case _:
+                raise TypeError(
+                    f"Unsupported request type {type(geri_request).__name__} for producing BatchEngineRequest."
+                )
+
+
+class StreamEngineRequestFactory:
+    """Factory for parsing API requests into stream Engine requests."""
+
+    @staticmethod
+    def from_geri_request(
+        geri_request: StreamGeriRequest,
+        request_id: str,
+        span_context: dict[str, str] | None,
+    ) -> StreamEngineRequest:
+        """Produce a StreamEngineRequest given a StreamGeriRequest, request ID, and span context."""
+        match geri_request:
+            case AudioGeriRequest():
+                return AudioEngineRequest.from_geri_request(geri_request, request_id, span_context)
+            case _:
+                raise TypeError(
+                    f"Unsupported request type {type(geri_request).__name__} for producing StreamEngineRequest."
+                )
 
 
 # ------------------ Engine response classes -------------------

@@ -3,17 +3,17 @@
 from __future__ import annotations
 
 import enum
-from abc import ABC, abstractmethod
+from abc import ABC
 
 from pydantic import BaseModel, ConfigDict, RootModel
 
-from cornserve.task_executors.geri.schema import (
-    AudioEngineRequest,
-    BatchEngineRequest,
-    ImageEngineRequest,
-    Status,
-    StreamEngineRequest,
-)
+
+class Status(enum.IntEnum):
+    """Status of various operations."""
+
+    SUCCESS = 0
+    ERROR = 1
+    FINISHED = 2
 
 
 class Modality(enum.StrEnum):
@@ -35,16 +35,9 @@ class BatchGeriRequest(BaseModel, ABC):
 
     Modality-specific generation request classes (e.g., ImageGeriRequest)
     that support batched generation should inherit from this class.
-
-    Given that API requests must eventually be parsed into Engine requests,
-    subclasses must define how to produce a corresponding BatchEngineRequest.
     """
 
     embedding_data_id: str
-
-    @abstractmethod
-    def to_batch_engine_request(self, request_id: str, span_context: dict[str, str] | None) -> BatchEngineRequest:
-        """Produce a BatchEngineRequest."""
 
 
 class StreamGeriRequest(BaseModel, ABC):
@@ -55,16 +48,9 @@ class StreamGeriRequest(BaseModel, ABC):
 
     Modality-specific generation request classes (e.g., AudioGeriRequest)
     that support streamed generation should inherit from this class.
-
-    Given that API requests must eventually be parsed into Engine requests,
-    subclasses must define how to produce a corresponding StreamEngineRequest.
     """
 
     embedding_data_id: str
-
-    @abstractmethod
-    def to_stream_engine_request(self, request_id: str, span_context: dict[str, str] | None) -> StreamEngineRequest:
-        """Produce a StreamEngineRequest."""
 
 
 # ---------- Modality specific generation request classes ----------
@@ -85,18 +71,6 @@ class ImageGeriRequest(BatchGeriRequest):
     num_inference_steps: int
     skip_tokens: int = 0
 
-    def to_batch_engine_request(self, request_id: str, span_context: dict[str, str] | None) -> ImageEngineRequest:
-        """Produce an ImageEngineRequest."""
-        return ImageEngineRequest(
-            request_id=request_id,
-            height=self.height,
-            width=self.width,
-            num_inference_steps=self.num_inference_steps,
-            embedding_data_id=self.embedding_data_id,
-            skip_tokens=self.skip_tokens,
-            span_context=span_context,
-        )
-
 
 class AudioGeriRequest(StreamGeriRequest):
     """Request to generate audio content.
@@ -110,16 +84,6 @@ class AudioGeriRequest(StreamGeriRequest):
 
     chunk_size: int | None = None
     left_context_size: int | None = None
-
-    def to_stream_engine_request(self, request_id: str, span_context: dict[str, str] | None) -> AudioEngineRequest:
-        """Produce an AudioEngineRequest."""
-        return AudioEngineRequest(
-            request_id=request_id,
-            embedding_data_id=self.embedding_data_id,
-            chunk_size=self.chunk_size,
-            left_context_size=self.left_context_size,
-            span_context=span_context,
-        )
 
 
 # ---------------------- Response classes ----------------------
