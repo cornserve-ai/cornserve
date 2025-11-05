@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from collections.abc import Generator
-from typing import Any
+from typing import Any, Protocol
 
 import torch
 
@@ -23,15 +23,19 @@ from cornserve.task_executors.geri.schema import (
 logger = get_logger(__name__)
 
 
-class ModelExecutor(ABC):
+class HasModel(Protocol):
+    """Protocol to enforce that ModelExecutor subclasses initialize a GeriModel field."""
+
+    model: GeriModel
+
+
+class ModelExecutor(HasModel, ABC):
     """A class to execute generation with a model.
 
     This is a simplified version compared to Eric's ModelExecutor.
     Since we're not using tensor parallelism initially, this directly
     manages a single model instance and executes generation requests.
     """
-
-    model: GeriModel
 
     def shutdown(self) -> None:
         """Shutdown the executor and clean up resources."""

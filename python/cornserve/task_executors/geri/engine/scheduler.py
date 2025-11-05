@@ -261,7 +261,7 @@ class RequestQueue:
 
 
 class HasRequestQueue(Protocol):
-    """A protocol to enforce that Scheduler subclasses must initialize a RequestQueue field."""
+    """Protocol to enforce that Scheduler subclasses initialize a RequestQueue field."""
 
     queue: RequestQueue
 
