@@ -104,7 +104,7 @@ class BatchExecutor(ModelExecutor[BatchGeriModel]):
 class StreamExecutor(ModelExecutor[StreamGeriModel]):
     """Executor for streamed generation requests."""
 
-    def __init__(self, model: StreamGeriModel):
+    def __init__(self, model: StreamGeriModel) -> None:
         """Initialize the batch executor."""
         self.model = model
 
