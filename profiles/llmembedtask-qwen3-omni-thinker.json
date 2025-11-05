@@ -1,0 +1,11 @@
+{
+  "task": {
+    "__class__": "LLMEmbeddingUnitTask",
+    "model_id": "Qwen/Qwen3-Omni-30B-A3B-Instruct",
+    "receive_embeddings": false,
+    "execution_descriptor_name": null
+  },
+  "num_gpus_to_profile": {
+    "2": {"launch_args": []}
+  }
+}
