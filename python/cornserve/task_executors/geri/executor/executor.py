@@ -83,7 +83,6 @@ class BatchExecutor(ModelExecutor):
         try:
             logger.info("Generating content with size %dx%d, %d inference steps", height, width, num_inference_steps)
 
-            assert isinstance(self.model, BatchGeriModel)
             generated_bytes = self.model.generate(
                 prompt_embeds=prompt_embeds,
                 height=height,
@@ -134,7 +133,6 @@ class StreamExecutor(ModelExecutor):
             }
             # only pass in non-None arguments
             gen_kwargs = {k: v for k, v in gen_kwargs.items() if v is not None}
-            assert isinstance(self.model, StreamGeriModel)
             streamed_generator: Generator[list[torch.Tensor | None], None, None] = self.model.generate(**gen_kwargs)
 
             logger.info("Obtained generator object")
