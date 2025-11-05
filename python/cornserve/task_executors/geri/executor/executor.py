@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from collections.abc import Generator
-from typing import Any, Protocol
+from typing import Any, Generic, Protocol, TypeVar
 
 import torch
 
@@ -23,13 +23,16 @@ from cornserve.task_executors.geri.schema import (
 logger = get_logger(__name__)
 
 
-class HasModel(Protocol):
+ModelT = TypeVar("ModelT", bound=GeriModel)
+
+
+class HasModel(Protocol, Generic[ModelT]):
     """Protocol to enforce that ModelExecutor subclasses initialize a GeriModel field."""
 
-    model: GeriModel
+    model: ModelT
 
 
-class ModelExecutor(HasModel, ABC):
+class ModelExecutor(HasModel[ModelT], Generic[ModelT], ABC):
     """A class to execute generation with a model.
 
     This is a simplified version compared to Eric's ModelExecutor.
@@ -53,7 +56,7 @@ class ModelExecutor(HasModel, ABC):
         """
 
 
-class BatchExecutor(ModelExecutor):
+class BatchExecutor(ModelExecutor[BatchGeriModel]):
     """Executor for batched (i.e., non-streaming) generation requests."""
 
     def __init__(self, model: BatchGeriModel) -> None:
@@ -83,7 +86,6 @@ class BatchExecutor(ModelExecutor):
         try:
             logger.info("Generating content with size %dx%d, %d inference steps", height, width, num_inference_steps)
 
-            assert isinstance(self.model, BatchGeriModel)
             generated_bytes = self.model.generate(
                 prompt_embeds=prompt_embeds,
                 height=height,
@@ -99,7 +101,7 @@ class BatchExecutor(ModelExecutor):
             return BatchGenerationResult(status=Status.ERROR, error_message=f"Generation failed: {str(e)}")
 
 
-class StreamExecutor(ModelExecutor):
+class StreamExecutor(ModelExecutor[StreamGeriModel]):
     """Executor for streamed generation requests."""
 
     def __init__(self, model: StreamGeriModel):
@@ -127,7 +129,6 @@ class StreamExecutor(ModelExecutor):
         try:
             logger.info("Beginning streamed generation")
 
-            assert isinstance(self.model, StreamGeriModel)
             streamed_generator: Generator[list[torch.Tensor | None], None, None] = self.model.generate(
                 prompt_embeds, chunk_size, left_context_size
             )
