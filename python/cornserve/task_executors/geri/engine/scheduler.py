@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import ClassVar
+from typing import ClassVar, Protocol
 
 from opentelemetry import propagate, trace
 from opentelemetry.trace import Span
@@ -260,10 +260,14 @@ class RequestQueue:
         return batch_requests
 
 
-class Scheduler:
-    """Scheduler for batching generation requests."""
+class HasRequestQueue(Protocol):
+    """A protocol to enforce that Scheduler subclasses must initialize a RequestQueue field."""
 
     queue: RequestQueue
+
+
+class Scheduler(HasRequestQueue, ABC):
+    """Scheduler for batching generation requests."""
 
     def __init__(self, max_batch_size: int | None = None) -> None:
         """Initialize the scheduler.
