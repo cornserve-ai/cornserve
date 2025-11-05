@@ -8,7 +8,7 @@ import signal
 import threading
 from abc import ABC, abstractmethod
 from multiprocessing.context import SpawnProcess
-from typing import Any
+from typing import Any, Protocol
 
 import torch
 import zmq
@@ -59,19 +59,23 @@ tracer = trace.get_tracer(__name__)
 propagator = propagate.get_global_textmap()
 
 
-class Engine(ABC):
+class EngineModeProtocol(Protocol):
+    """Protocol to enforce that Engine subclasses initialize execution mode dependent fields."""
+
+    model: GeriModel
+    executor: ModelExecutor
+    decoder: MsgpackDecoder
+    scheduler: Scheduler
+
+
+class Engine(EngineModeProtocol, ABC):
     """Geri core engine.
 
     The engine receives generation requests from the router and
     invokes the model executor to launch image generation.
     """
 
-    # Components that depend on the execution mode (i.e., streaming vs batched).
-    # Will be initialized during construction.
-    executor: ModelExecutor
-    decoder: MsgpackDecoder
-    scheduler: Scheduler
-
+    @abstractmethod
     def __init__(
         self,
         geri_config: GeriConfig,
@@ -91,17 +95,6 @@ class Engine(ABC):
         """
         self.geri_config = geri_config
 
-        # Initialize model executor
-        model = load_model(
-            model_id=geri_config.model.id,
-            torch_device=torch.device("cuda"),
-            registry_entry=model_registry_entry,
-            config=model_config,
-        )
-
-        # Initialize execution mode (i.e., batched vs streaming) specific engine components
-        self.mode_specific_initializer(model=model, geri_config=geri_config)
-
         # Set up serialization
         self.encoder = MsgpackEncoder()
 
@@ -109,8 +102,8 @@ class Engine(ABC):
             SidecarConfig(
                 sidecar_rank=sorted(geri_config.sidecar.ranks)[0],
                 group=sorted(geri_config.sidecar.ranks),
-                recv_tensor_dtype=model.dtype,
-                recv_tensor_shape=(-1, model.embedding_dim),
+                recv_tensor_dtype=self.model.dtype,
+                recv_tensor_shape=(-1, self.model.embedding_dim),
             )
         )
 
@@ -430,34 +423,43 @@ class BatchGeriEngine(Engine):
     in a batched, non-streaming manner.
     """
 
-    def mode_specific_initializer(
+    def __init__(
         self,
-        model: GeriModel,
         geri_config: GeriConfig,
+        request_sock_path: str,
+        response_sock_path: str,
+        model_registry_entry: RegistryEntry,
+        model_config: PretrainedConfig | None = None,
     ) -> None:
-        """Initialize mode-specific (i.e., batch vs stream) components.
-
-        Specifically, components that depend on the mode are:
-            self.executor
-            self.decoder
-            self.scheduler
+        """Initialize the engine.
 
         Args:
-            model: The model that was initialized for the Engine.
             geri_config: Geri configuration.
-
-        Raises:
-            TypeError: if the supplied model doesn't match the expected type for this execution mode.
+            request_sock_path: Path for receiving requests from router.
+            response_sock_path: Path for sending responses to router.
+            model_registry_entry: Geri Model Registry entry for the model to be loaded.
+            model_config (optional): Configuration for the model to be loaded.
         """
+        # Initialize model executor
+        model = load_model(
+            model_id=geri_config.model.id,
+            torch_device=torch.device("cuda"),
+            registry_entry=model_registry_entry,
+            config=model_config,
+        )
+
         if not isinstance(model, BatchGeriModel):
             raise TypeError(f"BatchGeriEngine should be initialized with BatchGeriModel, not {type(model).__name__}")
 
+        self.model = model
         self.executor = BatchExecutor(model=model)
 
         # Currently, the batch Engine core only supports image requests.
         # To add more request types, specify it in configs and add a match statement here.
         self.decoder = MsgpackDecoder(ImageEngineRequest)
         self.scheduler = ImageScheduler(max_batch_size=geri_config.server.max_batch_size)
+
+        super().__init__(geri_config, request_sock_path, response_sock_path, model_registry_entry, model_config)
 
     def step(self) -> None:
         """Step the engine core.
@@ -543,34 +545,43 @@ class StreamGeriEngine(Engine):
     in an streamed manner.
     """
 
-    def mode_specific_initializer(
+    def __init__(
         self,
-        model: GeriModel,
         geri_config: GeriConfig,
+        request_sock_path: str,
+        response_sock_path: str,
+        model_registry_entry: RegistryEntry,
+        model_config: PretrainedConfig | None = None,
     ) -> None:
-        """Initialize mode-specific (i.e., batch vs stream) components.
-
-        Specifically, components that depend on the mode are:
-            self.executor
-            self.decoder
-            self.scheduler
+        """Initialize the engine.
 
         Args:
-            model: The model that was initialized for the Engine.
             geri_config: Geri configuration.
-
-        Raises:
-            TypeError: if the supplied model doesn't match the expected type for this execution mode.
+            request_sock_path: Path for receiving requests from router.
+            response_sock_path: Path for sending responses to router.
+            model_registry_entry: Geri Model Registry entry for the model to be loaded.
+            model_config (optional): Configuration for the model to be loaded.
         """
+        # Initialize model executor
+        model = load_model(
+            model_id=geri_config.model.id,
+            torch_device=torch.device("cuda"),
+            registry_entry=model_registry_entry,
+            config=model_config,
+        )
+
         if not isinstance(model, StreamGeriModel):
             raise TypeError(f"StreamGeriEngine should be initialized with StreamGeriModel, not {type(model).__name__}")
 
+        self.model = model
         self.executor = StreamExecutor(model=model)
 
         # Currently, the stream Engine core only supports audio requests.
         # To add more request types, specify it in configs and add a match statement here.
         self.decoder = MsgpackDecoder(AudioEngineRequest)
         self.scheduler = AudioScheduler(max_batch_size=geri_config.server.max_batch_size)
+
+        super().__init__(geri_config, request_sock_path, response_sock_path, model_registry_entry, model_config)
 
     def step(self) -> None:
         """Step the engine core.
