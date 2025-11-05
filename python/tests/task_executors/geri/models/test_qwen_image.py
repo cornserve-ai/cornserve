@@ -2,12 +2,22 @@
 
 import torch
 
+from cornserve.task_executors.geri.executor.loader import get_registry_entry, load_model
+from cornserve.task_executors.geri.models.base import BatchGeriModel, GeriModel
 from cornserve.task_executors.geri.models.qwen_image import QwenImageModel
 
 from ..utils import assert_valid_png_results_list, create_dummy_embeddings
 
 model_id = "Qwen/Qwen-Image"
 pipeline_class_name = "QwenImagePipeline"
+
+
+def test_model_loading() -> None:
+    """Test model is correctly configured for model loader."""
+    registry_entry, _ = get_registry_entry(model_id)
+    model = load_model(model_id, torch.device("cuda"), registry_entry)
+    assert isinstance(model, GeriModel)
+    assert isinstance(model, BatchGeriModel)
 
 
 def test_qwen_image_generation() -> None:

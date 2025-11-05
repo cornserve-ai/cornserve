@@ -6,25 +6,49 @@ import multiprocessing as mp
 import queue
 import signal
 import threading
+from abc import ABC, abstractmethod
 from multiprocessing.context import SpawnProcess
-from typing import Any
+from typing import Any, Protocol
 
 import torch
 import zmq
 from opentelemetry import propagate, trace
+from transformers.configuration_utils import PretrainedConfig
 
 from cornserve.logging import get_logger
 from cornserve.sidecar.api import Sidecar
 from cornserve.sidecar.schema import SidecarConfig
 from cornserve.task_executors.geri.api import Status
 from cornserve.task_executors.geri.config import GeriConfig
-from cornserve.task_executors.geri.engine.scheduler import Scheduler
-from cornserve.task_executors.geri.executor.executor import ModelExecutor
+from cornserve.task_executors.geri.engine.scheduler import (
+    AudioScheduler,
+    AudioSchedulerBatch,
+    ImageScheduler,
+    ImageSchedulerBatch,
+    Scheduler,
+    SchedulerBatch,
+)
+from cornserve.task_executors.geri.executor.executor import (
+    BatchExecutor,
+    ModelExecutor,
+    StreamExecutor,
+)
 from cornserve.task_executors.geri.executor.loader import load_model
+from cornserve.task_executors.geri.models.base import (
+    BatchGeriModel,
+    GeriModel,
+    StreamGeriModel,
+)
+from cornserve.task_executors.geri.models.registry import RegistryEntry
 from cornserve.task_executors.geri.schema import (
+    AudioEngineRequest,
+    BatchEngineResponse,
     EngineOpcode,
     EngineRequest,
     EngineResponse,
+    GenerationResult,
+    ImageEngineRequest,
+    StreamEngineResponse,
 )
 from cornserve.task_executors.geri.utils.serde import MsgpackDecoder, MsgpackEncoder
 from cornserve.task_executors.geri.utils.zmq import zmq_sync_socket_ctx
@@ -35,49 +59,53 @@ tracer = trace.get_tracer(__name__)
 propagator = propagate.get_global_textmap()
 
 
-class Engine:
+class EngineModeProtocol(Protocol):
+    """Protocol to enforce that Engine subclasses initialize execution mode dependent fields."""
+
+    model: GeriModel
+    executor: ModelExecutor
+    decoder: MsgpackDecoder
+    scheduler: Scheduler
+
+
+class Engine(EngineModeProtocol, ABC):
     """Geri core engine.
 
     The engine receives generation requests from the router and
-    invokes the model executor to launch image generation. When content
-    is generated, the engine sends a response back to the router.
+    invokes the model executor to launch image generation.
     """
 
+    @abstractmethod
     def __init__(
         self,
-        config: GeriConfig,
+        geri_config: GeriConfig,
         request_sock_path: str,
         response_sock_path: str,
+        model_registry_entry: RegistryEntry,
+        model_config: PretrainedConfig | None = None,
     ) -> None:
         """Initialize the engine.
 
         Args:
-            config: Geri configuration.
+            geri_config: Geri configuration.
             request_sock_path: Path for receiving requests from router.
             response_sock_path: Path for sending responses to router.
+            model_registry_entry: Geri Model Registry entry for the model to be loaded.
+            model_config (optional): Configuration for the model to be loaded.
         """
-        self.config = config
+        self.geri_config = geri_config
 
-        model = load_model(model_id=config.model.id, torch_device=torch.device("cuda"))
+        # Set up serialization
+        self.encoder = MsgpackEncoder()
 
         self.sidecar = Sidecar(
             SidecarConfig(
-                sidecar_rank=sorted(config.sidecar.ranks)[0],
-                group=sorted(config.sidecar.ranks),
-                recv_tensor_dtype=model.dtype,
-                recv_tensor_shape=(-1, model.embedding_dim),
+                sidecar_rank=sorted(geri_config.sidecar.ranks)[0],
+                group=sorted(geri_config.sidecar.ranks),
+                recv_tensor_dtype=self.model.dtype,
+                recv_tensor_shape=(-1, self.model.embedding_dim),
             )
         )
-
-        # Set up serialization
-        self.decoder = MsgpackDecoder(EngineRequest)
-        self.encoder = MsgpackEncoder()
-
-        # Initialize model executor
-        self.executor = ModelExecutor(model=model)
-
-        # Initialize scheduler
-        self.scheduler = Scheduler(max_batch_size=config.server.max_batch_size)
 
         # Background thread that continuously receives from the request
         # ZMQ socket and pushes it into the request queue
@@ -98,6 +126,14 @@ class Engine:
         ).start()
 
         logger.info("Engine core initialized")
+
+    @abstractmethod
+    def step(self) -> None:
+        """Step the engine core.
+
+        This function is called in a loop to process requests and send
+        responses. It handles scheduling, executing, and processing results.
+        """
 
     def run(self) -> None:
         """Main engine loop."""
@@ -123,130 +159,39 @@ class Engine:
                 self._handle_client_request(*req)
 
             # Step the engine core
-            responses = self.step()
+            self.step()
 
-            # Put responses in the response queue
-            if responses:
-                for response in responses:
-                    self.response_queue.put_nowait(response)
+    def _collect_embed_chunks(self, embedding_data_id: str, skip_tokens: int = 0) -> torch.Tensor:
+        """Collect all chunks for a given embedding data ID."""
+        # Since data was already awaited by the engine client, these
+        # `recv_sync` calls should return immediately.
+        embedding_chunks = []
+        chunk_id = 0
+        while True:
+            chunk = self.sidecar.recv_sync(embedding_data_id, chunk_id=chunk_id)
+            if chunk is None:
+                break
+            embedding_chunks.append(chunk)
+            chunk_id += 1
 
-    def step(self) -> list[EngineResponse]:
-        """Step the engine core.
+        # Concatenate chunks for this request and slice initial tokens as specified
+        if embedding_chunks:
+            embedding = torch.cat(embedding_chunks, dim=0)[skip_tokens:].contiguous()
+            logger.debug(
+                "Retrieved embedding for data ID %s with %s and %d chunks (skipped %d initial tokens).",
+                embedding_data_id,
+                list(embedding.shape),
+                chunk_id,
+                skip_tokens,
+            )
+            return embedding
+        else:
+            logger.error("No embedding chunks received for data ID: %s", embedding_data_id)
+            raise RuntimeError(f"No embeddings received for data ID: {embedding_data_id}")
 
-        This function is called in a loop to process requests and send
-        responses. It handles scheduling, executing, and processing results.
-        """
-        batch = self.scheduler.schedule()
-        if batch is None:
-            return []
-
-        try:
-            # Collect all embeddings for the batch
-            prompt_embeds = []
-            for embedding_data_id, skip_tokens in zip(batch.embedding_data_ids, batch.skip_tokens, strict=True):
-                # Collect chunks for this embedding data ID.
-                # Since data was already awaited by the engine client, these
-                # `recv_sync` calls should return immediately.
-                embedding_chunks = []
-                chunk_id = 0
-                while True:
-                    chunk = self.sidecar.recv_sync(embedding_data_id, chunk_id=chunk_id)
-                    if chunk is None:
-                        break
-                    embedding_chunks.append(chunk)
-                    chunk_id += 1
-
-                # Concatenate chunks for this request and slice initial tokens as specified
-                if embedding_chunks:
-                    embedding = torch.cat(embedding_chunks, dim=0)[skip_tokens:].contiguous()
-                    prompt_embeds.append(embedding)
-                    logger.debug(
-                        "Retrieved embedding for data ID %s with %s and %d chunks (skipped %d initial tokens).",
-                        embedding_data_id,
-                        list(embedding.shape),
-                        chunk_id,
-                        skip_tokens,
-                    )
-                else:
-                    logger.error("No embedding chunks received for data ID: %s", embedding_data_id)
-                    raise RuntimeError(f"No embeddings received for data ID: {embedding_data_id}")
-
-            # Create a batch-level span for the entire generation operation
-            with tracer.start_as_current_span("geri.engine.generate_batch") as batch_span:
-                batch_span.set_attribute("geri.batch_size", len(batch))
-                batch_span.set_attribute("geri.height", batch.height)
-                batch_span.set_attribute("geri.width", batch.width)
-                batch_span.set_attribute("geri.num_inference_steps", batch.num_inference_steps)
-
-                # Create individual spans for each request in the batch as child spans
-                request_spans: list[trace.Span] = []
-                for i, (request_id, original_span) in enumerate(zip(batch.request_ids, batch.spans, strict=True)):
-                    if original_span is not None:
-                        # Create a child span under the original request's context
-                        context = trace.set_span_in_context(original_span)
-                        request_span = tracer.start_span("geri.engine.generate_request", context=context)
-                        request_span.set_attribute("geri.request_id", request_id)
-                        request_span.set_attribute("geri.batch_position", i)
-                        request_span.set_attribute("geri.batch_size", len(batch))
-                        request_spans.append(request_span)
-
-                # Execute the batch
-                result = self.executor.generate(
-                    prompt_embeds=[e.cuda() for e in prompt_embeds],
-                    height=batch.height,
-                    width=batch.width,
-                    num_inference_steps=batch.num_inference_steps,
-                )
-
-                # End individual request spans with result information
-                for request_span in request_spans:
-                    request_span.set_attribute("geri.batch_status", result.status.value)
-                    if result.error_message:
-                        request_span.set_attribute("geri.batch_error_message", result.error_message)
-                    request_span.end()
-
-            # Split the batched results back to individual responses
-            responses: list[EngineResponse] = []
-            for request_id, generated, span in zip(batch.request_ids, result.generated, batch.spans, strict=True):
-                response = EngineResponse(
-                    request_id=request_id,
-                    status=result.status,
-                    generated=generated,
-                    error_message=result.error_message,
-                )
-                responses.append(response)
-
-                # End the original request span (the top-level span for this request)
-                if span is not None:
-                    span.set_attribute("geri.status", result.status.value)
-                    if result.error_message:
-                        span.set_attribute("geri.error_message", result.error_message)
-                    span.end()
-
-            logger.info("Processed batch of %d requests", len(batch))
-            return responses
-
-        except Exception as e:
-            logger.exception("Batch processing failed")
-
-            # Send error responses to all requests in the batch
-            error_responses = []
-            for request_id, span in zip(batch.request_ids, batch.spans, strict=True):
-                response = EngineResponse(
-                    request_id=request_id,
-                    status=Status.ERROR,
-                    error_message=f"Batch processing failed: {str(e)}",
-                )
-                error_responses.append(response)
-
-                # End the original request span with error information
-                if span is not None:
-                    span.set_attribute("geri.status", "ERROR")
-                    span.set_attribute("geri.error_message", f"Batch processing failed: {str(e)}")
-                    span.record_exception(e)
-                    span.end()
-
-            return error_responses
+    @abstractmethod
+    def _create_top_level_span(self, request: EngineRequest) -> trace.Span | None:
+        """Create a top-level span for a client request if context is provided."""
 
     def _handle_client_request(self, opcode: EngineOpcode, request: Any) -> None:
         """Dispatch request from client."""
@@ -258,13 +203,7 @@ class Engine:
                     return
 
                 # Set up tracing span if context is provided
-                span = None
-                if request.span_context is not None:
-                    context = propagator.extract(request.span_context)
-                    span = tracer.start_span("geri.engine.process_request", context=context)
-                    span.set_attribute("geri.engine.process_request.request_id", request.request_id)
-                    span.set_attribute("geri.engine.process_request.height", request.height)
-                    span.set_attribute("geri.engine.process_request.width", request.width)
+                span = self._create_top_level_span(request)
 
                 self.scheduler.enqueue(request, span)
             case EngineOpcode.SHUTDOWN:
@@ -287,13 +226,14 @@ class Engine:
 
     def _response_send_loop(self, sock_path: str) -> None:
         """Continuously dequeue responses and send them to the router."""
-        buffer = bytearray()  # Reuse buffer
+        # buffer = bytearray()  # Reuse buffer
 
         with zmq_sync_socket_ctx(sock_path, zmq.PUSH) as sock:
             while True:
                 resp = self.response_queue.get()
-                self.encoder.encode_into(resp, buffer)
-                sock.send(buffer, copy=False)
+                # self.encoder.encode_into(resp, buffer)
+                # sock.send(buffer, copy=False)
+                sock.send(self.encoder.encode(resp), copy=False)
 
     def shutdown(self) -> None:
         """Shutdown the engine and clean up resources."""
@@ -305,9 +245,11 @@ class Engine:
     @classmethod
     def spawn_engine(
         cls,
-        config: GeriConfig,
+        geri_config: GeriConfig,
         request_sock_path: str,
         response_sock_path: str,
+        model_registry_entry: RegistryEntry,
+        model_config: PretrainedConfig | None = None,
     ) -> SpawnProcess:
         """Spawn the engine process.
 
@@ -323,11 +265,13 @@ class Engine:
             name="geri_engine",
             target=cls.main,
             kwargs=dict(
-                config=config,
+                geri_config=geri_config,
                 request_sock_path=request_sock_path,
                 response_sock_path=response_sock_path,
                 ready_pipe=writer,
                 ready_message=ready_message,
+                model_registry_entry=model_registry_entry,
+                model_config=model_config,
             ),
         )
         engine_proc.start()
@@ -343,12 +287,69 @@ class Engine:
         return engine_proc
 
     @staticmethod
+    def create_request_spans(batch) -> list[trace.Span]:
+        """Create individual spans for each request in the given batch as child spans."""
+        request_spans: list[trace.Span] = []
+        for i, (request_id, original_span) in enumerate(zip(batch.request_ids, batch.spans, strict=True)):
+            if original_span is not None:
+                # Create a child span under the original request's context
+                context = trace.set_span_in_context(original_span)
+                request_span = tracer.start_span("geri.engine.generate_request", context=context)
+                request_span.set_attribute("geri.request_id", request_id)
+                request_span.set_attribute("geri.batch_position", i)
+                request_span.set_attribute("geri.batch_size", len(batch))
+                request_spans.append(request_span)
+        return request_spans
+
+    @staticmethod
+    def end_request_span(request_span: trace.Span | None, result: GenerationResult) -> None:
+        """End a request's individual child span."""
+        if request_span is not None:
+            request_span.set_attribute("geri.batch_status", result.status.value)
+            if result.error_message:
+                request_span.set_attribute("geri.batch_error_message", result.error_message)
+            request_span.end()
+
+    @staticmethod
+    def end_top_level_span(span: trace.Span | None, result: GenerationResult) -> None:
+        """End a request's top level span."""
+        if span is not None:
+            span.set_attribute("geri.status", result.status.value)
+            if result.error_message:
+                span.set_attribute("geri.error_message", result.error_message)
+            span.end()
+
+    @staticmethod
+    def handle_batch_error(batch: SchedulerBatch, e: Exception, response_type: type[EngineResponse]):
+        """Send error responses to all requests in the batch."""
+        error_responses = []
+        for request_id, span in zip(batch.request_ids, batch.spans, strict=True):
+            response = response_type(
+                request_id=request_id,
+                status=Status.ERROR,
+                error_message=f"Batch processing failed: {str(e)}",
+            )
+            error_responses.append(response)
+
+            # End the original request span with error information
+            if span is not None:
+                span.set_attribute("geri.status", "ERROR")
+                span.set_attribute("geri.error_message", f"Batch processing failed: {str(e)}")
+                span.record_exception(e)
+                span.end()
+
+        return error_responses
+
+    @classmethod
     def main(
-        config: GeriConfig,
+        cls,
+        geri_config: GeriConfig,
         request_sock_path: str,
         response_sock_path: str,
         ready_pipe,
         ready_message: bytes,
+        model_registry_entry: RegistryEntry,
+        model_config: PretrainedConfig | None = None,
     ) -> None:
         """Main entry point for the engine process."""
         # Configure OpenTelemetry for this process
@@ -370,10 +371,12 @@ class Engine:
         engine: Engine | None = None
         try:
             # Create and initialize engine
-            engine = Engine(
-                config=config,
+            engine = cls(
+                geri_config=geri_config,
                 request_sock_path=request_sock_path,
                 response_sock_path=response_sock_path,
+                model_registry_entry=model_registry_entry,
+                model_config=model_config,
             )
 
             # Signal that we're ready
@@ -390,3 +393,281 @@ class Engine:
         finally:
             if engine:
                 engine.shutdown()
+
+
+class BatchGeriEngine(Engine):
+    """Batched Geri core engine.
+
+    When content is generated, the engine sends response back to the router
+    in a batched, non-streaming manner.
+    """
+
+    def __init__(
+        self,
+        geri_config: GeriConfig,
+        request_sock_path: str,
+        response_sock_path: str,
+        model_registry_entry: RegistryEntry,
+        model_config: PretrainedConfig | None = None,
+    ) -> None:
+        """Initialize the engine.
+
+        Args:
+            geri_config: Geri configuration.
+            request_sock_path: Path for receiving requests from router.
+            response_sock_path: Path for sending responses to router.
+            model_registry_entry: Geri Model Registry entry for the model to be loaded.
+            model_config (optional): Configuration for the model to be loaded.
+        """
+        # Initialize model executor
+        model = load_model(
+            model_id=geri_config.model.id,
+            torch_device=torch.device("cuda"),
+            registry_entry=model_registry_entry,
+            config=model_config,
+        )
+
+        if not isinstance(model, BatchGeriModel):
+            raise TypeError(f"BatchGeriEngine should be initialized with BatchGeriModel, not {type(model).__name__}")
+
+        self.model = model
+        self.executor = BatchExecutor(model=model)
+
+        # Currently, the batch Engine core only supports image requests.
+        # To add more request types, specify it in configs and add a match statement here.
+        self.decoder = MsgpackDecoder(ImageEngineRequest)
+        self.scheduler = ImageScheduler(max_batch_size=geri_config.server.max_batch_size)
+
+        super().__init__(geri_config, request_sock_path, response_sock_path, model_registry_entry, model_config)
+
+    def step(self) -> None:
+        """Step the engine core.
+
+        This function is called in a loop to process requests and send
+        responses. It handles scheduling, executing, and processing results.
+        """
+        assert isinstance(self.scheduler, ImageScheduler)
+        batch: ImageSchedulerBatch | None = self.scheduler.schedule()
+        if batch is None:
+            return
+
+        try:
+            responses = self._execute_batch(batch)
+        except Exception as e:
+            logger.exception("Batch processing failed")
+            responses = Engine.handle_batch_error(batch, e, BatchEngineResponse)
+
+        for response in responses:
+            self.response_queue.put_nowait(response)
+
+    def _execute_batch(self, batch: ImageSchedulerBatch) -> list[EngineResponse]:
+        """Execute requests in the given batch."""
+        prompt_embeds = []
+        for embedding_data_id, skip_tokens in zip(batch.embedding_data_ids, batch.skip_tokens, strict=True):
+            prompt_embeds.append(self._collect_embed_chunks(embedding_data_id, skip_tokens))
+
+        # Create a batch-level span for the entire generation operation
+        with tracer.start_as_current_span("geri.engine.execute_batch") as batch_span:
+            batch_span.set_attribute("geri.batch_size", len(batch))
+            batch_span.set_attribute("geri.height", batch.height)
+            batch_span.set_attribute("geri.width", batch.width)
+            batch_span.set_attribute("geri.num_inference_steps", batch.num_inference_steps)
+
+            request_spans = Engine.create_request_spans(batch)
+
+            # Execute the batch
+            result = self.executor.generate(
+                prompt_embeds=[e.cuda() for e in prompt_embeds],
+                height=batch.height,
+                width=batch.width,
+                num_inference_steps=batch.num_inference_steps,
+            )
+
+            # End individual request spans with result information
+            for request_span in request_spans:
+                Engine.end_request_span(request_span, result)
+
+        # Split the batched results back to individual responses
+        responses: list[EngineResponse] = []
+        for request_id, generated, span in zip(batch.request_ids, result.generated, batch.spans, strict=True):
+            response = BatchEngineResponse(
+                request_id=request_id,
+                status=result.status,
+                generated=generated,
+                error_message=result.error_message,
+            )
+            responses.append(response)
+
+            # End the original request span (the top-level span for this request)
+            Engine.end_top_level_span(span, result)
+
+        logger.info("Processed batch of %d requests", len(batch))
+        return responses
+
+    def _create_top_level_span(self, request: EngineRequest) -> trace.Span | None:
+        """Create a top-level span for a client request if context is provided."""
+        if request.span_context is not None:
+            context = propagator.extract(request.span_context)
+            span = tracer.start_span("geri.engine.process_request", context=context)
+            span.set_attribute("geri.engine.process_request.request_id", request.request_id)
+            if isinstance(request, ImageEngineRequest):
+                span.set_attribute("geri.engine.process_request.height", request.height)
+                span.set_attribute("geri.engine.process_request.width", request.width)
+                return span
+        return None
+
+
+class StreamGeriEngine(Engine):
+    """Streamed Geri core engine.
+
+    When content is generated, the engine sends response back to the router
+    in an streamed manner.
+    """
+
+    def __init__(
+        self,
+        geri_config: GeriConfig,
+        request_sock_path: str,
+        response_sock_path: str,
+        model_registry_entry: RegistryEntry,
+        model_config: PretrainedConfig | None = None,
+    ) -> None:
+        """Initialize the engine.
+
+        Args:
+            geri_config: Geri configuration.
+            request_sock_path: Path for receiving requests from router.
+            response_sock_path: Path for sending responses to router.
+            model_registry_entry: Geri Model Registry entry for the model to be loaded.
+            model_config (optional): Configuration for the model to be loaded.
+        """
+        # Initialize model executor
+        model = load_model(
+            model_id=geri_config.model.id,
+            torch_device=torch.device("cuda"),
+            registry_entry=model_registry_entry,
+            config=model_config,
+        )
+
+        if not isinstance(model, StreamGeriModel):
+            raise TypeError(f"StreamGeriEngine should be initialized with StreamGeriModel, not {type(model).__name__}")
+
+        self.model = model
+        self.executor = StreamExecutor(model=model)
+
+        # Currently, the stream Engine core only supports audio requests.
+        # To add more request types, specify it in configs and add a match statement here.
+        self.decoder = MsgpackDecoder(AudioEngineRequest)
+        self.scheduler = AudioScheduler(max_batch_size=geri_config.server.max_batch_size)
+
+        super().__init__(geri_config, request_sock_path, response_sock_path, model_registry_entry, model_config)
+
+    def step(self) -> None:
+        """Step the engine core.
+
+        This function is called in a loop to process requests and send
+        responses. It handles scheduling, executing, and processing results.
+        """
+        assert isinstance(self.scheduler, AudioScheduler)
+        batch: AudioSchedulerBatch | None = self.scheduler.schedule()
+        if batch is None:
+            return
+
+        try:
+            # No need to collect responses; all responses will be queued for forwarding
+            # within the _execute_batch method, in a streamed and incremental manner.
+            self._execute_batch(batch)
+
+        except Exception as e:
+            logger.exception("Batch processing failed")
+            for response in Engine.handle_batch_error(batch, e, StreamEngineResponse):
+                self.response_queue.put_nowait(response)
+
+    def _execute_batch(self, batch: AudioSchedulerBatch) -> None:
+        """Execute requests in the given batch."""
+        prompt_embeds = []
+        for embedding_data_id in batch.embedding_data_ids:
+            prompt_embeds.append(self._collect_embed_chunks(embedding_data_id))
+
+        # Create a batch-level span for the entire generation operation
+        with tracer.start_as_current_span("geri.engine.execute_batch") as batch_span:
+            batch_span.set_attribute("geri.batch_size", len(batch))
+            if batch.chunk_size is not None:
+                batch_span.set_attribute("geri.chunk_size", batch.chunk_size)
+            if batch.left_context_size is not None:
+                batch_span.set_attribute("geri.left_context_size", batch.left_context_size)
+
+            # Create individual spans for each request in the batch as child spans
+            request_spans: list[trace.Span] = Engine.create_request_spans(batch)
+
+            # This doesn't actually generate the full result; it only returns a generator
+            # we use to *acquire* the results in a streamed manner.
+            streaming_result = self.executor.generate(
+                prompt_embeds=[e.cuda() for e in prompt_embeds],
+                chunk_size=batch.chunk_size,
+                left_context_size=batch.left_context_size,
+            )
+
+        def signal_stream_end(request_id: str, error_msg: str | None = None) -> None:
+            response = StreamEngineResponse(
+                request_id=request_id,
+                status=Status.FINISHED,
+                error_message=error_msg,
+            )
+            self.response_queue.put_nowait(response)
+
+        if streaming_result.status != Status.SUCCESS or streaming_result.generator is None:
+            # Top-level spans will be ended by outer error handler
+            for request_span in request_spans:
+                Engine.end_request_span(request_span, streaming_result)
+            # Finish streams, and communicate the error
+            for request_id in batch.request_ids:
+                signal_stream_end(request_id, streaming_result.error_message)
+            raise ValueError(
+                f"Generator formation failed with status {streaming_result.status}: {streaming_result.error_message}"
+            )
+
+        batch_request_ids: list[str] = batch.request_ids
+        batch_spans: list[trace.Span | None] = batch.spans
+        request_is_done = [False] * len(batch_request_ids)
+
+        def handle_finished_request(index):
+            signal_stream_end(batch_request_ids[index])
+            Engine.end_request_span(request_spans[index], streaming_result)
+            Engine.end_top_level_span(batch_spans[index], streaming_result)
+
+        for streamed_chunks in streaming_result.generator:
+            for i, wav_chunk in enumerate(streamed_chunks):
+                request_id = batch_request_ids[i]
+                # Finished early
+                if wav_chunk is None:
+                    if not request_is_done[i]:
+                        handle_finished_request(i)
+                        request_is_done[i] = True
+                else:
+                    response = StreamEngineResponse(
+                        request_id=request_id,
+                        status=Status.SUCCESS,
+                        generate_bytes=wav_chunk.cpu().to(torch.float32).detach().numpy().tobytes(),
+                    )
+                    self.response_queue.put_nowait(response)
+
+        for i, finished in enumerate(request_is_done):
+            if not finished:
+                # Means it wasn't finished early during the generator loop.
+                # But by now, all requests are done, so we end it here.
+                handle_finished_request(i)
+
+    def _create_top_level_span(self, request: EngineRequest) -> trace.Span | None:
+        """Create a top-level span for a client request if context is provided."""
+        if request.span_context is not None:
+            context = propagator.extract(request.span_context)
+            span = tracer.start_span("geri.engine.process_request", context=context)
+            span.set_attribute("geri.engine.process_request.request_id", request.request_id)
+            if isinstance(request, AudioEngineRequest):
+                if request.chunk_size:
+                    span.set_attribute("geri.engine.process_request.chunk_size", request.chunk_size)
+                if request.left_context_size:
+                    span.set_attribute("geri.engine.process_request.left_context_size", request.left_context_size)
+            return span
+        return None

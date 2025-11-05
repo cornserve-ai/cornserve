@@ -7,56 +7,89 @@ import json
 
 import torch
 from huggingface_hub import hf_hub_download
+from transformers.configuration_utils import PretrainedConfig
+from transformers.models.auto.configuration_auto import AutoConfig
 
 from cornserve.logging import get_logger
 from cornserve.task_executors.geri.models.base import GeriModel
-from cornserve.task_executors.geri.models.registry import MODEL_REGISTRY
+from cornserve.task_executors.geri.models.registry import MODEL_REGISTRY, RegistryEntry
 
 logger = get_logger(__name__)
 
 
-def load_model(model_id: str, torch_device: torch.device) -> GeriModel:
-    """Load a model for generation.
+def get_registry_entry(model_id: str) -> tuple[RegistryEntry, PretrainedConfig | None]:
+    """Acquire the Geri model registry entry for the provided model_id.
 
     Args:
         model_id: Hugging Face model ID.
-        torch_device: Device to load the model on (e.g., torch.device("cuda"))
 
     Returns:
-        Loaded model instance.
+        Registry entry for the model and, if found, the HF model config.
 
     Raises:
+        ValueError: If the model's class name is not found in HF.
         KeyError: If the model type is not found in the registry.
-        FileNotFoundError: If model_index.json is not found.
-        ValueError: If the model configuration is invalid.
     """
-    logger.info("Loading model %s", model_id)
+    logger.info("Looking up Geri model registry for model %s", model_id)
 
-    # Download and parse model_index.json to get the pipeline class name
+    class_name: str | None = None
+    config: PretrainedConfig | None = None
+
+    # First, try to download and parse model_index.json to get the pipeline class name
     try:
         model_index_path = hf_hub_download(model_id, filename="model_index.json")
         with open(model_index_path) as f:
             model_index = json.load(f)
-
-        pipeline_class_name = model_index["_class_name"]
-        logger.info("Found pipeline class: %s", pipeline_class_name)
-
-    except Exception as e:
+        class_name = model_index["_class_name"]
+        logger.info("Found pipeline class: %s", class_name)
+    except Exception:
         logger.exception("Failed to load model_index.json from %s", model_id)
-        raise FileNotFoundError(f"Could not load model_index.json from {model_id}: {e}") from e
 
-    # Get the registry entry for this pipeline class
+    # Then, if that didn't work, try to parse config.json for model_type instead
+    if class_name is None:
+        try:
+            config = AutoConfig.from_pretrained(
+                model_id,
+                trust_remote_code=True,
+            )
+            class_name = config.model_type
+            logger.info("Found model class: %s", class_name)
+        except Exception:
+            logger.exception("Failed to load config from %s", model_id)
+
+    # Without the class name, it's not possible to find the registry entry
+    if class_name is None:
+        raise ValueError(f"Could not find class name from HF for model: {model_id}")
+
+    # Get the registry entry for this class
     try:
-        registry_entry = MODEL_REGISTRY[pipeline_class_name]
+        registry_entry = MODEL_REGISTRY[class_name]
     except KeyError:
         logger.exception(
-            "Pipeline class %s not found in registry. Available classes: %s",
-            pipeline_class_name,
+            "Model class %s not found in registry. Available classes: %s",
+            class_name,
             list(MODEL_REGISTRY.keys()),
         )
         raise
 
-    # Import the model class
+    return registry_entry, config
+
+
+def get_model_class(registry_entry: RegistryEntry) -> type[GeriModel]:
+    """Import and return the model class.
+
+    Args:
+        registry_entry: The registry entry for this model.
+
+    Returns:
+        The corresponding GeriModel class.
+
+    Raises:
+        ImportError: If the module specified in the registry entry could not be imported.
+        AttributeError: If the class in specified in the registry entry does not exist in
+            the module specified in the registry entry.
+        ValueError: If the model is invalid.
+    """
     try:
         model_class: type[GeriModel] = getattr(
             importlib.import_module(f"cornserve.task_executors.geri.models.{registry_entry.module}"),
@@ -82,8 +115,45 @@ def load_model(model_id: str, torch_device: torch.device) -> GeriModel:
     if not issubclass(model_class, GeriModel):
         raise ValueError(f"Model class {model_class} is not a subclass of GeriModel. Registry entry: {registry_entry}")
 
+    return model_class
+
+
+def load_model(
+    model_id: str,
+    torch_device: torch.device,
+    registry_entry: RegistryEntry,
+    config: PretrainedConfig | None = None,
+) -> GeriModel:
+    """Load a model for generation.
+
+    Args:
+        model_id: Hugging Face model ID.
+        torch_device: Device to load the model on (e.g., torch.device("cuda"))
+        registry_entry: The registry entry for this model.
+        config: The config for this model.
+            If supplied, the model will be initialized with the given config.
+            If not supplied, the config for the model will be looked up if needed.
+
+    Returns:
+        Loaded model instance.
+
+    Raises:
+        ImportError: If the module specified in the registry entry could not be imported.
+        AttributeError: If the class in specified in the registry entry does not exist in
+            the module specified in the registry entry.
+        ValueError: If the model is invalid.
+    """
+    logger.info("Loading model %s", model_id)
+
+    model_class: type[GeriModel] = get_model_class(registry_entry)
+
     # Instantiate the model
-    model = model_class(model_id=model_id, torch_dtype=registry_entry.torch_dtype, torch_device=torch_device)
+    model = model_class(
+        model_id=model_id,
+        torch_dtype=registry_entry.torch_dtype,
+        torch_device=torch_device,
+        config=config,
+    )
 
     logger.info("Model %s loaded successfully", model_id)
     return model

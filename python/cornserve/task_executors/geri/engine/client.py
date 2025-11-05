@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import asyncio
-import warnings
 from asyncio.futures import Future
+from collections.abc import AsyncGenerator
 from contextlib import suppress
 
 import torch
@@ -18,14 +18,32 @@ from opentelemetry import propagate, trace
 from cornserve.logging import get_logger
 from cornserve.sidecar.api import Sidecar
 from cornserve.sidecar.schema import SidecarConfig
-from cornserve.task_executors.geri.api import GenerationRequest, GenerationResponse, Status
+from cornserve.task_executors.geri.api import (
+    BatchGeriRequest,
+    BatchGeriResponse,
+    Status,
+    StreamGeriRequest,
+    StreamGeriResponseChunk,
+)
 from cornserve.task_executors.geri.config import GeriConfig
-from cornserve.task_executors.geri.engine.core import Engine
-from cornserve.task_executors.geri.executor.loader import load_model
+from cornserve.task_executors.geri.engine.core import (
+    BatchGeriEngine,
+    StreamGeriEngine,
+)
+from cornserve.task_executors.geri.executor.loader import (
+    get_model_class,
+    get_registry_entry,
+)
+from cornserve.task_executors.geri.models.base import GeriModel
 from cornserve.task_executors.geri.schema import (
+    BatchEngineRequest,
+    BatchEngineRequestFactory,
+    BatchEngineResponse,
     EngineOpcode,
-    EngineRequest,
-    EngineResponse,
+    GeriMode,
+    StreamEngineRequest,
+    StreamEngineRequestFactory,
+    StreamEngineResponse,
 )
 from cornserve.task_executors.geri.utils.serde import MsgpackDecoder, MsgpackEncoder
 from cornserve.task_executors.geri.utils.zmq import (
@@ -49,16 +67,13 @@ class EngineClient:
         3. Starts the engine process.
         4. Initializes the sidecar client that waits for data to arrive before enqueuing requests.
         """
-        # Figure out the embedding dimension from a temporary model instance
-        meta_device = torch.device("meta")
-        with warnings.catch_warnings():
-            warnings.filterwarnings(
-                "ignore",
-                message=".*copying from a non-meta parameter.*",
-                category=UserWarning,
-            )
-            with meta_device:
-                temp_model = load_model(model_id=config.model.id, torch_device=meta_device)
+        # Acquire model information and Geri mode to run engine in
+        registry_entry, model_config = get_registry_entry(config.model.id)
+        self.geri_mode = registry_entry.geri_mode
+
+        # Determine embedding dimension for the model
+        model_class: type[GeriModel] = get_model_class(registry_entry)
+        embedding_dim = model_class.find_embedding_dim(config.model.id, model_config)
 
         # Create ZMQ sockets for communication with the engine
         self.ctx = zmq.asyncio.Context(io_threads=2)
@@ -67,34 +82,51 @@ class EngineClient:
         self.response_sock_path = get_open_zmq_ipc_path("geri-engine-response")
         self.response_sock = make_zmq_socket(self.ctx, self.response_sock_path, zmq.PULL)
 
-        # Set up serialization
-        self.encoder = MsgpackEncoder()
-        self.decoder = MsgpackDecoder(EngineResponse)
-
         # Track pending requests
-        self.pending_requests: dict[str, Future[EngineResponse]] = {}
+        self.pending_requests: dict[str, Future[BatchEngineResponse]] = {}
+
+        # For streaming responses, we need producer-consumer queues
+        self.pending_streams: dict[str, asyncio.Queue[StreamEngineResponse]] = {}
 
         # Initialize the sidecar client
         self.sidecar = Sidecar(
             SidecarConfig(
                 sidecar_rank=sorted(config.sidecar.ranks)[0],
                 group=sorted(config.sidecar.ranks),
-                recv_tensor_dtype=temp_model.dtype,
-                recv_tensor_shape=(-1, temp_model.embedding_dim),
+                recv_tensor_dtype=registry_entry.torch_dtype,
+                recv_tensor_shape=(-1, embedding_dim),
             )
         )
 
-        # Start the engine process
-        self.engine_process = Engine.spawn_engine(
-            config=config,
+        # Set up serialization
+        self.encoder = MsgpackEncoder()
+
+        # Configure engine process based on what Geri mode we're in (streaming vs batched)
+        match self.geri_mode:
+            case GeriMode.BATCH:
+                self.decoder = MsgpackDecoder(BatchEngineResponse)
+                engine_type = BatchGeriEngine
+                response_listener = self._batch_response_listener
+            case GeriMode.STREAMING:
+                self.decoder = MsgpackDecoder(StreamEngineResponse)
+                engine_type = StreamGeriEngine
+                response_listener = self._stream_response_listener
+            case _:
+                raise ValueError(f"Unsupported Geri mode: {self.geri_mode}")
+
+        logger.info("Engine client launching Engine core in Geri mode: %s", self.geri_mode)
+        self.engine_process = engine_type.spawn_engine(
+            geri_config=config,
             request_sock_path=self.request_sock_path,
             response_sock_path=self.response_sock_path,
+            model_registry_entry=registry_entry,
+            model_config=model_config,
         )
 
         logger.info("EngineClient initialized with engine process PID: %d", self.engine_process.pid)
 
         # Start response listener task (after engine is ready)
-        self.response_task = asyncio.create_task(self._response_listener())
+        self.response_task = asyncio.create_task(response_listener())
 
     async def shutdown(self) -> None:
         """Shutdown the engine client and process."""
@@ -118,15 +150,18 @@ class EngineClient:
         # Close ZMQ context
         self.ctx.destroy()
 
-    @tracer.start_as_current_span("engine_client.generate")
-    async def generate(self, request_id: str, request: GenerationRequest) -> GenerationResponse:
-        """Generate content using the engine process."""
+    @tracer.start_as_current_span("engine_client.generate_batch")
+    async def generate_batch(self, request_id: str, request: BatchGeriRequest) -> BatchGeriResponse:
+        """Generate image content using the engine process."""
+        if self.geri_mode != GeriMode.BATCH:
+            raise RuntimeError(f"Wrong type of request (generate_batch) for Geri mode {self.geri_mode}")
+
         # Propagate trace context
         span_context = {}
         propagator.inject(span_context)
 
         # Wait for the embeddings to arrive in the sidecar
-        with tracer.start_as_current_span("engine_client.generate.sidecar_recv_wait"):
+        with tracer.start_as_current_span("engine_client.generate_batch.sidecar_recv_wait"):
             chunk_id = 0
             while True:
                 result = await self.sidecar.recv(id=request.embedding_data_id, chunk_id=chunk_id)
@@ -135,18 +170,10 @@ class EngineClient:
                 chunk_id += 1
 
         # Create message
-        message = EngineRequest(
-            request_id=request_id,
-            embedding_data_id=request.embedding_data_id,
-            height=request.height,
-            width=request.width,
-            num_inference_steps=request.num_inference_steps,
-            skip_tokens=request.skip_tokens,
-            span_context=span_context,
-        )
+        message: BatchEngineRequest = BatchEngineRequestFactory.from_geri_request(request, request_id, span_context)
 
         # Create future for response
-        future: Future[EngineResponse] = asyncio.Future()
+        future: Future[BatchEngineResponse] = asyncio.Future()
         self.pending_requests[request_id] = future
 
         # Send message to engine
@@ -166,34 +193,114 @@ class EngineClient:
 
         # Convert engine response to API response
         if engine_response.status == Status.SUCCESS:
-            return GenerationResponse(
+            return BatchGeriResponse(
                 status=Status.SUCCESS,
                 generated=engine_response.generated,
             )
         else:
-            return GenerationResponse(
+            return BatchGeriResponse(
                 status=Status.ERROR,
                 error_message=engine_response.error_message,
             )
 
-    async def _response_listener(self) -> None:
-        """Listen for responses from the engine process."""
-        logger.info("Starting response listener")
+    @tracer.start_as_current_span("engine_client.generate_streaming")
+    async def generate_streaming(
+        self,
+        request_id: str,
+        request: StreamGeriRequest,
+        stream_inputs: bool = False,  # for now, only outputs are streamed
+    ) -> AsyncGenerator[str, None]:
+        """Generate streamed-output audio using the engine process."""
+        if self.geri_mode != GeriMode.STREAMING:
+            raise RuntimeError(f"Wrong type of request (generate_streaming) for Geri mode {self.geri_mode}")
+
+        # Propagate trace context
+        span_context = {}
+        propagator.inject(span_context)
+
+        # Wait for *all* embeddings to arrive in the sidecar
+        with tracer.start_as_current_span("engine_client.generate_streaming.sidecar_recv_wait"):
+            chunk_id = 0
+            while True:
+                result = await self.sidecar.recv(id=request.embedding_data_id, chunk_id=chunk_id)
+                if result is None:
+                    break
+                chunk_id += 1
+
+        # Create a producer-consumer queue for this request.
+        # Will contain EngineResponse objects which hold bytes of wav data.
+        response_queue: asyncio.Queue[StreamEngineResponse] = asyncio.Queue()
+        self.pending_streams[request_id] = response_queue
+
+        # Create message
+        message: StreamEngineRequest = StreamEngineRequestFactory.from_geri_request(request, request_id, span_context)
+
+        # Send message to engine
+        await self.request_sock.send_multipart(
+            (EngineOpcode.GENERATE.value, self.encoder.encode(message)),
+            copy=False,
+        )
+        logger.info("Sent generate request to engine: %s", message)
+
+        while True:
+            engine_response = await response_queue.get()
+            if engine_response.status == Status.SUCCESS:
+                if engine_response.generate_bytes is not None:
+                    chunk = StreamGeriResponseChunk(engine_response.generate_bytes)
+                    # Pack it as a SSE event
+                    yield f"data: {chunk.model_dump_json()}\n\n"
+                else:
+                    logger.info("Generated bytes found to be None for request %s", request_id)
+            elif engine_response.status == Status.FINISHED:
+                logger.info("Successfully finished request %s", request_id)
+                break
+            else:
+                logger.info("Error detected for request %s", request_id)
+                break
+
+        # Cleanup
+        self.pending_streams.pop(request_id)
+
+    async def _batch_response_listener(self) -> None:
+        """Listen for batch responses from the engine process."""
+        logger.info("Starting batch response listener")
 
         try:
             while True:
                 # Receive response from engine
                 raw_response = await self.response_sock.recv()
-                response: EngineResponse = self.decoder.decode(raw_response)
+                response: BatchEngineResponse = self.decoder.decode(raw_response)
 
                 # Find pending request and complete it
                 future = self.pending_requests.pop(response.request_id, None)
                 if future and not future.done():
                     future.set_result(response)
                 else:
-                    logger.warning("Received response for unknown request: %s", response.request_id)
+                    logger.warning("Received batch response for unknown request: %s", response.request_id)
 
         except asyncio.CancelledError:
-            logger.info("Response listener cancelled")
+            logger.info("Batch response listener cancelled")
         except Exception:
-            logger.exception("Response listener failed")
+            logger.exception("Batch response listener failed")
+
+    async def _stream_response_listener(self) -> None:
+        """Listen for stream responses from the engine process."""
+        logger.info("Starting stream response listener")
+
+        try:
+            while True:
+                # Receive response from engine
+                raw_response = await self.response_sock.recv()
+                response: StreamEngineResponse = self.decoder.decode(raw_response)
+
+                # Find pending response data queue
+                queue = self.pending_streams.get(response.request_id)
+                if queue is not None:
+                    await queue.put(response)
+                else:
+                    logger.warning("Received streaming response for unknown request: %s", response.request_id)
+
+        except asyncio.CancelledError:
+            logger.info("Stream response listener cancelled")
+        except Exception:
+            logger.exception("Stream response listener failed")
