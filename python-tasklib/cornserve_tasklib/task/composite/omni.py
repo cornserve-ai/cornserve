@@ -17,7 +17,6 @@ from cornserve_tasklib.task.unit.llm import (
 from cornserve_tasklib.task.unit.omni import (
     OmniTalkerVocoderInput,
     OmniTalkerVocoderTask,
-    OmniOutputChunk,
 )
 
 
@@ -33,15 +32,12 @@ class OmniInput(OpenAIChatCompletionRequest):
 
     def model_post_init(self, context: Any, /) -> None:
         """Validate the model."""
-        assert self.model == "Qwen/Qwen2.5-Omni-7B", "Only Qwen/Qwen2.5-Omni-7B is supported."
+        assert self.model in {
+            "Qwen/Qwen3-Omni-30B-A3B-Instruct"
+        }, f"Only Qwen/Qwen3-Omni-30B-A3B-Instruct is supported, got {self.model}"
 
 
-def text_stream_transformer(chunk: OpenAIChatCompletionChunk) -> OmniOutputChunk:
-    """Transform a text chunk to an OmniOutputChunk."""
-    return OmniOutputChunk(text_chunk=chunk)
-
-
-class OmniTask(Task[OmniInput, Stream[OmniOutputChunk]]):
+class OmniTask(Task[OmniInput, Stream[OpenAIChatCompletionChunk]]):
     """A task that invokes a Multimodal LLM.
 
     Attributes:
@@ -49,7 +45,7 @@ class OmniTask(Task[OmniInput, Stream[OmniOutputChunk]]):
         modalities: List of input modalities other than text.
     """
 
-    model_id: Literal["Qwen/Qwen2.5-Omni-7B"] = "Qwen/Qwen2.5-Omni-7B"
+    model_id: Literal["Qwen/Qwen3-Omni-30B-A3B-Instruct"] = "Qwen/Qwen3-Omni-30B-A3B-Instruct"
     modalities: list[Modality] = []
     encoder_fission: bool = True
     coalesce_encoder_invocations: bool = True
@@ -69,35 +65,28 @@ class OmniTask(Task[OmniInput, Stream[OmniOutputChunk]]):
             coalesce_encoder_invocations=self.coalesce_encoder_invocations,
         )
         self.talker_vocoder = OmniTalkerVocoderTask(model_id=self.model_id)
-        self.system_prompt = (
-            "You are Qwen, a virtual human developed by the Qwen Team, Alibaba Group, capable of "
-            "perceiving auditory and visual inputs, as well as generating text and speech."
-        )
 
-    def invoke(self, task_input: OmniInput) -> Stream[OmniOutputChunk]:
+    def invoke(self, task_input: OmniInput) -> Stream[OpenAIChatCompletionChunk]:
         """Invoke the task.
 
         Given multimodal data and a text prompt, run the corresponding encoder
         for multimodal data and then pass the embeddings and text prompt to the LLM.
         """
-        # add system prompt
         thinker_input = OpenAIChatCompletionRequest.model_validate(
             dict(
-                model=task_input.model,
-                messages=[{"role": "system", "content": self.system_prompt}] + task_input.messages,
+                **task_input.model_dump(exclude={"return_audio"}),
             )
         )
-
+        # if only text response is needed, skip talker vocoder
         if not task_input.return_audio:
-            text_stream = self.thinker_text.invoke(thinker_input)
-            return text_stream.transform(text_stream_transformer)
+            return self.thinker_text.invoke(thinker_input)
 
         thinker_embedding_output = self.thinker_embedding.invoke(thinker_input)
 
         talker_input = OmniTalkerVocoderInput.model_validate(
             dict(
                 **task_input.model_dump(exclude={"return_audio"}),
-                embeddings=thinker_embedding_output.embeddings,
+                thinker_hidden_states=thinker_embedding_output.embeddings,
             )
         )
         return self.talker_vocoder.invoke(talker_input)

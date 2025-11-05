@@ -18,6 +18,9 @@ A `Task` can be:
 - a single inference of a neural network on GPUs (e.g., Text encoder, Vision encoder, Audio encoder, LLM, DiT, VAE decoder, Vocoder)
 - a composition of the above inference units (e.g., a Vision-Language model, a Thinker-Talker architecture model)
 
+The former is called a Unit Task, and concrete unit tasks inherit from `cornserve.task.base.UnitTask`.
+On the other hand, the latter is called a Composite Task, and they simply inherit from `cornserve.task.base.Task` and declare their *subtasks* and their execution logic in the `invoke` method.
+
 Concretely, `MLLMTask` is a composition of `EncoderTask` and `LLMTask`.
 
 ### Properties
@@ -56,7 +59,43 @@ Each concrete `Task` subclass is associated with one `TaskExecutionDescriptor` s
 
 The `LLMTask` is compatible with the `VLLMDescriptor`, which describes how to execute the LLM task using vLLM.
 Currently, only vLLM is implemented, but other executors like TensorRT-LLM or Dynamo can be implemented in the future.
-Similarly, the `EncoderTask` is compatible with the `EricDescriptor`, which describes how to execute the encoder task using Eric.
+Similarly, the `EncoderTask` is compatible with the `EricDescriptor`, which describes how to execute the encoder task using Eric, and the `GeneratorTask` is compatible with the `GeriDescriptor`, which describes how to execute the generator task using Geri.
+
+## CRD-Based Task Management
+
+Cornserve uses Kubernetes Custom Resource Definitions (CRDs) to enable dynamic task and execution descriptor management, moving away from statically built-in tasks to a more flexible runtime system.
+
+### Motivation
+
+Rather than having tasks and execution descriptors statically compiled into the system, the CRD-based approach allows:
+
+- **Dynamic registration**: Add new task types and execution descriptors at runtime without redeploying services
+- **Runtime flexibility**: Deploy, update, and remove tasks during system operation
+- **Fault tolerance**: Services can recover task definitions and instances after restarts by reading from CRDs
+- **Single source of truth**: CRDs serve as the authoritative state for task definitions, descriptors, and instances
+
+### CRD Types
+
+The system defines Custom Resources for:
+
+- **Unit Task Classes**: Definitions of atomic task types (e.g., `LLMTask`, `EncoderTask`)
+- **Composite Task Classes**: Definitions of task compositions (e.g., `MLLMTask`)
+- **Task Execution Descriptors**: Execution strategies for unit tasks (e.g., `VLLMDescriptor`, `EricDescriptor`)
+- **Unit Task Instances**: Specific instantiations of tasks with concrete parameters
+
+### How It Works
+
+Control plane services (Gateway, Resource Manager, Task Manager, Task Dispatcher) use a `TaskRegistry` that:
+
+1. **Watches CRDs**: Monitors Kubernetes for task and descriptor Custom Resources using the "list then watch" pattern
+2. **Loads into runtime**: Dynamically loads task classes and descriptors into Python's module system when CRs are created or updated
+3. **Maintains registries**: Keeps in-memory mappings from task/descriptor names to their runtime class definitions
+4. **References by name**: Services pass task instance references (CR names) rather than serializing full task objects
+
+This architecture enables eventual consistency across services while leveraging Kubernetes' strong consistency guarantees for the underlying CR storage.
+
+!!! note
+    The CRD-based management system is under active development and subject to change, particularly around versioning strategies and tear-down semantics.
 
 ## Task Lifecycle
 

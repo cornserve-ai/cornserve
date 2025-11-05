@@ -82,7 +82,7 @@ class Stream(TaskOutput, Generic[OutputT]):
     """
 
     # Each line in the stream should be a JSON string that can be parsed into an `OutputT` object.
-    async_iterator: AsyncIterator[str] | None = Field(default=None, exclude=True)
+    async_iterator: AsyncIterator[str] | AsyncIterator[bytes] | None = Field(default=None, exclude=True)
     response: aiohttp.ClientResponse | None = Field(default=None, exclude=True)
 
     _prev_type: type[TaskOutput] | None = None
@@ -157,7 +157,7 @@ class Stream(TaskOutput, Generic[OutputT]):
         _ = self.item_type  # Access the property to trigger validation
         return self
 
-    async def get_next(self) -> str | None:
+    async def get_next(self) -> str | bytes | None:
         """Get the next line from the stream.
 
         This is a convenience method to get the next line from the stream.
@@ -204,7 +204,7 @@ class Stream(TaskOutput, Generic[OutputT]):
 
         return self.item_type.model_validate_json(line.strip())
 
-    async def aiter_raw(self) -> AsyncGenerator[str]:
+    async def aiter_raw(self) -> AsyncGenerator[str | bytes, None]:
         """Asynchronously iterate over the raw output of the stream without parsing."""
         if self.async_iterator is None:
             raise ValueError("Stream generator is not initialized.")
@@ -514,10 +514,9 @@ class UnitTask(Task, Generic[InputT, OutputT]):
 
         raise AssertionError("Task context is neither in recording nor replay mode.")
 
-    @classmethod
-    def make_name(self) -> str:  # noqa: N804
+    def make_name(self) -> str:
         """Create a concise string representation of the task."""
-        return f"{self.__class__.__name__.lower()}"
+        return self.__class__.__name__.lower()
 
 
 class TaskInvocation(BaseModel, Generic[InputT, OutputT]):
@@ -602,7 +601,19 @@ class TaskGraphDispatch(BaseModel):
             if self.is_streaming:
                 response = await client.post(url, json=self.model_dump())
                 response.raise_for_status()
-                ait = aiter(response.content)
+
+                # Create a chunked iterator to avoid "chunk too big" error with large audio data
+                async def chunked_line_iterator():
+                    """Read lines from response using chunked reading to handle large lines."""
+                    buffer = b""
+                    async for chunk in response.content.iter_chunked(1024 * 1024):  # 1MB chunks
+                        buffer += chunk
+                        # Process complete lines from buffer
+                        while b"\n" in buffer:
+                            line_bytes, buffer = buffer.split(b"\n", 1)
+                            yield line_bytes
+
+                ait = aiter(chunked_line_iterator())
 
                 # First line is the task outputs of all invocations.
                 try:

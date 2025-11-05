@@ -40,12 +40,12 @@ cornserve = "cornserve.cli.main:main"
 
 [project.optional-dependencies]
 sidecar-api = [
-  "torch>=2.5.0, <=2.7.0",
+  "torch==2.9.0",
   "opentelemetry-instrumentation-grpc",
   "opentelemetry-instrumentation-threading",
 ]
 sidecar = [
-  "torch>=2.5.0, <=2.7.0",
+  "torch==2.9.0",
   "ucxx-cu12",
   "msgspec",
   "opentelemetry-instrumentation-grpc",
@@ -76,7 +76,7 @@ eric-no-gpu = [
   "pyzmq",
   "msgspec",
   "psutil",
-  "torch>=2.5.0, <=2.7.0",
+  "torch==2.9.0",
   "torchvision",
   "transformers==4.57.1",
   "huggingface_hub",
@@ -94,7 +94,7 @@ geri-no-gpu = [
   "uvicorn[standard]",
   "pyzmq",
   "msgspec",
-  "torch>=2.5.0, <=2.7.0",
+  "torch==2.9.0",
   "transformers==4.57.1",
   "huggingface_hub",
   "pillow",
@@ -159,7 +159,6 @@ ignore = [
   "PLR0913",  # Too many arguments
   "PLR0915",  # Too many statements
   "PLR0402",  # `import torch.nn as nn` is fine
-  "UP038",    # Deprecated and to be removed in Ruff 0.13
 ]
 
 [tool.ruff.lint.per-file-ignores]

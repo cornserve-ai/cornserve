@@ -4,7 +4,6 @@ from typing import Callable
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import numpy as np
 import numpy.typing as npt
 from transformers.models.auto.processing_auto import AutoProcessor
 
@@ -212,6 +211,7 @@ class Qwen3_VisionTransformer(EricModel):
         self.spatial_merge_unit = self.spatial_merge_size**2
         self.temporal_patch_size = vision_config.temporal_patch_size
         self.deepstack_visual_indexes = vision_config.deepstack_visual_indexes
+        self.out_hidden_size = vision_config.out_hidden_size
 
         self.num_position_embeddings = vision_config.num_position_embeddings
         self.num_grid_per_side = int(math.sqrt(self.num_position_embeddings))

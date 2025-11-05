@@ -280,7 +280,7 @@ async def invoke_tasks(request: TaskGraphDispatch, raw_request: Request):
     """Invoke a unit task graph."""
     task_manager: TaskManager = raw_request.app.state.task_manager
 
-    async def stream_response(results: list) -> AsyncGenerator[str]:
+    async def stream_response(results: list) -> AsyncGenerator[str | bytes, None]:
         """Stream the response for a streaming task results."""
         *results_with_empty_stream, stream = results
         results_with_empty_stream.append({})
@@ -293,7 +293,10 @@ async def invoke_tasks(request: TaskGraphDispatch, raw_request: Request):
             chunk = chunk.strip()
             if not chunk:
                 continue
-            yield chunk + "\n"
+            if isinstance(chunk, bytes):
+                yield chunk + b"\n"
+            else:
+                yield chunk + "\n"
 
     try:
         results = await task_manager.invoke_tasks(request)
