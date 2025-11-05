@@ -161,7 +161,7 @@ class EngineClient:
         propagator.inject(span_context)
 
         # Wait for the embeddings to arrive in the sidecar
-        with tracer.start_as_current_span("engine_client.generate.sidecar_recv_wait"):
+        with tracer.start_as_current_span("engine_client.generate_batch.sidecar_recv_wait"):
             chunk_id = 0
             while True:
                 result = await self.sidecar.recv(id=request.embedding_data_id, chunk_id=chunk_id)
@@ -219,7 +219,7 @@ class EngineClient:
         propagator.inject(span_context)
 
         # Wait for *all* embeddings to arrive in the sidecar
-        with tracer.start_as_current_span("engine_client.generate.sidecar_recv_wait"):
+        with tracer.start_as_current_span("engine_client.generate_streaming.sidecar_recv_wait"):
             chunk_id = 0
             while True:
                 result = await self.sidecar.recv(id=request.embedding_data_id, chunk_id=chunk_id)
