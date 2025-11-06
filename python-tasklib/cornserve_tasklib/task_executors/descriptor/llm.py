@@ -323,13 +323,18 @@ class PrefillVLLMDescriptor(
                 "remote_host": None,
                 "remote_port": None,
             }
-            request["cornserve_kv_transfer_send_params"] = {
-                "id": params.id,
-                "receiver_sidecar_ranks": params.dst_sidecar_ranks,
+            vllm_xargs = {
+                "cornserve_kv_transfer_params_forward_id": params.id,
+                "cornserve_kv_transfer_params_forward_ranks": str(params.dst_sidecar_ranks),
             }
+            request["vllm_xargs"] = vllm_xargs
 
         if (hidden_states := task_output.hidden_states) is not None:
-            request["cornserve_hidden_states_forward_ranks"] = hidden_states.dst_sidecar_ranks
+            vllm_xargs = request.setdefault("vllm_xargs", {})
+            vllm_xargs.update({
+                "cornserve_hidden_states_forward_id": hidden_states.id,
+                "cornserve_hidden_states_forward_ranks": str(hidden_states.dst_sidecar_ranks),
+            })
 
         return request
 
@@ -463,9 +468,10 @@ class DecodeVLLMDescriptor(
         request = task_input.model_dump(exclude={"cornserve_embeddings", "cornserve_kv_transfer_params"})
         if task_input.cornserve_kv_transfer_params is None:
             raise ValueError("Task input must contain cornserve_kv_transfer_params for decode tasks.")
-        request["cornserve_kv_transfer_recv_params"] = {
-            "id": task_input.cornserve_kv_transfer_params.id,
+        vllm_xargs = {
+            "cornserve_kv_transfer_params_recv_id": task_input.cornserve_kv_transfer_params.id,
         }
+        request["vllm_xargs"] = vllm_xargs
         request["stream"] = True
         return request
 

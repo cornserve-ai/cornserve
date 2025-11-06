@@ -48,7 +48,7 @@ RUN mkdir -p /opt/ucx-shim/{lib,include}
 RUN ln -s /usr/lib64        /opt/ucx-shim/lib
 RUN ln -s /usr/include      /opt/ucx-shim/include
 ENV UCX_PREFIX=/opt/ucx-shim
-RUN uv pip install "git+https://github.com/ai-dynamo/nixl@0.5.1" \
+RUN uv pip install "git+https://github.com/ai-dynamo/nixl@0.6.1" \
   --config-settings=setup-args="-Ducx_path=$UCX_PREFIX" \
   --config-settings=setup-args="-Dinstall_headers=false" \
   --config-settings=setup-args="-Dbuild_docs=false"
