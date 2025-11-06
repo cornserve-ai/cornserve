@@ -193,6 +193,7 @@ class TaskRegistry:
                 version=CRD_VERSION,
                 namespace=K8S_NAMESPACE,
                 plural=CRD_PLURAL_TASK_DEFINITIONS,
+                limit=1,
             )
             items = resp.get("items", [])
             return len(items) == 0

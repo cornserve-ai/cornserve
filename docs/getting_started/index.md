@@ -73,6 +73,7 @@ Next, install the Cornserve CLI that helps you interact with Cornserve:
 uv venv --python=3.11
 source .venv/bin/activate
 uv pip install python/
+uv pip install python-tasklib/
 ```
 
 Next, we need to deploy built-in tasks that Cornserve provides to our Cornserve cluster.
