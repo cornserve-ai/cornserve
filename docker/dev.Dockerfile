@@ -1,13 +1,13 @@
 # Build flash-attn wheel inside the `devel` image which has `nvcc`.
-FROM pytorch/pytorch:2.7.0-cuda12.6-cudnn9-devel AS builder
+FROM pytorch/pytorch:2.9.0-cuda12.8-cudnn9-devel AS builder
 
-ARG max_jobs=64
+ARG max_jobs=16
 ENV MAX_JOBS=${max_jobs}
 ENV NVCC_THREADS=8
 RUN pip wheel -w /tmp/wheels --no-build-isolation --no-deps --verbose flash-attn==2.7.4.post1
 
 # Copy over the flash-attn wheel for Eric
-FROM pytorch/pytorch:2.7.0-cuda12.6-cudnn9-runtime AS dev
+FROM pytorch/pytorch:2.9.0-cuda12.8-cudnn9-runtime AS dev
 
 COPY --from=builder /tmp/wheels/*.whl /tmp/wheels/
 RUN pip install --no-cache-dir /tmp/wheels/*.whl && rm -rf /tmp/wheels
@@ -15,10 +15,10 @@ RUN pip install --no-cache-dir /tmp/wheels/*.whl && rm -rf /tmp/wheels
 RUN apt-get update && apt-get upgrade -y
 RUN apt-get install wget build-essential librdmacm-dev net-tools -y
 
-########### Install UCX 1.18.0 ###########
-RUN wget https://github.com/openucx/ucx/releases/download/v1.18.0/ucx-1.18.0.tar.gz
-RUN tar xzf ucx-1.18.0.tar.gz
-WORKDIR /workspace/ucx-1.18.0
+########### Install UCX 1.19.0 ###########
+RUN wget https://github.com/openucx/ucx/releases/download/v1.19.0/ucx-1.19.0.tar.gz
+RUN tar xzf ucx-1.19.0.tar.gz
+WORKDIR /workspace/ucx-1.19.0
 RUN mkdir build
 RUN cd build && \
       ../configure --build=x86_64-unknown-linux-gnu --host=x86_64-unknown-linux-gnu --program-prefix= --disable-dependency-tracking \
