@@ -330,12 +330,11 @@ class PrefillVLLMDescriptor(
             request["vllm_xargs"] = vllm_xargs
 
         if (hidden_states := task_output.hidden_states) is not None:
-            vllm_xargs = request["vllm_xargs"] or {}
-            vllm_xargs = {
+            vllm_xargs = request.setdefault("vllm_xargs", {})
+            vllm_xargs.update({
                 "cornserve_hidden_states_forward_id": hidden_states.id,
                 "cornserve_hidden_states_forward_ranks": str(hidden_states.dst_sidecar_ranks),
-            }
-            request["vllm_xargs"] = vllm_xargs
+            })
 
         return request
 
