@@ -182,6 +182,24 @@ class TaskRegistry:
                 raise ValueError(f"Execution descriptor {name} already exists") from e
             raise
 
+    async def check_emptiness(self) -> bool:
+        """Return True if there are no task definitions deployed in the cluster."""
+        await self._load_config()
+        assert self._custom_api is not None
+
+        try:
+            resp = await self._custom_api.list_namespaced_custom_object(
+                group=CRD_GROUP,
+                version=CRD_VERSION,
+                namespace=K8S_NAMESPACE,
+                plural=CRD_PLURAL_TASK_DEFINITIONS,
+            )
+            items = resp.get("items", [])
+            return len(items) == 0
+        except client.ApiException as e:
+            logger.error("Failed to list task definitions for emptiness check: %s", e)
+            raise RuntimeError(f"Failed to check task definitions: {e}") from e
+
     async def get_task_instance(self, instance_name: str) -> UnitTask:
         """Reconstruct a configured task from its instance name."""
         await self._load_config()

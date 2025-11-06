@@ -32,6 +32,8 @@ If the feature is not small or requires broad changes over the codebase, please 
 
     # For environments without GPU (e.g., editor/IDE environment)
     uv pip install -e 'python[dev-no-gpu]' --config-settings editable_mode=strict
+
+    uv pip install -e python-tasklib/ --config-settings editable_mode=strict
     ```
 1. Generate Python bindings for Protobuf files with `uv run bash scripts/generate_pb.sh`.
 1. Implement changes in your branch and add tests as needed.
