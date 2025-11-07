@@ -57,6 +57,15 @@ async def register_app(request: AppRegistrationRequest, raw_request: Request):
         """
         app_id: str | None = None
         try:
+            # Check: if no task class observed, very likely the tasklib is not deployed yet
+            task_registry: TaskRegistry = raw_request.app.state.task_registry
+            is_empty = await task_registry.check_emptiness()
+            if is_empty:
+                raise ValueError(
+                    "No task definitions found in the cluster. Did you forget to deploy the tasklib? "
+                    "See https://cornserve.ai/getting_started/ for more instructions."
+                )
+
             # Parse and validate the app
             app_id, task_names = await app_manager.validate_and_create_app(request.source_code)
 
