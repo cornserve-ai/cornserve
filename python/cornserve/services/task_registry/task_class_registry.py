@@ -3,13 +3,10 @@
 from __future__ import annotations
 
 import base64
-import sys
-import types
-from importlib.machinery import ModuleSpec
 from typing import TYPE_CHECKING
 
 from cornserve.logging import get_logger
-from cornserve.services.task_registry.util import create_package_hierarchy_if_missing
+from cornserve.services.task_registry.util import write_to_file_and_import
 from cornserve.task.base import Task, UnitTask
 
 if TYPE_CHECKING:
@@ -69,7 +66,7 @@ class TaskClassRegistry:
         """
         decoded_source = base64.b64decode(source_code).decode("utf-8")
         try:
-            self._exec_install_and_register_task(
+            self._install_and_register_task(
                 decoded_source=decoded_source,
                 module_name=module_name,
                 task_class_name=task_class_name,
@@ -92,111 +89,63 @@ class TaskClassRegistry:
                 return
             raise
 
-    def _exec_install_and_register_task(
+    def _install_and_register_task(
         self,
         decoded_source: str,
         module_name: str,
         task_class_name: str,
         is_unit_task: bool,
     ) -> None:
-        """Execute task module source, validate, install, and register (unit or composite)."""
-        created_packages: list[str] = []
+        module = write_to_file_and_import(module_name=module_name, decoded_source=decoded_source)
 
-        # Ensure parent packages
-        parent = module_name.rpartition(".")[0]
-        if parent:
-            create_package_hierarchy_if_missing(parent)
-            # Track packages created for rollback
-            if parent in sys.modules:
-                created_packages.append(parent)
+        # Validate class presence and type
+        if not hasattr(module, task_class_name):
+            raise ValueError(f"Task class {task_class_name} not found in its source code")
+        task_cls = getattr(module, task_class_name)
 
-        # Create and pre-insert module
-        module = types.ModuleType(module_name)
-        module.__spec__ = ModuleSpec(module_name, loader=None, is_package=False)
-        module.__package__ = parent or module_name
-        module.__file__ = f"<crd:{module_name}>"
+        if is_unit_task:
+            if not issubclass(task_cls, UnitTask):
+                raise ValueError(f"Class {task_class_name} is not a UnitTask subclass")
+        elif not issubclass(task_cls, Task):
+            raise ValueError(f"Class {task_class_name} is not a Task subclass")
 
-        preexisting = module_name in sys.modules
-        previous_module = sys.modules.get(module_name)
-        sys.modules[module_name] = module
-        if parent:
-            setattr(sys.modules[parent], module_name.split(".")[-1], module)
+        if not is_unit_task:
+            self._register_composite(task_cls, task_class_name)
+            return
 
-        try:
-            # Execute the decoded source
-            exec(decoded_source, module.__dict__)
+        # Extract generic types from MRO
+        # Assert again for static type checkers
+        assert issubclass(task_cls, UnitTask)
+        task_input_cls = None
+        task_output_cls = None
+        for base in task_cls.__mro__:
+            if (
+                hasattr(base, "__name__")
+                and "UnitTask[" in str(base)
+                and hasattr(base, "__pydantic_generic_metadata__")
+            ):
+                metadata = base.__pydantic_generic_metadata__
+                if metadata and "args" in metadata and len(metadata["args"]) == 2:
+                    task_input_cls, task_output_cls = metadata["args"]
+                    break
 
-            # Validate class presence and type
-            if not hasattr(module, task_class_name):
-                raise ValueError(f"Task class {task_class_name} not found in source code")
-            task_cls = getattr(module, task_class_name)
+        if task_input_cls is None or task_output_cls is None:
+            # Special case:  the  "LLMBaseUnitTask" is a generic task class
+            # so it doesn't have concrete input/output types,
+            # so to let it goes through, we register it with dummy TaskInput/Output types
+            # TODO: Such special case is definitely not legetimate, what should we do instead?
+            if task_class_name == "LLMBaseUnitTask":
+                from cornserve.task.base import TaskInput as DummyInput  # noqa: PLC0415
+                from cornserve.task.base import TaskOutput as DummyOutput  # noqa: PLC0415
 
-            if is_unit_task:
-                if not issubclass(task_cls, UnitTask):
-                    raise ValueError(f"Class {task_class_name} is not a UnitTask subclass")
-            elif not issubclass(task_cls, Task):
-                raise ValueError(f"Class {task_class_name} is not a Task subclass")
-
-            if not is_unit_task:
-                self._register_composite(task_cls, task_class_name)
-                return
-
-            # Extract generic types from MRO
-            # Assert again for static type checkers
-            assert issubclass(task_cls, UnitTask)
-            task_input_cls = None
-            task_output_cls = None
-            for base in task_cls.__mro__:
-                if (
-                    hasattr(base, "__name__")
-                    and "UnitTask[" in str(base)
-                    and hasattr(base, "__pydantic_generic_metadata__")
-                ):
-                    metadata = base.__pydantic_generic_metadata__
-                    if metadata and "args" in metadata and len(metadata["args"]) == 2:
-                        task_input_cls, task_output_cls = metadata["args"]
-                        break
-
-            if task_input_cls is None or task_output_cls is None:
-                # Special case:  the  "LLMBaseUnitTask" is a generic task class
-                # so it doesn't have concrete input/output types,
-                # so to let it goes through, we register it with dummy TaskInput/Output types
-                # TODO: Such special case is definitely not legetimate, what should we do instead?
-                if task_class_name == "LLMBaseUnitTask":
-                    from cornserve.task.base import TaskInput as DummyInput  # noqa: PLC0415
-                    from cornserve.task.base import TaskOutput as DummyOutput  # noqa: PLC0415
-
-                    task_input_cls, task_output_cls = DummyInput, DummyOutput
-                else:
-                    raise ValueError(
-                        f"Task class {task_class_name} missing generic type arguments. "
-                        f"Expected format: class {task_class_name}(UnitTask[InputType, OutputType])"
-                    )
-
-            self._register(task_cls, task_input_cls, task_output_cls, task_class_name)
-        except Exception:
-            # Roll back package placeholders
-            for pkg_name in reversed(created_packages):
-                parent_name = pkg_name.rpartition(".")[0]
-                child_name = pkg_name.split(".")[-1]
-                if parent_name in sys.modules:
-                    try:
-                        if getattr(sys.modules[parent_name], child_name, None) is sys.modules.get(pkg_name):
-                            delattr(sys.modules[parent_name], child_name)
-                    except Exception:
-                        pass
-                sys.modules.pop(pkg_name, None)
-            # Roll back pre-inserted module to restore sys.modules state
-            try:
-                if parent and getattr(sys.modules.get(parent, None), module_name.split(".")[-1], None) is module:
-                    delattr(sys.modules[parent], module_name.split(".")[-1])
-            except Exception:
-                pass
-            if preexisting and previous_module is not None:
-                sys.modules[module_name] = previous_module
+                task_input_cls, task_output_cls = DummyInput, DummyOutput
             else:
-                sys.modules.pop(module_name, None)
-            raise
+                raise ValueError(
+                    f"Task class {task_class_name} missing generic type arguments. "
+                    f"Expected format: class {task_class_name}(UnitTask[InputType, OutputType])"
+                )
+
+        self._register(task_cls, task_input_cls, task_output_cls, task_class_name)
 
     def _bind_pending_tasks(self) -> None:
         """Attempt to load any pending task modules deferred due to missing deps."""
@@ -205,7 +154,7 @@ class TaskClassRegistry:
         remaining: list[tuple[str, str, str, bool]] = []
         for decoded_source, module_name, task_class_name, is_unit_task in self._pending:
             try:
-                self._exec_install_and_register_task(
+                self._install_and_register_task(
                     decoded_source=decoded_source,
                     module_name=module_name,
                     task_class_name=task_class_name,
