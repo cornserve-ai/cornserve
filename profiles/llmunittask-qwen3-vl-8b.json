@@ -1,0 +1,11 @@
+{
+  "task": {
+    "__class__": "LLMUnitTask",
+    "model_id": "Qwen/Qwen3-VL-8B-Instruct",
+    "receive_embeddings": true,
+    "execution_descriptor_name": null
+  },
+  "num_gpus_to_profile": {
+    "1": {"launch_args": ["--max-model-len", "128000"]}
+  }
+}
