@@ -10,6 +10,7 @@ from contextlib import suppress
 from pathlib import Path
 from typing import Annotated, Any
 
+import pyaudio
 import requests
 import rich
 import tyro
@@ -398,6 +399,7 @@ def invoke(
     aggregate_keys: list[str] | None = None,
     png_key: str | None = None,
     save_png_path: str | None = None,
+    audio_key: str | None = None,
 ) -> None:
     """Invoke an app with the given data.
 
@@ -416,6 +418,9 @@ def invoke(
             the PNG will be displayed using Kitty TGP (if supported) and/or saved to file.
         save_png_path: Optional path to save the PNG file. If specified along with png_key,
             the PNG data will be decoded and saved to this file path.
+        audio_key: Optional key in the response containing base64-encoded wav bytes.
+            Supports dot notation for nested fields. If specified, the audio will be played
+            from the device that the CLI is running on.
     """
     if app_id_or_alias.startswith("app-"):
         app_id = app_id_or_alias
@@ -446,8 +451,13 @@ def invoke(
             if png_key:
                 rich.print(Panel("PNG display is not supported for streaming responses", style="red", expand=False))
                 return
-            _handle_streaming_response(raw_response, aggregate_keys)
+            _handle_streaming_response(raw_response, aggregate_keys, audio_key)
         else:
+            if audio_key:
+                rich.print(
+                    Panel("Audio playback is not supported for non-streaming responses", style="red", expand=False)
+                )
+                return
             _handle_non_streaming_response(raw_response, png_key, save_png_path)
 
     except Exception as e:
@@ -480,15 +490,37 @@ def _handle_non_streaming_response(
 def _handle_streaming_response(
     response: requests.Response,
     aggregate_keys: list[str] | None = None,
+    audio_key: str | None = None,
 ) -> None:
     """Handle streaming response with live-updating table.
 
-    If aggregate_keys is provided, accumulates values for those keys across all streaming responses.
-    Keys support dot notation (e.g., "choices.0.delta.content") and pure numbers are cast to integers.
-
-    If aggregate_keys is None, displays each JSON response as a new table row with an incremented index.
+    Args:
+        response: A response from which the result can be streamed.
+        aggregate_keys: If provided, values for these keys across all streaming responses will
+            be accumulated. Keys support dot notation (e.g., "choices.0.delta.content") and pure
+            numbers are cast to integers. If aggregate_keys is None, displays each JSON response
+            as a new table row with an incremented index.
+        audio_key: Optional key in the response containing base64-encoded wav bytes.
+            Supports dot notation for nested fields. If specified, audio in the response will be
+            played from the device that the CLI is running on.
     """
     console = rich.get_console()
+
+    # hardcoded for now for dev (todo: fix)
+    sample_rate = 24000
+    channels = 1
+    sample_width = 2
+
+    if audio_key is not None:
+        p = pyaudio.PyAudio()
+        stream = p.open(
+            format=p.get_format_from_width(sample_width),
+            channels=channels,
+            rate=sample_rate,
+            output=True,
+        )
+    else:
+        p, stream = None, None
 
     if aggregate_keys:
         # Aggregation mode: accumulate values for specified keys
@@ -514,6 +546,12 @@ def _handle_streaming_response(
                         table = _create_response_table(accumulated_data, aggregate_keys)
                         live.update(table, refresh=True)
 
+                        if not (audio_key is None or p is None or stream is None):
+                            value = _extract_nested_value(response_data, audio_key)
+                            if value is not None:
+                                pcm_bytes = base64.b64decode(str(value))
+                                stream.write(pcm_bytes)
+
                     except json.JSONDecodeError as e:
                         rich.print(Panel(f"Failed to parse JSON response: {e}", style="red", expand=False))
                         break
@@ -537,6 +575,16 @@ def _handle_streaming_response(
                     accumulated_data[str(line_idx)] = line
                     table = _create_response_table(accumulated_data)
                     live.update(table, refresh=True)
+
+                    if not (audio_key is None or p is None or stream is None):
+                        try:
+                            response_data = json.loads(line)
+                            if (value := _extract_nested_value(response_data, audio_key)) is not None:
+                                pcm_bytes = base64.b64decode(str(value))
+                                stream.write(pcm_bytes)
+                        except json.JSONDecodeError as e:
+                            rich.print(Panel(f"Failed to parse JSON response: {e}", style="red", expand=False))
+                            break
 
             # Final newline after live display ends
             console.print()
