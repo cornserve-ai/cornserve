@@ -8,23 +8,51 @@ import time
 import sounddevice as sd
 
 
-class PCM16StreamPlayer:
-    """Streams little-endian PCM16 mono to the default audio output."""
+class PCMStreamPlayer:
+    """Streams raw PCM data to the default audio output."""
 
-    def __init__(self, samplerate: int = 24000, channels: int = 1, prebuffer_seconds: float = 0.20):
+    # Map of format strings to sounddevice dtype and bytes per sample.
+    PCM_FORMATS = {
+        "pcm16": {"dtype": "int16", "bytes": 2},
+        "pcm24": {"dtype": "int32", "bytes": 3},
+        "pcm32": {"dtype": "int32", "bytes": 4},
+    }
+
+    DEFAULT_SAMPLE_RATE = 24000
+    DEFAULT_CHANNELS = 1
+    DEFAULT_PREBUFFER_SEC = 0.20
+    DEFAULT_FORMAT = "pcm16"
+
+    def __init__(
+        self,
+        sample_rate: int | None = None,
+        channels: int | None = None,
+        pcm_format: str | None = None,
+        prebuffer_seconds: float | None = None,
+    ):
         """Initialize the stream player."""
-        self.samplerate = samplerate
-        self.channels = channels
+        self.sample_rate = self.DEFAULT_SAMPLE_RATE if sample_rate is None else sample_rate
+        self.channels = self.DEFAULT_CHANNELS if channels is None else channels
 
-        # 2 bytes per int16 sample
-        self.prebuffer_bytes = int(prebuffer_seconds * samplerate * channels * 2)
+        prebuffer_seconds = self.DEFAULT_PREBUFFER_SEC if prebuffer_seconds is None else prebuffer_seconds
+        pcm_format_str = (self.DEFAULT_FORMAT if pcm_format is None else pcm_format).lower()
+
+        # Get format details
+        format_details = self.PCM_FORMATS.get(pcm_format_str)
+        if not format_details:
+            raise ValueError(f"Unsupported PCM format: {pcm_format}. Supported: {list(self.PCM_FORMATS.keys())}")
+
+        self.dtype = format_details["dtype"]
+        self.bytes_per_sample = format_details["bytes"]
+
+        self.prebuffer_bytes = int(prebuffer_seconds * self.sample_rate * self.channels * self.bytes_per_sample)
 
         self._q: queue.Queue[bytes] = queue.Queue(maxsize=256)
         self._stop = threading.Event()
         self._stream = sd.RawOutputStream(
-            samplerate=self.samplerate,
+            samplerate=self.sample_rate,
             channels=self.channels,
-            dtype="int16",
+            dtype=self.dtype,
             latency="low",
             blocksize=0,  # let PortAudio decide
         )
@@ -38,7 +66,7 @@ class PCM16StreamPlayer:
         self._writer_thread.start()
 
     def feed(self, pcm_bytes: bytes) -> None:
-        """Feed raw PCM16 bytes (LE). Thread-safe."""
+        """Feed raw PCM bytes. Thread-safe."""
         if not pcm_bytes:
             return
         if not self._stream_started:
@@ -97,8 +125,19 @@ class PCM16StreamPlayer:
                     if not first_write_done and not self._stream.active and self._stream_started:
                         # Start then write a tiny silence so stop() has something to drain
                         self._stream.start()
-                        # ~ 10ms
-                        self._stream.write(b"\x00" * (self.samplerate // 100))
+
+                        # ~ 10ms of silence
+                        num_samples_10ms = int(self.sample_rate * 0.01)
+                        num_bytes_10ms = num_samples_10ms * self.channels * self.bytes_per_sample
+
+                        # Ensure at least a small amount of silence is written
+                        if num_bytes_10ms == 0:
+                            num_bytes_10ms = max(
+                                self.channels * self.bytes_per_sample,
+                                1,
+                            )
+
+                        self._stream.write(b"\x00" * num_bytes_10ms)
                         first_write_done = True
                     if self._stream.active:
                         # blocking drain
