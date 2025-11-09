@@ -10,7 +10,6 @@ from contextlib import suppress
 from pathlib import Path
 from typing import Annotated, Any
 
-import pyaudio
 import requests
 import rich
 import tyro
@@ -25,6 +24,7 @@ from rich.table import Table
 from rich.text import Text
 from tyro.constructors import PrimitiveConstructorSpec
 
+from cornserve.cli.audio_streamer import PCM16StreamPlayer
 from cornserve.cli.log_streamer import LogStreamer
 from cornserve.cli.tasklib_explorer import discover_tasklib
 from cornserve.cli.utils.k8s import load_k8s_config
@@ -418,8 +418,8 @@ def invoke(
             the PNG will be displayed using Kitty TGP (if supported) and/or saved to file.
         save_png_path: Optional path to save the PNG file. If specified along with png_key,
             the PNG data will be decoded and saved to this file path.
-        audio_key: Optional key in the response containing base64-encoded wav bytes.
-            Supports dot notation for nested fields. If specified, the audio will be played
+        audio_key: Optional key indicating the field in the response containing base64-encoded wav
+            bytes. Supports dot notation for nested fields. If specified, the audio will be played
             from the device that the CLI is running on.
     """
     if app_id_or_alias.startswith("app-"):
@@ -451,7 +451,10 @@ def invoke(
             if png_key:
                 rich.print(Panel("PNG display is not supported for streaming responses", style="red", expand=False))
                 return
-            _handle_streaming_response(raw_response, aggregate_keys, audio_key)
+            if audio_key:
+                _handle_streaming_audio_response(raw_response, audio_key, aggregate_keys)
+            else:
+                _handle_streaming_response(raw_response, aggregate_keys)
         else:
             if audio_key:
                 rich.print(
@@ -490,37 +493,15 @@ def _handle_non_streaming_response(
 def _handle_streaming_response(
     response: requests.Response,
     aggregate_keys: list[str] | None = None,
-    audio_key: str | None = None,
 ) -> None:
     """Handle streaming response with live-updating table.
 
-    Args:
-        response: A response from which the result can be streamed.
-        aggregate_keys: If provided, values for these keys across all streaming responses will
-            be accumulated. Keys support dot notation (e.g., "choices.0.delta.content") and pure
-            numbers are cast to integers. If aggregate_keys is None, displays each JSON response
-            as a new table row with an incremented index.
-        audio_key: Optional key in the response containing base64-encoded wav bytes.
-            Supports dot notation for nested fields. If specified, audio in the response will be
-            played from the device that the CLI is running on.
+    If aggregate_keys is provided, accumulates values for those keys across all streaming responses.
+    Keys support dot notation (e.g., "choices.0.delta.content") and pure numbers are cast to integers.
+
+    If aggregate_keys is None, displays each JSON response as a new table row with an incremented index.
     """
     console = rich.get_console()
-
-    # hardcoded for now for dev (todo: fix)
-    sample_rate = 24000
-    channels = 1
-    sample_width = 2
-
-    if audio_key is not None:
-        p = pyaudio.PyAudio()
-        stream = p.open(
-            format=p.get_format_from_width(sample_width),
-            channels=channels,
-            rate=sample_rate,
-            output=True,
-        )
-    else:
-        p, stream = None, None
 
     if aggregate_keys:
         # Aggregation mode: accumulate values for specified keys
@@ -546,12 +527,6 @@ def _handle_streaming_response(
                         table = _create_response_table(accumulated_data, aggregate_keys)
                         live.update(table, refresh=True)
 
-                        if not (audio_key is None or p is None or stream is None):
-                            value = _extract_nested_value(response_data, audio_key)
-                            if value is not None:
-                                pcm_bytes = base64.b64decode(str(value))
-                                stream.write(pcm_bytes)
-
                     except json.JSONDecodeError as e:
                         rich.print(Panel(f"Failed to parse JSON response: {e}", style="red", expand=False))
                         break
@@ -576,21 +551,77 @@ def _handle_streaming_response(
                     table = _create_response_table(accumulated_data)
                     live.update(table, refresh=True)
 
-                    if not (audio_key is None or p is None or stream is None):
-                        try:
-                            response_data = json.loads(line)
-                            if (value := _extract_nested_value(response_data, audio_key)) is not None:
-                                pcm_bytes = base64.b64decode(str(value))
-                                stream.write(pcm_bytes)
-                        except json.JSONDecodeError as e:
-                            rich.print(Panel(f"Failed to parse JSON response: {e}", style="red", expand=False))
-                            break
-
             # Final newline after live display ends
             console.print()
 
         except Exception as e:
             rich.print(Panel(f"Error processing streaming response: {e}", style="red", expand=False))
+
+
+def _handle_streaming_audio_response(
+    response: requests.Response,
+    audio_key: str,
+    aggregate_keys: list[str] | None = None,
+) -> None:
+    """Handle streaming response with live-updating table.
+
+    Args:
+        response: A response from which the result can be streamed.
+        audio_key: Key of the field containing base64-encoded wav bytes in the response. Supports
+            dot notation for nested fields (e.g., "choices.0.delta.wav"). Aaudio in the response
+            will be played from the device that the CLI is running on.
+        aggregate_keys: If provided, values for these keys across all streaming responses will
+            be accumulated. Keys support dot notation (e.g., "choices.0.delta.content") and pure
+            numbers are cast to integers. If aggregate_keys is None, displays each JSON response
+            as a new table row with an incremented index.
+    """
+    console = rich.get_console()
+
+    player = PCM16StreamPlayer()
+    player.start()
+
+    # Aggregation mode: accumulate values for specified keys
+    accumulated_data: dict[str, str] = {}
+    if aggregate_keys is not None:
+        accumulated_data = {key: "" for key in aggregate_keys}
+
+    try:
+        with Live("Waiting for response...", vertical_overflow="visible") as live:
+            for line in response.iter_lines(chunk_size=None, decode_unicode=True):
+                line = line.strip()
+                if not line:
+                    continue
+
+                try:
+                    # Parse each JSON response
+                    response_data = json.loads(line)
+
+                    if aggregate_keys:
+                        # Extract and accumulate values for each aggregate key
+                        for key in aggregate_keys:
+                            if (value := _extract_nested_value(response_data, key)) is not None:
+                                accumulated_data[key] += str(value)
+
+                        # Update the live table
+                        table = _create_response_table(accumulated_data, aggregate_keys)
+                        live.update(table, refresh=True)
+
+                    value = _extract_nested_value(response_data, audio_key)
+                    if value is not None:
+                        pcm_bytes = base64.b64decode(str(value))
+                        player.feed(pcm_bytes)
+
+                except json.JSONDecodeError as e:
+                    rich.print(Panel(f"Failed to parse JSON response: {e}", style="red", expand=False))
+                    break
+
+        # Final newline after live display ends
+        console.print()
+
+    except Exception as e:
+        rich.print(Panel(f"Error processing audio streaming response: {e}", style="red", expand=False))
+
+    player.close()
 
 
 @app.command(name="deploy_tasklib")
