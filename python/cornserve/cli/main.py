@@ -421,15 +421,16 @@ def invoke(
             the PNG will be displayed using Kitty TGP (if supported) and/or saved to file.
         save_png_path: Optional path to save the PNG file. If specified along with png_key,
             the PNG data will be decoded and saved to this file path.
-        audio_key: Optional key indicating the field in the response containing generated audio,
-            as base64-encoded wav bytes. Supports dot notation for nested fields. If specified,
-            the audio will be played from the device that the CLI is running on.
-        audio_sample_rate: If audio_key is provided, can optionally specify the sample rate for the
-            audio to be played.
-        audio_channels: If audio_key is provided, can optionally specify the number of channels for
-            the audio to be played.
-        audio_pcm_format: If audio_key is provided, can optionally specify as a string the PCM format
-            for the audio to be played. Currently supported formats: pcm16, pcm24, and pcm32.
+        audio_key: Optional key indicating the field in the response containing generated audio.
+            Supports dot notation for nested fields. If specified, the audio will be played from
+            the device that the CLI is running on.
+        audio_sample_rate: If audio-key is provided, audio-sample-rate can also optionally be
+            provided to specify the sample rate for the audio to be played.
+        audio_channels: If audio-key is provided, audio-channels can also optionally be provided
+            to specify the number of channels for the audio to be played.
+        audio_pcm_format: If audio-key is provided, audio-pcm-format can also optionally be
+            provided to specify as a string the PCM format for the audio to be played.
+            Currently supported formats: pcm16, pcm24, and pcm32.
     """
     if not audio_key and (audio_sample_rate or audio_channels or audio_pcm_format):
         rich.print(
