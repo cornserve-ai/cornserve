@@ -12,13 +12,14 @@ import torch.nn.functional as F
 import numpy.typing as npt
 from transformers.models.auto.processing_auto import AutoProcessor
 from transformers.models.qwen3_vl.configuration_qwen3_vl import Qwen3VLConfig
+from transformers.video_utils import VideoMetadata
 
 from .base import EricModel
 from .layers.activations import get_act_fn
 from .layers.linear import ColumnParallelLinear, RowParallelLinear
 from .qwen2_5_vl import Qwen2_5_VisionAttention, Qwen2_5_VisionRotaryEmbedding
 from cornserve.task_executors.eric.api import Modality
-from cornserve.task_executors.eric.router.processor import BaseModalityProcessor
+from cornserve.task_executors.eric.router.processor import BaseModalityProcessor, thread_local
 
 
 class Qwen3_VisionPatchEmbed(nn.Module):
@@ -403,6 +404,24 @@ class ModalityProcessor(BaseModalityProcessor):
 
     def get_video_processor(self) -> Callable | None:
         def processor(video: npt.NDArray) -> dict[str, torch.Tensor]:
-            return self.hf_processor.video_processor(videos=[video], return_tensors="pt").data
+            """Invoke the HF processor and convert to dict."""
+
+            # Access the loader's metadata which has the actual FPS captured from the video file
+            loader_metadata = thread_local.loader.video_loader.last_video_metadata
+            metadata = VideoMetadata(
+                fps=loader_metadata["fps"],
+                duration=loader_metadata["duration"],
+                total_num_frames=loader_metadata["total_num_frames"],
+                frames_indices=loader_metadata["frames_indices"],
+                video_backend="opencv",
+            )
+
+            out = self.hf_processor.video_processor(
+                videos=[video],
+                video_metadata=[metadata],
+                do_sample_frames=False,
+                return_tensors="pt",
+            )
+            return out.data
 
         return processor
