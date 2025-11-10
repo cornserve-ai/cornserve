@@ -17,7 +17,6 @@ from typing import TYPE_CHECKING, Any, ClassVar, Generic, Self, TypeVar, final, 
 import aiohttp
 from opentelemetry import trace
 from pydantic import BaseModel, ConfigDict, Field, model_serializer, model_validator
-from pydantic._internal._model_construction import ModelMetaclass
 
 from cornserve.constants import K8S_GATEWAY_SERVICE_HTTP_URL
 from cornserve.logging import get_logger
@@ -62,56 +61,11 @@ task_manager_context: ContextVar[TaskManager | None] = ContextVar("task_manager_
 current_task_context: ContextVar[Task | None] = ContextVar("current_task_context", default=None)
 
 
-class QualifiedNameInstanceCheckMeta(ModelMetaclass):
-    """Metaclass that makes isinstance() work across different module loads.
-
-    When the same class is loaded from different modules (e.g., from CRD vs from app module),
-    they have different class identities but the same qualified name. This metaclass makes
-    isinstance() compare by qualified name instead of identity.
-
-    Inherits from Pydantic's ModelMetaclass to preserve Pydantic functionality.
-    """
-
-    def __instancecheck__(self, instance: Any) -> bool:
-        """Override isinstance to compare by qualified name instead of identity.
-
-        Args:
-            self: The class being checked against (e.g., Stream, TaskInput, etc.)
-            instance: The object being checked
-        """
-        # First try normal isinstance check (fast path for same module)
-        if super().__instancecheck__(instance):
-            return True
-
-        # Only apply qualified name checking for cornserve_tasklib or cornserve classes
-        if not self.__module__.startswith("cornserve"):
-            return False
-
-        instance_class = type(instance)
-        if not instance_class.__module__.startswith("cornserve"):
-            return False
-
-        self_qualname = f"{self.__module__}.{self.__qualname__}"
-        instance_qualname = f"{instance_class.__module__}.{instance_class.__qualname__}"
-
-        # Check if the instance's class has the same qualified name
-        if self_qualname == instance_qualname:
-            return True
-
-        # Check if any base class of the instance matches by qualified name
-        for base in instance_class.__mro__:
-            base_qualname = f"{base.__module__}.{base.__qualname__}"
-            if self_qualname == base_qualname:
-                return True
-
-        return False
-
-
-class TaskInput(BaseModel, metaclass=QualifiedNameInstanceCheckMeta):
+class TaskInput(BaseModel):
     """Base class for task input."""
 
 
-class TaskOutput(BaseModel, metaclass=QualifiedNameInstanceCheckMeta):
+class TaskOutput(BaseModel):
     """Base class for task output."""
 
 
@@ -498,18 +452,10 @@ class UnitTask(Task, Generic[InputT, OutputT]):
         if not isinstance(other, UnitTask):
             return False
 
-        self_root_name = f"{self.root_unit_task_cls.__module__}.{self.root_unit_task_cls.__qualname__}"
-        other_root_name = f"{other.root_unit_task_cls.__module__}.{other.root_unit_task_cls.__qualname__}"
-        if self_root_name != other_root_name:
+        if self.root_unit_task_cls != other.root_unit_task_cls:
             return False
 
-        self_desc_name = (
-            f"{self.execution_descriptor.__class__.__module__}.{self.execution_descriptor.__class__.__qualname__}"
-        )
-        other_desc_name = (
-            f"{other.execution_descriptor.__class__.__module__}.{other.execution_descriptor.__class__.__qualname__}"
-        )
-        if self_desc_name != other_desc_name:
+        if self.execution_descriptor.__class__ != other.execution_descriptor.__class__:
             return False
 
         # Check if all fields defined by the root unit task class are the same.
