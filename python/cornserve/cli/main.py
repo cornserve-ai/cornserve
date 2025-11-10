@@ -613,6 +613,7 @@ def _handle_streaming_audio_response(
 
     # If aggregation mode: accumulate values for specified keys
     accumulated_data = {key: "" for key in aggregate_keys} if aggregate_keys else {}
+    audio_panel_shown = False
 
     try:
         with Live("Waiting for response...", vertical_overflow="visible") as live:
@@ -625,20 +626,25 @@ def _handle_streaming_audio_response(
                     # Parse each JSON response
                     response_data = json.loads(line)
 
+                    value = _extract_nested_value(response_data, audio_key)
+                    if value is not None:
+                        pcm_bytes = base64.b64decode(str(value))
+                        player.feed(pcm_bytes)
+
+                        if not aggregate_keys and not audio_panel_shown:
+                            # Since we won't be showing a table, show text instead.
+                            live.update(Panel("Receiving audio...", style="green"))
+                            audio_panel_shown = True
+
                     if aggregate_keys:
                         # Extract and accumulate values for each aggregate key
                         for key in aggregate_keys:
                             if (value := _extract_nested_value(response_data, key)) is not None:
                                 accumulated_data[key] += str(value)
 
-                        # Update the live table
+                        # Show live updated table
                         table = _create_response_table(accumulated_data, aggregate_keys)
                         live.update(table, refresh=True)
-
-                    value = _extract_nested_value(response_data, audio_key)
-                    if value is not None:
-                        pcm_bytes = base64.b64decode(str(value))
-                        player.feed(pcm_bytes)
 
                 except json.JSONDecodeError as e:
                     rich.print(Panel(f"Failed to parse JSON response: {e}", style="red", expand=False))
