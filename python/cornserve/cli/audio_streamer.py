@@ -1,4 +1,4 @@
-"""Utility for playing streamed audio response."""
+"""Utility for playing streamed audio responses."""
 
 import contextlib
 import queue
