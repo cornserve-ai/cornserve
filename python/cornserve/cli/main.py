@@ -597,8 +597,7 @@ def _handle_streaming_audio_response(
             will be played from the device that the CLI is running on.
         aggregate_keys: If provided, values for these keys across all streaming responses will
             be accumulated. Keys support dot notation (e.g., "choices.0.delta.content") and pure
-            numbers are cast to integers. If aggregate_keys is None, displays each JSON response
-            as a new table row with an incremented index.
+            numbers are cast to integers. If aggregate_keys is None, only audio will be played.
         audio_sample_rate: Can optionally be supplied to specify the sample rate for the audio to be
             played. Otherwise, the `PCMStreamPlayer` class will choose a default.
         audio_channels: Can optionally be supplied to specify the number of channels for the audio to
@@ -612,10 +611,8 @@ def _handle_streaming_audio_response(
     player = PCMStreamPlayer(sample_rate=audio_sample_rate, channels=audio_channels, pcm_format=audio_pcm_format)
     player.start()
 
-    # Aggregation mode: accumulate values for specified keys
-    accumulated_data: dict[str, str] = {}
-    if aggregate_keys is not None:
-        accumulated_data = {key: "" for key in aggregate_keys}
+    # If aggregation mode: accumulate values for specified keys
+    accumulated_data = {key: "" for key in aggregate_keys} if aggregate_keys else {}
 
     try:
         with Live("Waiting for response...", vertical_overflow="visible") as live:
