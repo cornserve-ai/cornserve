@@ -61,6 +61,15 @@ class PCMStreamPlayer:
         self._prebuffer = bytearray()
         self._stream_started = False
 
+    def __enter__(self):
+        """Set up the audio player as a context manager."""
+        self.start()
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        """Clean up the audio player as a context manager."""
+        self.close()
+
     def start(self) -> None:
         """Start the writer thread."""
         self._writer_thread.start()

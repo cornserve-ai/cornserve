@@ -608,15 +608,17 @@ def _handle_streaming_audio_response(
     """
     console = rich.get_console()
 
-    player = PCMStreamPlayer(sample_rate=audio_sample_rate, channels=audio_channels, pcm_format=audio_pcm_format)
-    player.start()
-
     # If aggregation mode: accumulate values for specified keys
     accumulated_data = {key: "" for key in aggregate_keys} if aggregate_keys else {}
     audio_panel_shown = False
 
     try:
-        with Live("Waiting for response...", vertical_overflow="visible") as live:
+        with (
+            PCMStreamPlayer(
+                sample_rate=audio_sample_rate, channels=audio_channels, pcm_format=audio_pcm_format
+            ) as player,
+            Live("Waiting for response...", vertical_overflow="visible") as live,
+        ):
             for line in response.iter_lines(chunk_size=None, decode_unicode=True):
                 line = line.strip()
                 if not line:
@@ -655,8 +657,6 @@ def _handle_streaming_audio_response(
 
     except Exception as e:
         rich.print(Panel(f"Error processing audio streaming response: {e}", style="red", expand=False))
-
-    player.close()
 
 
 @app.command(name="deploy_tasklib")
