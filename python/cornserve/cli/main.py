@@ -450,6 +450,27 @@ def invoke(
         else:
             _handle_non_streaming_response(raw_response, png_key, save_png_path)
 
+    except requests.exceptions.HTTPError as e:
+        error_details = f"HTTP {e.response.status_code}: {e.response.reason}"
+        try:
+            # Try to extract error details from response body
+            if e.response.headers.get("content-type", "").startswith("application/json"):
+                error_body = e.response.json()
+                if isinstance(error_body, dict) and "detail" in error_body:
+                    error_details += f"\nDetails: {error_body['detail']}"
+                elif isinstance(error_body, dict) and "message" in error_body:
+                    error_details += f"\nMessage: {error_body['message']}"
+                else:
+                    error_details += f"\nResponse: {error_body}"
+            else:
+                # For non-JSON responses, show the raw text
+                response_text = e.response.text.strip()
+                if response_text:
+                    error_details += f"\nResponse: {response_text}"
+        except Exception:
+            # If we can't parse the response, just show what we have
+            pass
+        rich.print(Panel(f"Failed to invoke app: {error_details}", style="red", expand=False))
     except Exception as e:
         rich.print(Panel(f"Failed to invoke app: {e}", style="red", expand=False))
 

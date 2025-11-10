@@ -231,7 +231,7 @@ class Qwen3_VisionTransformer(EricModel):
 
     @property
     def chunk_shape(self) -> tuple[int, ...]:
-        return (1, self.out_hidden_size)
+        return (1, self.out_hidden_size * (1 + len(self.deepstack_visual_indexes)))
 
     def forward(
         self,

@@ -4,7 +4,7 @@
 $ cornserve register examples/mllm.py
 
 $ cornserve invoke mllm --aggregate-keys choices.0.delta.content --data - <<EOF
-model: "Qwen/Qwen2-VL-7B-Instruct"
+model: "Qwen/Qwen3-VL-8B-Instruct"
 messages:
 - role: "user"
   content:
@@ -19,7 +19,7 @@ messages:
 EOF
 
 $ cornserve invoke mllm --aggregate-keys choices.0.delta.content usage --data - <<EOF
-model: "Qwen/Qwen2-VL-7B-Instruct"
+model: "Qwen/Qwen3-VL-8B-Instruct"
 messages:
 - role: "user"
   content:
@@ -48,8 +48,7 @@ from cornserve_tasklib.task.unit.llm import OpenAIChatCompletionChunk, OpenAICha
 from cornserve.app.base import AppConfig
 
 mllm = MLLMTask(
-    model_id="Qwen/Qwen2-VL-7B-Instruct",
-    # model_id="google/gemma-3-4b-it",
+    model_id="Qwen/Qwen3-VL-8B-Instruct",
     modalities=[Modality.IMAGE],
 )
 
