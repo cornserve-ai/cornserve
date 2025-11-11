@@ -309,7 +309,7 @@ class SidecarReceiver:
         while True:
             await req_state.done_event.wait()
             # some chunk of this request is already received
-            if req_state.num_chunks and recv_req.chunk_id >= req_state.num_chunks - 1:
+            if req_state.num_chunks and recv_req.chunk_id >= req_state.num_chunks:
                 # check out of bound, chunk_ids are 0-indexed
                 logger.info(
                     "receive: chunk_id %d out of bound for request %s >= request.num_chunks %s",
