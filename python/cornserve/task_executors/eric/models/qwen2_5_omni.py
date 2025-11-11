@@ -483,10 +483,10 @@ class ModalityProcessor(BaseModalityProcessor):
             #       In general, we should be able to pass in arbitrary processor-specific kwargs via requests
             #       and fallback to model-specific defaults if not provided.
             #       The defaults below were taken from HF Transformers `Qwen2_5OmniProcessorKwargs_defaults`.
-            # JM: the API is now updated to use "shortest_edge" and "longest_edge".
             out = self.hf_processor.video_processor(
                 videos=[video],
-                size={"shortest_edge": 128 * 28 * 28, "longest_edge": 768 * 28 * 28},
+                min_pixels=128 * 28 * 28,
+                max_pixels=768 * 28 * 28,
                 return_tensors="pt",
             )
             return out.data
