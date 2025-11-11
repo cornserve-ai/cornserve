@@ -52,7 +52,7 @@ class QwenImageTask(Task[QwenImageInput, QwenImageOutput]):
 
     def post_init(self) -> None:
         """Initialize subtasks."""
-        self.text_encoder = LLMEmbeddingUnitTask(model_id="Qwen/Qwen2.5-VL-7B-Instruct")
+        self.text_encoder = LLMEmbeddingUnitTask(model_id="Qwen/Qwen2.5-VL-7B-Instruct", receive_embeddings=False)
         self.generator = GeneratorTask(modality=Modality.IMAGE, model_id="Qwen/Qwen-Image")
 
         # These two parameters are specific to Qwen/Qwen-Image and should not be changed.

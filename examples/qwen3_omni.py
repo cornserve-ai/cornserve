@@ -1,7 +1,8 @@
 """An app that generates text or audio using Qwen/Qwen3-Omni-30B-A3B-Instruct model.
 
-For streaming audio generation, the returning chunk is a OpenAIChatCompletionChunk with
-audio chunk PCM16 based64 encoded in `choices.[].delta.audio.data`.
+For streaming audio generation, the returning audio chunk is an ChatCompletionAudio object
+within each OpenAIChatCompletionChunk. The audio data is PCM16 based64 encoded, and can be
+aggregated through `choices.[].delta.audio.data`.
 
 ```console
 $ cornserve register examples/qwen3_omni.py
