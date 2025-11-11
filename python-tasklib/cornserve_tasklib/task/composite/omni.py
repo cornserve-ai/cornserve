@@ -1,16 +1,14 @@
 """Built-in task for Qwen Omni Thinker and Talker."""
 
 from __future__ import annotations
-
 from typing import Any, Literal
 
 from cornserve.task.base import Stream, Task
+
+from cornserve_tasklib.task.composite.llm import MLLMEmbeddingTask, MLLMTask
 from cornserve_tasklib.task.unit.encoder import Modality
-from cornserve_tasklib.task.composite.llm import (
-    MLLMEmbeddingTask,
-    MLLMTask,
-)
 from cornserve_tasklib.task.unit.llm import (
+    ChatCompletionMessageParam,
     OpenAIChatCompletionChunk,
     OpenAIChatCompletionRequest,
 )
@@ -89,4 +87,10 @@ class OmniTask(Task[OmniInput, Stream[OpenAIChatCompletionChunk]]):
                 thinker_hidden_states=thinker_embedding_output.embeddings,
             )
         )
+        talker_input.messages.append(
+            ChatCompletionMessageParam.model_validate(
+                {"role": "assistant", "content": "<tts_pad>"}
+            )
+        )
+
         return self.talker_vocoder.invoke(talker_input)
