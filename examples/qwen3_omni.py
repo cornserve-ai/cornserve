@@ -1,9 +1,12 @@
 """An app that generates text or audio using Qwen/Qwen3-Omni-30B-A3B-Instruct model.
 
+For streaming audio generation, the returning chunk is a OpenAIChatCompletionChunk with
+audio chunk PCM16 based64 encoded in `choices.[].delta.audio.data`.
+
 ```console
 $ cornserve register examples/qwen3_omni.py
 
-$ cornserve invoke qwen3_omni --audio-key choices.0.delta.wav --data - <<EOF
+$ cornserve invoke qwen3_omni --audio-key choices.0.delta.audio.data --data - <<EOF
 model: "Qwen/Qwen3-Omni-30B-A3B-Instruct"
 messages:
 - role: "user"
