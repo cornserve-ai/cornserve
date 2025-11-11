@@ -76,6 +76,9 @@ VOLUME_HF_CACHE = "/data/hfcache"
 VOLUME_SHM = "/dev/shm"
 VOLUME_VLLM_EXECUTOR_CACHE = "/data/cornserve/cache"
 
+# Container's internal directory where tasklib modules are written for dynamic import.
+TASKLIB_DIR = "/tmp/cornserve_tasklib"
+
 # Unit task profiles mounted here with a ConfigMap.
 UNIT_TASK_PROFILES_DIR = "/etc/cornserve/profiles"
 K8S_UNIT_TASK_PROFILES_CONFIG_MAP_NAME = "cornserve-profiles"

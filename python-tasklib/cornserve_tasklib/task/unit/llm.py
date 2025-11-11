@@ -111,8 +111,7 @@ def extract_multimodal_content(
     multimodal_data: list[ChatCompletionContentPartMultimodalParam] = []
     for message in messages:
         for part in message.content:
-            # TODO: Should check via the class type, when we fixed issue #157.
-            if isinstance(part, str) or getattr(part, "type", None) == "text":
+            if isinstance(part, ChatCompletionContentPartTextParam):
                 continue
             multimodal_data.append(part)
 

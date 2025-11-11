@@ -3,15 +3,12 @@
 from __future__ import annotations
 
 import base64
-import sys
-import types
 from collections import defaultdict
-from importlib.machinery import ModuleSpec
 from typing import TYPE_CHECKING
 
 from cornserve.logging import get_logger
 from cornserve.services.task_registry.task_class_registry import TASK_CLASS_REGISTRY
-from cornserve.services.task_registry.util import create_package_hierarchy_if_missing
+from cornserve.services.task_registry.util import write_to_file_and_import
 from cornserve.task_executors.descriptor.base import TaskExecutionDescriptor
 
 if TYPE_CHECKING:
@@ -31,7 +28,7 @@ class TaskExecutionDescriptorRegistry:
         # each item is (decoded_source, module_name, descriptor_class_name, is_default)
         self._pending: dict[str, list[tuple[str, str, str, bool]]] = defaultdict(list)
 
-    def _exec_install_and_register(
+    def _install_and_register(
         self,
         decoded_source: str,
         module_name: str,
@@ -39,59 +36,18 @@ class TaskExecutionDescriptorRegistry:
         task_class_name: str,
         is_default: bool,
     ) -> None:
-        """Execute descriptor module source, validate, install, and register for a task class.
+        module = write_to_file_and_import(module_name=module_name, decoded_source=decoded_source)
 
-        Shared by both immediate and deferred code paths to avoid duplication.
-        """
-        created_packages: list[str] = []
+        # Validate descriptor exists and type
+        if not hasattr(module, descriptor_class_name):
+            raise ValueError(f"Descriptor class {descriptor_class_name} not found in its source code")
+        descriptor_cls = getattr(module, descriptor_class_name)
+        if not issubclass(descriptor_cls, TaskExecutionDescriptor):
+            raise ValueError(f"Class {descriptor_class_name} is not a TaskExecutionDescriptor subclass")
 
-        parent = module_name.rpartition(".")[0]
-
-        # Create and pre-insert module
-        module = types.ModuleType(module_name)
-        module.__spec__ = ModuleSpec(module_name, loader=None, is_package=False)
-        module.__package__ = parent or module_name
-        module.__file__ = f"<crd:{module_name}>"
-
-        try:
-            # Execute source
-            exec(decoded_source, module.__dict__)
-
-            # Validate descriptor exists and is a subclass
-            if not hasattr(module, descriptor_class_name):
-                raise ValueError(f"Descriptor class {descriptor_class_name} not found in source code")
-            descriptor_cls = getattr(module, descriptor_class_name)
-            if not issubclass(descriptor_cls, TaskExecutionDescriptor):
-                raise ValueError(f"Class {descriptor_class_name} is not a TaskExecutionDescriptor subclass")
-
-            # Create parent packages only now, after validation succeeds
-            if parent:
-                create_package_hierarchy_if_missing(parent)
-                # Track packages created for rollback
-                if parent in sys.modules:
-                    created_packages.append(parent)
-
-            # Install after validation
-            sys.modules[module_name] = module
-            if parent:
-                setattr(sys.modules[parent], module_name.split(".")[-1], module)
-
-            # Get task class from registry
-            task_cls, _, _ = TASK_CLASS_REGISTRY.get_unit_task(task_class_name)
-            self._register(task_cls, descriptor_cls, descriptor_class_name, default=is_default)
-        except Exception:
-            # Roll back any packages we created
-            for pkg_name in reversed(created_packages):
-                parent_name = pkg_name.rpartition(".")[0]
-                child_name = pkg_name.split(".")[-1]
-                if parent_name in sys.modules:
-                    try:
-                        if getattr(sys.modules[parent_name], child_name, None) is sys.modules.get(pkg_name):
-                            delattr(sys.modules[parent_name], child_name)
-                    except Exception:
-                        pass
-                sys.modules.pop(pkg_name, None)
-            raise
+        # Get task class from registry and register
+        task_cls, _, _ = TASK_CLASS_REGISTRY.get_unit_task(task_class_name)
+        self._register(task_cls, descriptor_cls, descriptor_class_name, default=is_default)
 
     def _register(
         self,
@@ -140,7 +96,7 @@ class TaskExecutionDescriptorRegistry:
             return
 
         # Task present: execute and register via shared helper
-        self._exec_install_and_register(
+        self._install_and_register(
             decoded_source=decoded_source,
             module_name=module_name,
             descriptor_class_name=descriptor_class_name,
@@ -158,7 +114,7 @@ class TaskExecutionDescriptorRegistry:
             return
         pending_items = self._pending.pop(task_name)
         for decoded_source, module_name, descriptor_class_name, is_default in pending_items:
-            self._exec_install_and_register(
+            self._install_and_register(
                 decoded_source=decoded_source,
                 module_name=module_name,
                 descriptor_class_name=descriptor_class_name,
