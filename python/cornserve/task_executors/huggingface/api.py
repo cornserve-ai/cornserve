@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import enum
 
-from cornserve_tasklib.task.unit.llm import StreamOptions
 from pydantic import BaseModel
 
 
@@ -13,6 +12,16 @@ class ModelType(enum.StrEnum):
 
     QWEN_IMAGE = "QWEN_IMAGE"
     QWEN_OMNI = "QWEN_OMNI"
+
+
+class StreamOptions(BaseModel):
+    """Streaming options for OpenAI Chat Completion.
+
+    Attributes:
+        include_usage: If set, the final chunk will include token usage statistics.
+    """
+
+    include_usage: bool = True
 
 
 class HuggingFaceRequest(BaseModel):

@@ -24,7 +24,6 @@ from rich.table import Table
 from rich.text import Text
 from tyro.constructors import PrimitiveConstructorSpec
 
-from cornserve.cli.audio_streamer import PCMStreamPlayer
 from cornserve.cli.log_streamer import LogStreamer
 from cornserve.cli.tasklib_explorer import discover_tasklib
 from cornserve.cli.utils.k8s import load_k8s_config
@@ -628,6 +627,20 @@ def _handle_streaming_audio_response(
             Currently supported formats: pcm16, pcm24, and pcm32.
     """
     console = rich.get_console()
+
+    # Lazy import to avoid requiring audio dependencies on systems that don't need them
+    try:
+        from cornserve.cli.audio_streamer import PCMStreamPlayer  # noqa: PLC0415
+
+    except (ImportError, OSError) as e:
+        rich.print(
+            Panel(
+                f"Error: {e}",
+                style="red",
+                expand=False,
+            )
+        )
+        return
 
     # If aggregation mode: accumulate values for specified keys
     accumulated_data = {key: "" for key in aggregate_keys} if aggregate_keys else {}

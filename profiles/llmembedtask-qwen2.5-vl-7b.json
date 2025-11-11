@@ -1,0 +1,11 @@
+{
+  "task": {
+    "__class__": "LLMEmbeddingUnitTask",
+    "model_id": "Qwen/Qwen2.5-VL-7B-Instruct",
+    "receive_embeddings": false,
+    "execution_descriptor_name": null
+  },
+  "num_gpus_to_profile": {
+    "1": {"launch_args": ["--max-model-len", "102400"]}
+  }
+}

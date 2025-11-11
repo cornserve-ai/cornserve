@@ -45,7 +45,7 @@ class GeriDescriptor(TaskExecutionDescriptor[GeneratorTask, GeneratorInput, Gene
 
     def get_api_url(self, base: str) -> str:
         """Get the task executor's base URL for API calls."""
-        return f"{base}/generate"
+        return f"{base}/{self.task.modality.value}/generate"
 
     def to_request(self, task_input: GeneratorInput, task_output: GeneratorOutput) -> dict[str, Any]:
         """Convert TaskInput to a request object for the task executor."""

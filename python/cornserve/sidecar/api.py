@@ -272,7 +272,7 @@ class Sidecar:
 
         Args:
             id: The id of the data. This is used to identify the data in the sidecar.
-            num_chunks: The toatal number of chunks sent in the stream.
+            num_chunks: The total number of chunks sent in the stream.
             dst_sidecar_ranks: The ranks of the sidecars to send the data to. This is a list of lists,
                 where each list is a sidecar TP group.
         """
