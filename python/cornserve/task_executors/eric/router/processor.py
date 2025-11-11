@@ -233,6 +233,9 @@ class VideoLoader(BaseLoader):
             raise ValueError("Failed to open video stream.")
 
         total_num_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        original_fps = cap.get(cv2.CAP_PROP_FPS)
+        duration = total_num_frames / original_fps if original_fps > 0 else 0
+
         if self.max_num_frames is not None and total_num_frames > self.max_num_frames:
             frame_indices = np.linspace(0, total_num_frames - 1, self.max_num_frames, dtype=int)
         else:
@@ -256,7 +259,22 @@ class VideoLoader(BaseLoader):
 
         assert frames_loaded == len(frame_indices), f"Expected {len(frame_indices)} frames, but got {frames_loaded}."
 
-        logger.info("Loaded video with %d frames of size: %dx%d", frames_loaded, width, height)
+        logger.info(
+            "Loaded video with %d frames of size: %dx%d (original fps: %.2f, duration: %.2fs)",
+            frames_loaded,
+            width,
+            height,
+            original_fps,
+            duration,
+        )
+
+        # Store metadata for processing
+        self.last_video_metadata = {
+            "total_num_frames": total_num_frames,
+            "fps": original_fps,
+            "duration": duration,
+            "frames_indices": frame_indices.tolist(),
+        }
 
         return frames
 

@@ -801,8 +801,7 @@ class ModalityProcessor(BaseModalityProcessor):
             """Invoke the HF processor and convert to dict."""
             out = self.hf_processor.video_processor(
                 videos=[video],
-                min_pixels=128 * 32 * 32,
-                max_pixels=768 * 32 * 32,
+                size={"shortest_edge": 128 * 32 * 32, "longest_edge": 768 * 32 * 32},
                 return_tensors="pt",
             )
             return out.data
