@@ -111,6 +111,8 @@ class OmniTalkerVocoderDescriptor(
             "cornserve_hidden_states_recv_id": task_input.thinker_hidden_states.id,
         }
         request["vllm_xargs"] = vllm_xargs
+        # cornserve specific field for wiping out the text content
+        request["cornserve_return_audio"] = True
         logger.info("Omni Talker Vocoder request: %s", request)
         return request
 

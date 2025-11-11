@@ -3,19 +3,16 @@
 ```console
 $ cornserve register examples/qwen3_omni.py
 
-$ cornserve invoke qwen3_omni --aggregate-keys choices.0.delta.wav --data - <<EOF
+$ cornserve invoke qwen3_omni --audio-key choices.0.delta.wav --data - <<EOF
 model: "Qwen/Qwen3-Omni-30B-A3B-Instruct"
 messages:
 - role: "user"
   content:
   - type: text
-    text: "What can you see and hear? Answer in one short sentence."
-  - type: image_url
-    image_url:
-      url: "https://dedicated.junzema.com/cars.jpg"
-  - type: audio_url
-    audio_url:
-      url: "https://dedicated.junzema.com/cough.wav"
+    text: "Describe this multimodal serving system architecture in one short sentence."
+  - type: video_url
+    video_url:
+      url: "https://github.com/cornserve-ai/cornserve/raw/refs/heads/master/docs/assets/video/cornserve.mp4"
 return_audio: true
 EOF
 
@@ -25,10 +22,13 @@ messages:
 - role: "user"
   content:
   - type: text
-    text: "Describe what you see"
-  - type: video_url
-    video_url:
-      url: "https://dedicated.junzema.com/draw.mp4"
+    text: "Write a poem about the images you see."
+  - type: image_url
+    image_url:
+      url: "https://picsum.photos/id/12/480/560"
+  - type: image_url
+    image_url:
+      url: "https://picsum.photos/id/234/960/960"
 return_audio: false
 EOF
 ```
