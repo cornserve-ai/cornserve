@@ -24,6 +24,7 @@ from rich.table import Table
 from rich.text import Text
 from tyro.constructors import PrimitiveConstructorSpec
 
+from cornserve.cli.audio_streamer import PCMStreamPlayer
 from cornserve.cli.log_streamer import LogStreamer
 from cornserve.cli.tasklib_explorer import discover_tasklib
 from cornserve.cli.utils.k8s import load_k8s_config
@@ -398,6 +399,10 @@ def invoke(
     aggregate_keys: list[str] | None = None,
     png_key: str | None = None,
     save_png_path: str | None = None,
+    audio_key: str | None = None,
+    audio_sample_rate: int | None = None,
+    audio_channels: int | None = None,
+    audio_pcm_format: str | None = None,
 ) -> None:
     """Invoke an app with the given data.
 
@@ -416,7 +421,27 @@ def invoke(
             the PNG will be displayed using Kitty TGP (if supported) and/or saved to file.
         save_png_path: Optional path to save the PNG file. If specified along with png_key,
             the PNG data will be decoded and saved to this file path.
+        audio_key: Optional key indicating the field in the response containing generated audio.
+            Supports dot notation for nested fields. If specified, the audio will be played from
+            the device that the CLI is running on.
+        audio_sample_rate: If audio-key is provided, audio-sample-rate can also optionally be
+            provided to specify the sample rate for the audio to be played.
+        audio_channels: If audio-key is provided, audio-channels can also optionally be provided
+            to specify the number of channels for the audio to be played.
+        audio_pcm_format: If audio-key is provided, audio-pcm-format can also optionally be
+            provided to specify as a string the PCM format for the audio to be played.
+            Currently supported formats: pcm16, pcm24, and pcm32.
     """
+    if not audio_key and (audio_sample_rate or audio_channels or audio_pcm_format):
+        rich.print(
+            Panel(
+                "To specify audio-sample-rate, audio-channels, or audio-pcm-format, must also specify audio-key.",
+                style="red",
+                expand=False,
+            )
+        )
+        return
+
     if app_id_or_alias.startswith("app-"):
         app_id = app_id_or_alias
     else:
@@ -446,8 +471,18 @@ def invoke(
             if png_key:
                 rich.print(Panel("PNG display is not supported for streaming responses", style="red", expand=False))
                 return
-            _handle_streaming_response(raw_response, aggregate_keys)
+            if audio_key:
+                _handle_streaming_audio_response(
+                    raw_response, audio_key, aggregate_keys, audio_sample_rate, audio_channels, audio_pcm_format
+                )
+            else:
+                _handle_streaming_response(raw_response, aggregate_keys)
         else:
+            if audio_key:
+                rich.print(
+                    Panel("Audio playback is not supported for non-streaming responses", style="red", expand=False)
+                )
+                return
             _handle_non_streaming_response(raw_response, png_key, save_png_path)
 
     except requests.exceptions.HTTPError as e:
@@ -564,6 +599,85 @@ def _handle_streaming_response(
 
         except Exception as e:
             rich.print(Panel(f"Error processing streaming response: {e}", style="red", expand=False))
+
+
+def _handle_streaming_audio_response(
+    response: requests.Response,
+    audio_key: str,
+    aggregate_keys: list[str] | None = None,
+    audio_sample_rate: int | None = None,
+    audio_channels: int | None = None,
+    audio_pcm_format: str | None = None,
+) -> None:
+    """Handle streaming response with live-updating table.
+
+    Args:
+        response: A response from which the result can be streamed.
+        audio_key: Key of the field containing base64-encoded wav bytes in the response. Supports
+            dot notation for nested fields (e.g., "choices.0.delta.wav"). Aaudio in the response
+            will be played from the device that the CLI is running on.
+        aggregate_keys: If provided, values for these keys across all streaming responses will
+            be accumulated. Keys support dot notation (e.g., "choices.0.delta.content") and pure
+            numbers are cast to integers. If aggregate_keys is None, only audio will be played.
+        audio_sample_rate: Can optionally be supplied to specify the sample rate for the audio to be
+            played. Otherwise, the `PCMStreamPlayer` class will choose a default.
+        audio_channels: Can optionally be supplied to specify the number of channels for the audio to
+            be played. Otherwise, the `PCMStreamPlayer` class will choose a default.
+        audio_pcm_format: Can optionally be supplied as a str to specify the PCM format for the audio
+            to be played. Otherwise, the `PCMStreamPlayer` class will choose a default.
+            Currently supported formats: pcm16, pcm24, and pcm32.
+    """
+    console = rich.get_console()
+
+    # If aggregation mode: accumulate values for specified keys
+    accumulated_data = {key: "" for key in aggregate_keys} if aggregate_keys else {}
+    audio_panel_shown = False
+
+    try:
+        with (
+            PCMStreamPlayer(
+                sample_rate=audio_sample_rate, channels=audio_channels, pcm_format=audio_pcm_format
+            ) as player,
+            Live("Waiting for response...", vertical_overflow="visible") as live,
+        ):
+            for line in response.iter_lines(chunk_size=None, decode_unicode=True):
+                line = line.strip()
+                if not line:
+                    continue
+
+                try:
+                    # Parse each JSON response
+                    response_data = json.loads(line)
+
+                    value = _extract_nested_value(response_data, audio_key)
+                    if value is not None:
+                        pcm_bytes = base64.b64decode(str(value))
+                        player.feed(pcm_bytes)
+
+                        if not aggregate_keys and not audio_panel_shown:
+                            # Since we won't be showing a table, show text instead.
+                            live.update(Panel("Receiving audio...", style="green"))
+                            audio_panel_shown = True
+
+                    if aggregate_keys:
+                        # Extract and accumulate values for each aggregate key
+                        for key in aggregate_keys:
+                            if (value := _extract_nested_value(response_data, key)) is not None:
+                                accumulated_data[key] += str(value)
+
+                        # Show live updated table
+                        table = _create_response_table(accumulated_data, aggregate_keys)
+                        live.update(table, refresh=True)
+
+                except json.JSONDecodeError as e:
+                    rich.print(Panel(f"Failed to parse JSON response: {e}", style="red", expand=False))
+                    break
+
+        # Final newline after live display ends
+        console.print()
+
+    except Exception as e:
+        rich.print(Panel(f"Error processing audio streaming response: {e}", style="red", expand=False))
 
 
 @app.command(name="deploy_tasklib")
