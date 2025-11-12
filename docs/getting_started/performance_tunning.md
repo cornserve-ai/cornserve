@@ -22,7 +22,7 @@ Model fission works best when components are heterogeneous or components can be 
   Example: InternVL-38B → encoder fission if you can balance encoder vs. LLM.
 
 - **Serving multiple models that share components.**
-  Fissioning the shared components lets different models reuse them. <br>
+  Fissioning the shared components lets different models reuse them.  
   Example: Gemma3 4B, 12B, and 27B are served together → fission the image encoder so that all models can use the same encoder capacity.
 
 - **App requests have heterogeneity.**
