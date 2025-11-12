@@ -18,7 +18,7 @@ Model fission works best when components are heterogeneous or components can be 
   Example: Qwen3-Omni → encoder fission to separate its thinker, talker, and vocoder components.
 
 - **Models have large encoders with heavy multimodal embeddings.**
-  When encoders are big and do substantial work, and you can match encoder scale to the LLM's throughput, fission helps. <br>
+  When encoders are big and do substantial work, and you can match encoder scale to the LLM's throughput, fission helps.  
   Example: InternVL-38B → encoder fission if you can balance encoder vs. LLM.
 
 - **Serving multiple models that share components.**
