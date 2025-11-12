@@ -26,7 +26,7 @@ Model fission works best when components are heterogeneous or components can be 
   Example: Gemma3 4B, 12B, and 27B are served together → fission the image encoder so that all models can use the same encoder capacity.
 
 - **App requests have heterogeneity.**
-  If some requests need expensive components (e.g., audio or image generation) while others are lightweight (text-only), fission lets the heavy parts run separately so the light requests aren't slowed down. <br>
+  If some requests need expensive components (e.g., audio or image generation) while others are lightweight (text-only), fission lets the heavy parts run separately so the light requests aren't slowed down.  
   Example: Qwen-Image served together with Qwen2.5-VL-8B for both image chat and image generation → encoder fission to separate the image generator from the multimodal LLM.
 
 ---
