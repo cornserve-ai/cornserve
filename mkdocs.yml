@@ -83,6 +83,7 @@ nav:
     # - Using Jupyter Notebook: getting_started/jupyter.ipynb
     - Registering and Invoking Apps: getting_started/registering_apps.md
     - Performance Tuning: getting_started/performance_tuning.md
+    - Supported Models: getting_started/supported_models.md
   - Architecture:
     - architecture/index.md
     - Task: architecture/task.md
