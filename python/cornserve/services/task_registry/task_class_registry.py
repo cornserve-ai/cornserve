@@ -134,11 +134,9 @@ class TaskClassRegistry:
             # so it doesn't have concrete input/output types,
             # so to let it goes through, we register it with dummy TaskInput/Output types
             # TODO: Such special case is definitely not legetimate, what should we do instead?
+            # Maybe use a decorator to mark the base classes?
             if task_class_name == "LLMBaseUnitTask":
-                from cornserve.task.base import TaskInput as DummyInput  # noqa: PLC0415
-                from cornserve.task.base import TaskOutput as DummyOutput  # noqa: PLC0415
-
-                task_input_cls, task_output_cls = DummyInput, DummyOutput
+                return # This base class should never be used directly
             else:
                 raise ValueError(
                     f"Task class {task_class_name} missing generic type arguments. "
