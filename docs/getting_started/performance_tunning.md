@@ -34,7 +34,7 @@ Model fission works best when components are heterogeneous or components can be 
 ## Prefer Monolithic when
 
 - **You can't balance the components given limited resources (not enough GPUs).**  
-  If one component is about **1:100** slower than another and you don't have enough GPUs to bring them close, fission strands capacity. <br>
+  If one component is about **1:100** slower than another and you don't have enough GPUs to bring them close, fission strands capacity.  
   Example: Qwen-Image served alone under tight GPU budgets → monolithic is often better.
 
 - **LLM decode memory is the limiter (KV cache bound).**
