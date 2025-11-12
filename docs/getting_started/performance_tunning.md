@@ -38,7 +38,7 @@ Model fission works best when components are heterogeneous or components can be 
   Example: Qwen-Image served alone under tight GPU budgets → monolithic is often better.
 
 - **LLM decode memory is the limiter (KV cache bound).**
-  If throughput is capped by KV cache size, monolithic deployment generally wins because more memory will remain available for the LLM. <br>
+  If throughput is capped by KV cache size, monolithic deployment generally wins because more memory will remain available for the LLM.  
   Example: Qwen2.5-VL → monolithic is usually better since performance is typically limited by LLM decode memory size.
 
 ---
