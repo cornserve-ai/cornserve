@@ -14,7 +14,7 @@ Model fission works best when components are heterogeneous or components can be 
 ## Prefer Model Fission when
 
 - **A model has many hard-to-combine components.**
-  Some models may have multiple encoders, LLMs, or even generators that are difficult to fit into a monolithic design. <br>
+  Some models may have multiple encoders, LLMs, or even generators that are difficult to fit into a monolithic design.  
   Example: Qwen3-Omni → encoder fission to separate its thinker, talker, and vocoder components.
 
 - **Models have large encoders with heavy multimodal embeddings.**
