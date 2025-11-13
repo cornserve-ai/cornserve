@@ -117,12 +117,15 @@ def assert_same_weights(
 
     def check_param(name: str, param: torch.Tensor, hf_params: dict[str, torch.Tensor]) -> None:
         """Check if the parameter is the same, while accounting for transformed weights."""
+        # Check if this parameter matches a transformed pattern FIRST
+        for pattern, func in transformed_weights.items():
+            if fnmatch(name, pattern):
+                func(name, param, hf_params)
+                return
+
+        # Otherwise, use default comparison
         hf_param = hf_params.get(name)
         if hf_param is None:
-            for pattern, func in transformed_weights.items():
-                if fnmatch(name, pattern):
-                    func(name, param, hf_params)
-                    return
             raise ValueError(f"Parameter {name} not found in Hugging Face model")
         assert param.shape == hf_param.shape, name
         assert torch.allclose(param, hf_param), name

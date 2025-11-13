@@ -23,7 +23,11 @@ from cornserve.task_executors.eric.router.processor import BaseModalityProcessor
 
 
 class Qwen3_VisionPatchEmbed(nn.Module):
-    """Module to produce patch embeddings of an image or video."""
+    """Module to produce patch embeddings of an image or video.
+
+    Uses Linear instead of Conv3d for better performance. When kernel_size == stride,
+    Conv3d is mathematically equivalent to Linear but has significant overhead.
+    """
 
     def __init__(
         self,
@@ -36,20 +40,50 @@ class Qwen3_VisionPatchEmbed(nn.Module):
         self.patch_size = patch_size
         self.temporal_patch_size = temporal_patch_size
         self.embed_dim = embed_dim
+        self.in_channels = in_channels
 
-        kernel_size = (temporal_patch_size, patch_size, patch_size)
-        self.proj = nn.Conv3d(
-            in_channels,
-            embed_dim,
-            kernel_size=kernel_size,
-            stride=kernel_size,
-            bias=True,
+        input_dim = in_channels * temporal_patch_size * patch_size * patch_size
+        self.proj = nn.Linear(input_dim, embed_dim, bias=True)
+
+    def _load_from_state_dict(
+        self,
+        state_dict,
+        prefix,
+        local_metadata,
+        strict,
+        missing_keys,
+        unexpected_keys,
+        error_msgs,
+    ):
+        """Convert Conv3d weights to Linear weights during loading.
+
+        HuggingFace checkpoints have Conv3d weights with shape [out, in, kt, kh, kw].
+        We need to reshape them to Linear weights with shape [out, in*kt*kh*kw].
+        """
+        weight_key = f"{prefix}proj.weight"
+
+        if weight_key in state_dict:
+            conv3d_weight = state_dict[weight_key]
+            # Conv3d weight shape: [out_channels, in_channels, kt, kh, kw]
+            if conv3d_weight.dim() == 5:
+                out_channels, in_channels, kt, kh, kw = conv3d_weight.shape
+                # Reshape to Linear weight: [out_channels, in_channels * kt * kh * kw]
+                linear_weight = conv3d_weight.reshape(out_channels, in_channels * kt * kh * kw)
+                state_dict[weight_key] = linear_weight
+
+        # Call the parent implementation to actually load the weights
+        super()._load_from_state_dict(
+            state_dict,
+            prefix,
+            local_metadata,
+            strict,
+            missing_keys,
+            unexpected_keys,
+            error_msgs,
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        num_patches, _ = x.shape
-        x = x.view(num_patches, -1, self.temporal_patch_size, self.patch_size, self.patch_size)
-        return self.proj(x).view(num_patches, self.embed_dim)
+        return self.proj(x)
 
 
 class Qwen3_VisionMLP(nn.Module):

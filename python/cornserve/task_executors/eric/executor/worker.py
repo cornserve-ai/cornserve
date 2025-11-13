@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import multiprocessing as mp
+import os
 import pickle
 import signal
 from dataclasses import dataclass
@@ -97,6 +98,9 @@ class Worker:
             )
         else:
             self.sender_sidecar_client = None
+
+        # Initialize profiler as None (will be created when start_profile is called)
+        self.profiler_info: tuple[torch.profiler.profile, str] | None = None
 
     @staticmethod
     def spawn_worker(
@@ -287,11 +291,21 @@ class Worker:
                 worker_span.add_event("model_foward.start")
                 unique_spans[request_id] = worker_span
 
-        output = self.model(
-            modality=batch.modality,
-            adapter_name=batch.adapter_name,
-            batch=batch.data,
-        )
+        # Run model forward pass (with profiler step if profiling is active)
+        if self.profiler_info is not None:
+            with torch.profiler.record_function("model_forward"):
+                output = self.model(
+                    modality=batch.modality,
+                    adapter_name=batch.adapter_name,
+                    batch=batch.data,
+                )
+            self.profiler_info[0].step()
+        else:
+            output = self.model(
+                modality=batch.modality,
+                adapter_name=batch.adapter_name,
+                batch=batch.data,
+            )
         for worker_span in unique_spans.values():
             worker_span.add_event("model_forward.done")
 
@@ -328,3 +342,64 @@ class Worker:
                 [o.cpu() for o in output],
                 batch._dump_prefix + f"-tp{self.tp_size}.pt",
             )
+
+    def start_profile(self, output_dir: str = "./profiler_output") -> str:
+        """Start PyTorch profiler.
+
+        Args:
+            output_dir: Directory where profiler traces will be saved.
+
+        Returns:
+            Path to the trace file that will be created when profiling stops.
+        """
+        if self.profiler_info is not None:
+            logger.warning("Profiler is already running on worker %d", self.tp_rank)
+            return self.profiler_info[1]
+
+        # Create output directory if it doesn't exist
+        os.makedirs(output_dir, exist_ok=True)
+
+        # Set up the output path for this worker
+        profiler_output_path = os.path.join(output_dir, f"worker-rank-{self.tp_rank}-trace.json")
+
+        # Create the profiler
+        profiler = torch.profiler.profile(
+            activities=[
+                torch.profiler.ProfilerActivity.CPU,
+                torch.profiler.ProfilerActivity.CUDA,
+            ],
+            record_shapes=True,
+            with_stack=True,
+        )
+
+        # Start profiling
+        profiler.__enter__()
+        logger.info("Profiler started on worker %d, output will be saved to %s", self.tp_rank, profiler_output_path)
+
+        self.profiler_info = (profiler, profiler_output_path)
+
+        return profiler_output_path
+
+    def stop_profile(self) -> str | None:
+        """Stop PyTorch profiler and export chrome trace.
+
+        Returns:
+            Path to the exported trace file, or None if profiler was not running.
+        """
+        if self.profiler_info is None:
+            logger.warning("Profiler is not running on worker %d", self.tp_rank)
+            return None
+
+        profiler, profiler_output_path = self.profiler_info
+
+        # Stop the profiler
+        profiler.__exit__(None, None, None)
+
+        # Export the chrome trace
+        profiler.export_chrome_trace(profiler_output_path)
+        logger.info("Profiler stopped on worker %d, trace saved to %s", self.tp_rank, profiler_output_path)
+
+        # Clean up
+        self.profiler_info = None
+
+        return profiler_output_path
