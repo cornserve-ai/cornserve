@@ -13,7 +13,7 @@ Specifying `--shm-size` with at least 4 GB and `--ipc host` is required.
 
 ```bash
 pip install -e 'python[dev]'
-pip install -e python-tasklib/
+pip install -e tasklib/
 ```
 
 ## Testing

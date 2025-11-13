@@ -6,22 +6,24 @@ from collections.abc import AsyncGenerator
 from typing import Any
 
 import aiohttp
-
 from cornserve import constants
 from cornserve.logging import get_logger
 from cornserve.services.resource import GPU
 from cornserve.task.base import Stream
+from cornserve.task_executors.descriptor.base import TaskExecutionDescriptor
+
 from cornserve_tasklib.task.unit.llm import OpenAIChatCompletionChunk
 from cornserve_tasklib.task.unit.omni import (
     OmniTalkerVocoderInput,
     OmniTalkerVocoderTask,
 )
-from cornserve.task_executors.descriptor.base import TaskExecutionDescriptor
 
 logger = get_logger(__name__)
 
 
-async def parse_stream_to_audio_chunks(response: aiohttp.ClientResponse) -> AsyncGenerator[str]:
+async def parse_stream_to_audio_chunks(
+    response: aiohttp.ClientResponse,
+) -> AsyncGenerator[str]:
     """Parse the streaming response into audio chunks."""
     assert not response.closed, "Response must not be closed when parsing."
     try:
@@ -38,7 +40,10 @@ async def parse_stream_to_audio_chunks(response: aiohttp.ClientResponse) -> Asyn
                     continue
 
                 if not line.startswith("data: "):
-                    logger.warning("Skipping unexpected line in OpenAI chat completion stream: %s", line[:100])
+                    logger.warning(
+                        "Skipping unexpected line in OpenAI chat completion stream: %s",
+                        line[:100],
+                    )
                     continue
 
                 line = line[6:].strip()
@@ -54,7 +59,9 @@ async def parse_stream_to_audio_chunks(response: aiohttp.ClientResponse) -> Asyn
 
 
 class OmniTalkerVocoderDescriptor(
-    TaskExecutionDescriptor[OmniTalkerVocoderTask, OmniTalkerVocoderInput, Stream[OpenAIChatCompletionChunk]]
+    TaskExecutionDescriptor[
+        OmniTalkerVocoderTask, OmniTalkerVocoderInput, Stream[OpenAIChatCompletionChunk]
+    ]
 ):
     """Task execution descriptor for Omni Talker tasks.
 
@@ -64,7 +71,9 @@ class OmniTalkerVocoderDescriptor(
 
     def create_executor_name(self) -> str:
         """Create a name for the task executor."""
-        return "-".join(["vllm", self.task.model_id.split("/")[-1].replace(".", "-"), "talker"]).lower()
+        return "-".join(
+            ["vllm", self.task.model_id.split("/")[-1].replace(".", "-"), "talker"]
+        ).lower()
 
     def get_container_image(self) -> str:
         """Get the container image name for the task executor."""
@@ -100,12 +109,14 @@ class OmniTalkerVocoderDescriptor(
         task_output: Stream[OpenAIChatCompletionChunk],
     ) -> dict[str, Any]:
         """Convert TaskInput to a request object for the task executor."""
-        request = task_input.model_dump(exclude={
-            "thinker_hidden_states",
-            "cornserve_embeddings",
-            "cornserve_kv_transfer_params",
-            "encoder_fission",
-        })
+        request = task_input.model_dump(
+            exclude={
+                "thinker_hidden_states",
+                "cornserve_embeddings",
+                "cornserve_kv_transfer_params",
+                "encoder_fission",
+            }
+        )
         request["stream"] = True
         vllm_xargs = {
             "cornserve_hidden_states_recv_id": task_input.thinker_hidden_states.id,
@@ -126,4 +137,3 @@ class OmniTalkerVocoderDescriptor(
             async_iterator=parse_stream_to_audio_chunks(response),
             response=response,
         )
-

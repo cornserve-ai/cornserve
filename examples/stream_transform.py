@@ -29,7 +29,10 @@ from collections.abc import AsyncIterator
 
 from cornserve_tasklib.task.composite.llm import MLLMTask
 from cornserve_tasklib.task.unit.encoder import Modality
-from cornserve_tasklib.task.unit.llm import OpenAIChatCompletionChunk, OpenAIChatCompletionRequest
+from cornserve_tasklib.task.unit.llm import (
+    OpenAIChatCompletionChunk,
+    OpenAIChatCompletionRequest,
+)
 
 from cornserve.app.base import AppConfig
 from cornserve.task.base import TaskOutput

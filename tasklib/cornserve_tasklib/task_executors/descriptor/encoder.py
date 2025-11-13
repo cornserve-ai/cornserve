@@ -6,9 +6,17 @@ import uuid
 from typing import Any
 
 import aiohttp
-
 from cornserve import constants
 from cornserve.services.resource import GPU
+from cornserve.task_executors.descriptor.base import TaskExecutionDescriptor
+from cornserve.task_executors.eric.api import (
+    EmbeddingData,
+    EmbeddingRequest,
+    EmbeddingResponse,
+    Modality,
+    Status,
+)
+
 from cornserve_tasklib.task.unit.encoder import (
     DummyEncoderOutput,
     DummyEncoderTask,
@@ -16,8 +24,6 @@ from cornserve_tasklib.task.unit.encoder import (
     EncoderOutput,
     EncoderTask,
 )
-from cornserve.task_executors.descriptor.base import TaskExecutionDescriptor
-from cornserve.task_executors.eric.api import EmbeddingData, EmbeddingRequest, EmbeddingResponse, Modality, Status
 
 
 class EricDescriptor(TaskExecutionDescriptor[EncoderTask, EncoderInput, EncoderOutput]):
@@ -58,12 +64,18 @@ class EricDescriptor(TaskExecutionDescriptor[EncoderTask, EncoderInput, EncoderO
         """Get the task executor's base URL for API calls."""
         return f"{base}/embeddings"
 
-    def to_request(self, task_input: EncoderInput, task_output: EncoderOutput) -> dict[str, Any]:
+    def to_request(
+        self, task_input: EncoderInput, task_output: EncoderOutput
+    ) -> dict[str, Any]:
         """Convert TaskInput to a request object for the task executor."""
         data: list[EmbeddingData] = []
-        for url, forward in zip(task_input.data_urls, task_output.embeddings, strict=True):
+        for url, forward in zip(
+            task_input.data_urls, task_output.embeddings, strict=True
+        ):
             if forward.dst_sidecar_ranks is None:
-                raise ValueError("Destination sidecar ranks must be specified for each forward.")
+                raise ValueError(
+                    "Destination sidecar ranks must be specified for each forward."
+                )
             data.append(
                 EmbeddingData(
                     id=forward.id,
@@ -76,7 +88,9 @@ class EricDescriptor(TaskExecutionDescriptor[EncoderTask, EncoderInput, EncoderO
         req = EmbeddingRequest(data=data)
         return req.model_dump()
 
-    async def from_response(self, task_output: EncoderOutput, response: aiohttp.ClientResponse) -> EncoderOutput:
+    async def from_response(
+        self, task_output: EncoderOutput, response: aiohttp.ClientResponse
+    ) -> EncoderOutput:
         """Convert the task executor response to TaskOutput."""
         response_data = await response.json()
         resp = EmbeddingResponse.model_validate(response_data)
@@ -85,7 +99,10 @@ class EricDescriptor(TaskExecutionDescriptor[EncoderTask, EncoderInput, EncoderO
         else:
             raise RuntimeError(f"Error in encoder task: {resp.error_message}")
 
-class DummyEricDescriptor(TaskExecutionDescriptor[DummyEncoderTask, EncoderInput, DummyEncoderOutput]):
+
+class DummyEricDescriptor(
+    TaskExecutionDescriptor[DummyEncoderTask, EncoderInput, DummyEncoderOutput]
+):
     """Task execution descriptor for Dummy Encoder tasks.
 
     This descriptor handles launching Eric (multimodal encoder) tasks and converting between
@@ -123,7 +140,9 @@ class DummyEricDescriptor(TaskExecutionDescriptor[DummyEncoderTask, EncoderInput
         """Get the task executor's base URL for API calls."""
         return f"{base}/embeddings"
 
-    def to_request(self, task_input: EncoderInput, task_output: DummyEncoderOutput) -> dict[str, Any]:
+    def to_request(
+        self, task_input: EncoderInput, task_output: DummyEncoderOutput
+    ) -> dict[str, Any]:
         """Convert TaskInput to a request object for the task executor."""
         data: list[EmbeddingData] = []
         for url in task_input.data_urls:
@@ -149,4 +168,3 @@ class DummyEricDescriptor(TaskExecutionDescriptor[DummyEncoderTask, EncoderInput
             return DummyEncoderOutput()
         else:
             raise RuntimeError(f"Error in encoder task: {resp.error_message}")
-

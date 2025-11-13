@@ -1,6 +1,7 @@
 """Built-in task for Qwen Omni Thinker and Talker."""
 
 from __future__ import annotations
+
 from typing import Any, Literal
 
 from cornserve.task.base import Stream, Task
@@ -30,9 +31,9 @@ class OmniInput(OpenAIChatCompletionRequest):
 
     def model_post_init(self, context: Any, /) -> None:
         """Validate the model."""
-        assert self.model in {
-            "Qwen/Qwen3-Omni-30B-A3B-Instruct"
-        }, f"Only Qwen/Qwen3-Omni-30B-A3B-Instruct is supported, got {self.model}"
+        assert self.model in {"Qwen/Qwen3-Omni-30B-A3B-Instruct"}, (
+            f"Only Qwen/Qwen3-Omni-30B-A3B-Instruct is supported, got {self.model}"
+        )
 
 
 class OmniTask(Task[OmniInput, Stream[OpenAIChatCompletionChunk]]):
@@ -43,7 +44,9 @@ class OmniTask(Task[OmniInput, Stream[OpenAIChatCompletionChunk]]):
         modalities: List of input modalities other than text.
     """
 
-    model_id: Literal["Qwen/Qwen3-Omni-30B-A3B-Instruct"] = "Qwen/Qwen3-Omni-30B-A3B-Instruct"
+    model_id: Literal["Qwen/Qwen3-Omni-30B-A3B-Instruct"] = (
+        "Qwen/Qwen3-Omni-30B-A3B-Instruct"
+    )
     modalities: list[Modality] = []
     encoder_fission: bool = True
     coalesce_encoder_invocations: bool = True

@@ -13,7 +13,7 @@ docker run -it --gpus all --entrypoint bash --ipc host --rm --name eric-dev -v $
 
 ```bash
 pip install -e 'python[dev]'
-pip install -e python-tasklib/
+pip install -e 'tasklib/'
 ```
 
 ## Testing

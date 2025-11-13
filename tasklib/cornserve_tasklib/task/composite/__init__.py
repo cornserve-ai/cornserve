@@ -1,2 +1,1 @@
 """Composite task modules."""
-
