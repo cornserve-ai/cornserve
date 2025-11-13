@@ -4,15 +4,19 @@ on:
   pull_request:
     paths:
       - '.github/workflows/python_lint.yaml'
+      - 'scripts/generate_pb.sh'
       - 'python/**'
+      - 'tasklib/**'
+      - 'examples/**'
       - 'proto/**'
-      - 'pyproject.toml'
   push:
     paths:
       - '.github/workflows/python_lint.yaml'
+      - 'scripts/generate_pb.sh'
       - 'python/**'
+      - 'tasklib/**'
+      - 'examples/**'
       - 'proto/**'
-      - 'pyproject.toml'
 
 # Jobs initiated by previous pushes get cancelled by a new push.
 concurrency:
@@ -37,4 +41,4 @@ jobs:
       - name: Generate protobuf files
         run: uv run bash scripts/generate_pb.sh
       - name: Check format and lint
-        run: uv run bash python/scripts/lint.sh
+        run: uv run bash scripts/lint.sh

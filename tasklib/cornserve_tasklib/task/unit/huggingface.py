@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import uuid
 
+from cornserve.task.base import TaskInput, TaskOutput, UnitTask
 from openai.types.chat.chat_completion_chunk import Choice, ChoiceDelta
 from pydantic import Field
 
-from cornserve.task.base import TaskInput, TaskOutput, UnitTask
 from cornserve_tasklib.task.unit.llm import (
     ChatCompletionMessageParam,
     OpenAIChatCompletionChunk,
@@ -45,7 +45,9 @@ class HuggingFaceQwenImageOutput(TaskOutput):
     image: str
 
 
-class HuggingFaceQwenImageTask(UnitTask[HuggingFaceQwenImageInput, HuggingFaceQwenImageOutput]):
+class HuggingFaceQwenImageTask(
+    UnitTask[HuggingFaceQwenImageInput, HuggingFaceQwenImageOutput]
+):
     """A task that invokes the Qwen-Image model via HuggingFace diffusers.
 
     Attributes:
@@ -56,7 +58,9 @@ class HuggingFaceQwenImageTask(UnitTask[HuggingFaceQwenImageInput, HuggingFaceQw
     model_id: str = "Qwen/Qwen-Image"
     max_batch_size: int = 1
 
-    def make_record_output(self, task_input: HuggingFaceQwenImageInput) -> HuggingFaceQwenImageOutput:
+    def make_record_output(
+        self, task_input: HuggingFaceQwenImageInput
+    ) -> HuggingFaceQwenImageOutput:
         """Create a mock task output object for invocation recording."""
         return HuggingFaceQwenImageOutput(image="")
 
@@ -99,7 +103,9 @@ class HuggingFaceQwenOmniOutput(TaskOutput):
     text_chunk: OpenAIChatCompletionChunk | None = None
 
 
-class HuggingFaceQwenOmniTask(UnitTask[HuggingFaceQwenOmniInput, HuggingFaceQwenOmniOutput]):
+class HuggingFaceQwenOmniTask(
+    UnitTask[HuggingFaceQwenOmniInput, HuggingFaceQwenOmniOutput]
+):
     """A task that invokes the Qwen 2.5 Omni model via HuggingFace transformers.
 
     Attributes:
@@ -110,7 +116,9 @@ class HuggingFaceQwenOmniTask(UnitTask[HuggingFaceQwenOmniInput, HuggingFaceQwen
     model_id: str = "Qwen/Qwen2.5-Omni-7B"
     max_batch_size: int = 1
 
-    def make_record_output(self, task_input: HuggingFaceQwenOmniInput) -> HuggingFaceQwenOmniOutput:
+    def make_record_output(
+        self, task_input: HuggingFaceQwenOmniInput
+    ) -> HuggingFaceQwenOmniOutput:
         """Create a mock task output object for invocation recording."""
         if task_input.return_audio:
             return HuggingFaceQwenOmniOutput(audio_chunk="")
@@ -118,7 +126,13 @@ class HuggingFaceQwenOmniTask(UnitTask[HuggingFaceQwenOmniInput, HuggingFaceQwen
         return HuggingFaceQwenOmniOutput(
             text_chunk=OpenAIChatCompletionChunk(
                 id="ID",
-                choices=[Choice(index=0, finish_reason="stop", delta=ChoiceDelta(role="assistant", content=""))],
+                choices=[
+                    Choice(
+                        index=0,
+                        finish_reason="stop",
+                        delta=ChoiceDelta(role="assistant", content=""),
+                    )
+                ],
                 created=0,
                 object="chat.completion.chunk",
                 model=task_input.model,

@@ -8,11 +8,10 @@ from __future__ import annotations
 import uuid
 from typing import Generic, Literal, TypeAlias, TypeVar
 
-from openai.types.chat import ChatCompletionChunk
-from pydantic import BaseModel, Field
-
 from cornserve.task.base import Stream, TaskInput, TaskOutput, UnitTask
 from cornserve.task.forward import DataForward, Tensor
+from openai.types.chat import ChatCompletionChunk
+from pydantic import BaseModel, Field
 
 
 class StreamOptions(BaseModel):
@@ -61,7 +60,9 @@ class ChatCompletionContentPartVideoParam(BaseModel):
 
 # Also supports ommitting the `type` field.
 ChatCompletionContentPartMultimodalParam: TypeAlias = (
-    ChatCompletionContentPartAudioParam | ChatCompletionContentPartImageParam | ChatCompletionContentPartVideoParam
+    ChatCompletionContentPartAudioParam
+    | ChatCompletionContentPartImageParam
+    | ChatCompletionContentPartVideoParam
 )
 
 ChatCompletionContentPartParam: TypeAlias = (
@@ -111,7 +112,7 @@ def extract_multimodal_content(
     multimodal_data: list[ChatCompletionContentPartMultimodalParam] = []
     for message in messages:
         for part in message.content:
-            if isinstance(part, ChatCompletionContentPartTextParam):
+            if isinstance(part, (ChatCompletionContentPartTextParam, str)):
                 continue
             multimodal_data.append(part)
 
@@ -143,7 +144,9 @@ class OpenAIChatCompletionChunk(TaskOutput, ChatCompletionChunk):
     """Output model for streamed OpenAI Chat Completion tasks."""
 
 
-class LLMUnitTask(LLMBaseUnitTask[OpenAIChatCompletionRequest, Stream[OpenAIChatCompletionChunk]]):
+class LLMUnitTask(
+    LLMBaseUnitTask[OpenAIChatCompletionRequest, Stream[OpenAIChatCompletionChunk]]
+):
     """A task that invokes an LLM and returns a stream of chat completion chunks.
 
     Attributes:
@@ -159,13 +162,16 @@ class LLMUnitTask(LLMBaseUnitTask[OpenAIChatCompletionRequest, Stream[OpenAIChat
         """Create a mock task output object for invocation recording."""
         return Stream[OpenAIChatCompletionChunk]()
 
+
 class LLMEmbeddingResponse(TaskOutput):
     """Output model for LLM embedding tasks."""
 
     embeddings: DataForward[Tensor]
 
 
-class LLMEmbeddingUnitTask(LLMBaseUnitTask[OpenAIChatCompletionRequest, LLMEmbeddingResponse]):
+class LLMEmbeddingUnitTask(
+    LLMBaseUnitTask[OpenAIChatCompletionRequest, LLMEmbeddingResponse]
+):
     """A task that invokes an LLM to compute multimodal embeddings.
 
     Attributes:
@@ -174,7 +180,9 @@ class LLMEmbeddingUnitTask(LLMBaseUnitTask[OpenAIChatCompletionRequest, LLMEmbed
             a separate encoder task. If False, the task will compute them itself.
     """
 
-    def make_record_output(self, task_input: OpenAIChatCompletionRequest) -> LLMEmbeddingResponse:
+    def make_record_output(
+        self, task_input: OpenAIChatCompletionRequest
+    ) -> LLMEmbeddingResponse:
         """Create a mock task output object for invocation recording."""
         return LLMEmbeddingResponse(embeddings=DataForward[Tensor]())
 
@@ -186,7 +194,9 @@ class PrefillChatCompletionResponse(TaskOutput):
     hidden_states: DataForward[Tensor] | None = None
 
 
-class PrefillLLMUnitTask(UnitTask[OpenAIChatCompletionRequest, PrefillChatCompletionResponse]):
+class PrefillLLMUnitTask(
+    UnitTask[OpenAIChatCompletionRequest, PrefillChatCompletionResponse]
+):
     """A task that invokes a vLLM to perform prefill."""
 
     model_id: str
@@ -197,7 +207,9 @@ class PrefillLLMUnitTask(UnitTask[OpenAIChatCompletionRequest, PrefillChatComple
         """Create a concise string representation of the task."""
         return f"prefill-{self.model_id.split('/')[-1].lower()}"
 
-    def make_record_output(self, task_input: OpenAIChatCompletionRequest) -> PrefillChatCompletionResponse:
+    def make_record_output(
+        self, task_input: OpenAIChatCompletionRequest
+    ) -> PrefillChatCompletionResponse:
         """Create a mock task output object for invocation recording."""
         if self.send_hidden_states:
             return PrefillChatCompletionResponse(hidden_states=DataForward[Tensor]())
@@ -211,7 +223,9 @@ class PrefillLLMUnitTask(UnitTask[OpenAIChatCompletionRequest, PrefillChatComple
             )
 
 
-class DecodeLLMUnitTask(UnitTask[OpenAIChatCompletionRequest, Stream[OpenAIChatCompletionChunk]]):
+class DecodeLLMUnitTask(
+    UnitTask[OpenAIChatCompletionRequest, Stream[OpenAIChatCompletionChunk]]
+):
     """A task that invokes a vLLM decoder and returns a stream of chat completion chunks."""
 
     model_id: str
@@ -221,7 +235,9 @@ class DecodeLLMUnitTask(UnitTask[OpenAIChatCompletionRequest, Stream[OpenAIChatC
         """Create a concise string representation of the task."""
         return f"decode-{self.model_id.split('/')[-1].lower()}"
 
-    def make_record_output(self, task_input: OpenAIChatCompletionRequest) -> Stream[OpenAIChatCompletionChunk]:
+    def make_record_output(
+        self, task_input: OpenAIChatCompletionRequest
+    ) -> Stream[OpenAIChatCompletionChunk]:
         """Create a mock task output object for invocation recording."""
         return Stream[OpenAIChatCompletionChunk]()
 
@@ -232,5 +248,6 @@ class DecodeLLMUnitTask(UnitTask[OpenAIChatCompletionRequest, Stream[OpenAIChatC
                 f"Model ID in task input ({task_input.model}) does not match the task model ID ({self.model_id})."
             )
         if not task_input.cornserve_kv_transfer_params:
-            raise ValueError("KV transfer parameters must be specified in the task input.")
-
+            raise ValueError(
+                "KV transfer parameters must be specified in the task input."
+            )

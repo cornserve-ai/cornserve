@@ -5,9 +5,16 @@ from __future__ import annotations
 from typing import Any
 
 import aiohttp
-
 from cornserve import constants
 from cornserve.services.resource import GPU
+from cornserve.task_executors.descriptor.base import TaskExecutionDescriptor
+from cornserve.task_executors.huggingface.api import (
+    HuggingFaceRequest,
+    HuggingFaceResponse,
+    ModelType,
+    Status,
+)
+
 from cornserve_tasklib.task.unit.huggingface import (
     HuggingFaceQwenImageInput,
     HuggingFaceQwenImageOutput,
@@ -16,12 +23,12 @@ from cornserve_tasklib.task.unit.huggingface import (
     HuggingFaceQwenOmniOutput,
     HuggingFaceQwenOmniTask,
 )
-from cornserve.task_executors.descriptor.base import TaskExecutionDescriptor
-from cornserve.task_executors.huggingface.api import HuggingFaceRequest, HuggingFaceResponse, ModelType, Status
 
 
 class HuggingFaceQwenImageDescriptor(
-    TaskExecutionDescriptor[HuggingFaceQwenImageTask, HuggingFaceQwenImageInput, HuggingFaceQwenImageOutput]
+    TaskExecutionDescriptor[
+        HuggingFaceQwenImageTask, HuggingFaceQwenImageInput, HuggingFaceQwenImageOutput
+    ]
 ):
     """Task execution descriptor for HuggingFace Qwen-Image tasks."""
 
@@ -52,7 +59,9 @@ class HuggingFaceQwenImageDescriptor(
         return f"{base}/generate"
 
     def to_request(
-        self, task_input: HuggingFaceQwenImageInput, task_output: HuggingFaceQwenImageOutput
+        self,
+        task_input: HuggingFaceQwenImageInput,
+        task_output: HuggingFaceQwenImageOutput,
     ) -> dict[str, Any]:
         """Convert TaskInput to a request object for the task executor."""
         return HuggingFaceRequest(**task_input.model_dump()).model_dump()
@@ -65,7 +74,9 @@ class HuggingFaceQwenImageDescriptor(
         hf_response = HuggingFaceResponse.model_validate(response_data)
 
         if hf_response.status != Status.SUCCESS:
-            raise RuntimeError(f"Error in HuggingFace Qwen-Image task: {hf_response.error_message}")
+            raise RuntimeError(
+                f"Error in HuggingFace Qwen-Image task: {hf_response.error_message}"
+            )
 
         if hf_response.image is None:
             raise RuntimeError("No image received from HuggingFace Qwen-Image task")
@@ -74,7 +85,9 @@ class HuggingFaceQwenImageDescriptor(
 
 
 class HuggingFaceQwenOmniDescriptor(
-    TaskExecutionDescriptor[HuggingFaceQwenOmniTask, HuggingFaceQwenOmniInput, HuggingFaceQwenOmniOutput]
+    TaskExecutionDescriptor[
+        HuggingFaceQwenOmniTask, HuggingFaceQwenOmniInput, HuggingFaceQwenOmniOutput
+    ]
 ):
     """Task execution descriptor for HuggingFace Qwen 2.5 Omni tasks."""
 
@@ -125,10 +138,13 @@ class HuggingFaceQwenOmniDescriptor(
         hf_response = HuggingFaceResponse.model_validate(response_data)
 
         if hf_response.status != Status.SUCCESS:
-            raise RuntimeError(f"Error in HuggingFace Qwen-Omni task: {hf_response.error_message}")
+            raise RuntimeError(
+                f"Error in HuggingFace Qwen-Omni task: {hf_response.error_message}"
+            )
 
         if hf_response.audio_chunk is None:
-            raise RuntimeError("No audio chunk received from HuggingFace Qwen-Omni task")
+            raise RuntimeError(
+                "No audio chunk received from HuggingFace Qwen-Omni task"
+            )
 
         return HuggingFaceQwenOmniOutput(audio_chunk=hf_response.audio_chunk)
-
