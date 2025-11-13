@@ -81,7 +81,8 @@ kubectl apply -k kubernetes/kustomize/cornserve-system/base
 kubectl apply -k kubernetes/kustomize/cornserve/overlays/prod
 ```
 
-!!! Tip
+!!! Warning
+    With the `prod` overlay, **the Cornserve Gateway is not exposed** via any service by default. Users are expected to expose the Gateway in a way suitable for their infrastructure (e.g., a Load Balancer service). For local development or to quickly test Cornserve, use the `local` overlay, which will expose the Gateway via a NodePort service on port `30080`.
     For more information on other Kustomize overlays we have, please check out [the Contributor Guide](../contributor_guide/kubernetes.md).
 
 If you'll be using gated models from Hugging Face Hub, you'll need to make the Hugging Face token available to Task Executors:
