@@ -172,3 +172,28 @@ class ModelExecutor:
             receiver_ranks=batch.receiver_ranks,
             status=Status.SUCCESS,
         )
+
+    def start_profile(self, output_dir: str = "./profiler_output") -> list[str]:
+        """Start PyTorch profiler on all workers.
+
+        Args:
+            output_dir: Directory where profiler traces will be saved.
+
+        Returns:
+            List of paths to trace files that will be created (one per worker).
+        """
+        logger.info("Starting profiler on all workers, output directory: %s", output_dir)
+        trace_paths = self.run_workers("start_profile", kwargs={"output_dir": output_dir})
+        logger.info("Profiler started, trace files will be: %s", trace_paths)
+        return trace_paths
+
+    def stop_profile(self) -> list[str]:
+        """Stop PyTorch profiler on all workers and export chrome traces.
+
+        Returns:
+            List of paths to exported trace files (one per worker).
+        """
+        logger.info("Stopping profiler on all workers")
+        trace_paths = self.run_workers("stop_profile")
+        logger.info("Profiler stopped, trace files saved: %s", trace_paths)
+        return trace_paths
