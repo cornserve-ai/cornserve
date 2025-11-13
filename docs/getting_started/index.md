@@ -81,7 +81,7 @@ cornserve deploy-tasklib
 Cornserve allows applying custom launch args to task executors via task profiles. We'll be using [Qwen3 VL 8B](https://huggingface.co/Qwen/Qwen3-VL-8B-Instruct) for this demo, and you could limit the maximum model length via:
 
 ```bash
-cornserve deploy-profiles profiles --kube-config-path ~/.kube/config
+cornserve deploy-profiles profiles --kube-config-path ~/.kube/config  # Or any appropriate kubeconfig path
 ```
 
 Then, try registering a simple example app that defines a Vision-Language Model:
