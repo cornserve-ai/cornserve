@@ -373,7 +373,7 @@ class Worker:
         )
 
         # Start profiling
-        profiler.__enter__()
+        profiler.start()
         logger.info("Profiler started on worker %d, output will be saved to %s", self.tp_rank, profiler_output_path)
 
         self.profiler_info = (profiler, profiler_output_path)
@@ -393,7 +393,7 @@ class Worker:
         profiler, profiler_output_path = self.profiler_info
 
         # Stop the profiler
-        profiler.__exit__(None, None, None)
+        profiler.stop()
 
         # Export the chrome trace
         profiler.export_chrome_trace(profiler_output_path)
