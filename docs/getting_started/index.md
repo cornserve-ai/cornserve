@@ -78,7 +78,7 @@ uv pip install python/
 Next, we need to deploy built-in tasks that Cornserve provides to our Cornserve cluster.
 
 ```bash
-uv pip install tasklib/
+uv pip install 'tasklib/'
 export CORNSERVE_GATEWAY_URL=$(minikube service -n cornserve gateway-node-port --url)
 cornserve deploy-tasklib
 ```
