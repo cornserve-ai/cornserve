@@ -8,7 +8,7 @@ import os
 import sys
 from contextlib import suppress
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 import requests
 import rich
@@ -693,7 +693,17 @@ def _handle_streaming_audio_response(
         rich.print(Panel(f"Error processing audio streaming response: {e}", style="red", expand=False))
 
 
-@app.command(name="deploy_tasklib")
+@app.command(name="tasklib")
+def tasklib(
+    subcommand: Annotated[Literal["deploy", "purge"], tyro.conf.Positional],
+) -> None:
+    """Tasklib operations."""
+    if subcommand == "deploy":
+        deploy_tasklib()
+    elif subcommand == "purge":
+        purge_tasklib()
+
+
 def deploy_tasklib() -> None:
     """Scan cornserve_tasklib and deploy tasks/descriptors automatically.
 
@@ -755,6 +765,28 @@ def deploy_tasklib() -> None:
         rich.print(Panel("No composite tasks discovered.", style="yellow", expand=False))
 
     rich.print(Panel("Tasklib deployment complete.", style="green", expand=False))
+
+
+def purge_tasklib() -> None:
+    """Purge all tasklib CRs and runtime state across services.
+
+    Fails if the cluster is not idle (active UnitTaskInstance CRs).
+    """
+    try:
+        resp = requests.post(f"{GATEWAY_URL}/purge-tasklib")
+        if resp.status_code == 409:
+            rich.print(
+                Panel(
+                    "Cluster is not idle. Please ensure no UnitTaskInstance CRs exist before purging.",
+                    style="red",
+                    expand=False,
+                )
+            )
+            return
+        resp.raise_for_status()
+        rich.print(Panel("Tasklib purged successfully.", style="green", expand=False))
+    except Exception as e:
+        rich.print(Panel(f"Failed to purge tasklib: {e}", style="red", expand=False))
 
 
 @app.command(name="deploy_profiles")
