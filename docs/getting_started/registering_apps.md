@@ -7,7 +7,7 @@ The current deployment process is as follows:
 2. If you haven't already, deploy the Cornserve tasklib to the cluster.
     ```bash
     export CORNSERVE_GATEWAY_URL=[...]
-    cornserve tasklib-deploy
+    cornserve tasklib deploy
     ```
 3. Register & deploy the app to the Cornserve Gateway for validation and deployment:
     ```bash
