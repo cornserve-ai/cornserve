@@ -8,7 +8,7 @@ import os
 import sys
 from contextlib import suppress
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 import requests
 import rich
@@ -693,7 +693,17 @@ def _handle_streaming_audio_response(
         rich.print(Panel(f"Error processing audio streaming response: {e}", style="red", expand=False))
 
 
-@app.command(name="deploy_tasklib")
+@app.command(name="tasklib")
+def tasklib(
+    subcommand: Annotated[Literal["deploy", "purge"], tyro.conf.Positional],
+) -> None:
+    """Tasklib operations."""
+    if subcommand == "deploy":
+        deploy_tasklib()
+    elif subcommand == "purge":
+        purge_tasklib()
+
+
 def deploy_tasklib() -> None:
     """Scan cornserve_tasklib and deploy tasks/descriptors automatically.
 
@@ -757,7 +767,6 @@ def deploy_tasklib() -> None:
     rich.print(Panel("Tasklib deployment complete.", style="green", expand=False))
 
 
-@app.command(name="purge_tasklib")
 def purge_tasklib() -> None:
     """Purge all tasklib CRs and runtime state across services.
 
