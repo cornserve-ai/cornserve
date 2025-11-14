@@ -158,6 +158,7 @@ class TaskExecutionDescriptorRegistry:
         """Clear all registrations and defaults."""
         self.registry.clear()
         self.default_registry.clear()
+        self._pending.clear()
 
 
 DESCRIPTOR_REGISTRY = TaskExecutionDescriptorRegistry()

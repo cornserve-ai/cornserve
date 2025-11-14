@@ -757,6 +757,29 @@ def deploy_tasklib() -> None:
     rich.print(Panel("Tasklib deployment complete.", style="green", expand=False))
 
 
+@app.command(name="purge_tasklib")
+def purge_tasklib() -> None:
+    """Purge all tasklib CRs and runtime state across services.
+
+    Fails if the cluster is not idle (active UnitTaskInstance CRs).
+    """
+    try:
+        resp = requests.post(f"{GATEWAY_URL}/purge-tasklib")
+        if resp.status_code == 409:
+            rich.print(
+                Panel(
+                    "Cluster is not idle. Please ensure no UnitTaskInstance CRs exist before purging.",
+                    style="red",
+                    expand=False,
+                )
+            )
+            return
+        resp.raise_for_status()
+        rich.print(Panel("Tasklib purged successfully.", style="green", expand=False))
+    except Exception as e:
+        rich.print(Panel(f"Failed to purge tasklib: {e}", style="red", expand=False))
+
+
 @app.command(name="deploy_profiles")
 def profile_deploy(
     profiles_dir: Annotated[Path, tyro.conf.Positional] = Path("profiles"),

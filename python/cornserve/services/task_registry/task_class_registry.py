@@ -136,7 +136,7 @@ class TaskClassRegistry:
             # TODO: Such special case is definitely not legetimate, what should we do instead?
             # Maybe use a decorator to mark the base classes?
             if task_class_name == "LLMBaseUnitTask":
-                return # This base class should never be used directly
+                return  # This base class should never be used directly
             else:
                 raise ValueError(
                     f"Task class {task_class_name} missing generic type arguments. "
@@ -187,6 +187,7 @@ class TaskClassRegistry:
         """Clear all registered task classes."""
         self._unit_tasks.clear()
         self._composite_tasks.clear()
+        self._pending.clear()
 
     def list_registered_unit_tasks(self) -> list[str]:
         """List names of registered unit tasks."""

@@ -413,3 +413,26 @@ async def deploy_tasks(request: TasksDeploymentRequest, raw_request: Request):
     except Exception as e:
         logger.exception("Failed to deploy tasks")
         return Response(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, content=str(e))
+
+
+@router.post("/purge-tasklib")
+async def purge_tasklib(raw_request: Request):
+    """Purge tasklib by deleting all TaskDefinition/ExecutionDescriptor CRs.
+
+    Requires the cluster to be idle (no UnitTaskInstance CRs). Each service's TaskRegistry
+    watcher will responds to CR DELETED events by purging its local runtime.
+    """
+    task_registry: TaskRegistry = raw_request.app.state.task_registry
+    try:
+        idle = await task_registry.check_no_activate_task_instance()
+        if not idle:
+            return Response(
+                status_code=status.HTTP_409_CONFLICT,
+                content="Cluster is not idle, cannot purge tasklib.",
+            )
+
+        await task_registry.delete_all_task_definitions_and_descriptors()
+        return {"status": "ok"}
+    except Exception as e:
+        logger.exception("Failed to purge tasklib")
+        return Response(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, content=str(e))
