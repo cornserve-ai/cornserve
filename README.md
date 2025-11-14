@@ -11,7 +11,7 @@ https://github.com/user-attachments/assets/583796e8-da20-4918-9311-db05e94726eb
 
 
 
-Cornserve is an execution platform for multimodal AI.
+Cornserve is a distributed inference platform for complex, Any-to-Any multimodal AI.
 Split complex models into smaller separately scalable components (**model fission**) and share common components across multiple applications (**sharing**), all on your own infrastructure.
 
 
