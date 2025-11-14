@@ -7,11 +7,12 @@ from typing import Any, ClassVar
 
 import aiohttp
 import kubernetes_asyncio.client as kclient
-
 from cornserve import constants
 from cornserve.logging import get_logger
 from cornserve.services.resource import GPU
 from cornserve.task.base import Stream, TaskOutput
+from cornserve.task_executors.descriptor.base import TaskExecutionDescriptor
+
 from cornserve_tasklib.task.unit.llm import (
     URL,
     DecodeLLMUnitTask,
@@ -23,12 +24,13 @@ from cornserve_tasklib.task.unit.llm import (
     PrefillLLMUnitTask,
     extract_multimodal_content,
 )
-from cornserve.task_executors.descriptor.base import TaskExecutionDescriptor
 
 logger = get_logger(__name__)
 
 
-async def parse_stream_to_completion_chunks(response: aiohttp.ClientResponse) -> AsyncGenerator[str]:
+async def parse_stream_to_completion_chunks(
+    response: aiohttp.ClientResponse,
+) -> AsyncGenerator[str]:
     """Parse the response stream to OpenAIChatCompletionChunk objects."""
     try:
         async for line in response.content:
@@ -37,7 +39,10 @@ async def parse_stream_to_completion_chunks(response: aiohttp.ClientResponse) ->
                 continue
 
             if not line.startswith("data: "):
-                logger.warning("Skipping unexpected line in OpenAI chat completion stream: %s", line)
+                logger.warning(
+                    "Skipping unexpected line in OpenAI chat completion stream: %s",
+                    line,
+                )
                 continue
 
             line = line[6:].strip()
@@ -49,7 +54,9 @@ async def parse_stream_to_completion_chunks(response: aiohttp.ClientResponse) ->
             try:
                 _ = OpenAIChatCompletionChunk.model_validate_json(line)
             except Exception as e:
-                logger.error("Failed to parse OpenAIChatCompletionChunk from line: %s", line)
+                logger.error(
+                    "Failed to parse OpenAIChatCompletionChunk from line: %s", line
+                )
                 logger.exception(e)
                 break
 
@@ -59,7 +66,9 @@ async def parse_stream_to_completion_chunks(response: aiohttp.ClientResponse) ->
         response.close()
 
 
-class VLLMDescriptor(TaskExecutionDescriptor[LLMBaseUnitTask, OpenAIChatCompletionRequest, TaskOutput]):
+class VLLMDescriptor(
+    TaskExecutionDescriptor[LLMBaseUnitTask, OpenAIChatCompletionRequest, TaskOutput]
+):
     """Task execution descriptor using vLLM."""
 
     def create_executor_name(self) -> str:
@@ -135,16 +144,24 @@ class VLLMDescriptor(TaskExecutionDescriptor[LLMBaseUnitTask, OpenAIChatCompleti
                     f"The number of multimodal data in messages {len(multimodal_data)} != "
                     f"{len(task_input.cornserve_embeddings)} the number of embeddings provided."
                 )
-            for multimodal_content, forward in zip(multimodal_data, task_input.cornserve_embeddings, strict=True):
-                modality = multimodal_content.type.split("_")[0]  # e.g., "audio", "image", "video"
+            for multimodal_content, forward in zip(
+                multimodal_data, task_input.cornserve_embeddings, strict=True
+            ):
+                modality = multimodal_content.type.split("_")[
+                    0
+                ]  # e.g., "audio", "image", "video"
                 data_url: URL = getattr(multimodal_content, multimodal_content.type)
-                data_url.url = f"data:{modality}/uuid;data_id={forward.id};url={data_url.url},"
+                data_url.url = (
+                    f"data:{modality}/uuid;data_id={forward.id};url={data_url.url},"
+                )
 
-        request = task_input.model_dump(exclude={
-            "cornserve_embeddings",
-            "cornserve_kv_transfer_params",
-            "encoder_fission",
-        })
+        request = task_input.model_dump(
+            exclude={
+                "cornserve_embeddings",
+                "cornserve_kv_transfer_params",
+                "encoder_fission",
+            }
+        )
 
         if isinstance(task_output, Stream):
             request["stream"] = True
@@ -152,7 +169,9 @@ class VLLMDescriptor(TaskExecutionDescriptor[LLMBaseUnitTask, OpenAIChatCompleti
         if isinstance(task_output, LLMEmbeddingResponse):
             vllm_xargs = {
                 "cornserve_hidden_states_forward_id": task_output.embeddings.id,
-                "cornserve_hidden_states_forward_ranks": str(task_output.embeddings.dst_sidecar_ranks),
+                "cornserve_hidden_states_forward_ranks": str(
+                    task_output.embeddings.dst_sidecar_ranks
+                ),
             }
             request["vllm_xargs"] = vllm_xargs
 
@@ -171,7 +190,9 @@ class VLLMDescriptor(TaskExecutionDescriptor[LLMBaseUnitTask, OpenAIChatCompleti
             )
         if isinstance(task_output, LLMEmbeddingResponse):
             return LLMEmbeddingResponse(embeddings=task_output.embeddings)
-        raise ValueError(f"Expected task output to be Stream or LLMEmbeddingResponse, got {type(task_output)}")
+        raise ValueError(
+            f"Expected task output to be Stream or LLMEmbeddingResponse, got {type(task_output)}"
+        )
 
     def get_container_volumes(self) -> list[tuple[str, str, str]]:
         """Get the container volumes for the task manager.
@@ -182,7 +203,11 @@ class VLLMDescriptor(TaskExecutionDescriptor[LLMBaseUnitTask, OpenAIChatCompleti
         return [
             ("hf-cache", constants.VOLUME_HF_CACHE, "/root/.cache/huggingface"),
             ("shm", constants.VOLUME_SHM, "/dev/shm"),
-            ("torch-compile-cache", constants.VOLUME_VLLM_EXECUTOR_CACHE, "/root/.cache/vllm/torch_compile_cache"),
+            (
+                "torch-compile-cache",
+                constants.VOLUME_VLLM_EXECUTOR_CACHE,
+                "/root/.cache/vllm/torch_compile_cache",
+            ),
         ]
 
 
@@ -218,7 +243,10 @@ class PrefillVLLMDescriptor(
             [
                 # ("UCX_LOG_LEVEL", "debug"),
                 # ("VLLM_LOGGING_LEVEL", "DEBUG"),
-                ("VLLM_NIXL_SIDE_CHANNEL_PORT", str(self.NIXL_BASE_PORT + gpus[0].global_rank)),
+                (
+                    "VLLM_NIXL_SIDE_CHANNEL_PORT",
+                    str(self.NIXL_BASE_PORT + gpus[0].global_rank),
+                ),
             ]
         )
         if self.task.receive_embeddings:
@@ -229,11 +257,15 @@ class PrefillVLLMDescriptor(
 
     def get_kubernetes_envs(self, gpus: list[GPU]) -> list[kclient.V1EnvVar]:
         """Get the kubernetes environment variables for the task executor."""
-        envs = [kclient.V1EnvVar(name=n, value=v) for n, v in self.get_container_envs(gpus)]
+        envs = [
+            kclient.V1EnvVar(name=n, value=v) for n, v in self.get_container_envs(gpus)
+        ]
         envs.append(
             kclient.V1EnvVar(
                 name="VLLM_NIXL_SIDE_CHANNEL_HOST",
-                value_from=kclient.V1EnvVarSource(field_ref=kclient.V1ObjectFieldSelector(field_path="status.podIP")),
+                value_from=kclient.V1EnvVarSource(
+                    field_ref=kclient.V1ObjectFieldSelector(field_path="status.podIP")
+                ),
             )
         )
         return envs
@@ -272,7 +304,11 @@ class PrefillVLLMDescriptor(
             ("infiniband-dev", "/dev/infiniband", "/dev/infiniband"),
             ("hf-cache", constants.VOLUME_HF_CACHE, "/root/.cache/huggingface"),
             ("shm", constants.VOLUME_SHM, "/dev/shm"),
-            ("torch-compile-cache", constants.VOLUME_VLLM_EXECUTOR_CACHE, "/root/.cache/vllm/torch_compile_cache"),
+            (
+                "torch-compile-cache",
+                constants.VOLUME_VLLM_EXECUTOR_CACHE,
+                "/root/.cache/vllm/torch_compile_cache",
+            ),
         ]
 
     def get_api_url(self, base: str) -> str:
@@ -304,13 +340,21 @@ class PrefillVLLMDescriptor(
                 raise ValueError(
                     "The number of multimodal data in messages does not match the number of embeddings provided."
                 )
-            for multimodal_content, forward in zip(multimodal_data, task_input.cornserve_embeddings, strict=True):
-                modality = multimodal_content.type.split("_")[0]  # e.g., "audio", "image", "video"
+            for multimodal_content, forward in zip(
+                multimodal_data, task_input.cornserve_embeddings, strict=True
+            ):
+                modality = multimodal_content.type.split("_")[
+                    0
+                ]  # e.g., "audio", "image", "video"
                 data_url: URL = getattr(multimodal_content, multimodal_content.type)
-                data_url.url = f"data:{modality}/uuid;data_id={forward.id};url={data_url.url},"
+                data_url.url = (
+                    f"data:{modality}/uuid;data_id={forward.id};url={data_url.url},"
+                )
 
         # force non-streaming
-        request = task_input.model_dump(exclude={"cornserve_embeddings", "stream_options"})
+        request = task_input.model_dump(
+            exclude={"cornserve_embeddings", "stream_options"}
+        )
         # overwrite max_completion_tokens
         request["max_completion_tokens"] = 1
 
@@ -325,16 +369,22 @@ class PrefillVLLMDescriptor(
             }
             vllm_xargs = {
                 "cornserve_kv_transfer_params_forward_id": params.id,
-                "cornserve_kv_transfer_params_forward_ranks": str(params.dst_sidecar_ranks),
+                "cornserve_kv_transfer_params_forward_ranks": str(
+                    params.dst_sidecar_ranks
+                ),
             }
             request["vllm_xargs"] = vllm_xargs
 
         if (hidden_states := task_output.hidden_states) is not None:
             vllm_xargs = request.setdefault("vllm_xargs", {})
-            vllm_xargs.update({
-                "cornserve_hidden_states_forward_id": hidden_states.id,
-                "cornserve_hidden_states_forward_ranks": str(hidden_states.dst_sidecar_ranks),
-            })
+            vllm_xargs.update(
+                {
+                    "cornserve_hidden_states_forward_id": hidden_states.id,
+                    "cornserve_hidden_states_forward_ranks": str(
+                        hidden_states.dst_sidecar_ranks
+                    ),
+                }
+            )
 
         return request
 
@@ -346,12 +396,18 @@ class PrefillVLLMDescriptor(
         """Convert the response from the task executor to TaskOutput."""
         resp_data = await response.json()
         if "kv_transfer_params" in resp_data:
-            return PrefillChatCompletionResponse(kv_transfer_params=task_output.kv_transfer_params)
+            return PrefillChatCompletionResponse(
+                kv_transfer_params=task_output.kv_transfer_params
+            )
         return PrefillChatCompletionResponse(hidden_states=task_output.hidden_states)
 
 
 class DecodeVLLMDescriptor(
-    TaskExecutionDescriptor[DecodeLLMUnitTask, OpenAIChatCompletionRequest, Stream[OpenAIChatCompletionChunk]]
+    TaskExecutionDescriptor[
+        DecodeLLMUnitTask,
+        OpenAIChatCompletionRequest,
+        Stream[OpenAIChatCompletionChunk],
+    ]
 ):
     """Task execution descriptor using vLLM in decode mode."""
 
@@ -378,7 +434,10 @@ class DecodeVLLMDescriptor(
             [
                 # ("UCX_LOG_LEVEL", "debug"),
                 # ("VLLM_LOGGING_LEVEL", "DEBUG"),
-                ("VLLM_NIXL_SIDE_CHANNEL_PORT", str(self.NIXL_BASE_PORT + gpus[0].global_rank)),
+                (
+                    "VLLM_NIXL_SIDE_CHANNEL_PORT",
+                    str(self.NIXL_BASE_PORT + gpus[0].global_rank),
+                ),
             ]
         )
         envs.append(
@@ -388,11 +447,15 @@ class DecodeVLLMDescriptor(
 
     def get_kubernetes_envs(self, gpus: list[GPU]) -> list[kclient.V1EnvVar]:
         """Get the kubernetes environment variables for the task executor."""
-        envs = [kclient.V1EnvVar(name=n, value=v) for n, v in self.get_container_envs(gpus)]
+        envs = [
+            kclient.V1EnvVar(name=n, value=v) for n, v in self.get_container_envs(gpus)
+        ]
         envs.append(
             kclient.V1EnvVar(
                 name="VLLM_NIXL_SIDE_CHANNEL_HOST",
-                value_from=kclient.V1EnvVarSource(field_ref=kclient.V1ObjectFieldSelector(field_path="status.podIP")),
+                value_from=kclient.V1EnvVarSource(
+                    field_ref=kclient.V1ObjectFieldSelector(field_path="status.podIP")
+                ),
             )
         )
         return envs
@@ -433,7 +496,11 @@ class DecodeVLLMDescriptor(
             ("infiniband-dev", "/dev/infiniband", "/dev/infiniband"),
             ("hf-cache", constants.VOLUME_HF_CACHE, "/root/.cache/huggingface"),
             ("shm", constants.VOLUME_SHM, "/dev/shm"),
-            ("torch-compile-cache", constants.VOLUME_VLLM_EXECUTOR_CACHE, "/root/.cache/vllm/torch_compile_cache"),
+            (
+                "torch-compile-cache",
+                constants.VOLUME_VLLM_EXECUTOR_CACHE,
+                "/root/.cache/vllm/torch_compile_cache",
+            ),
         ]
 
     def get_api_url(self, base: str) -> str:
@@ -460,14 +527,24 @@ class DecodeVLLMDescriptor(
                 raise ValueError(
                     "The number of multimodal data in messages does not match the number of embeddings provided."
                 )
-            for multimodal_content, forward in zip(multimodal_data, task_input.cornserve_embeddings, strict=True):
-                modality = multimodal_content.type.split("_")[0]  # e.g., "audio", "image", "video"
+            for multimodal_content, forward in zip(
+                multimodal_data, task_input.cornserve_embeddings, strict=True
+            ):
+                modality = multimodal_content.type.split("_")[
+                    0
+                ]  # e.g., "audio", "image", "video"
                 data_url: URL = getattr(multimodal_content, multimodal_content.type)
-                data_url.url = f"data:{modality}/uuid;data_id={forward.id};url={data_url.url},"
+                data_url.url = (
+                    f"data:{modality}/uuid;data_id={forward.id};url={data_url.url},"
+                )
 
-        request = task_input.model_dump(exclude={"cornserve_embeddings", "cornserve_kv_transfer_params"})
+        request = task_input.model_dump(
+            exclude={"cornserve_embeddings", "cornserve_kv_transfer_params"}
+        )
         if task_input.cornserve_kv_transfer_params is None:
-            raise ValueError("Task input must contain cornserve_kv_transfer_params for decode tasks.")
+            raise ValueError(
+                "Task input must contain cornserve_kv_transfer_params for decode tasks."
+            )
         vllm_xargs = {
             "cornserve_kv_transfer_params_recv_id": task_input.cornserve_kv_transfer_params.id,
         }
@@ -485,4 +562,3 @@ class DecodeVLLMDescriptor(
             async_iterator=parse_stream_to_completion_chunks(response),
             response=response,
         )
-

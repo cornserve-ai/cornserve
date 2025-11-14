@@ -39,17 +39,12 @@ Next, clone the Cornserve GitHub repository and deploy Cornserve on your Minikub
 ```bash
 git clone https://github.com/cornserve-ai/cornserve.git
 cd cornserve
-git checkout v0.0.2  # or the latest release tag
+git checkout v0.1.0  # or the latest release tag
 
 minikube kubectl -- apply -k kubernetes/kustomize/cornserve-system/overlays/minikube
 minikube kubectl -- apply -k kubernetes/kustomize/cornserve/overlays/minikube
 ```
 
-We'll be using [Gemma 3 4B](https://huggingface.co/google/gemma-3-4b-it) for this demo, so you need to have access (requests are processed immediately with an account).
-While we wait for the containers to spin up, add your HuggingFace access token to Cornserve, which can be created [here](https://huggingface.co/settings/tokens) if you don't have one already.
-```
-minikube kubectl -- create -n cornserve secret generic cornserve-env --from-literal=hf-token='YOUR_HUGGINGFACE_TOKEN'
-```
 
 After a few moments (which largely depends on how long it takes to pull Docker images from Docker Hub), check whether Cornserve is running:
 
@@ -78,9 +73,15 @@ uv pip install python/
 Next, we need to deploy built-in tasks that Cornserve provides to our Cornserve cluster.
 
 ```bash
-uv pip install python-tasklib/
+uv pip install 'tasklib/'
 export CORNSERVE_GATEWAY_URL=$(minikube service -n cornserve gateway-node-port --url)
 cornserve deploy-tasklib
+```
+
+Cornserve allows applying custom launch args to task executors via task profiles. We'll be using [Qwen3 VL 8B](https://huggingface.co/Qwen/Qwen3-VL-8B-Instruct) for this demo, and you could limit the maximum model length via:
+
+```bash
+cornserve deploy-profiles profiles --kube-config-path ~/.kube/config  # Or any appropriate kubeconfig path
 ```
 
 Then, try registering a simple example app that defines a Vision-Language Model:
@@ -106,7 +107,7 @@ Now, you can invoke the app using the CLI:
 
 ```console
 $ cornserve invoke mllm --aggregate-keys choices.0.delta.content --data - <<EOF
-model: "Qwen/Qwen2-VL-7B-Instruct"
+model: "Qwen/Qwen3-VL-8B-Instruct"
 messages:
 - role: "user"
   content:

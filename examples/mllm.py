@@ -43,7 +43,10 @@ from collections.abc import AsyncIterator
 
 from cornserve_tasklib.task.composite.llm import MLLMTask
 from cornserve_tasklib.task.unit.encoder import Modality
-from cornserve_tasklib.task.unit.llm import OpenAIChatCompletionChunk, OpenAIChatCompletionRequest
+from cornserve_tasklib.task.unit.llm import (
+    OpenAIChatCompletionChunk,
+    OpenAIChatCompletionRequest,
+)
 
 from cornserve.app.base import AppConfig
 
@@ -59,6 +62,8 @@ class Config(AppConfig):
     tasks = {"mllm": mllm}
 
 
-async def serve(request: OpenAIChatCompletionRequest) -> AsyncIterator[OpenAIChatCompletionChunk]:
+async def serve(
+    request: OpenAIChatCompletionRequest,
+) -> AsyncIterator[OpenAIChatCompletionChunk]:
     """Main serve function for the app."""
     return await mllm(request)

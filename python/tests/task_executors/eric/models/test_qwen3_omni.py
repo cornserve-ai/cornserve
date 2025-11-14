@@ -35,11 +35,29 @@ def test_weight_loading() -> None:
     our_model = load_model(model_id, torch_device=torch.device("cpu"))
     destroy_distributed()
 
+    def check_patch_embed_weight(our_name: str, our_param: torch.Tensor, hf_params: dict[str, torch.Tensor]):
+        """Convert HF's Conv3d weight to Linear format and compare."""
+        hf_param = hf_params.get(our_name)
+        assert hf_param is not None, f"Parameter {our_name} not found in HF model"
+
+        # HF has Conv3d weight: [out, in, kt, kh, kw]
+        # We have Linear weight: [out, in*kt*kh*kw]
+        if hf_param.dim() == 5:
+            out_channels, in_channels, kt, kh, kw = hf_param.shape
+            linear_weight = hf_param.reshape(out_channels, in_channels * kt * kh * kw)
+            assert our_param.shape == linear_weight.shape, f"{our_name}: shape mismatch"
+            assert torch.allclose(our_param, linear_weight), f"{our_name}: values don't match"
+        else:
+            # Fallback to regular comparison
+            assert our_param.shape == hf_param.shape, f"{our_name}: shape mismatch"
+            assert torch.allclose(our_param, hf_param), f"{our_name}: values don't match"
+
     # Check if parameters are the same
     assert_same_weights(
         hf_model,
         our_model,
         ignored_prefixes=MODEL_REGISTRY[model_shorthand].weight.ignored_prefixes,
+        transformed_weights={"visual.patch_embed.proj.weight": check_patch_embed_weight},
     )
 
 

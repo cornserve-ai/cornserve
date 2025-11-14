@@ -1,1 +1,1 @@
-"""HuggingFace task executor."""
+"""HuggingFace task executor (deprecated)."""

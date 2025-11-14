@@ -4,10 +4,9 @@ from __future__ import annotations
 
 import enum
 
-from pydantic import field_validator
-
 from cornserve.task.base import TaskInput, TaskOutput, UnitTask
 from cornserve.task.forward import DataForward, Tensor
+from pydantic import field_validator
 
 
 class Modality(enum.StrEnum):
@@ -66,7 +65,9 @@ class EncoderTask(UnitTask[EncoderInput, EncoderOutput]):
 
     def make_record_output(self, task_input: EncoderInput) -> EncoderOutput:
         """Create a task output for task invocation recording."""
-        return EncoderOutput(embeddings=[DataForward[Tensor]() for _ in task_input.data_urls])
+        return EncoderOutput(
+            embeddings=[DataForward[Tensor]() for _ in task_input.data_urls]
+        )
 
     def validate_input(self, task_input: EncoderInput) -> None:
         """Validate the input for the encoder task."""

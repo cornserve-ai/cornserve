@@ -6,17 +6,23 @@ from collections import defaultdict
 
 from cornserve.task.base import Stream, Task
 from cornserve.task.forward import DataForward, Tensor
-from cornserve_tasklib.task.unit.encoder import EncoderInput, EncoderOutput, EncoderTask, Modality
+
+from cornserve_tasklib.task.unit.encoder import (
+    EncoderInput,
+    EncoderOutput,
+    EncoderTask,
+    Modality,
+)
 from cornserve_tasklib.task.unit.llm import (
-    LLMUnitTask,
-    LLMEmbeddingUnitTask,
-    LLMEmbeddingResponse,
-    PrefillLLMUnitTask,
-    DecodeLLMUnitTask,
-    OpenAIChatCompletionRequest,
-    OpenAIChatCompletionChunk,
-    extract_multimodal_content,
     URL,
+    DecodeLLMUnitTask,
+    LLMEmbeddingResponse,
+    LLMEmbeddingUnitTask,
+    LLMUnitTask,
+    OpenAIChatCompletionChunk,
+    OpenAIChatCompletionRequest,
+    PrefillLLMUnitTask,
+    extract_multimodal_content,
 )
 
 
@@ -46,12 +52,19 @@ class MLLMTask(Task[OpenAIChatCompletionRequest, Stream[OpenAIChatCompletionChun
         """Initialize subtasks."""
         if self.encoder_fission:
             self.encoders = {
-                modality: EncoderTask(model_ids=self.encoder_model_ids or {self.model_id}, modality=modality)
+                modality: EncoderTask(
+                    model_ids=self.encoder_model_ids or {self.model_id},
+                    modality=modality,
+                )
                 for modality in self.modalities
             }
-        self.llm = LLMUnitTask(model_id=self.model_id, receive_embeddings=self.encoder_fission)
+        self.llm = LLMUnitTask(
+            model_id=self.model_id, receive_embeddings=self.encoder_fission
+        )
 
-    def invoke(self, task_input: OpenAIChatCompletionRequest) -> Stream[OpenAIChatCompletionChunk]:
+    def invoke(
+        self, task_input: OpenAIChatCompletionRequest
+    ) -> Stream[OpenAIChatCompletionChunk]:
         """Invoke the task."""
         if self.encoder_fission:
             encoder_input_urls: dict[Modality, list[str]] = defaultdict(list)
@@ -75,7 +88,10 @@ class MLLMTask(Task[OpenAIChatCompletionRequest, Stream[OpenAIChatCompletionChun
                 for modality, encoder_task in self.encoders.items():
                     if modality not in encoder_input_urls:
                         continue
-                    encoder_input = EncoderInput(model_id=task_input.model, data_urls=encoder_input_urls[modality])
+                    encoder_input = EncoderInput(
+                        model_id=task_input.model,
+                        data_urls=encoder_input_urls[modality],
+                    )
                     encoder_output = encoder_task.invoke(encoder_input)
                     encoder_outputs[modality] = encoder_output
 
@@ -90,7 +106,9 @@ class MLLMTask(Task[OpenAIChatCompletionRequest, Stream[OpenAIChatCompletionChun
                 for multimodal_content in multimodal_contents:
                     modality = Modality(multimodal_content.type.split("_")[0])
                     data_url: URL = getattr(multimodal_content, multimodal_content.type)
-                    encoder_input = EncoderInput(model_id=task_input.model, data_urls=[data_url.url])
+                    encoder_input = EncoderInput(
+                        model_id=task_input.model, data_urls=[data_url.url]
+                    )
                     encoder_output = self.encoders[modality].invoke(encoder_input)
                     embeddings.append(encoder_output.embeddings[0])
 
@@ -132,10 +150,15 @@ class MLLMEmbeddingTask(Task[OpenAIChatCompletionRequest, LLMEmbeddingResponse])
         """Initialize subtasks."""
         if self.encoder_fission:
             self.encoders = {
-                modality: EncoderTask(model_ids=self.encoder_model_ids or {self.model_id}, modality=modality)
+                modality: EncoderTask(
+                    model_ids=self.encoder_model_ids or {self.model_id},
+                    modality=modality,
+                )
                 for modality in self.modalities
             }
-        self.llm = LLMEmbeddingUnitTask(model_id=self.model_id, receive_embeddings=self.encoder_fission)
+        self.llm = LLMEmbeddingUnitTask(
+            model_id=self.model_id, receive_embeddings=self.encoder_fission
+        )
 
     def invoke(self, task_input: OpenAIChatCompletionRequest) -> LLMEmbeddingResponse:
         """Invoke the task."""
@@ -161,7 +184,10 @@ class MLLMEmbeddingTask(Task[OpenAIChatCompletionRequest, LLMEmbeddingResponse])
                 for modality, encoder_task in self.encoders.items():
                     if modality not in encoder_input_urls:
                         continue
-                    encoder_input = EncoderInput(model_id=task_input.model, data_urls=encoder_input_urls[modality])
+                    encoder_input = EncoderInput(
+                        model_id=task_input.model,
+                        data_urls=encoder_input_urls[modality],
+                    )
                     encoder_output = encoder_task.invoke(encoder_input)
                     encoder_outputs[modality] = encoder_output
 
@@ -176,7 +202,9 @@ class MLLMEmbeddingTask(Task[OpenAIChatCompletionRequest, LLMEmbeddingResponse])
                 for multimodal_content in multimodal_contents:
                     modality = Modality(multimodal_content.type.split("_")[0])
                     data_url: URL = getattr(multimodal_content, multimodal_content.type)
-                    encoder_input = EncoderInput(model_id=task_input.model, data_urls=[data_url.url])
+                    encoder_input = EncoderInput(
+                        model_id=task_input.model, data_urls=[data_url.url]
+                    )
                     encoder_output = self.encoders[modality].invoke(encoder_input)
                     embeddings.append(encoder_output.embeddings[0])
 
@@ -187,7 +215,9 @@ class MLLMEmbeddingTask(Task[OpenAIChatCompletionRequest, LLMEmbeddingResponse])
         return self.llm.invoke(task_input)
 
 
-class DisaggregatedMLLMTask(Task[OpenAIChatCompletionRequest, Stream[OpenAIChatCompletionChunk]]):
+class DisaggregatedMLLMTask(
+    Task[OpenAIChatCompletionRequest, Stream[OpenAIChatCompletionChunk]]
+):
     """A task that invokes a Multimodal LLM, with disaggregated prefill and decode in LLM.
 
     Attributes:
@@ -213,13 +243,22 @@ class DisaggregatedMLLMTask(Task[OpenAIChatCompletionRequest, Stream[OpenAIChatC
         """Initialize subtasks."""
         if self.encoder_fission:
             self.encoders = {
-                modality: EncoderTask(model_ids=self.encoder_model_ids or {self.model_id}, modality=modality)
+                modality: EncoderTask(
+                    model_ids=self.encoder_model_ids or {self.model_id},
+                    modality=modality,
+                )
                 for modality in self.modalities
             }
-        self.prefill = PrefillLLMUnitTask(model_id=self.model_id, receive_embeddings=self.encoder_fission)
-        self.decode = DecodeLLMUnitTask(model_id=self.model_id, receive_embeddings=self.encoder_fission)
+        self.prefill = PrefillLLMUnitTask(
+            model_id=self.model_id, receive_embeddings=self.encoder_fission
+        )
+        self.decode = DecodeLLMUnitTask(
+            model_id=self.model_id, receive_embeddings=self.encoder_fission
+        )
 
-    def invoke(self, task_input: OpenAIChatCompletionRequest) -> Stream[OpenAIChatCompletionChunk]:
+    def invoke(
+        self, task_input: OpenAIChatCompletionRequest
+    ) -> Stream[OpenAIChatCompletionChunk]:
         """Invoke the task."""
         # TODO: clean up repeated code with MLLMTask
         if self.encoder_fission:
@@ -244,7 +283,10 @@ class DisaggregatedMLLMTask(Task[OpenAIChatCompletionRequest, Stream[OpenAIChatC
                 for modality, encoder_task in self.encoders.items():
                     if modality not in encoder_input_urls:
                         continue
-                    encoder_input = EncoderInput(model_id=task_input.model, data_urls=encoder_input_urls[modality])
+                    encoder_input = EncoderInput(
+                        model_id=task_input.model,
+                        data_urls=encoder_input_urls[modality],
+                    )
                     encoder_output = encoder_task.invoke(encoder_input)
                     encoder_outputs[modality] = encoder_output
 
@@ -259,7 +301,9 @@ class DisaggregatedMLLMTask(Task[OpenAIChatCompletionRequest, Stream[OpenAIChatC
                 for multimodal_content in multimodal_contents:
                     modality = Modality(multimodal_content.type.split("_")[0])
                     data_url: URL = getattr(multimodal_content, multimodal_content.type)
-                    encoder_input = EncoderInput(model_id=task_input.model, data_urls=[data_url.url])
+                    encoder_input = EncoderInput(
+                        model_id=task_input.model, data_urls=[data_url.url]
+                    )
                     encoder_output = self.encoders[modality].invoke(encoder_input)
                     embeddings.append(encoder_output.embeddings[0])
 

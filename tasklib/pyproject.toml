@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cornserve-tasklib"
+version = "0.0.1"
+description = "Task library for Cornserve"
+authors = [
+  { name = "Cornserve Team" },
+]
+readme = "README.md"
+license = { file = "LICENSE" }
+dependencies = [
+  "aiohttp",
+  "pydantic",
+  "openai",
+  "kubernetes_asyncio",
+  "cornserve",
+]

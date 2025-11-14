@@ -37,7 +37,10 @@ from collections.abc import AsyncIterator
 
 from cornserve_tasklib.task.composite.llm import MLLMTask
 from cornserve_tasklib.task.unit.encoder import Modality
-from cornserve_tasklib.task.unit.llm import OpenAIChatCompletionChunk, OpenAIChatCompletionRequest
+from cornserve_tasklib.task.unit.llm import (
+    OpenAIChatCompletionChunk,
+    OpenAIChatCompletionRequest,
+)
 
 from cornserve.app.base import AppConfig
 from cornserve.task.base import Task
@@ -66,7 +69,9 @@ class Config(AppConfig):
     tasks = gemma_tasks
 
 
-async def serve(request: OpenAIChatCompletionRequest) -> AsyncIterator[OpenAIChatCompletionChunk]:
+async def serve(
+    request: OpenAIChatCompletionRequest,
+) -> AsyncIterator[OpenAIChatCompletionChunk]:
     """Main serve function for the app."""
     match request.model:
         case "google/gemma-3-4b-it":

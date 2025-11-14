@@ -5,15 +5,25 @@ from __future__ import annotations
 from typing import Any
 
 import aiohttp
-
 from cornserve import constants
 from cornserve.services.resource import GPU
-from cornserve_tasklib.task.unit.generator import GeneratorInput, GeneratorOutput, GeneratorTask
 from cornserve.task_executors.descriptor.base import TaskExecutionDescriptor
-from cornserve.task_executors.geri.api import ImageGeriRequest, BatchGeriResponse, Status
+from cornserve.task_executors.geri.api import (
+    BatchGeriResponse,
+    ImageGeriRequest,
+    Status,
+)
+
+from cornserve_tasklib.task.unit.generator import (
+    GeneratorInput,
+    GeneratorOutput,
+    GeneratorTask,
+)
 
 
-class GeriDescriptor(TaskExecutionDescriptor[GeneratorTask, GeneratorInput, GeneratorOutput]):
+class GeriDescriptor(
+    TaskExecutionDescriptor[GeneratorTask, GeneratorInput, GeneratorOutput]
+):
     """Task execution descriptor for Generator tasks.
 
     This descriptor handles launching Geri (multimodal generator) tasks and converting between
@@ -47,7 +57,9 @@ class GeriDescriptor(TaskExecutionDescriptor[GeneratorTask, GeneratorInput, Gene
         """Get the task executor's base URL for API calls."""
         return f"{base}/{self.task.modality.value}/generate"
 
-    def to_request(self, task_input: GeneratorInput, task_output: GeneratorOutput) -> dict[str, Any]:
+    def to_request(
+        self, task_input: GeneratorInput, task_output: GeneratorOutput
+    ) -> dict[str, Any]:
         """Convert TaskInput to a request object for the task executor."""
         req = ImageGeriRequest(
             embedding_data_id=task_input.embeddings.id,
@@ -58,7 +70,9 @@ class GeriDescriptor(TaskExecutionDescriptor[GeneratorTask, GeneratorInput, Gene
         )
         return req.model_dump()
 
-    async def from_response(self, task_output: GeneratorOutput, response: aiohttp.ClientResponse) -> GeneratorOutput:
+    async def from_response(
+        self, task_output: GeneratorOutput, response: aiohttp.ClientResponse
+    ) -> GeneratorOutput:
         """Convert the task executor response to TaskOutput."""
         response_data = await response.json()
         resp = BatchGeriResponse.model_validate(response_data)
@@ -69,4 +83,3 @@ class GeriDescriptor(TaskExecutionDescriptor[GeneratorTask, GeneratorInput, Gene
             return GeneratorOutput(generated=resp.generated)
         else:
             raise RuntimeError(f"Error in generator task: {resp.error_message}")
-

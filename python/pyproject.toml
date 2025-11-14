@@ -88,7 +88,7 @@ eric-no-gpu = [
   "opentelemetry-instrumentation-fastapi",
   "opentelemetry-instrumentation-threading",
 ]
-eric = ["flash-attn==2.7.4.post1", "xformers @ https://download.pytorch.org/whl/cu129/xformers-0.0.33%2B5d4b92a5.d20251029-cp39-abi3-linux_x86_64.whl", "cornserve[eric-no-gpu]"]
+eric = ["flash-attn==2.7.4.post1", "xformers==0.0.33", "cornserve[eric-no-gpu]"]
 eric-audio = ["cornserve[eric,audio]"]
 geri-no-gpu = [
   "fastapi",
@@ -168,7 +168,7 @@ ignore = [
 "cornserve/services/**/grpc.py" = ["N802"]
 
 [tool.pyright]
-extraPaths = ["../python-tasklib", "../python-tasklib/build/lib"]
+extraPaths = ["../tasklib", "../tasklib/build/lib"]
 exclude = [
   "**/*_pb2.py",
   "**/*_pb2_grpc.py",

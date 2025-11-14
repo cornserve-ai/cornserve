@@ -2,10 +2,10 @@
 
 Cornserve can be deployed on a GPU cluster managed by Kubernetes.
 
-!!! Note
-    The `cornserve` namespace is used for most of our control plane and data plane objects.
-    On the other hand, the `cornserve-system` namespace is used for components that look over and manage the Cornserve system itself (under `cornserve`), like Jaeger and Prometheus.
-If you already have a Kubernetes cluster running, you can deploy Cornserve on it with the `prod` overlay:
+!!! Important
+    Audio dependencies are not included by default in our Docker images due to license incompatibilities.
+    The Cornserve Python package has audio dependencies as optional dependencies, and Eric's Dockerfile provides an extra build target (`eric-audio`) that includes audio dependencies.
+    Before you install/run Cornserve, please ensure you understand and agree to dependency licensing terms.
 
 ## Deploying K3s
 
@@ -80,6 +80,10 @@ On top of a Kubernetes cluster, you can deploy Cornserve with a single command:
 kubectl apply -k kubernetes/kustomize/cornserve-system/base
 kubectl apply -k kubernetes/kustomize/cornserve/overlays/prod
 ```
+
+!!! Warning
+    With the `prod` overlay, **the Cornserve Gateway is not exposed** via any service by default. Users are expected to expose the Gateway in a way suitable for their infrastructure (e.g., a Load Balancer service). For local development or to quickly test Cornserve, use the `local` overlay, which will expose the Gateway via a NodePort service on port `30080`.
+    For more information on other Kustomize overlays we have, please check out [the Contributor Guide](../contributor_guide/kubernetes.md).
 
 If you'll be using gated models from Hugging Face Hub, you'll need to make the Hugging Face token available to Task Executors:
 
