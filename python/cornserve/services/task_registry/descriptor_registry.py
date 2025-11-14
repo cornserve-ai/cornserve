@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 
 from cornserve.logging import get_logger
 from cornserve.services.task_registry.task_class_registry import TASK_CLASS_REGISTRY
-from cornserve.services.task_registry.util import write_to_file_and_import
+from cornserve.services.task_registry.utils import write_to_file_and_import
 from cornserve.task_executors.descriptor.base import TaskExecutionDescriptor
 
 if TYPE_CHECKING:

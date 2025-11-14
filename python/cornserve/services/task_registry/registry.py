@@ -35,7 +35,7 @@ from cornserve.constants import (
 from cornserve.logging import get_logger
 from cornserve.services.task_registry.descriptor_registry import DESCRIPTOR_REGISTRY
 from cornserve.services.task_registry.task_class_registry import TASK_CLASS_REGISTRY
-from cornserve.services.task_registry.util import purge_tasklib_modules_and_delete_dir
+from cornserve.services.task_registry.utils import purge_tasklib_modules_and_delete_dir
 
 if TYPE_CHECKING:
     from cornserve.task.base import UnitTask
@@ -204,7 +204,7 @@ class TaskRegistry:
             logger.error("Failed to list task definitions for emptiness check: %s", e)
             raise RuntimeError(f"Failed to check task definitions: {e}") from e
 
-    async def check_no_activate_task_instance(self) -> bool:
+    async def check_no_active_task_instance(self) -> bool:
         """Return True if there are NO UnitTaskInstance CRs present (i.e. cluster idle)."""
         await self._load_config()
         assert self._custom_api is not None
@@ -304,10 +304,8 @@ class TaskRegistry:
                 plural=plural,
             )
             items = resp.get("items", [])
-            for item in items:
-                name = item.get("metadata", {}).get("name")
-                if not name:
-                    continue
+
+            async def _delete_one(name: str) -> None:
                 try:
                     await self._custom_api.delete_namespaced_custom_object(
                         group=CRD_GROUP,
@@ -321,6 +319,13 @@ class TaskRegistry:
                     if e.status != 404:
                         logger.error("Failed deleting %s/%s: %s", plural, name, e)
                         raise
+
+            coroutines = []
+            for item in items:
+                name = item.get("metadata", {}).get("name")
+                coroutines.append(_delete_one(name))
+
+            await asyncio.gather(*coroutines)
         except client.ApiException as e:
             logger.error("Failed to list %s for purge: %s", plural, e)
             raise

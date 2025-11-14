@@ -424,7 +424,7 @@ async def purge_tasklib(raw_request: Request):
     """
     task_registry: TaskRegistry = raw_request.app.state.task_registry
     try:
-        idle = await task_registry.check_no_activate_task_instance()
+        idle = await task_registry.check_no_active_task_instance()
         if not idle:
             return Response(
                 status_code=status.HTTP_409_CONFLICT,

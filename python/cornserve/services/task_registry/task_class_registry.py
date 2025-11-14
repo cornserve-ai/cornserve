@@ -6,7 +6,7 @@ import base64
 from typing import TYPE_CHECKING
 
 from cornserve.logging import get_logger
-from cornserve.services.task_registry.util import write_to_file_and_import
+from cornserve.services.task_registry.utils import write_to_file_and_import
 from cornserve.task.base import Task, UnitTask
 
 if TYPE_CHECKING:
