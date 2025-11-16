@@ -2,23 +2,30 @@
 
 from __future__ import annotations
 
+from collections.abc import AsyncGenerator
 from typing import Any
 
 import aiohttp
 from cornserve import constants
 from cornserve.services.resource import GPU
+from cornserve.task.base import Stream
 from cornserve.task_executors.descriptor.base import TaskExecutionDescriptor
 from cornserve.task_executors.geri.api import (
+    AudioGeriRequest,
     BatchGeriResponse,
     ImageGeriRequest,
     Status,
+    StreamGeriResponseChunk,
 )
 
 from cornserve_tasklib.task.unit.generator import (
+    AudioGeneratorInput,
+    AudioGeneratorTask,
     GeneratorInput,
     GeneratorOutput,
     GeneratorTask,
 )
+from cornserve_tasklib.task.unit.llm import OpenAIChatCompletionChunk
 
 
 class GeriDescriptor(
@@ -83,3 +90,85 @@ class GeriDescriptor(
             return GeneratorOutput(generated=resp.generated)
         else:
             raise RuntimeError(f"Error in generator task: {resp.error_message}")
+
+
+class AudioGeriDescriptor(
+    TaskExecutionDescriptor[
+        AudioGeneratorTask, AudioGeneratorInput, Stream[OpenAIChatCompletionChunk]
+    ]
+):
+    """Task execution descriptor for Generator tasks.
+
+    This descriptor handles launching Geri (multimodal generator) tasks and converting between
+    the external task API types and internal executor types.
+    """
+
+    def create_executor_name(self) -> str:
+        """Create a name for the task executor."""
+        model_name = self.task.model_id.split("/")[-1].lower()
+        name = "-".join(["geri", self.task.modality, model_name]).lower()
+        return name
+
+    def get_container_image(self) -> str:
+        """Get the container image name for the task executor."""
+        return constants.CONTAINER_IMAGE_GERI
+
+    def get_container_args(self, gpus: list[GPU], port: int) -> list[str]:
+        """Get the container command for the task executor."""
+        # fmt: off
+        cmd = [
+            "--model.id", self.task.model_id,
+            "--model.modality", self.task.modality.value.upper(),
+            "--server.port", str(port),
+            "--server.max-batch-size", str(self.task.max_batch_size),
+            "--sidecar.ranks", *[str(gpu.global_rank) for gpu in gpus],
+        ]
+        # fmt: on
+        return cmd
+
+    def get_api_url(self, base: str) -> str:
+        """Get the task executor's base URL for API calls."""
+        return f"{base}/{self.task.modality.value}/generate"
+
+    def to_request(
+        self,
+        task_input: AudioGeneratorInput,
+        task_output: Stream[OpenAIChatCompletionChunk],
+    ) -> dict[str, Any]:
+        """Convert TaskInput to a request object for the task executor."""
+        req = AudioGeriRequest(
+            embedding_data_id=task_input.embeddings.id,
+            chunk_size=task_input.chunk_size,
+            left_context_size=task_input.left_context_size,
+        )
+        return req.model_dump()
+
+    async def from_response(
+        self,
+        task_output: Stream[OpenAIChatCompletionChunk],
+        response: aiohttp.ClientResponse,
+    ) -> Stream[OpenAIChatCompletionChunk]:
+        """Convert the task executor response to TaskOutput."""
+
+        async def parse_geri_chunks(
+            response: aiohttp.ClientResponse,
+        ) -> AsyncGenerator[bytes]:
+            try:
+                async for raw_line in response.content:
+                    line = raw_line.decode().strip()
+                    if not line.startswith("data: "):
+                        continue
+
+                    chunk_str = line[len("data: ") :]
+                    if chunk_str == "[DONE]":
+                        return
+
+                    chunk_model = StreamGeriResponseChunk.model_validate_json(chunk_str)
+                    yield chunk_model.root
+            finally:
+                await response.release()
+
+        return Stream[OpenAIChatCompletionChunk](
+            async_iterator=parse_geri_chunks(response),
+            response=response,
+        )
