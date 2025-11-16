@@ -106,7 +106,7 @@ geri-no-gpu = [
   "opentelemetry-instrumentation-threading",
 ]
 geri = ["cornserve[geri-no-gpu]"]
-huggingface-te = [
+huggingface-te-no-gpu = [
   "fastapi",
   "uvicorn[standard]",
   "transformers==4.57.1",
@@ -114,10 +114,10 @@ huggingface-te = [
   "diffusers>=0.35.1",
   "qwen_omni_utils==0.0.8",
   "torchvision",  # Unspecified dependency of qwen_omni_utils
-  "flash-attn",
   "accelerate",
   "opentelemetry-instrumentation-fastapi",
 ]
+huggingface-te = ["cornserve[huggingface-te-no-gpu]", "flash-attn"]
 dev-common = [
   "grpcio-tools",
   "pyright",
@@ -130,7 +130,7 @@ dev-common = [
   "cornserve[sidecar-api,gateway,resource-manager,task-manager,task-dispatcher]",
 ]
 dev = ["cornserve[dev-common,sidecar,eric,geri,huggingface-te]"]
-dev-no-gpu = ["cornserve[dev-common,eric-no-gpu,geri-no-gpu,huggingface-te]"]
+dev-no-gpu = ["cornserve[dev-common,eric-no-gpu,geri-no-gpu,huggingface-te-no-gpu]"]
 
 [tool.setuptools.dynamic]
 version = { attr = "cornserve.__version__" }
