@@ -113,6 +113,8 @@ huggingface-te = [
   "pillow",
   "diffusers>=0.35.1",
   "qwen_omni_utils==0.0.8",
+  "torchvision",  # Unspecified dependency of qwen_omni_utils
+  "flash-attn",
   "accelerate",
   "opentelemetry-instrumentation-fastapi",
 ]

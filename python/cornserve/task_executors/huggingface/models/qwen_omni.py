@@ -99,7 +99,15 @@ class QwenOmniModel(HFModel):
         # Generate response
         text_ids, audio = self.model.generate(**inputs, use_audio_in_video=False, return_audio=True)
 
-        text = self.processor.batch_decode(text_ids)[0]
+        # Handle different return formats:
+        # - Qwen 2.5 Omni returns: (sequences_tensor, audio)
+        # - Qwen 3 Omni returns: (GenerateOutput, audio)
+        if hasattr(text_ids, "sequences"):
+            # Qwen 3 Omni: Extract sequences from GenerateOutput
+            text = self.processor.batch_decode(text_ids.sequences, skip_special_tokens=True)[0]
+        else:
+            # Qwen 2.5 Omni: Already have sequences
+            text = self.processor.batch_decode(text_ids, skip_special_tokens=True)[0]
 
         audio_data = audio.reshape(-1).detach().cpu().numpy()  # np.float32
         audio_b64 = base64.b64encode(audio_data.tobytes()).decode("utf-8")
