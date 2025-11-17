@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from kubernetes_asyncio import client, config
@@ -29,10 +30,12 @@ from cornserve.constants import (
     CRD_PLURAL_UNIT_TASK_INSTANCES,
     CRD_VERSION,
     K8S_NAMESPACE,
+    TASKLIB_DIR,
 )
 from cornserve.logging import get_logger
 from cornserve.services.task_registry.descriptor_registry import DESCRIPTOR_REGISTRY
 from cornserve.services.task_registry.task_class_registry import TASK_CLASS_REGISTRY
+from cornserve.services.task_registry.utils import purge_tasklib_modules_and_delete_dir
 
 if TYPE_CHECKING:
     from cornserve.task.base import UnitTask
@@ -201,6 +204,34 @@ class TaskRegistry:
             logger.error("Failed to list task definitions for emptiness check: %s", e)
             raise RuntimeError(f"Failed to check task definitions: {e}") from e
 
+    async def check_no_active_task_instance(self) -> bool:
+        """Return True if there are NO UnitTaskInstance CRs present (i.e. cluster idle)."""
+        await self._load_config()
+        assert self._custom_api is not None
+        try:
+            resp = await self._custom_api.list_namespaced_custom_object(
+                group=CRD_GROUP,
+                version=CRD_VERSION,
+                namespace=K8S_NAMESPACE,
+                plural=CRD_PLURAL_UNIT_TASK_INSTANCES,
+                limit=1,
+            )
+            items = resp.get("items", [])
+            return len(items) == 0
+        except client.ApiException as e:
+            logger.error("Failed to list unit task instances: %s", e)
+            raise RuntimeError(f"Failed to check unit task instances: {e}") from e
+
+    async def delete_all_task_definitions_and_descriptors(self) -> None:
+        """Delete all task class definition and execution descriptor CRs."""
+        await self._load_config()
+        assert self._custom_api is not None
+
+        await self._delete_all_crs_by_plural(CRD_PLURAL_EXECUTION_DESCRIPTORS)
+        await self._delete_all_crs_by_plural(CRD_PLURAL_TASK_DEFINITIONS)
+
+        logger.info("Deleted all task definitions and execution descriptors.")
+
     async def get_task_instance(self, instance_name: str) -> UnitTask:
         """Reconstruct a configured task from its instance name."""
         await self._load_config()
@@ -263,6 +294,60 @@ class TaskRegistry:
             self._watch_executiondescriptors(),
         ]
         await asyncio.gather(*watchers)
+
+    async def _delete_all_crs_by_plural(self, plural: str) -> None:
+        try:
+            resp = await self._custom_api.list_namespaced_custom_object(
+                group=CRD_GROUP,
+                version=CRD_VERSION,
+                namespace=K8S_NAMESPACE,
+                plural=plural,
+            )
+            items = resp.get("items", [])
+
+            async def _delete_one(name: str) -> None:
+                try:
+                    await self._custom_api.delete_namespaced_custom_object(
+                        group=CRD_GROUP,
+                        version=CRD_VERSION,
+                        namespace=K8S_NAMESPACE,
+                        plural=plural,
+                        name=name,
+                    )
+                except client.ApiException as e:
+                    # Ignore not found
+                    if e.status != 404:
+                        logger.error("Failed deleting %s/%s: %s", plural, name, e)
+                        raise
+
+            coroutines = []
+            for item in items:
+                name = item.get("metadata", {}).get("name")
+                coroutines.append(_delete_one(name))
+
+            await asyncio.gather(*coroutines)
+        except client.ApiException as e:
+            logger.error("Failed to list %s for purge: %s", plural, e)
+            raise
+
+    def _purge_local_registries_if_needed(self) -> None:
+        """Purge in-process runtime state and the source files in tasklib directory.
+
+        To avoid repeated cleanup on consecutive DELETE events, we check whether
+        the tasklib directory exists. If absent, skip.
+        """
+        if not Path(TASKLIB_DIR).exists():
+            # Already absent
+            return
+
+        # Clear registries
+        try:
+            DESCRIPTOR_REGISTRY.clear()
+            TASK_CLASS_REGISTRY.clear()
+            purge_tasklib_modules_and_delete_dir()
+        except Exception as e:
+            logger.warning("Error clearing registries and purging tasklib: %s", e)
+            raise
 
     def _handle_object(self, obj: dict[str, Any], kind: str, event_type: str) -> None:
         spec = obj.get("spec", {})
@@ -327,6 +412,14 @@ class TaskRegistry:
                     name,
                     e,
                 )
+
+        # NOTE: We don't allow individual deletion for now. Any DELETED event triggers a complete purge.
+        elif event_type == "DELETED" and kind in (CRD_KIND_TASK_DEFINITION, CRD_KIND_EXECUTION_DESCRIPTOR):
+            try:
+                self._purge_local_registries_if_needed()
+            except Exception as e:
+                logger.error("Error occurred during purge: %s", e)
+                raise
 
     async def _watch_resource(self, plural: str, kind: str) -> None:
         assert self._custom_api is not None

@@ -1,5 +1,6 @@
 """Utility functions for task registry operations."""
 
+import shutil
 import sys
 import types
 from importlib import import_module, invalidate_caches
@@ -67,3 +68,14 @@ def write_to_file_and_import(module_name: str, decoded_source: str) -> types.Mod
 
     # Not loaded: import normally
     return import_module(module_name)
+
+
+def purge_tasklib_modules_and_delete_dir() -> None:
+    """Remove dynamically loaded cornserve_tasklib modules and delete the tasklib directory."""
+    to_remove = [m for m in list(sys.modules.keys()) if m.startswith("cornserve_tasklib")]
+    for m in to_remove:
+        sys.modules.pop(m, None)
+
+    tasklib_path = Path(TASKLIB_DIR)
+    if tasklib_path.exists():
+        shutil.rmtree(tasklib_path)

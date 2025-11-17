@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import base64
-from typing import TYPE_CHECKING
+import inspect
+from typing import TYPE_CHECKING, TypeVar
+
+from pydantic import BaseModel
 
 from cornserve.logging import get_logger
-from cornserve.services.task_registry.util import write_to_file_and_import
+from cornserve.services.task_registry.utils import write_to_file_and_import
 from cornserve.task.base import Task, UnitTask
 
 if TYPE_CHECKING:
@@ -119,31 +122,29 @@ class TaskClassRegistry:
         task_input_cls = None
         task_output_cls = None
         for base in task_cls.__mro__:
-            if (
-                hasattr(base, "__name__")
-                and "UnitTask[" in str(base)
-                and hasattr(base, "__pydantic_generic_metadata__")
-            ):
+            if hasattr(base, "__pydantic_generic_metadata__"):
                 metadata = base.__pydantic_generic_metadata__
-                if metadata and "args" in metadata and len(metadata["args"]) == 2:
-                    task_input_cls, task_output_cls = metadata["args"]
-                    break
+                if metadata and "args" in metadata:
+                    args = metadata["args"]
+                    # Generic classes have arguments of TypeVars.
+                    # Concrete classes have arguments of BaseModel subclasses.
+                    # We register both kinds.
+                    if len(args) == 2 and (
+                        (
+                            inspect.isclass(args[0])
+                            and inspect.isclass(args[1])
+                            and issubclass(args[0], BaseModel)
+                            and issubclass(args[1], BaseModel)
+                        )
+                        or (isinstance(args[0], TypeVar) and isinstance(args[1], TypeVar))
+                    ):
+                        task_input_cls, task_output_cls = args
+                        break
 
         if task_input_cls is None or task_output_cls is None:
-            # Special case:  the  "LLMBaseUnitTask" is a generic task class
-            # so it doesn't have concrete input/output types,
-            # so to let it goes through, we register it with dummy TaskInput/Output types
-            # TODO: Such special case is definitely not legetimate, what should we do instead?
-            if task_class_name == "LLMBaseUnitTask":
-                from cornserve.task.base import TaskInput as DummyInput  # noqa: PLC0415
-                from cornserve.task.base import TaskOutput as DummyOutput  # noqa: PLC0415
-
-                task_input_cls, task_output_cls = DummyInput, DummyOutput
-            else:
-                raise ValueError(
-                    f"Task class {task_class_name} missing generic type arguments. "
-                    f"Expected format: class {task_class_name}(UnitTask[InputType, OutputType])"
-                )
+            # Some illegal classes
+            logger.warning("Task class %s has no valid generic type arguments", task_class_name)
+            return
 
         self._register(task_cls, task_input_cls, task_output_cls, task_class_name)
 
@@ -189,6 +190,7 @@ class TaskClassRegistry:
         """Clear all registered task classes."""
         self._unit_tasks.clear()
         self._composite_tasks.clear()
+        self._pending.clear()
 
     def list_registered_unit_tasks(self) -> list[str]:
         """List names of registered unit tasks."""

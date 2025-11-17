@@ -75,7 +75,7 @@ Next, we need to deploy built-in tasks that Cornserve provides to our Cornserve 
 ```bash
 uv pip install 'tasklib/'
 export CORNSERVE_GATEWAY_URL=$(minikube service -n cornserve gateway-node-port --url)
-cornserve deploy-tasklib
+cornserve tasklib deploy
 ```
 
 Cornserve allows applying custom launch args to task executors via task profiles. We'll be using [Qwen3 VL 8B](https://huggingface.co/Qwen/Qwen3-VL-8B-Instruct) for this demo, and you could limit the maximum model length via:
