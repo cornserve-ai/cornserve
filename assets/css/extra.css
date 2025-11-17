@@ -1,0 +1,18 @@
+/* Override mkdocs-video plugin styles for responsive margins */
+.video-container {
+  margin: 0 auto !important;
+}
+
+/* Desktop screens */
+@media (min-width: 1024px) {
+  .video-container {
+    padding: 0 12% !important;
+  }
+}
+
+/* Mobile - use plugin default */
+@media (max-width: 767px) {
+  .video-container {
+    padding: 0 !important;
+  }
+}
