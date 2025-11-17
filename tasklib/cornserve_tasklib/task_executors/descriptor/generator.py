@@ -2,23 +2,122 @@
 
 from __future__ import annotations
 
+import json
+import time
+import uuid
+from collections.abc import AsyncGenerator
 from typing import Any
 
 import aiohttp
 from cornserve import constants
+from cornserve.logging import get_logger
 from cornserve.services.resource import GPU
+from cornserve.task.base import Stream
 from cornserve.task_executors.descriptor.base import TaskExecutionDescriptor
 from cornserve.task_executors.geri.api import (
+    AudioGeriRequest,
     BatchGeriResponse,
     ImageGeriRequest,
     Status,
+    StreamGeriResponseChunk,
 )
 
 from cornserve_tasklib.task.unit.generator import (
+    AudioGeneratorInput,
+    AudioGeneratorTask,
     GeneratorInput,
     GeneratorOutput,
     GeneratorTask,
 )
+from cornserve_tasklib.task.unit.llm import OpenAIChatCompletionChunk
+
+logger = get_logger(__name__)
+
+
+async def parse_geri_chunks(
+    response: aiohttp.ClientResponse,
+) -> AsyncGenerator[str]:
+    """Parses SSE stream and reformats it into OpenAIChatCompletionChunk JSON strings."""
+    logger.info("IN PARSE_GERI_CHUNKS (OpenAI-compatible)")
+
+    stream_id = f"audio-{uuid.uuid4().hex}"
+    model_name = "your-audio-model"
+    sent_final_chunk = False
+
+    try:
+        while not response.content.at_eof():
+            logger.info("RIGHT BEFORE AWAIT")
+            raw_line = await response.content.readline()
+            if not raw_line:
+                continue
+
+            logger.info("IN PARSE_GERI_CHUNKS ITERATION")
+
+            line = raw_line.decode().strip()
+
+            if not line.startswith("data: "):
+                continue
+
+            chunk_str = line[len("data: ") :]
+
+            if chunk_str == "[DONE]":
+                logger.info("Received explicit [DONE] signal.")
+                sent_final_chunk = True
+                # We'll send the final chunk *after* the loop
+                break
+
+            try:
+                chunk_model = StreamGeriResponseChunk.model_validate_json(chunk_str)
+                base64_audio_data = chunk_model.model_dump_json()
+
+                payload_dict = {
+                    "id": stream_id,
+                    "object": "chat.completion.chunk",
+                    "created": int(time.time()),
+                    "model": model_name,
+                    "choices": [
+                        {
+                            "index": 0,
+                            "delta": {"audio": {"data": base64_audio_data}},
+                            "finish_reason": None,
+                        }
+                    ],
+                }
+
+                thing = json.dumps(payload_dict)
+                chunk = OpenAIChatCompletionChunk.model_validate_json(thing)
+                yield chunk.model_dump_json()
+
+            except json.JSONDecodeError:
+                logger.warning("Failed to decode JSON chunk: %s", chunk_str)
+
+        logger.info("OUT OF WHILE LOOP")
+
+        # Send the final "stop" chunk if we haven't already
+        if not sent_final_chunk:
+            logger.info("Stream ended naturally, sending final 'stop' chunk.")
+            payload_dict = {
+                "id": stream_id,
+                "object": "chat.completion.chunk",
+                "created": int(time.time()),
+                "model": model_name,
+                "choices": [
+                    {
+                        "index": 0,
+                        "delta": {},
+                        "finish_reason": "stop",
+                    }
+                ],
+            }
+
+            thing = json.dumps(payload_dict)
+            chunk = OpenAIChatCompletionChunk.model_validate_json(thing)
+            yield chunk.model_dump_json()
+
+    except Exception as e:
+        logger.exception("Error while parsing SSE stream: %s", e)
+    finally:
+        await response.release()
 
 
 class GeriDescriptor(
@@ -83,3 +182,65 @@ class GeriDescriptor(
             return GeneratorOutput(generated=resp.generated)
         else:
             raise RuntimeError(f"Error in generator task: {resp.error_message}")
+
+
+class AudioGeriDescriptor(
+    TaskExecutionDescriptor[
+        AudioGeneratorTask, AudioGeneratorInput, Stream[OpenAIChatCompletionChunk]
+    ]
+):
+    """Task execution descriptor for Generator tasks.
+    This descriptor handles launching Geri (multimodal generator) tasks and converting between
+    the external task API types and internal executor types.
+    """
+
+    def create_executor_name(self) -> str:
+        """Create a name for the task executor."""
+        model_name = self.task.model_id.split("/")[-1].lower()
+        name = "-".join(["geri", self.task.modality, model_name]).lower()
+        return name
+
+    def get_container_image(self) -> str:
+        """Get the container image name for the task executor."""
+        return constants.CONTAINER_IMAGE_GERI
+
+    def get_container_args(self, gpus: list[GPU], port: int) -> list[str]:
+        """Get the container command for the task executor."""
+        # fmt: off
+        cmd = [
+            "--model.id", self.task.model_id,
+            "--model.modality", self.task.modality.value.upper(),
+            "--server.port", str(port),
+            "--server.max-batch-size", str(self.task.max_batch_size),
+            "--sidecar.ranks", *[str(gpu.global_rank) for gpu in gpus],
+        ]
+        # fmt: on
+        return cmd
+
+    def get_api_url(self, base: str) -> str:
+        """Get the task executor's base URL for API calls."""
+        return f"{base}/{self.task.modality.value}/generate"
+
+    def to_request(
+        self,
+        task_input: AudioGeneratorInput,
+        task_output: Stream[OpenAIChatCompletionChunk],
+    ) -> dict[str, Any]:
+        """Convert TaskInput to a request object for the task executor."""
+        req = AudioGeriRequest(
+            embedding_data_id=task_input.embeddings.id,
+            chunk_size=task_input.chunk_size,
+            left_context_size=task_input.left_context_size,
+        )
+        return req.model_dump()
+
+    async def from_response(
+        self,
+        task_output: Stream[OpenAIChatCompletionChunk],
+        response: aiohttp.ClientResponse,
+    ) -> Stream[OpenAIChatCompletionChunk]:
+        """Convert the task executor response to TaskOutput."""
+        return Stream[OpenAIChatCompletionChunk](
+            async_iterator=parse_geri_chunks(response),
+            response=response,
+        )

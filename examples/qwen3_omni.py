@@ -52,6 +52,7 @@ omni = OmniTask(
     model_id="Qwen/Qwen3-Omni-30B-A3B-Instruct",
     modalities=[Modality.IMAGE, Modality.VIDEO, Modality.AUDIO],
     encoder_fission=False,
+    vocoder_fission=True,
 )
 
 
