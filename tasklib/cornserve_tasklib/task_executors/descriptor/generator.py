@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import time
-import uuid
 from collections.abc import AsyncGenerator
 from typing import Any
 
@@ -37,75 +36,31 @@ logger = get_logger(__name__)
 async def parse_geri_chunks(
     response: aiohttp.ClientResponse,
 ) -> AsyncGenerator[str]:
-    """Parses SSE stream and reformats it into OpenAIChatCompletionChunk JSON strings."""
-    logger.info("IN PARSE_GERI_CHUNKS (OpenAI-compatible)")
+    logger.info("IN PARSE_GERI_CHUNKS")
+    async for line_bytes in response.content:
+        logger.info("IN PARSE_GERI_CHUNKS ITERATION")
 
-    stream_id = f"audio-{uuid.uuid4().hex}"
-    model_name = "your-audio-model"
-    sent_final_chunk = False
+        line = line_bytes.decode("utf-8").strip()
+        if not line:
+            logger.info("SKIPPED ITERATION IN PARSE_GERI_CHUNKS")
+            continue
 
-    try:
-        while not response.content.at_eof():
-            logger.info("RIGHT BEFORE AWAIT")
-            raw_line = await response.content.readline()
-            if not raw_line:
-                continue
+        if line.startswith("data: "):
+            logger.info("DATA FOUND IN PARSE_GERI_CHUNKS")
+            chunk_str = line[6:].strip()
+            chunk_model = StreamGeriResponseChunk.model_validate_json(chunk_str)
+            base64_audio_data = chunk_model.model_dump_json()
 
-            logger.info("IN PARSE_GERI_CHUNKS ITERATION")
-
-            line = raw_line.decode().strip()
-
-            if not line.startswith("data: "):
-                continue
-
-            chunk_str = line[len("data: ") :]
-
-            if chunk_str == "[DONE]":
-                logger.info("Received explicit [DONE] signal.")
-                sent_final_chunk = True
-                # We'll send the final chunk *after* the loop
-                break
-
-            try:
-                chunk_model = StreamGeriResponseChunk.model_validate_json(chunk_str)
-                base64_audio_data = chunk_model.model_dump_json()
-
-                payload_dict = {
-                    "id": stream_id,
-                    "object": "chat.completion.chunk",
-                    "created": int(time.time()),
-                    "model": model_name,
-                    "choices": [
-                        {
-                            "index": 0,
-                            "delta": {"audio": {"data": base64_audio_data}},
-                            "finish_reason": None,
-                        }
-                    ],
-                }
-
-                thing = json.dumps(payload_dict)
-                chunk = OpenAIChatCompletionChunk.model_validate_json(thing)
-                yield chunk.model_dump_json()
-
-            except json.JSONDecodeError:
-                logger.warning("Failed to decode JSON chunk: %s", chunk_str)
-
-        logger.info("OUT OF WHILE LOOP")
-
-        # Send the final "stop" chunk if we haven't already
-        if not sent_final_chunk:
-            logger.info("Stream ended naturally, sending final 'stop' chunk.")
             payload_dict = {
-                "id": stream_id,
+                "id": 0,
                 "object": "chat.completion.chunk",
                 "created": int(time.time()),
-                "model": model_name,
+                "model": "",
                 "choices": [
                     {
                         "index": 0,
-                        "delta": {},
-                        "finish_reason": "stop",
+                        "delta": {"audio": {"data": base64_audio_data}},
+                        "finish_reason": None,
                     }
                 ],
             }
@@ -113,11 +68,8 @@ async def parse_geri_chunks(
             thing = json.dumps(payload_dict)
             chunk = OpenAIChatCompletionChunk.model_validate_json(thing)
             yield chunk.model_dump_json()
-
-    except Exception as e:
-        logger.exception("Error while parsing SSE stream: %s", e)
-    finally:
-        await response.release()
+        else:
+            logger.info("DATA NOT FOUND IN PARSE_GERI_CHUNKS")
 
 
 class GeriDescriptor(
