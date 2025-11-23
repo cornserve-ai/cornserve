@@ -52,7 +52,7 @@ async def parse_geri_chunks(
             base64_audio_data = chunk_model.model_dump_json()
 
             payload_dict = {
-                "id": 0,
+                "id": "0",
                 "object": "chat.completion.chunk",
                 "created": int(time.time()),
                 "model": "",
