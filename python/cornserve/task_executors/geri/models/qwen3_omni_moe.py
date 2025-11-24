@@ -80,6 +80,7 @@ class Qwen3OmniMoeCode2Wav(StreamGeriModel, nn.Module):
     def initialize(self, config: Qwen3OmniMoeCode2WavConfig):
         """Initialize the model's components with the given config."""
         self.config = config
+        self.num_quantizers = config.num_quantizers
 
         self.total_upsample = np.prod(config.upsample_rates + config.upsampling_ratios)
         self.pre_transformer = Qwen3OmniMoeCode2WavTransformerModel._from_config(config)
@@ -144,7 +145,7 @@ class Qwen3OmniMoeCode2Wav(StreamGeriModel, nn.Module):
 
         # Each element of `prompt_embeds` has shape (seqlen, num_quantizers).
         # First, we transpose to (num_quantizers, seqlen).
-        prompt_embeds = [torch.transpose(embed, 0, 1) for embed in prompt_embeds]
+        prompt_embeds = [torch.transpose(embed, 0, 1).to(dtype=int) for embed in prompt_embeds]
 
         # To batch, we pad them all to the same seqlen and then stack them along dim 0.
         code_lens = [embed.shape[-1] for embed in prompt_embeds]
@@ -188,7 +189,7 @@ class Qwen3OmniMoeCode2Wav(StreamGeriModel, nn.Module):
     @property
     def embedding_dim(self) -> int:
         """The dimension of the prompt embeddings used by the model."""
-        return self.code_embedding.embedding_dim
+        return self.num_quantizers
 
     @staticmethod
     def _get_config(model_id: str) -> Qwen3OmniMoeCode2WavConfig:
@@ -213,7 +214,7 @@ class Qwen3OmniMoeCode2Wav(StreamGeriModel, nn.Module):
                 hidden size will be extracted directly from config.
         """
         if isinstance(config, Qwen3OmniMoeConfig):
-            return config.code2wav_config.hidden_size
+            return config.code2wav_config.num_quantizers
         if isinstance(config, Qwen3OmniMoeCode2WavConfig):
-            return config.hidden_size
-        return Qwen3OmniMoeCode2Wav._get_config(model_id).hidden_size
+            return config.num_quantizers
+        return Qwen3OmniMoeCode2Wav._get_config(model_id).num_quantizers
