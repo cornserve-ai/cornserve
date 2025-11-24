@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import json
 import time
 from collections.abc import AsyncGenerator
@@ -36,21 +37,24 @@ logger = get_logger(__name__)
 async def parse_geri_chunks(
     response: aiohttp.ClientResponse,
 ) -> AsyncGenerator[str]:
-    logger.info("IN PARSE_GERI_CHUNKS")
-    async for line_bytes in response.content:
-        logger.info("IN PARSE_GERI_CHUNKS ITERATION")
+    buffer = b""
+    async for chunk in response.content.iter_chunked(4096):
+        buffer += chunk
+        while b"\n" in buffer:
+            line_bytes, buffer = buffer.split(b"\n", 1)
 
-        line = line_bytes.decode("utf-8").strip()
-        if not line:
-            logger.info("SKIPPED ITERATION IN PARSE_GERI_CHUNKS")
-            continue
+            line = line_bytes.decode().strip()
+            if not line or not line.startswith("data: "):
+                continue
 
-        if line.startswith("data: "):
-            logger.info("DATA FOUND IN PARSE_GERI_CHUNKS")
             chunk_str = line[6:].strip()
             chunk_model = StreamGeriResponseChunk.model_validate_json(chunk_str)
-            base64_audio_data = chunk_model.model_dump_json()
 
+            if not chunk_model.root:
+                logger.info("Chunk model root was empty")
+                continue
+
+            base64_audio_data = base64.b64encode(chunk_model.root).decode()
             payload_dict = {
                 "id": "0",
                 "object": "chat.completion.chunk",
@@ -60,16 +64,13 @@ async def parse_geri_chunks(
                     {
                         "index": 0,
                         "delta": {"audio": {"data": base64_audio_data}},
-                        "finish_reason": None,
                     }
                 ],
             }
 
-            thing = json.dumps(payload_dict)
-            chunk = OpenAIChatCompletionChunk.model_validate_json(thing)
-            yield chunk.model_dump_json()
-        else:
-            logger.info("DATA NOT FOUND IN PARSE_GERI_CHUNKS")
+            payload_str = json.dumps(payload_dict)
+            completion_obj = OpenAIChatCompletionChunk.model_validate_json(payload_str)
+            yield completion_obj.model_dump_json()
 
 
 class GeriDescriptor(
