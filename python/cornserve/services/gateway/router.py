@@ -21,7 +21,7 @@ from fastapi.responses import StreamingResponse
 from opentelemetry import trace
 from pydantic import ValidationError
 
-from cornserve.constants import K8S_RESOURCE_MANAGER_GRPC_URL
+from cornserve.constants import CRD_PLURAL_TASK_DEFINITIONS, K8S_RESOURCE_MANAGER_GRPC_URL
 from cornserve.logging import get_logger
 from cornserve.services.gateway.app.manager import AppManager
 from cornserve.services.gateway.models import (
@@ -59,6 +59,7 @@ async def register_app(request: AppRegistrationRequest, raw_request: Request):
         try:
             # Check: if no task class observed, very likely the tasklib is not deployed yet
             task_registry: TaskRegistry = raw_request.app.state.task_registry
+            await task_registry.wait_for_watcher(CRD_PLURAL_TASK_DEFINITIONS)
             is_empty = await task_registry.check_emptiness()
             if is_empty:
                 raise ValueError(

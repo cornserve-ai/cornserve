@@ -108,3 +108,6 @@ CRD_PLURAL_EXECUTION_DESCRIPTORS = "executiondescriptors"
 CRD_KIND_TASK_DEFINITION = "TaskDefinition"
 CRD_KIND_UNIT_TASK_INSTANCE = "UnitTaskInstance"
 CRD_KIND_EXECUTION_DESCRIPTOR = "ExecutionDescriptor"
+
+# TaskRegistry max wait time for CR watcher to catch up
+TASK_REGISTRY_CR_WATCHER_TIMEOUT = 20.0

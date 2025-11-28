@@ -31,6 +31,7 @@ from cornserve.constants import (
     CRD_VERSION,
     K8S_NAMESPACE,
     TASKLIB_DIR,
+    TASK_REGISTRY_CR_WATCHER_TIMEOUT,
 )
 from cornserve.logging import get_logger
 from cornserve.services.task_registry.descriptor_registry import DESCRIPTOR_REGISTRY
@@ -51,6 +52,11 @@ class TaskRegistry:
         """Initialize lazy Kubernetes API clients."""
         self._api_client: client.ApiClient | None = None
         self._custom_api: client.CustomObjectsApi | None = None
+
+        # Last observed resourceVersions for CRs seen by this watcher's event loop.
+        # Used to coordinate "have we processed everything the API server currently knows about?"
+        self._task_definitions_rv: int | None = None
+        self._execution_descriptors_rv: int | None = None
 
     async def _load_config(self) -> None:
         if self._api_client:
@@ -255,6 +261,9 @@ class TaskRegistry:
             if not config:
                 raise ValueError(f"Task instance {instance_name} missing config")
 
+            # Ensure the watcher has caught up with TaskDefinition CRs before resolving the class.
+            await self.wait_for_watcher(CRD_PLURAL_TASK_DEFINITIONS)
+
             task_cls, _, _ = TASK_CLASS_REGISTRY.get_unit_task(definition_ref)
             task_instance = task_cls.model_validate(config)
             logger.info("Reconstructed %s from task instance: %s", definition_ref, instance_name)
@@ -263,6 +272,72 @@ class TaskRegistry:
             if e.status == 404:
                 raise ValueError(f"Task instance {instance_name} not found") from e
             raise RuntimeError(f"Failed to get task instance {instance_name}: {e}") from e
+
+    async def wait_for_watcher(
+        self,
+        plural: str,
+        timeout_seconds: float = TASK_REGISTRY_CR_WATCHER_TIMEOUT,
+        poll_interval_seconds: float = 0.1,
+    ) -> None:
+        """Wait for the local watcher to catch up with the API server for a given CR plural.
+
+        This coordinates with the k8s watcher via resourceVersion:
+        - Take a single snapshot of the current list resourceVersion of that plural.
+        - Then poll the watcher's last-seen resourceVersion for that plural.
+        - Once the watcher has processed events up to (or beyond) that snapshot, return.
+        """
+        loop = asyncio.get_running_loop()
+        start = loop.time()
+
+        assert self._custom_api is not None
+
+        # --- 1) Take a single snapshot of the current resourceVersion for this plural ---
+        try:
+            resp = await self._custom_api.list_namespaced_custom_object(
+                group=CRD_GROUP,
+                version=CRD_VERSION,
+                namespace=K8S_NAMESPACE,
+                plural=plural,
+                limit=1,
+            )
+            current_rv = resp.get("metadata", {}).get("resourceVersion")
+        except client.ApiException as e:
+            logger.error("Error listing %s CRs while taking resourceVersion snapshot: %s", plural, e)
+            raise
+
+        if current_rv is None:
+            # Nothing to wait on; treat as already caught up.
+            return
+        target_rv = int(current_rv) - 1
+
+        # --- 2) Poll until the watcher has reached or passed target_rv ---
+        while True:
+            if plural == CRD_PLURAL_TASK_DEFINITIONS:
+                watcher_rv = self._task_definitions_rv
+            elif plural == CRD_PLURAL_EXECUTION_DESCRIPTORS:
+                watcher_rv = self._execution_descriptors_rv
+            else:
+                raise ValueError(f"Unsupported plural for wait_for_watcher: {plural}")
+
+            if watcher_rv is not None:
+                try:
+                    # resourceVersion is officially opaque, but in practice it's a decimal string.
+                    if watcher_rv >= target_rv:
+                        return
+                except ValueError:
+                    # Fallback: if they don't parse as ints, require exact match.
+                    if watcher_rv == target_rv:
+                        return
+
+            # Timeout check
+            elapsed = loop.time() - start
+            if elapsed >= timeout_seconds:
+                raise TimeoutError(
+                    f"Timed out after {timeout_seconds}s waiting for watcher to catch up for plural={plural} "
+                    f"(target_rv={target_rv}, watcher_rv={watcher_rv})"
+                )
+
+            await asyncio.sleep(poll_interval_seconds)
 
     async def delete_task_instance(self, instance_name: str) -> None:
         """Delete a unit task instance CR by instancename."""
@@ -442,6 +517,10 @@ class TaskRegistry:
                         self._handle_object(item, kind, "EXISTING")
 
                     resource_version = initial_list.get("metadata", {}).get("resourceVersion")
+                    if plural == CRD_PLURAL_TASK_DEFINITIONS:
+                        self._task_definitions_rv = int(resource_version)
+                    elif plural == CRD_PLURAL_EXECUTION_DESCRIPTORS:
+                        self._execution_descriptors_rv = int(resource_version)
 
                 w = Watch()
                 async with w.stream(
@@ -462,6 +541,10 @@ class TaskRegistry:
                         rv = obj.get("metadata", {}).get("resourceVersion")
                         if rv:
                             resource_version = rv
+                            if plural == CRD_PLURAL_TASK_DEFINITIONS:
+                                self._task_definitions_rv = int(resource_version)
+                            elif plural == CRD_PLURAL_EXECUTION_DESCRIPTORS:
+                                self._execution_descriptors_rv = int(resource_version)
             except asyncio.CancelledError:
                 raise
             except client.ApiException as e:
@@ -470,6 +553,10 @@ class TaskRegistry:
                 if getattr(e, "status", None) == 410:
                     logger.warning("Watch for %s expired (410 Gone). Relisting to refresh.", kind)
                     resource_version = None
+                    if plural == CRD_PLURAL_TASK_DEFINITIONS:
+                        self._task_definitions_rv = resource_version
+                    elif plural == CRD_PLURAL_EXECUTION_DESCRIPTORS:
+                        self._execution_descriptors_rv = resource_version
                     continue
                 logger.error("Error watching %s (API): %s", kind, e)
                 await asyncio.sleep(5)
