@@ -46,11 +46,11 @@ service Sidecar {
 message RegisterRequest {
   int32 rank = 1;
   repeated int32 group = 2;
-  int32 send_slot_numel = 4;
-  int32 recv_slot_numel = 5;
-  bool concurrent_copy = 6;
-  string send_dtype = 7;
-  string recv_dtype = 8;
+  int32 send_slot_numel = 3;
+  int32 recv_slot_numel = 4;
+  bool concurrent_copy = 5;
+  string send_dtype = 6;
+  string recv_dtype = 7;
 }
 
 message RegisterResponse {
