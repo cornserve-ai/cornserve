@@ -189,18 +189,36 @@ class SidecarServicer(sidecar_pb2_grpc.SidecarServicer):
 
     def _build_config(self, request: sidecar_pb2.RegisterRequest) -> SidecarServerConfig:
         """Build the sidecar config from the register request."""
-        # currently the shared memory is partitioned equally between the sender and receiver
-        # TODO: watermark alloc
-        slab_size = self.shm_size // 2
-        tensor_dtype = getattr(torch, request.dtype)
-        slab_numel = slab_size // tensor_dtype.itemsize
+        # shared memory is partitioned equally between the sender and receiver
+        slab_bytes = self.shm_size // 2
+
+        send_dtype_str = request.send_dtype
+        recv_dtype_str = request.recv_dtype
+
+        if not send_dtype_str and not recv_dtype_str:
+            raise ValueError("send_dtype and recv_dtype must be provided (or at least one of them)")
+        
+        # If only one specified, assume same.
+        if send_dtype_str and not recv_dtype_str:
+            recv_dtype_str = send_dtype_str
+        elif recv_dtype_str and not send_dtype_str:
+            send_dtype_str = recv_dtype_str
+        
+        send_dtype = getattr(torch, send_dtype_str)
+        recv_dtype = getattr(torch, recv_dtype_str)
+
+        send_slab_numel = slab_bytes // send_dtype.itemsize
+        recv_slab_numel = slab_bytes // recv_dtype.itemsize
+        
         return SidecarServerConfig(
             sidecar_rank=self.sidecar_rank,
             node_info=self.node_info,
             peers=self.peers,
             group=sorted(list(request.group)),
-            tensor_dtype=tensor_dtype,
-            slab_numel=slab_numel,
+            send_dtype=send_dtype,
+            recv_dtype=recv_dtype,
+            send_slab_numel=send_slab_numel,
+            recv_slab_numel=recv_slab_numel,
             send_slot_numel=request.send_slot_numel,
             recv_slot_numel=request.recv_slot_numel,
             concurrent_copy=request.concurrent_copy,
@@ -220,10 +238,12 @@ class SidecarServicer(sidecar_pb2_grpc.SidecarServicer):
             # validate the request
             assert request.rank >= 0
             assert request.group
-            assert request.dtype
             assert request.send_slot_numel
             assert request.recv_slot_numel
             assert request.concurrent_copy is not None
+
+            # If only one dtype is specified, assume same.
+            assert request.send_dtype or request.recv_dtype
 
             if any(r not in self.node_info.sidecar_ranks for r in list(request.group)):
                 logger.error("Sidecar ranks not in node")
