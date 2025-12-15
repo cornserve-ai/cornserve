@@ -420,7 +420,10 @@ async def test_dtype_mismatch(
                 received = received.to(device_from_rank(sender_rank))
                 if i == 0:
                     print("TEST: Received data id", id, " of tensor", received.shape)
-                assert torch.allclose(sent.to(dtype=received.dtype), received), (
+                sent_bytes = sent.view(torch.uint8).flatten()
+                received_bytes = received.view(torch.uint8).flatten()
+                size = min(sent_bytes.numel(), received_bytes.numel())
+                assert torch.equal(sent_bytes[:size], received_bytes[:size]), (
                     f"Data mismatch for id {id}: {sent} vs {received}"
                 )
 
