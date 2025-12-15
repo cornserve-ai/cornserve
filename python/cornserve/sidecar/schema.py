@@ -56,12 +56,14 @@ class SidecarConfig:
             raise ValueError("Send tensor shape and dtype should be set together")
         if (self.recv_tensor_shape is None) ^ (self.recv_tensor_dtype is None):
             raise ValueError("Recv tensor shape and dtype should be set together")
-        if (
-            self.send_tensor_dtype is not None
-            and self.recv_tensor_dtype is not None
-            and self.send_tensor_dtype != self.recv_tensor_dtype
-        ):
-            raise ValueError("Send and recv tensor dtypes should be the same for now")
+        if self.send_tensor_dtype is None and self.recv_tensor_dtype is None:
+            raise ValueError("Either send tensor dtype or recv tensor dtype should be set")
+
+        # If only one dtype is provided, assume same.
+        if self.recv_tensor_dtype is None:
+            self.recv_tensor_dtype = self.send_tensor_dtype
+        if self.send_tensor_dtype is None:
+            self.send_tensor_dtype = self.recv_tensor_dtype
 
     def get_send_tensor_shape(self) -> tuple[int, ...]:
         """Return the send tensor shape."""
@@ -111,10 +113,10 @@ class SidecarConfig:
             )
         raise ValueError("Either send tensor shape or recv tensor shape should be set")
 
-    def get_dtype(self) -> torch.dtype:
-        """Return the dtype to use for the sender and receiver shared memory manager."""
-        if self.send_tensor_dtype is not None:
-            return self.send_tensor_dtype
-        if self.recv_tensor_dtype is not None:
-            return self.recv_tensor_dtype
-        raise ValueError("Either send tensor dtype or recv tensor dtype should be set")
+    def get_send_dtype(self) -> torch.dtype:
+        """Return the dtype to use for the sender shared memory manager."""
+        return self.send_tensor_dtype
+
+    def get_recv_dtype(self) -> torch.dtype:
+        """Return the dtype to use for the receiver shared memory manager."""
+        return self.recv_tensor_dtype
