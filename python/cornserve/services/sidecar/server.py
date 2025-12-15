@@ -197,19 +197,19 @@ class SidecarServicer(sidecar_pb2_grpc.SidecarServicer):
 
         if not send_dtype_str and not recv_dtype_str:
             raise ValueError("send_dtype and recv_dtype must be provided (or at least one of them)")
-        
+
         # If only one specified, assume same.
         if send_dtype_str and not recv_dtype_str:
             recv_dtype_str = send_dtype_str
         elif recv_dtype_str and not send_dtype_str:
             send_dtype_str = recv_dtype_str
-        
+
         send_dtype = getattr(torch, send_dtype_str)
         recv_dtype = getattr(torch, recv_dtype_str)
 
         send_slab_numel = slab_bytes // send_dtype.itemsize
         recv_slab_numel = slab_bytes // recv_dtype.itemsize
-        
+
         return SidecarServerConfig(
             sidecar_rank=self.sidecar_rank,
             node_info=self.node_info,
