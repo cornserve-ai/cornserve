@@ -123,8 +123,10 @@ class SidecarServerConfig:
     # need to be sorted
     group: list[int]
 
-    tensor_dtype: torch.dtype
-    slab_numel: int
+    send_dtype: torch.dtype
+    recv_dtype: torch.dtype
+    send_slab_numel: int
+    recv_slab_numel: int
 
     send_slot_numel: int
     recv_slot_numel: int
@@ -143,8 +145,10 @@ class SidecarServerConfig:
         # ignores sidecar_rank due to grouping
         return (
             self.group == sorted(other.group)
-            and self.tensor_dtype == other.tensor_dtype
-            and self.slab_numel == other.slab_numel
+            and self.send_dtype == other.send_dtype
+            and self.recv_dtype == other.recv_dtype
+            and self.send_slab_numel == other.send_slab_numel
+            and self.recv_slab_numel == other.recv_slab_numel
             and self.send_slot_numel == other.send_slot_numel
             and self.recv_slot_numel == other.recv_slot_numel
             and self.concurrent_copy == other.concurrent_copy
@@ -155,8 +159,10 @@ class SidecarServerConfig:
         return hash(
             (
                 tuple(self.group),
-                self.tensor_dtype,
-                self.slab_numel,
+                self.send_dtype,
+                self.recv_dtype,
+                self.send_slab_numel,
+                self.recv_slab_numel,
                 self.send_slot_numel,
                 self.recv_slot_numel,
                 self.concurrent_copy,
@@ -165,41 +171,63 @@ class SidecarServerConfig:
 
     def sender_config(self) -> SidecarSenderConfig:
         """Create the sender config."""
+        sender_part_size = self.send_slab_numel * self.send_dtype.itemsize
+        recv_part_size = self.recv_slab_numel * self.recv_dtype.itemsize
+        partition_bytes = sender_part_size + recv_part_size
+
         full_tensor, slab = init_shmem(
             filename=shm_filename(),
             local_ranks=self.node_info.get_local_ranks(self.group),
             num_local_sidecars=self.node_info.get_sidecar_num(),
-            partition_numel=self.slab_numel * 2,
-            dtype=self.tensor_dtype,
+            partition_bytes=partition_bytes,
+
+            # We say uint8 here, but we'll cast to correct dtype later.
+            # This is to slice the returned slab by bytes.
+            dtype=torch.uint8,
         )
+
+        sender_slab_bytes = slab[:sender_part_size]
+        
+        # Cast back to correct dtype.
+        sender_slab = sender_slab_bytes.view(self.send_dtype)
+
         return SidecarSenderConfig(
             sidecar_rank=self.sidecar_rank,
             node_info=self.node_info,
             peers=self.peers,
             group=self.group,
             base_ptr=full_tensor.data_ptr(),
-            shared_tensor=slab[: slab.numel() // 2],
+            shared_tensor=sender_slab,
             slot_numel=self.send_slot_numel,
             concurrent_copy=self.concurrent_copy,
         )
 
     def receiver_config(self) -> SidecarReceiverConfig:
         """Create the receiver config."""
+        sender_part_size = self.send_slab_numel * self.send_dtype.itemsize
+        recv_part_size = self.recv_slab_numel * self.recv_dtype.itemsize
+        partition_bytes = sender_part_size + recv_part_size
+
         full_tensor, slab = init_shmem(
             filename=shm_filename(),
             local_ranks=self.node_info.get_local_ranks(self.group),
             num_local_sidecars=self.node_info.get_sidecar_num(),
-            partition_numel=self.slab_numel * 2,
-            dtype=self.tensor_dtype,
+            partition_bytes=partition_bytes,
+            dtype=torch.uint8,
         )
+
+        # Receiver slab starts after sender slab.
+        receiver_slab_bytes = slab[sender_part_size:]
+        receiver_slab = receiver_slab_bytes.view(self.recv_dtype)
+
         return SidecarReceiverConfig(
             sidecar_rank=self.sidecar_rank,
             node_info=self.node_info,
             peers=self.peers,
             group=self.group,
             base_ptr=full_tensor.data_ptr(),
-            shared_tensor=slab[slab.numel() // 2 :],
-            slot_numel=self.send_slot_numel,
+            shared_tensor=receiver_slab,
+            slot_numel=self.recv_slot_numel,
         )
 
 
