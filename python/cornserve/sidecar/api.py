@@ -82,7 +82,8 @@ class Sidecar:
         self.config = config
         self.sidecar_rank = config.sidecar_rank
         self.group = config.group
-        self.dtype = config.get_dtype()
+        self.send_dtype = config.get_send_dtype()
+        self.recv_dtype = config.get_recv_dtype()
 
         # register the sidecar to the server, provide hint and grouping
         # note when using TP, only talks to the head sidecar
@@ -103,7 +104,8 @@ class Sidecar:
         request = sidecar_pb2.RegisterRequest(
             rank=self.sidecar_rank,
             group=self.group,
-            dtype=str(self.dtype).split(".")[-1],
+            send_dtype=str(self.send_dtype).split(".")[-1],
+            recv_dtype=str(self.recv_dtype).split(".")[-1],
             send_slot_numel=config.get_send_slot_numel(),
             recv_slot_numel=config.get_recv_slot_numel(),
             concurrent_copy=config.concurrent_copy,
@@ -118,8 +120,8 @@ class Sidecar:
             filename=shm_filename(),
             local_ranks=[response.local_rank],
             num_local_sidecars=response.num_local_sidecars,
-            partition_numel=response.shm_size * 2,
-            dtype=self.dtype,
+            partition_bytes=response.shm_size,
+            dtype=torch.uint8,
         )
 
         self.base_ptr = self.full_tensor.data_ptr()
@@ -363,8 +365,8 @@ class Sidecar:
 
         obj = self.msgpack_decoder.decode(response.data)
         if isinstance(obj, SharedTensorHandle):
-            cbuf = (ctypes.c_byte * obj.numel * self.dtype.itemsize).from_address(self.base_ptr + obj.offset)
-            tensor = torch.frombuffer(cbuf, dtype=self.dtype, count=obj.numel)
+            cbuf = (ctypes.c_byte * obj.numel * self.recv_dtype.itemsize).from_address(self.base_ptr + obj.offset)
+            tensor = torch.frombuffer(cbuf, dtype=self.recv_dtype, count=obj.numel)
             tensor_view = tensor.view(self.config.get_recv_tensor_shape())
             logger.info(
                 "Received shard %d of chunk %d in req %s successfully (shape %s)",
@@ -401,8 +403,8 @@ class Sidecar:
 
         obj = self.msgpack_decoder.decode(response.data)
         if isinstance(obj, SharedTensorHandle):
-            cbuf = (ctypes.c_byte * obj.numel * self.dtype.itemsize).from_address(self.base_ptr + obj.offset)
-            tensor = torch.frombuffer(cbuf, dtype=self.dtype, count=obj.numel)
+            cbuf = (ctypes.c_byte * obj.numel * self.recv_dtype.itemsize).from_address(self.base_ptr + obj.offset)
+            tensor = torch.frombuffer(cbuf, dtype=self.recv_dtype, count=obj.numel)
             tensor_view = tensor.view(self.config.get_recv_tensor_shape())
             logger.info(
                 "Sync read shard %d of chunk %d in req %s successfully (shape %s)",
