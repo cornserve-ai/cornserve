@@ -477,3 +477,121 @@ async def test_mixed_streaming(
         await sender.shutdown()
     for receiver in sidecar_receivers:
         await receiver.shutdown()
+
+
+dtype_mismatch_test_params = [
+    ([0], [2], torch.int64, torch.bfloat16),
+    ([0], [2], torch.float32, torch.float64),
+]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "sidecar_servers",
+    ["intranode", "internode"],
+    indirect=True,
+    ids=["intra", "inter"],
+)
+@pytest.mark.parametrize(
+    "sender_ranks, receiver_ranks, send_tensor_dtype, recv_tensor_dtype",
+    dtype_mismatch_test_params,
+)
+async def test_dtype_mismatch(
+    sidecar_servers: tuple[list[multiprocessing.Process], Literal["intranode", "internode"]],
+    sender_ranks: list[int],
+    receiver_ranks: list[int],
+    send_tensor_dtype: torch.dtype,
+    recv_tensor_dtype: torch.dtype,
+):
+    """Test sidecars initialized with different send_tensor_dtype and recv_tensor_dtype.
+
+    The first group (sender_ranks) will have:
+        send_dtype = send_tensor_dtype
+        recv_dtype = recv_tensor_dtype
+
+    The second group (receiver_ranks) will have:
+        send_dtype = recv_tensor_dtype
+        recv_dtype = send_tensor_dtype
+    """
+    servers, setup_type = sidecar_servers
+    assert servers is not None, "Servers fixture should be available"
+
+    from cornserve.sidecar.api import Sidecar
+    from cornserve.sidecar.schema import SidecarConfig
+
+    print("------------------------------------------------------------")
+    print(
+        f"Testing {setup_type} dtype mismatch communication:\n",
+        f"Group 1 ranks: {sender_ranks} (send={send_tensor_dtype}, recv={recv_tensor_dtype})\n",
+        f"Group 2 ranks: {receiver_ranks} (send={recv_tensor_dtype}, recv={send_tensor_dtype})",
+    )
+
+    group1_sidecars = []
+    group2_sidecars = []
+
+    shape = (10, 10)
+
+    for r in sender_ranks:
+        config = SidecarConfig(
+            sidecar_rank=r,
+            group=sender_ranks,
+            send_tensor_shape=(-1, *shape),
+            send_tensor_dtype=send_tensor_dtype,
+            recv_tensor_shape=(-1, *shape),
+            recv_tensor_dtype=recv_tensor_dtype,
+        )
+        group1_sidecars.append(Sidecar(config))
+
+    for r in receiver_ranks:
+        config = SidecarConfig(
+            sidecar_rank=r,
+            group=receiver_ranks,
+            send_tensor_shape=(-1, *shape),
+            send_tensor_dtype=recv_tensor_dtype,
+            recv_tensor_shape=(-1, *shape),
+            recv_tensor_dtype=send_tensor_dtype,
+        )
+        group2_sidecars.append(Sidecar(config))
+
+    async def verify_send_recv(
+        src_sidecars: list[Sidecar], dst_sidecars: list[Sidecar], dst_ranks: list[int], dtype: torch.dtype
+    ):
+        id = uuid.uuid4().hex
+        data = torch.randn(*shape, dtype=torch.float32)
+        data = data.to(dtype)
+
+        # Send
+        print(f"Sending {dtype} tensor from {src_sidecars[0].sidecar_rank} to {dst_ranks}")
+        for r, sender in enumerate(src_sidecars):
+            sender.send(
+                id=id,
+                data=data.to(device_from_rank(r)),
+                dst_sidecar_ranks=[dst_ranks],
+            )
+
+        # Recv
+        for receiver in dst_sidecars:
+            received = await receiver.recv(id=id)
+            print(f"Receiver {receiver.sidecar_rank} received tensor {received.shape} {received.dtype}")
+
+            # Move to CPU for comparison
+            sent_cpu = data.cpu()
+            recv_cpu = received.cpu()
+            assert sent_cpu.dtype == recv_cpu.dtype
+            assert torch.allclose(sent_cpu, recv_cpu)
+
+        # Clean up
+        await dst_sidecars[0].mark_done(id=id)
+
+    # Test Group 1 to Group 2 (sends send_tensor_dtype)
+    print("Phase 1: Group 1 -> Group 2")
+    await verify_send_recv(group1_sidecars, group2_sidecars, receiver_ranks, send_tensor_dtype)
+
+    # Test Group 2 to Group 1 (sends recv_tensor_dtype)
+    print("Phase 2: Group 2 -> Group 1")
+    await verify_send_recv(group2_sidecars, group1_sidecars, sender_ranks, recv_tensor_dtype)
+
+    for s in group1_sidecars:
+        await s.shutdown()
+    for s in group2_sidecars:
+        await s.shutdown()
