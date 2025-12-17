@@ -645,10 +645,12 @@ class StreamGeriEngine(Engine):
                         handle_finished_request(i)
                         request_is_done[i] = True
                 else:
+                    # Convert to pcm16 format
+                    wav_chunk_int16 = (wav_chunk.clamp(-1, 1) * torch.iinfo(torch.int16).max).to(torch.int16)
                     response = StreamEngineResponse(
                         request_id=request_id,
                         status=Status.SUCCESS,
-                        generate_bytes=wav_chunk.cpu().to(torch.float32).detach().numpy().tobytes(),
+                        generate_bytes=wav_chunk_int16.cpu().detach().numpy().tobytes(),
                     )
                     self.response_queue.put_nowait(response)
 
