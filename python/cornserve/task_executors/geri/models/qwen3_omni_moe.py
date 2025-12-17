@@ -179,7 +179,7 @@ class Qwen3OmniMoeCode2Wav(StreamGeriModel, nn.Module):
     @property
     def dtype(self) -> torch.dtype:
         """The data type of the model."""
-        return self.code_embedding.weight.dtype
+        return torch.int64
 
     @property
     def device(self) -> torch.device:
