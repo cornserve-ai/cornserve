@@ -9,6 +9,13 @@
 
 https://github.com/user-attachments/assets/583796e8-da20-4918-9311-db05e94726eb
 
+---
+**Project News**  
+
+- \[2025/12/16\] Our paper preprint ("Cornserve: Efficiently Serving Any-to-Any Multimodal Models") is now available on [arXiv](https://arxiv.org/abs/2512.14098).
+- \[2025/11/14\] Cornserve project announced with v0.1.0 release!
+---
+
 
 
 Cornserve is a distributed inference platform for complex, Any-to-Any multimodal AI.
