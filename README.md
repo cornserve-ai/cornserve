@@ -3,7 +3,7 @@
 
 [![Docker Hub](https://custom-icon-badges.demolab.com/badge/Docker-cornserve-1D63ED.svg?logo=docker&logoColor=white)](https://hub.docker.com/r/cornserve/gateway)
 [![Homepage](https://custom-icon-badges.demolab.com/badge/Docs-cornserve.ai-dddddd.svg?logo=home&logoColor=white&logoSource=feather)](https://cornserve.ai/)
-[![Paper](https://custom-icon-badges.herokuapp.com/badge/Paper-arXiv-red?logo=arxiv&logoColor=white)](https://arxiv.org/abs/2512.14098)
+[![Paper](https://custom-icon-badges.herokuapp.com/badge/Paper-arXiv-b31b1b?logo=arxiv&logoColor=white)](https://arxiv.org/abs/2512.14098)
 [![Apache-2.0 License](https://custom-icon-badges.herokuapp.com/github/license/cornserve-ai/cornserve?logo=law)](/LICENSE)
 </div>
 
