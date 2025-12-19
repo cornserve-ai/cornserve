@@ -402,14 +402,19 @@ async def deploy_tasks(request: TasksDeploymentRequest, raw_request: Request):
             *(create_execution_descriptor(spec) for spec in request.descriptor_definitions),
         ]
 
-        if coroutines:
-            results = await asyncio.gather(*coroutines, return_exceptions=True)
-            errors = [e for e in results if isinstance(e, Exception)]
-            if errors:
-                # Raise if any creation failed
-                raise errors[0]
+        if not coroutines:
+            return {"status": "ok", "max_resource_version": None}
 
-        return {"status": "ok"}
+        results = await asyncio.gather(*coroutines, return_exceptions=True)
+        errors = [e for e in results if isinstance(e, Exception)]
+        if errors:
+            # Raise if any creation failed
+            raise errors[0]
+
+        resource_versions = [int(r["metadata"]["resourceVersion"]) for r in results]
+        max_resource_version = max(resource_versions)
+
+        return {"status": "ok", "max_resource_version": max_resource_version}
     except Exception as e:
         logger.exception("Failed to deploy tasks")
         return Response(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, content=str(e))

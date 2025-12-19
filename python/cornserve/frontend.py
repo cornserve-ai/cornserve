@@ -211,6 +211,7 @@ class CornserveClient:
             return TaskResponse(status=500, content=f"Failed to explore cornserve_tasklib: {e}")
 
         summaries: list[str] = []
+        max_rv: int | None = None
         try:
             # Deploy unit tasks + descriptors first
             if unit_task_entries or descriptor_entries:
@@ -224,6 +225,8 @@ class CornserveClient:
                     timeout=60,
                 )
                 resp.raise_for_status()
+                batch_rv = int(resp.json()["max_resource_version"])
+                max_rv = batch_rv if max_rv is None else max(max_rv, batch_rv)
                 unit_list = ", ".join(e.task_class_name for e in unit_task_entries) or "-"
                 desc_list = ", ".join(e.descriptor_class_name for e in descriptor_entries) or "-"
                 summaries.append(f"unit={unit_list}; descriptors={desc_list}")
@@ -242,12 +245,15 @@ class CornserveClient:
                     timeout=60,
                 )
                 resp.raise_for_status()
+                batch_rv = int(resp.json()["max_resource_version"])
+                max_rv = batch_rv if max_rv is None else max(max_rv, batch_rv)
                 comp_list = ", ".join(e.task_class_name for e in composite_task_entries) or "-"
                 summaries.append(f"composite={comp_list}")
             else:
                 summaries.append("composite=-")
 
-            return TaskResponse(status=200, content=f"Tasklib deployed: {'; '.join(summaries)}")
+            rv_message = "" if max_rv is None else f"; max_resource_version={max_rv}"
+            return TaskResponse(status=200, content=f"Tasklib deployed: {'; '.join(summaries)}{rv_message}")
         except Exception as e:
             return TaskResponse(status=500, content=f"Failed to deploy tasklib: {e}")
 
