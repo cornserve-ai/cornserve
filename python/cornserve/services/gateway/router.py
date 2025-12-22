@@ -414,6 +414,15 @@ async def deploy_tasks(request: TasksDeploymentRequest, raw_request: Request):
         resource_versions = [int(r["metadata"]["resourceVersion"]) for r in results]
         max_resource_version = max(resource_versions)
 
+        # Update the CR storing latest tasklib deployment's max rv
+        # NOTE: Theoretically, if gateway fails after deploying CRs but before updating rv,
+        # an inconsistency is introduced. But in that case, the deployment request is
+        # considered as failed, so the user should re-deploy.
+        await task_registry.update_latest_tasklib_rv(max_resource_version)
+
+        # FIXME: This is just a proof-of-concept. We need to sync on all services, not just gateway.
+        await task_registry.sync_watchers(max_resource_version)
+
         return {"status": "ok", "max_resource_version": max_resource_version}
     except Exception as e:
         logger.exception("Failed to deploy tasks")

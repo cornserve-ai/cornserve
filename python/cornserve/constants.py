@@ -103,8 +103,13 @@ CRD_VERSION = "v1"
 CRD_PLURAL_TASK_DEFINITIONS = "taskdefinitions"
 CRD_PLURAL_UNIT_TASK_INSTANCES = "unittaskinstances"
 CRD_PLURAL_EXECUTION_DESCRIPTORS = "executiondescriptors"
+CRD_PLURAL_LATEST_TASKLIB_RVS = "latesttasklibrvs"
 
 # CR kind names (must match spec.names.kind in CRD files)
 CRD_KIND_TASK_DEFINITION = "TaskDefinition"
 CRD_KIND_UNIT_TASK_INSTANCE = "UnitTaskInstance"
 CRD_KIND_EXECUTION_DESCRIPTOR = "ExecutionDescriptor"
+CRD_KIND_LATEST_TASKLIB_RV = "LatestTasklibRV"
+
+# Singleton CR storing the resourceVersion associated with the latest tasklib deployment.
+CR_NAME_LATEST_TASKLIB_RV = "latest-tasklib-rv"

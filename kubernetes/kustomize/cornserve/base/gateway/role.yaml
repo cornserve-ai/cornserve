@@ -6,5 +6,5 @@ metadata:
   name: gateway-cr-access-role
 rules:
 - apiGroups: ["cornserve.ai"]
-  resources: ["taskdefinitions", "unittaskinstances", "executiondescriptors"]
+  resources: ["taskdefinitions", "unittaskinstances", "executiondescriptors", "latesttasklibrvs"]
   verbs: ["create", "update", "patch", "get", "list", "watch", "delete"]

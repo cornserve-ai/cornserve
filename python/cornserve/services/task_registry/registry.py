@@ -25,7 +25,9 @@ from cornserve.constants import (
     CRD_KIND_EXECUTION_DESCRIPTOR,
     CRD_KIND_TASK_DEFINITION,
     CRD_KIND_UNIT_TASK_INSTANCE,
+    CR_NAME_LATEST_TASKLIB_RV,
     CRD_PLURAL_EXECUTION_DESCRIPTORS,
+    CRD_PLURAL_LATEST_TASKLIB_RVS,
     CRD_PLURAL_TASK_DEFINITIONS,
     CRD_PLURAL_UNIT_TASK_INSTANCES,
     CRD_VERSION,
@@ -52,6 +54,10 @@ class TaskRegistry:
         self._api_client: client.ApiClient | None = None
         self._custom_api: client.CustomObjectsApi | None = None
 
+        # Watcher resource version states (updated by background watch tasks)
+        self._task_definition_rv: int = 0
+        self._execution_descriptor_rv: int = 0
+
     async def _load_config(self) -> None:
         if self._api_client:
             return
@@ -64,6 +70,32 @@ class TaskRegistry:
 
         self._api_client = client.ApiClient()
         self._custom_api = client.CustomObjectsApi(self._api_client)
+
+    async def update_latest_tasklib_rv(
+        self,
+        max_resource_version: int,
+        *,
+        namespace: str = K8S_NAMESPACE,
+        name: str = CR_NAME_LATEST_TASKLIB_RV,
+    ) -> None:
+        """Update the singleton LatestTasklibRV CR instance with the latest tasklib max RV.
+
+        NOTE: This CR is expected to always exist (initialized at cluster creation time).
+        """
+        await self._load_config()
+        assert self._custom_api is not None
+
+        max_resource_version = int(max_resource_version)
+        patch_body = [{"op": "replace", "path": "/spec/maxResourceVersion", "value": max_resource_version}]
+        
+        await self._custom_api.patch_namespaced_custom_object(
+            group=CRD_GROUP,
+            version=CRD_VERSION,
+            namespace=namespace,
+            plural=CRD_PLURAL_LATEST_TASKLIB_RVS,
+            name=name,
+            body=patch_body,
+        )
 
     async def create_task_definition(
         self,
@@ -295,6 +327,15 @@ class TaskRegistry:
         ]
         await asyncio.gather(*watchers)
 
+    async def sync_watchers(self, target_rv: int, poll_interval: float = 0.1) -> None:
+        """Wait until either watcher's resourceVersion is >= target_rv.
+        
+        FIXME: Technically, we should track targets of both kinds. For now, only use the max.
+        """
+        target_rv = int(target_rv)
+        while self._task_definition_rv < target_rv and self._execution_descriptor_rv < target_rv:
+            await asyncio.sleep(poll_interval)
+
     async def _delete_all_crs_by_plural(self, plural: str) -> None:
         try:
             resp = await self._custom_api.list_namespaced_custom_object(
@@ -421,6 +462,13 @@ class TaskRegistry:
                 logger.error("Error occurred during purge: %s", e)
                 raise
 
+    def _update_watcher_rv(self, kind: str, rv: int) -> None:
+        """Update the appropriate watcher's resource version state."""
+        if kind == CRD_KIND_TASK_DEFINITION:
+            self._task_definition_rv = rv
+        elif kind == CRD_KIND_EXECUTION_DESCRIPTOR:
+            self._execution_descriptor_rv = rv
+
     async def _watch_resource(self, plural: str, kind: str) -> None:
         assert self._custom_api is not None
 
@@ -442,6 +490,8 @@ class TaskRegistry:
                         self._handle_object(item, kind, "EXISTING")
 
                     resource_version = initial_list.get("metadata", {}).get("resourceVersion")
+                    if resource_version:
+                        self._update_watcher_rv(kind, int(resource_version))
 
                 w = Watch()
                 async with w.stream(
@@ -462,6 +512,7 @@ class TaskRegistry:
                         rv = obj.get("metadata", {}).get("resourceVersion")
                         if rv:
                             resource_version = rv
+                            self._update_watcher_rv(kind, int(rv))
             except asyncio.CancelledError:
                 raise
             except client.ApiException as e:

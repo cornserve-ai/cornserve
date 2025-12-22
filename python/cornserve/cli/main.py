@@ -715,6 +715,15 @@ def deploy_tasklib() -> None:
         rich.print(Panel(f"Failed to explore cornserve_tasklib: {e}", style="red", expand=False))
         return
 
+    # NOTE: Purge existing tasklib before redeploy. This is critical for theoretical correctness.
+    # If gateway fails after deploying CRs but before updating rv, the user will retry deployment.
+    # Then, since no CRs updated, the latest_tasklib_rv is higher than it should and leading to a deadlock.
+    rich.print("Purging existing tasklib ...")
+    if not purge_tasklib(quiet=True):
+        rich.print(Panel("Failed to purge existing tasklib. Cannot (re)deploy.", style="red", expand=False))
+        return
+    rich.print(Panel("Existing tasklib purged.", style="green", expand=False))
+
     # Deploy unit tasks + descriptors
     max_rv: int | None = None
     if unit_task_entries or descriptor_entries:
@@ -778,7 +787,7 @@ def deploy_tasklib() -> None:
     )
 
 
-def purge_tasklib() -> None:
+def purge_tasklib(quiet: bool = False) -> bool:
     """Purge all tasklib CRs and runtime state across services.
 
     Fails if the cluster is not idle (active UnitTaskInstance CRs).
@@ -793,11 +802,14 @@ def purge_tasklib() -> None:
                     expand=False,
                 )
             )
-            return
+            return False
         resp.raise_for_status()
-        rich.print(Panel("Tasklib purged successfully.", style="green", expand=False))
+        if not quiet:
+            rich.print(Panel("Tasklib purged successfully.", style="green", expand=False))
+        return True
     except Exception as e:
         rich.print(Panel(f"Failed to purge tasklib: {e}", style="red", expand=False))
+        return False
 
 
 @app.command(name="deploy_profiles")
