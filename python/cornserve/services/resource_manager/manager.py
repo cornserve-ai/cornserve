@@ -25,6 +25,7 @@ from cornserve.services.pb import (
 )
 from cornserve.services.resource import GPU, CannotColocateError, Resource
 from cornserve.services.sidecar.launch import SidecarLaunchInfo
+from cornserve.services.task_registry import TaskRegistry
 from cornserve.services.utils import to_strict_k8s_name
 from cornserve.sidecar.constants import grpc_url_from_rank
 from cornserve.task.base import UnitTask
@@ -169,6 +170,7 @@ class ResourceManager:
         resource: Resource,
         sidecar_names: list[str],
         task_dispatcher_urls: list[str],
+        task_registry: TaskRegistry,
     ) -> None:
         """Initialize the ResourceManager.
 
@@ -177,9 +179,11 @@ class ResourceManager:
             resource: Resource allocation manager
             sidecar_names: Names of sidecar pods
             task_dispatcher_urls: List of Task Dispatcher gRPC URLs for broadcasting notifications
+            task_registry: Task registry
         """
         self.api_client = api_client
         self.resource = resource
+        self.task_registry = task_registry
 
         self.kube_core_client = kclient.CoreV1Api(api_client)
         self.sidecar_names = sidecar_names
@@ -207,7 +211,7 @@ class ResourceManager:
         self.profile_manager = UnitTaskProfileManager()
 
     @staticmethod
-    async def init() -> ResourceManager:
+    async def init(task_registry: TaskRegistry) -> ResourceManager:
         """Actually initialize the resource manager.
 
         Spawn the sidecar pods and created GPU objects make up the `Resource` object.
@@ -327,6 +331,7 @@ class ResourceManager:
                 resource=resource,
                 sidecar_names=[pod.metadata.name for pod in created_pods],
                 task_dispatcher_urls=task_dispatcher_urls,
+                task_registry=task_registry,
             )
         except Exception as e:
             logger.error("Error during resource initialization: %s", str(e))
@@ -863,6 +868,15 @@ class ResourceManager:
                 )
                 if response.status != common_pb2.Status.STATUS_OK:
                     raise RuntimeError(f"Failed to register task manager: {response}")
+
+            # Ensure new task manager's registry is up-to-date before proceeding
+            with tracer.start_as_current_span("ResourceManager._spawn_task_manager.sync_task_registry"):
+                target_rv = await self.task_registry.get_latest_tasklib_rv()
+                if target_rv > 0:
+                    sync_req = task_manager_pb2.SyncTaskRegistryRequest(target_rv=target_rv)
+                    sync_resp = await state.stub.SyncTaskRegistry(sync_req, timeout=constants.SYNC_WATCHERS_TIMEOUT)
+                    if sync_resp.status != common_pb2.Status.STATUS_OK:
+                        raise RuntimeError(f"Failed to sync task manager registry: {sync_resp}")
 
         except Exception as e:
             if isinstance(e, grpc.aio.AioRpcError):

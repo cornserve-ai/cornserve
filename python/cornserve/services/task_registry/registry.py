@@ -21,11 +21,11 @@ from kubernetes_asyncio import client, config
 from kubernetes_asyncio.watch import Watch
 
 from cornserve.constants import (
+    CR_NAME_LATEST_TASKLIB_RV,
     CRD_GROUP,
     CRD_KIND_EXECUTION_DESCRIPTOR,
     CRD_KIND_TASK_DEFINITION,
     CRD_KIND_UNIT_TASK_INSTANCE,
-    CR_NAME_LATEST_TASKLIB_RV,
     CRD_PLURAL_EXECUTION_DESCRIPTORS,
     CRD_PLURAL_LATEST_TASKLIB_RVS,
     CRD_PLURAL_TASK_DEFINITIONS,
@@ -87,7 +87,7 @@ class TaskRegistry:
 
         max_resource_version = int(max_resource_version)
         patch_body = [{"op": "replace", "path": "/spec/maxResourceVersion", "value": max_resource_version}]
-        
+
         await self._custom_api.patch_namespaced_custom_object(
             group=CRD_GROUP,
             version=CRD_VERSION,
@@ -96,6 +96,28 @@ class TaskRegistry:
             name=name,
             body=patch_body,
         )
+
+    async def get_latest_tasklib_rv(
+        self,
+        namespace: str = K8S_NAMESPACE,
+        name: str = CR_NAME_LATEST_TASKLIB_RV,
+    ) -> int:
+        """Read the latest tasklib resource version from the LatestTasklibRV CR."""
+        await self._load_config()
+        assert self._custom_api is not None
+
+        try:
+            cr = await self._custom_api.get_namespaced_custom_object(
+                group=CRD_GROUP,
+                version=CRD_VERSION,
+                namespace=namespace,
+                plural=CRD_PLURAL_LATEST_TASKLIB_RVS,
+                name=name,
+            )
+            return int(cr.get("spec", {}).get("maxResourceVersion", 0))
+        except Exception as e:
+            logger.warning("Failed to read LatestTasklibRV CR: %s", e)
+            return 0
 
     async def create_task_definition(
         self,
@@ -329,7 +351,7 @@ class TaskRegistry:
 
     async def sync_watchers(self, target_rv: int, poll_interval: float = 0.1) -> None:
         """Wait until either watcher's resourceVersion is >= target_rv.
-        
+
         FIXME: Technically, we should track targets of both kinds. For now, only use the max.
         """
         target_rv = int(target_rv)

@@ -10,6 +10,9 @@ service TaskDispatcher {
 
   // Existing unit task removed
   rpc NotifyUnitTaskTeardown(NotifyUnitTaskTeardownRequest) returns (NotifyUnitTaskTeardownResponse);
+
+  // Sync task registry to a target resource version
+  rpc SyncTaskRegistry(SyncTaskRegistryRequest) returns (SyncTaskRegistryResponse);
 }
 
 // New unit task deployed
@@ -37,5 +40,16 @@ message NotifyUnitTaskTeardownRequest {
 }
 
 message NotifyUnitTaskTeardownResponse {
+  common.Status status = 1;
+}
+
+// Sync task registry to a target resource version
+message SyncTaskRegistryRequest {
+  // Target resource version to sync to
+  int64 target_rv = 1;
+}
+
+message SyncTaskRegistryResponse {
+  // Success or failure
   common.Status status = 1;
 }

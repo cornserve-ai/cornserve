@@ -7,6 +7,7 @@ import base64
 import json
 from collections.abc import AsyncGenerator, AsyncIterator
 
+import grpc
 from fastapi import (
     APIRouter,
     FastAPI,
@@ -21,7 +22,11 @@ from fastapi.responses import StreamingResponse
 from opentelemetry import trace
 from pydantic import ValidationError
 
-from cornserve.constants import K8S_RESOURCE_MANAGER_GRPC_URL
+from cornserve.constants import (
+    K8S_RESOURCE_MANAGER_GRPC_URL,
+    K8S_TASK_DISPATCHER_GRPC_URL,
+    SYNC_WATCHERS_TIMEOUT,
+)
 from cornserve.logging import get_logger
 from cornserve.services.gateway.app.manager import AppManager
 from cornserve.services.gateway.models import (
@@ -36,12 +41,48 @@ from cornserve.services.gateway.models import (
 )
 from cornserve.services.gateway.session import SessionManager
 from cornserve.services.gateway.task_manager import TaskManager
+from cornserve.services.pb import (
+    resource_manager_pb2,
+    resource_manager_pb2_grpc,
+    task_dispatcher_pb2,
+    task_dispatcher_pb2_grpc,
+)
 from cornserve.services.task_registry import TaskRegistry
 from cornserve.task.base import Stream, TaskGraphDispatch, TaskOutput, UnitTaskList, task_manager_context
 
 router = APIRouter()
 logger = get_logger(__name__)
 tracer = trace.get_tracer(__name__)
+
+
+async def _sync_all_control_plane_registries(target_rv: int, task_registry) -> None:
+    """Sync task registries across all control-plane services."""
+
+    async def sync_gateway() -> None:
+        await task_registry.sync_watchers(target_rv)
+
+    async def sync_resource_manager() -> None:
+        async with grpc.aio.insecure_channel(K8S_RESOURCE_MANAGER_GRPC_URL) as channel:
+            stub = resource_manager_pb2_grpc.ResourceManagerStub(channel)
+            await stub.SyncTaskRegistry(
+                resource_manager_pb2.SyncTaskRegistryRequest(target_rv=target_rv),
+                timeout=SYNC_WATCHERS_TIMEOUT,
+            )
+
+    async def sync_task_dispatcher() -> None:
+        async with grpc.aio.insecure_channel(K8S_TASK_DISPATCHER_GRPC_URL) as channel:
+            stub = task_dispatcher_pb2_grpc.TaskDispatcherStub(channel)
+            await stub.SyncTaskRegistry(
+                task_dispatcher_pb2.SyncTaskRegistryRequest(target_rv=target_rv),
+                timeout=SYNC_WATCHERS_TIMEOUT,
+            )
+
+    # Invoke the sync requests
+    await asyncio.gather(
+        sync_gateway(),
+        sync_resource_manager(),
+        sync_task_dispatcher(),
+    )
 
 
 @router.post("/app/register")
@@ -411,7 +452,9 @@ async def deploy_tasks(request: TasksDeploymentRequest, raw_request: Request):
             # Raise if any creation failed
             raise errors[0]
 
-        resource_versions = [int(r["metadata"]["resourceVersion"]) for r in results]
+        resource_versions = [
+            int(r["metadata"]["resourceVersion"]) for r in results if r is not None and not isinstance(r, BaseException)
+        ]
         max_resource_version = max(resource_versions)
 
         # Update the CR storing latest tasklib deployment's max rv
@@ -420,8 +463,8 @@ async def deploy_tasks(request: TasksDeploymentRequest, raw_request: Request):
         # considered as failed, so the user should re-deploy.
         await task_registry.update_latest_tasklib_rv(max_resource_version)
 
-        # FIXME: This is just a proof-of-concept. We need to sync on all services, not just gateway.
-        await task_registry.sync_watchers(max_resource_version)
+        # Sync task registries across all control-plane services except task-managers
+        await _sync_all_control_plane_registries(max_resource_version, task_registry)
 
         return {"status": "ok", "max_resource_version": max_resource_version}
     except Exception as e:

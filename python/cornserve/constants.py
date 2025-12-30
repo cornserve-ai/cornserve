@@ -64,12 +64,16 @@ K8S_CORNSERVE_CONFIG_MAP_NAME = "cornserve-config"
 K8S_SIDECAR_SERVICE_NAME = "sidecar"
 K8S_GATEWAY_SERVICE_HTTP_URL = "http://gateway:8000"
 K8S_TASK_DISPATCHER_HTTP_URL = "http://task-dispatcher:8000"
+K8S_TASK_DISPATCHER_GRPC_URL = "task-dispatcher:50051"
 K8S_TASK_DISPATCHER_HEADLESS_SERVICE = "task-dispatcher-headless"
 K8S_RESOURCE_MANAGER_GRPC_URL = "resource-manager:50051"
 K8S_OTEL_GRPC_URL = "http://jaeger-collector.cornserve-system.svc.cluster.local:4317"
 K8S_TASK_EXECUTOR_SECRET_NAME = "cornserve-env"
 K8S_TASK_EXECUTOR_HF_TOKEN_KEY = "hf-token"
 K8S_TASK_EXECUTOR_HEALTHY_TIMEOUT = 20 * 60.0
+
+# Control-plane sync timeout
+SYNC_WATCHERS_TIMEOUT = 30.0  # seconds
 
 # Volume host paths.
 VOLUME_HF_CACHE = "/data/hfcache"

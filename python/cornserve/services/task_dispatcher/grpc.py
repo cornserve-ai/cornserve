@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import asyncio
 from typing import TYPE_CHECKING
 
 import grpc
 
+from cornserve.constants import SYNC_WATCHERS_TIMEOUT
 from cornserve.logging import get_logger
 from cornserve.services.pb import common_pb2, task_dispatcher_pb2, task_dispatcher_pb2_grpc
 from cornserve.services.task_registry import TaskRegistry
@@ -48,6 +50,25 @@ class TaskDispatcherServicer(task_dispatcher_pb2_grpc.TaskDispatcherServicer):
         task = await self.task_registry.get_task_instance(request.task_instance_name)
         await self.task_dispatcher.notify_task_teardown(task=task)
         return task_dispatcher_pb2.NotifyUnitTaskTeardownResponse(status=common_pb2.Status.STATUS_OK)
+
+    async def SyncTaskRegistry(
+        self,
+        request: task_dispatcher_pb2.SyncTaskRegistryRequest,
+        context: grpc.aio.ServicerContext,
+    ) -> task_dispatcher_pb2.SyncTaskRegistryResponse:
+        """Sync task registry to target resource version."""
+        try:
+            await asyncio.wait_for(
+                self.task_registry.sync_watchers(request.target_rv),
+                timeout=SYNC_WATCHERS_TIMEOUT,
+            )
+            return task_dispatcher_pb2.SyncTaskRegistryResponse(status=common_pb2.Status.STATUS_OK)
+        except TimeoutError:
+            logger.error("SyncTaskRegistry timed out waiting for rv %d", request.target_rv)
+            await context.abort(grpc.StatusCode.DEADLINE_EXCEEDED, "Sync task registry timed out")
+        except Exception as e:
+            logger.exception("SyncTaskRegistry failed: %s", e)
+            await context.abort(grpc.StatusCode.INTERNAL, str(e))
 
 
 def create_server(task_dispatcher: TaskDispatcher, task_registry: TaskRegistry) -> grpc.aio.Server:
