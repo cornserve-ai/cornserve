@@ -18,7 +18,7 @@ service ResourceManager {
   rpc ScaleUnitTask(ScaleUnitTaskRequest) returns (ScaleUnitTaskResponse);
 
   // Sync task registry to a target resource version
-  rpc SyncTaskRegistry(SyncTaskRegistryRequest) returns (SyncTaskRegistryResponse);
+  rpc SyncTaskRegistry(common.SyncTaskRegistryRequest) returns (common.SyncTaskRegistryResponse);
 }
 
 // Deploy a new task
@@ -69,13 +69,3 @@ message ScaleUnitTaskResponse {
   common.Status status = 1;
 }
 
-// Sync task registry to a target resource version
-message SyncTaskRegistryRequest {
-  // Target resource version to sync to
-  int64 target_rv = 1;
-}
-
-message SyncTaskRegistryResponse {
-  // Success or failure
-  common.Status status = 1;
-}

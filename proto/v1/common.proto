@@ -8,3 +8,13 @@ enum Status {
   STATUS_OK = 1;
   STATUS_ERROR = 2;
 }
+
+// Sync task registry to a target resource version
+message SyncTaskRegistryRequest {
+  // Target resource version to sync to
+  int64 target_rv = 1;
+}
+
+message SyncTaskRegistryResponse {
+  Status status = 1;
+}
