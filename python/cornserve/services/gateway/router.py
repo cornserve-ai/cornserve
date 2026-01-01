@@ -55,17 +55,17 @@ logger = get_logger(__name__)
 tracer = trace.get_tracer(__name__)
 
 
-async def _sync_all_control_plane_registries(target_rv: int, task_registry) -> None:
+async def _sync_all_control_plane_registries(task_registry: TaskRegistry) -> None:
     """Sync task registries across all control-plane services."""
 
     async def sync_gateway() -> None:
-        await task_registry.sync_watchers(target_rv)
+        await task_registry.sync_watchers()
 
     async def sync_resource_manager() -> None:
         async with grpc.aio.insecure_channel(K8S_RESOURCE_MANAGER_GRPC_URL) as channel:
             stub = resource_manager_pb2_grpc.ResourceManagerStub(channel)
             await stub.SyncTaskRegistry(
-                resource_manager_pb2.SyncTaskRegistryRequest(target_rv=target_rv),
+                resource_manager_pb2.SyncTaskRegistryRequest(),
                 timeout=SYNC_WATCHERS_TIMEOUT,
             )
 
@@ -73,7 +73,7 @@ async def _sync_all_control_plane_registries(target_rv: int, task_registry) -> N
         async with grpc.aio.insecure_channel(K8S_TASK_DISPATCHER_GRPC_URL) as channel:
             stub = task_dispatcher_pb2_grpc.TaskDispatcherStub(channel)
             await stub.SyncTaskRegistry(
-                task_dispatcher_pb2.SyncTaskRegistryRequest(target_rv=target_rv),
+                task_dispatcher_pb2.SyncTaskRegistryRequest(),
                 timeout=SYNC_WATCHERS_TIMEOUT,
             )
 
@@ -438,35 +438,51 @@ async def deploy_tasks(request: TasksDeploymentRequest, raw_request: Request):
                     return None
                 raise
 
-        coroutines = [
-            *(create_task_definition(spec) for spec in request.task_definitions),
-            *(create_execution_descriptor(spec) for spec in request.descriptor_definitions),
-        ]
+        task_def_coroutines = [create_task_definition(spec) for spec in request.task_definitions]
+        descriptor_coroutines = [create_execution_descriptor(spec) for spec in request.descriptor_definitions]
 
-        if not coroutines:
-            return {"status": "ok", "max_resource_version": None}
+        if not task_def_coroutines and not descriptor_coroutines:
+            return {"status": "ok"}
 
-        results = await asyncio.gather(*coroutines, return_exceptions=True)
+        # Run all coroutines together but track their counts to split results
+        num_task_defs = len(task_def_coroutines)
+        all_coroutines = task_def_coroutines + descriptor_coroutines
+        results = await asyncio.gather(*all_coroutines, return_exceptions=True)
+
         errors = [e for e in results if isinstance(e, Exception)]
         if errors:
             # Raise if any creation failed
             raise errors[0]
 
-        resource_versions = [
-            int(r["metadata"]["resourceVersion"]) for r in results if r is not None and not isinstance(r, BaseException)
-        ]
-        max_resource_version = max(resource_versions)
+        # Split results into task definitions and descriptors
+        task_def_results = results[:num_task_defs]
+        descriptor_results = results[num_task_defs:]
 
-        # Update the CR storing latest tasklib deployment's max rv
+        # Compute max RV for each type (use 0 if no results)
+        task_class_rvs = [
+            int(r["metadata"]["resourceVersion"])
+            for r in task_def_results
+            if r is not None and not isinstance(r, BaseException)
+        ]
+        descriptor_rvs = [
+            int(r["metadata"]["resourceVersion"])
+            for r in descriptor_results
+            if r is not None and not isinstance(r, BaseException)
+        ]
+
+        max_task_class_rv = max(task_class_rvs) if task_class_rvs else 0
+        max_descriptor_rv = max(descriptor_rvs) if descriptor_rvs else 0
+
+        # Update the CR storing latest tasklib deployment's max rvs
         # NOTE: Theoretically, if gateway fails after deploying CRs but before updating rv,
         # an inconsistency is introduced. But in that case, the deployment request is
         # considered as failed, so the user should re-deploy.
-        await task_registry.update_latest_tasklib_rv(max_resource_version)
+        await task_registry.update_latest_tasklib_rv(max_task_class_rv, max_descriptor_rv)
 
         # Sync task registries across all control-plane services except task-managers
-        await _sync_all_control_plane_registries(max_resource_version, task_registry)
+        await _sync_all_control_plane_registries(task_registry)
 
-        return {"status": "ok", "max_resource_version": max_resource_version}
+        return {"status": "ok"}
     except Exception as e:
         logger.exception("Failed to deploy tasks")
         return Response(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, content=str(e))

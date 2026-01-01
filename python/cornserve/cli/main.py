@@ -725,7 +725,6 @@ def deploy_tasklib() -> None:
     rich.print(Panel("Existing tasklib purged.", style="green", expand=False))
 
     # Deploy unit tasks + descriptors
-    max_rv: int | None = None
     if unit_task_entries or descriptor_entries:
         try:
             rich.print("Deploying unit tasks and descriptors ...")
@@ -735,8 +734,6 @@ def deploy_tasklib() -> None:
             )
             resp = requests.post(f"{GATEWAY_URL}/deploy-tasks", json=payload.model_dump())
             resp.raise_for_status()
-            batch_rv = int(resp.json()["max_resource_version"])
-            max_rv = batch_rv if max_rv is None else max(max_rv, batch_rv)
             unit_list = ", ".join(e.task_class_name for e in unit_task_entries) or "-"
             desc_list = ", ".join(e.descriptor_class_name for e in descriptor_entries) or "-"
             rich.print(
@@ -762,8 +759,6 @@ def deploy_tasklib() -> None:
             )
             resp = requests.post(f"{GATEWAY_URL}/deploy-tasks", json=payload.model_dump())
             resp.raise_for_status()
-            batch_rv = int(resp.json()["max_resource_version"])
-            max_rv = batch_rv if max_rv is None else max(max_rv, batch_rv)
             comp_list = ", ".join(e.task_class_name for e in composite_task_entries)
             rich.print(
                 Panel(
@@ -778,13 +773,7 @@ def deploy_tasklib() -> None:
     else:
         rich.print(Panel("No composite tasks discovered.", style="yellow", expand=False))
 
-    rich.print(
-        Panel(
-            f"Tasklib deployment complete. max_resource_version={max_rv}",
-            style="green",
-            expand=False,
-        )
-    )
+    rich.print(Panel("Tasklib deployment complete.", style="green", expand=False))
 
 
 def purge_tasklib(quiet: bool = False) -> bool:

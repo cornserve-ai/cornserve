@@ -73,20 +73,25 @@ class TaskRegistry:
 
     async def update_latest_tasklib_rv(
         self,
-        max_resource_version: int,
+        max_task_class_rv: int,
+        max_descriptor_rv: int,
         *,
         namespace: str = K8S_NAMESPACE,
         name: str = CR_NAME_LATEST_TASKLIB_RV,
     ) -> None:
-        """Update the singleton LatestTasklibRV CR instance with the latest tasklib max RV.
+        """Update the singleton LatestTasklibRV CR instance with the latest tasklib RVs.
 
         NOTE: This CR is expected to always exist (initialized at cluster creation time).
         """
         await self._load_config()
         assert self._custom_api is not None
 
-        max_resource_version = int(max_resource_version)
-        patch_body = [{"op": "replace", "path": "/spec/maxResourceVersion", "value": max_resource_version}]
+        max_task_class_rv = int(max_task_class_rv)
+        max_descriptor_rv = int(max_descriptor_rv)
+        patch_body = [
+            {"op": "replace", "path": "/spec/maxTaskClassRV", "value": max_task_class_rv},
+            {"op": "replace", "path": "/spec/maxDescriptorRV", "value": max_descriptor_rv},
+        ]
 
         await self._custom_api.patch_namespaced_custom_object(
             group=CRD_GROUP,
@@ -101,8 +106,8 @@ class TaskRegistry:
         self,
         namespace: str = K8S_NAMESPACE,
         name: str = CR_NAME_LATEST_TASKLIB_RV,
-    ) -> int:
-        """Read the latest tasklib resource version from the LatestTasklibRV CR."""
+    ) -> tuple[int, int]:
+        """Read the latest tasklib resource versions from the LatestTasklibRV CR."""
         await self._load_config()
         assert self._custom_api is not None
 
@@ -114,10 +119,13 @@ class TaskRegistry:
                 plural=CRD_PLURAL_LATEST_TASKLIB_RVS,
                 name=name,
             )
-            return int(cr.get("spec", {}).get("maxResourceVersion", 0))
+            spec = cr.get("spec", {})
+            max_task_class_rv = int(spec.get("maxTaskClassRV", 0))
+            max_descriptor_rv = int(spec.get("maxDescriptorRV", 0))
+            return (max_task_class_rv, max_descriptor_rv)
         except Exception as e:
             logger.warning("Failed to read LatestTasklibRV CR: %s", e)
-            return 0
+            return (0, 0)
 
     async def create_task_definition(
         self,
@@ -349,13 +357,11 @@ class TaskRegistry:
         ]
         await asyncio.gather(*watchers)
 
-    async def sync_watchers(self, target_rv: int, poll_interval: float = 0.1) -> None:
-        """Wait until either watcher's resourceVersion is >= target_rv.
+    async def sync_watchers(self, poll_interval: float = 0.1) -> None:
+        """Wait until both watchers have caught up to their respective target RVs."""
+        target_task_class_rv, target_descriptor_rv = await self.get_latest_tasklib_rv()
 
-        FIXME: Technically, we should track targets of both kinds. For now, only use the max.
-        """
-        target_rv = int(target_rv)
-        while self._task_definition_rv < target_rv and self._execution_descriptor_rv < target_rv:
+        while self._task_definition_rv < target_task_class_rv or self._execution_descriptor_rv < target_descriptor_rv:
             await asyncio.sleep(poll_interval)
 
     async def _delete_all_crs_by_plural(self, plural: str) -> None:

@@ -20,8 +20,9 @@ spec:
             spec:
               type: object
               properties:
-                maxResourceVersion:
+                maxTaskClassRV:
                   type: integer
-                  description: "The latest max resourceVersion returned from tasklib (re)deployment k8s api calls."
-              required: ["maxResourceVersion"]
+                maxDescriptorRV:
+                  type: integer
+              required: ["maxTaskClassRV", "maxDescriptorRV"]
 

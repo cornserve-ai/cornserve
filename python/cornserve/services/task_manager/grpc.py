@@ -112,15 +112,15 @@ class TaskManagerServicer(task_manager_pb2_grpc.TaskManagerServicer):
         request: task_manager_pb2.SyncTaskRegistryRequest,
         context: grpc.aio.ServicerContext,
     ) -> task_manager_pb2.SyncTaskRegistryResponse:
-        """Sync task registry to target resource version."""
+        """Sync task registry to target resource versions (fetched from LatestTasklibRV CR)."""
         try:
             await asyncio.wait_for(
-                self.task_registry.sync_watchers(request.target_rv),
+                self.task_registry.sync_watchers(),
                 timeout=SYNC_WATCHERS_TIMEOUT,
             )
             return task_manager_pb2.SyncTaskRegistryResponse(status=common_pb2.Status.STATUS_OK)
         except TimeoutError:
-            logger.error("SyncTaskRegistry timed out waiting for rv %d", request.target_rv)
+            logger.error("SyncTaskRegistry timed out")
             await context.abort(grpc.StatusCode.DEADLINE_EXCEEDED, "Sync task registry timed out")
         except Exception as e:
             logger.exception("SyncTaskRegistry failed: %s", e)
