@@ -10,10 +10,7 @@ enum Status {
 }
 
 // Sync task registry to a target resource version
-message SyncTaskRegistryRequest {
-  // Target resource version to sync to
-  int64 target_rv = 1;
-}
+message SyncTaskRegistryRequest {}
 
 message SyncTaskRegistryResponse {
   Status status = 1;

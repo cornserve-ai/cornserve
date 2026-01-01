@@ -32,6 +32,7 @@ from cornserve.constants import (
     CRD_PLURAL_UNIT_TASK_INSTANCES,
     CRD_VERSION,
     K8S_NAMESPACE,
+    SYNC_WATCHERS_POLL_INTERVAL,
     TASKLIB_DIR,
 )
 from cornserve.logging import get_logger
@@ -357,12 +358,12 @@ class TaskRegistry:
         ]
         await asyncio.gather(*watchers)
 
-    async def sync_watchers(self, poll_interval: float = 0.1) -> None:
+    async def sync_watchers(self) -> None:
         """Wait until both watchers have caught up to their respective target RVs."""
         target_task_class_rv, target_descriptor_rv = await self.get_latest_tasklib_rv()
 
         while self._task_definition_rv < target_task_class_rv or self._execution_descriptor_rv < target_descriptor_rv:
-            await asyncio.sleep(poll_interval)
+            await asyncio.sleep(SYNC_WATCHERS_POLL_INTERVAL)
 
     async def _delete_all_crs_by_plural(self, plural: str) -> None:
         try:
@@ -493,9 +494,9 @@ class TaskRegistry:
     def _update_watcher_rv(self, kind: str, rv: int) -> None:
         """Update the appropriate watcher's resource version state."""
         if kind == CRD_KIND_TASK_DEFINITION:
-            self._task_definition_rv = rv
+            self._task_definition_rv = max(self._task_definition_rv, rv)
         elif kind == CRD_KIND_EXECUTION_DESCRIPTOR:
-            self._execution_descriptor_rv = rv
+            self._execution_descriptor_rv = max(self._execution_descriptor_rv, rv)
 
     async def _watch_resource(self, plural: str, kind: str) -> None:
         assert self._custom_api is not None

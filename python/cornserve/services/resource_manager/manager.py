@@ -871,7 +871,7 @@ class ResourceManager:
 
             # Ensure new task manager's registry is up-to-date before proceeding
             with tracer.start_as_current_span("ResourceManager._spawn_task_manager.sync_task_registry"):
-                sync_req = task_manager_pb2.SyncTaskRegistryRequest()
+                sync_req = common_pb2.SyncTaskRegistryRequest()
                 sync_resp = await state.stub.SyncTaskRegistry(sync_req, timeout=constants.SYNC_WATCHERS_TIMEOUT)
                 if sync_resp.status != common_pb2.Status.STATUS_OK:
                     raise RuntimeError(f"Failed to sync task manager registry: {sync_resp}")

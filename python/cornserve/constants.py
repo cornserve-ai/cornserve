@@ -74,6 +74,7 @@ K8S_TASK_EXECUTOR_HEALTHY_TIMEOUT = 20 * 60.0
 
 # Control-plane sync timeout
 SYNC_WATCHERS_TIMEOUT = 30.0  # seconds
+SYNC_WATCHERS_POLL_INTERVAL = 0.1  # seconds
 
 # Volume host paths.
 VOLUME_HF_CACHE = "/data/hfcache"

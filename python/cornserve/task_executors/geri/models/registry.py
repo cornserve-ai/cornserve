@@ -47,13 +47,4 @@ MODEL_REGISTRY: dict[str, RegistryEntry] = {
         geri_mode=GeriMode.STREAMING,
         torch_dtype=torch.bfloat16,
     ),
-    # Qwen2.5-Omni stub, keyed by HF `model_type` ("qwen2_5_omni").
-    # This enables Geri to start up for Qwen/Qwen2.5-Omni-7B in AUDIO mode.
-    "qwen2_5_omni": RegistryEntry(
-        module="qwen2_5_omni",
-        class_name="Qwen2_5OmniStub",
-        modalities=[Modality.AUDIO],
-        geri_mode=GeriMode.STREAMING,
-        torch_dtype=torch.bfloat16,
-    ),
 }

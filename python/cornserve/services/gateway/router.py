@@ -42,9 +42,8 @@ from cornserve.services.gateway.models import (
 from cornserve.services.gateway.session import SessionManager
 from cornserve.services.gateway.task_manager import TaskManager
 from cornserve.services.pb import (
-    resource_manager_pb2,
+    common_pb2,
     resource_manager_pb2_grpc,
-    task_dispatcher_pb2,
     task_dispatcher_pb2_grpc,
 )
 from cornserve.services.task_registry import TaskRegistry
@@ -65,7 +64,7 @@ async def _sync_all_control_plane_registries(task_registry: TaskRegistry) -> Non
         async with grpc.aio.insecure_channel(K8S_RESOURCE_MANAGER_GRPC_URL) as channel:
             stub = resource_manager_pb2_grpc.ResourceManagerStub(channel)
             await stub.SyncTaskRegistry(
-                resource_manager_pb2.SyncTaskRegistryRequest(),
+                common_pb2.SyncTaskRegistryRequest(),
                 timeout=SYNC_WATCHERS_TIMEOUT,
             )
 
@@ -73,7 +72,7 @@ async def _sync_all_control_plane_registries(task_registry: TaskRegistry) -> Non
         async with grpc.aio.insecure_channel(K8S_TASK_DISPATCHER_GRPC_URL) as channel:
             stub = task_dispatcher_pb2_grpc.TaskDispatcherStub(channel)
             await stub.SyncTaskRegistry(
-                task_dispatcher_pb2.SyncTaskRegistryRequest(),
+                common_pb2.SyncTaskRegistryRequest(),
                 timeout=SYNC_WATCHERS_TIMEOUT,
             )
 
