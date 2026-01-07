@@ -8,3 +8,6 @@ rules:
 - apiGroups: ["cornserve.ai"]
   resources: ["taskdefinitions", "unittaskinstances", "executiondescriptors", "latesttasklibrvs"]
   verbs: ["create", "update", "patch", "get", "list", "watch", "delete"]
+- apiGroups: [""]
+  resources: ["endpoints"]
+  verbs: ["list"]

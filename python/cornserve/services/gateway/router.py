@@ -19,12 +19,13 @@ from fastapi import (
 )
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import StreamingResponse
+from kubernetes_asyncio import client as kclient
+from kubernetes_asyncio import config as kconfig
 from opentelemetry import trace
 from pydantic import ValidationError
 
 from cornserve.constants import (
     K8S_RESOURCE_MANAGER_GRPC_URL,
-    K8S_TASK_DISPATCHER_GRPC_URL,
     SYNC_WATCHERS_TIMEOUT,
 )
 from cornserve.logging import get_logger
@@ -47,6 +48,7 @@ from cornserve.services.pb import (
     task_dispatcher_pb2_grpc,
 )
 from cornserve.services.task_registry import TaskRegistry
+from cornserve.services.utils import discover_task_dispatcher_replicas
 from cornserve.task.base import Stream, TaskGraphDispatch, TaskOutput, UnitTaskList, task_manager_context
 
 router = APIRouter()
@@ -57,9 +59,6 @@ tracer = trace.get_tracer(__name__)
 async def _sync_all_control_plane_registries(task_registry: TaskRegistry) -> None:
     """Sync task registries across all control-plane services."""
 
-    async def sync_gateway() -> None:
-        await task_registry.sync_watchers()
-
     async def sync_resource_manager() -> None:
         async with grpc.aio.insecure_channel(K8S_RESOURCE_MANAGER_GRPC_URL) as channel:
             stub = resource_manager_pb2_grpc.ResourceManagerStub(channel)
@@ -68,19 +67,30 @@ async def _sync_all_control_plane_registries(task_registry: TaskRegistry) -> Non
                 timeout=SYNC_WATCHERS_TIMEOUT,
             )
 
-    async def sync_task_dispatcher() -> None:
-        async with grpc.aio.insecure_channel(K8S_TASK_DISPATCHER_GRPC_URL) as channel:
+    async def _sync_single_task_dispatcher(url: str) -> None:
+        async with grpc.aio.insecure_channel(url) as channel:
             stub = task_dispatcher_pb2_grpc.TaskDispatcherStub(channel)
             await stub.SyncTaskRegistry(
                 common_pb2.SyncTaskRegistryRequest(),
                 timeout=SYNC_WATCHERS_TIMEOUT,
             )
 
+    async def sync_all_task_dispatchers() -> None:
+        try:
+            kconfig.load_incluster_config()
+        except kconfig.ConfigException as e:
+            raise RuntimeError("Could not load Kubernetes configuration") from e
+
+        async with kclient.ApiClient() as api_client:
+            core_api = kclient.CoreV1Api(api_client)
+            task_dispatcher_urls = await discover_task_dispatcher_replicas(core_api)
+        await asyncio.gather(*(_sync_single_task_dispatcher(url) for url in task_dispatcher_urls))
+
     # Invoke the sync requests
     await asyncio.gather(
-        sync_gateway(),
+        task_registry.sync_watchers(),
         sync_resource_manager(),
-        sync_task_dispatcher(),
+        sync_all_task_dispatchers(),
     )
 
 

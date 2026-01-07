@@ -26,7 +26,7 @@ from cornserve.services.pb import (
 from cornserve.services.resource import GPU, CannotColocateError, Resource
 from cornserve.services.sidecar.launch import SidecarLaunchInfo
 from cornserve.services.task_registry import TaskRegistry
-from cornserve.services.utils import to_strict_k8s_name
+from cornserve.services.utils import discover_task_dispatcher_replicas, to_strict_k8s_name
 from cornserve.sidecar.constants import grpc_url_from_rank
 from cornserve.task.base import UnitTask
 from cornserve.task_executors.profile import UnitTaskProfileManager
@@ -34,52 +34,6 @@ from cornserve.utils import format_grpc_error
 
 logger = get_logger(__name__)
 tracer = trace.get_tracer(__name__)
-
-
-async def discover_task_dispatcher_replicas(kube_client: kclient.CoreV1Api) -> list[str]:
-    """Discover all Task Dispatcher replica endpoints via headless service.
-
-    Uses Kubernetes service discovery to find all Task Dispatcher pod IPs
-    and return their gRPC endpoints for broadcasting notifications.
-
-    Args:
-        kube_client: Kubernetes API client for service discovery
-
-    Returns:
-        List of Task Dispatcher gRPC URLs (e.g., ["10.1.2.3:50051", "10.1.2.4:50051"])
-
-    Raises:
-        RuntimeError: If Task Dispatcher replicas cannot be discovered.
-    """
-    try:
-        # Query the headless service to get all Task Dispatcher pod endpoints
-        endpoints = await kube_client.list_namespaced_endpoints(
-            namespace=constants.K8S_NAMESPACE,
-            field_selector=f"metadata.name={constants.K8S_TASK_DISPATCHER_HEADLESS_SERVICE}",
-        )
-
-        task_dispatcher_urls = []
-        for endpoint in endpoints.items:
-            if endpoint.subsets:
-                for subset in endpoint.subsets:
-                    if subset.addresses and subset.ports:
-                        for address in subset.addresses:
-                            for port in subset.ports:
-                                if port.name == "grpc":
-                                    task_dispatcher_urls.append(f"{address.ip}:{port.port}")
-
-        if not task_dispatcher_urls:
-            raise RuntimeError(
-                f"No Task Dispatcher replicas found in headless service "
-                f"{constants.K8S_TASK_DISPATCHER_HEADLESS_SERVICE}. "
-                "Ensure Task Dispatcher pods are running and healthy."
-            )
-
-        logger.info("Discovered %d Task Dispatcher replicas: %s", len(task_dispatcher_urls), task_dispatcher_urls)
-        return task_dispatcher_urls
-
-    except Exception as e:
-        raise RuntimeError(f"Failed to discover Task Dispatcher replicas: {e}") from e
 
 
 @dataclass
