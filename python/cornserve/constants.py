@@ -118,3 +118,5 @@ CRD_KIND_LATEST_TASKLIB_RV = "LatestTasklibRV"
 
 # Singleton CR storing the resourceVersion associated with the latest tasklib deployment.
 CR_NAME_LATEST_TASKLIB_RV = "latest-tasklib-rv"
+CR_KEY_MAX_TASK_CLASS_RV = "maxTaskClassRV"
+CR_KEY_MAX_DESCRIPTOR_RV = "maxDescriptorRV"
