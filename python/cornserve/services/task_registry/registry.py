@@ -21,15 +21,20 @@ from kubernetes_asyncio import client, config
 from kubernetes_asyncio.watch import Watch
 
 from cornserve.constants import (
+    CR_KEY_MAX_DESCRIPTOR_RV,
+    CR_KEY_MAX_TASK_CLASS_RV,
+    CR_NAME_LATEST_TASKLIB_RV,
     CRD_GROUP,
     CRD_KIND_EXECUTION_DESCRIPTOR,
     CRD_KIND_TASK_DEFINITION,
     CRD_KIND_UNIT_TASK_INSTANCE,
     CRD_PLURAL_EXECUTION_DESCRIPTORS,
+    CRD_PLURAL_LATEST_TASKLIB_RVS,
     CRD_PLURAL_TASK_DEFINITIONS,
     CRD_PLURAL_UNIT_TASK_INSTANCES,
     CRD_VERSION,
     K8S_NAMESPACE,
+    SYNC_WATCHERS_POLL_INTERVAL,
     TASKLIB_DIR,
 )
 from cornserve.logging import get_logger
@@ -52,6 +57,10 @@ class TaskRegistry:
         self._api_client: client.ApiClient | None = None
         self._custom_api: client.CustomObjectsApi | None = None
 
+        # Watcher resource version states (updated by background watch tasks)
+        self._task_definition_rv: int = 0
+        self._execution_descriptor_rv: int = 0
+
     async def _load_config(self) -> None:
         if self._api_client:
             return
@@ -64,6 +73,62 @@ class TaskRegistry:
 
         self._api_client = client.ApiClient()
         self._custom_api = client.CustomObjectsApi(self._api_client)
+
+    async def update_latest_tasklib_rv(
+        self,
+        max_task_class_rv: int,
+        max_descriptor_rv: int,
+        *,
+        namespace: str = K8S_NAMESPACE,
+        name: str = CR_NAME_LATEST_TASKLIB_RV,
+    ) -> None:
+        """Update the singleton LatestTasklibRV CR instance with the latest tasklib RVs.
+
+        NOTE: This CR is expected to always exist (initialized at cluster creation time).
+        """
+        await self._load_config()
+        assert self._custom_api is not None
+
+        max_task_class_rv = int(max_task_class_rv)
+        max_descriptor_rv = int(max_descriptor_rv)
+        patch_body = [
+            {"op": "replace", "path": f"/spec/{CR_KEY_MAX_TASK_CLASS_RV}", "value": max_task_class_rv},
+            {"op": "replace", "path": f"/spec/{CR_KEY_MAX_DESCRIPTOR_RV}", "value": max_descriptor_rv},
+        ]
+
+        await self._custom_api.patch_namespaced_custom_object(
+            group=CRD_GROUP,
+            version=CRD_VERSION,
+            namespace=namespace,
+            plural=CRD_PLURAL_LATEST_TASKLIB_RVS,
+            name=name,
+            body=patch_body,
+        )
+
+    async def get_latest_tasklib_rv(
+        self,
+        namespace: str = K8S_NAMESPACE,
+        name: str = CR_NAME_LATEST_TASKLIB_RV,
+    ) -> tuple[int, int]:
+        """Read the latest tasklib resource versions from the LatestTasklibRV CR."""
+        await self._load_config()
+        assert self._custom_api is not None
+
+        try:
+            cr = await self._custom_api.get_namespaced_custom_object(
+                group=CRD_GROUP,
+                version=CRD_VERSION,
+                namespace=namespace,
+                plural=CRD_PLURAL_LATEST_TASKLIB_RVS,
+                name=name,
+            )
+            spec = cr.get("spec", {})
+            max_task_class_rv = int(spec.get(CR_KEY_MAX_TASK_CLASS_RV, 0))
+            max_descriptor_rv = int(spec.get(CR_KEY_MAX_DESCRIPTOR_RV, 0))
+            return (max_task_class_rv, max_descriptor_rv)
+        except Exception as e:
+            logger.warning("Failed to read LatestTasklibRV CR: %s", e)
+            return (0, 0)
 
     async def create_task_definition(
         self,
@@ -295,6 +360,13 @@ class TaskRegistry:
         ]
         await asyncio.gather(*watchers)
 
+    async def sync_watchers(self) -> None:
+        """Wait until both watchers have caught up to their respective target RVs."""
+        target_task_class_rv, target_descriptor_rv = await self.get_latest_tasklib_rv()
+
+        while self._task_definition_rv < target_task_class_rv or self._execution_descriptor_rv < target_descriptor_rv:
+            await asyncio.sleep(SYNC_WATCHERS_POLL_INTERVAL)
+
     async def _delete_all_crs_by_plural(self, plural: str) -> None:
         try:
             resp = await self._custom_api.list_namespaced_custom_object(
@@ -421,55 +493,61 @@ class TaskRegistry:
                 logger.error("Error occurred during purge: %s", e)
                 raise
 
+    def _get_watcher_rv(self, kind: str) -> int:
+        if kind == CRD_KIND_TASK_DEFINITION:
+            return self._task_definition_rv
+        return self._execution_descriptor_rv
+
+    def _set_watcher_rv(self, kind: str, rv: int) -> None:
+        if kind == CRD_KIND_TASK_DEFINITION:
+            self._task_definition_rv = max(self._task_definition_rv, rv)
+        else:
+            self._execution_descriptor_rv = max(self._execution_descriptor_rv, rv)
+
+    def _reset_watcher_rv(self, kind: str) -> None:
+        if kind == CRD_KIND_TASK_DEFINITION:
+            self._task_definition_rv = 0
+        else:
+            self._execution_descriptor_rv = 0
+
     async def _watch_resource(self, plural: str, kind: str) -> None:
         assert self._custom_api is not None
 
-        # Save the last resourceVersion seen to resume watch without relisting
-        resource_version: str | None = None
-
         while True:
             try:
-                # Only relist when we don't have a resourceVersion
-                if resource_version is None:
+                if self._get_watcher_rv(kind) == 0:
                     initial_list = await self._custom_api.list_namespaced_custom_object(
                         group=CRD_GROUP,
                         version=CRD_VERSION,
                         namespace=K8S_NAMESPACE,
                         plural=plural,
                     )
-
                     for item in initial_list.get("items", []):
                         self._handle_object(item, kind, "EXISTING")
+                    self._set_watcher_rv(kind, int(initial_list["metadata"]["resourceVersion"]))
 
-                    resource_version = initial_list.get("metadata", {}).get("resourceVersion")
-
-                w = Watch()
-                async with w.stream(
+                async with Watch().stream(
                     self._custom_api.list_namespaced_custom_object,
                     group=CRD_GROUP,
                     version=CRD_VERSION,
                     namespace=K8S_NAMESPACE,
                     plural=plural,
                     watch=True,
-                    resource_version=resource_version,
+                    resource_version=str(self._get_watcher_rv(kind)),
                     timeout_seconds=300,
                 ) as stream:
                     async for event in stream:
-                        event_type = event.get("type", "UNKNOWN")
                         obj = event["object"]
-                        self._handle_object(obj, kind, event_type)
-                        # Update resourceVersion
-                        rv = obj.get("metadata", {}).get("resourceVersion")
-                        if rv:
-                            resource_version = rv
+                        self._handle_object(obj, kind, event.get("type", "UNKNOWN"))
+                        self._set_watcher_rv(kind, int(obj["metadata"]["resourceVersion"]))
             except asyncio.CancelledError:
                 raise
             except client.ApiException as e:
                 # If the resourceVersion is too old, the API returns 410 Gone.
                 # Reset resourceVersion to force a relist on next loop.
                 if getattr(e, "status", None) == 410:
-                    logger.warning("Watch for %s expired (410 Gone). Relisting to refresh.", kind)
-                    resource_version = None
+                    logger.warning("Watch for %s expired (410 Gone). Relisting.", kind)
+                    self._reset_watcher_rv(kind)
                     continue
                 logger.error("Error watching %s (API): %s", kind, e)
                 await asyncio.sleep(5)

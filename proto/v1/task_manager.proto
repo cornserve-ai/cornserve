@@ -23,6 +23,9 @@ service TaskManager {
   
   // Health checking
   rpc Healthcheck(HealthcheckRequest) returns (HealthcheckResponse);
+
+  // Sync task registry to a target resource version
+  rpc SyncTaskRegistry(common.SyncTaskRegistryRequest) returns (common.SyncTaskRegistryResponse);
 }
 
 enum ResourceAction {
@@ -145,3 +148,4 @@ message HealthcheckResponse {
   common.Status status = 1;
   map<string, TaskExecutorStatus> task_executor_statuses = 2;
 }
+

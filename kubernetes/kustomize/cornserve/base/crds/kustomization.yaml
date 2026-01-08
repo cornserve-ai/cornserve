@@ -4,3 +4,5 @@ resources:
 - execution-descriptor-crd.yaml
 - task-definition-crd.yaml
 - unit-task-instance-crd.yaml
+- latest-tasklib-rv-crd.yaml
+- latest-tasklib-rv.yaml

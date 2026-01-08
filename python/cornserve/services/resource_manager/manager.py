@@ -25,7 +25,8 @@ from cornserve.services.pb import (
 )
 from cornserve.services.resource import GPU, CannotColocateError, Resource
 from cornserve.services.sidecar.launch import SidecarLaunchInfo
-from cornserve.services.utils import to_strict_k8s_name
+from cornserve.services.task_registry import TaskRegistry
+from cornserve.services.utils import discover_task_dispatcher_replicas, to_strict_k8s_name
 from cornserve.sidecar.constants import grpc_url_from_rank
 from cornserve.task.base import UnitTask
 from cornserve.task_executors.profile import UnitTaskProfileManager
@@ -33,52 +34,6 @@ from cornserve.utils import format_grpc_error
 
 logger = get_logger(__name__)
 tracer = trace.get_tracer(__name__)
-
-
-async def discover_task_dispatcher_replicas(kube_client: kclient.CoreV1Api) -> list[str]:
-    """Discover all Task Dispatcher replica endpoints via headless service.
-
-    Uses Kubernetes service discovery to find all Task Dispatcher pod IPs
-    and return their gRPC endpoints for broadcasting notifications.
-
-    Args:
-        kube_client: Kubernetes API client for service discovery
-
-    Returns:
-        List of Task Dispatcher gRPC URLs (e.g., ["10.1.2.3:50051", "10.1.2.4:50051"])
-
-    Raises:
-        RuntimeError: If Task Dispatcher replicas cannot be discovered.
-    """
-    try:
-        # Query the headless service to get all Task Dispatcher pod endpoints
-        endpoints = await kube_client.list_namespaced_endpoints(
-            namespace=constants.K8S_NAMESPACE,
-            field_selector=f"metadata.name={constants.K8S_TASK_DISPATCHER_HEADLESS_SERVICE}",
-        )
-
-        task_dispatcher_urls = []
-        for endpoint in endpoints.items:
-            if endpoint.subsets:
-                for subset in endpoint.subsets:
-                    if subset.addresses and subset.ports:
-                        for address in subset.addresses:
-                            for port in subset.ports:
-                                if port.name == "grpc":
-                                    task_dispatcher_urls.append(f"{address.ip}:{port.port}")
-
-        if not task_dispatcher_urls:
-            raise RuntimeError(
-                f"No Task Dispatcher replicas found in headless service "
-                f"{constants.K8S_TASK_DISPATCHER_HEADLESS_SERVICE}. "
-                "Ensure Task Dispatcher pods are running and healthy."
-            )
-
-        logger.info("Discovered %d Task Dispatcher replicas: %s", len(task_dispatcher_urls), task_dispatcher_urls)
-        return task_dispatcher_urls
-
-    except Exception as e:
-        raise RuntimeError(f"Failed to discover Task Dispatcher replicas: {e}") from e
 
 
 @dataclass
@@ -169,6 +124,7 @@ class ResourceManager:
         resource: Resource,
         sidecar_names: list[str],
         task_dispatcher_urls: list[str],
+        task_registry: TaskRegistry,
     ) -> None:
         """Initialize the ResourceManager.
 
@@ -177,9 +133,11 @@ class ResourceManager:
             resource: Resource allocation manager
             sidecar_names: Names of sidecar pods
             task_dispatcher_urls: List of Task Dispatcher gRPC URLs for broadcasting notifications
+            task_registry: Task registry
         """
         self.api_client = api_client
         self.resource = resource
+        self.task_registry = task_registry
 
         self.kube_core_client = kclient.CoreV1Api(api_client)
         self.sidecar_names = sidecar_names
@@ -207,7 +165,7 @@ class ResourceManager:
         self.profile_manager = UnitTaskProfileManager()
 
     @staticmethod
-    async def init() -> ResourceManager:
+    async def init(task_registry: TaskRegistry) -> ResourceManager:
         """Actually initialize the resource manager.
 
         Spawn the sidecar pods and created GPU objects make up the `Resource` object.
@@ -327,6 +285,7 @@ class ResourceManager:
                 resource=resource,
                 sidecar_names=[pod.metadata.name for pod in created_pods],
                 task_dispatcher_urls=task_dispatcher_urls,
+                task_registry=task_registry,
             )
         except Exception as e:
             logger.error("Error during resource initialization: %s", str(e))
@@ -863,6 +822,13 @@ class ResourceManager:
                 )
                 if response.status != common_pb2.Status.STATUS_OK:
                     raise RuntimeError(f"Failed to register task manager: {response}")
+
+            # Ensure new task manager's registry is up-to-date before proceeding
+            with tracer.start_as_current_span("ResourceManager._spawn_task_manager.sync_task_registry"):
+                sync_req = common_pb2.SyncTaskRegistryRequest()
+                sync_resp = await state.stub.SyncTaskRegistry(sync_req, timeout=constants.SYNC_WATCHERS_TIMEOUT)
+                if sync_resp.status != common_pb2.Status.STATUS_OK:
+                    raise RuntimeError(f"Failed to sync task manager registry: {sync_resp}")
 
         except Exception as e:
             if isinstance(e, grpc.aio.AioRpcError):
