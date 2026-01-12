@@ -211,8 +211,7 @@ class SidecarServerConfig:
             filename=shm_filename(),
             local_ranks=self.node_info.get_local_ranks(self.group),
             num_local_sidecars=self.node_info.get_sidecar_num(),
-            partition_bytes=partition_bytes,
-            dtype=torch.uint8,
+            partition_bytes=partition_bytes
         )
 
         # Receiver slab starts after sender slab.
