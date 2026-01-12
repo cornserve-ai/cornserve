@@ -32,6 +32,8 @@ def init_shmem(
     partition_bytes: int,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """Initialize a shared memory buffer between the sidecar client and server.
+    
+    Returns the full tensor on the node and the slab used by the current sidecar group in `torch.uint8` type.
 
     All sidecars within the same node will share the same buffer but at different offsets.
     Each sidecar will only access its own slice of the buffer, and each slice has the same size.
