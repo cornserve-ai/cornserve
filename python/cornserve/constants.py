@@ -64,12 +64,17 @@ K8S_CORNSERVE_CONFIG_MAP_NAME = "cornserve-config"
 K8S_SIDECAR_SERVICE_NAME = "sidecar"
 K8S_GATEWAY_SERVICE_HTTP_URL = "http://gateway:8000"
 K8S_TASK_DISPATCHER_HTTP_URL = "http://task-dispatcher:8000"
+K8S_TASK_DISPATCHER_GRPC_URL = "task-dispatcher:50051"
 K8S_TASK_DISPATCHER_HEADLESS_SERVICE = "task-dispatcher-headless"
 K8S_RESOURCE_MANAGER_GRPC_URL = "resource-manager:50051"
 K8S_OTEL_GRPC_URL = "http://jaeger-collector.cornserve-system.svc.cluster.local:4317"
 K8S_TASK_EXECUTOR_SECRET_NAME = "cornserve-env"
 K8S_TASK_EXECUTOR_HF_TOKEN_KEY = "hf-token"
 K8S_TASK_EXECUTOR_HEALTHY_TIMEOUT = 20 * 60.0
+
+# Control-plane sync timeout
+SYNC_WATCHERS_TIMEOUT = 30.0  # seconds
+SYNC_WATCHERS_POLL_INTERVAL = 0.1  # seconds
 
 # Volume host paths.
 VOLUME_HF_CACHE = "/data/hfcache"
@@ -103,8 +108,15 @@ CRD_VERSION = "v1"
 CRD_PLURAL_TASK_DEFINITIONS = "taskdefinitions"
 CRD_PLURAL_UNIT_TASK_INSTANCES = "unittaskinstances"
 CRD_PLURAL_EXECUTION_DESCRIPTORS = "executiondescriptors"
+CRD_PLURAL_LATEST_TASKLIB_RVS = "latesttasklibrvs"
 
 # CR kind names (must match spec.names.kind in CRD files)
 CRD_KIND_TASK_DEFINITION = "TaskDefinition"
 CRD_KIND_UNIT_TASK_INSTANCE = "UnitTaskInstance"
 CRD_KIND_EXECUTION_DESCRIPTOR = "ExecutionDescriptor"
+CRD_KIND_LATEST_TASKLIB_RV = "LatestTasklibRV"
+
+# Singleton CR storing the resourceVersion associated with the latest tasklib deployment.
+CR_NAME_LATEST_TASKLIB_RV = "latest-tasklib-rv"
+CR_KEY_MAX_TASK_CLASS_RV = "maxTaskClassRV"
+CR_KEY_MAX_DESCRIPTOR_RV = "maxDescriptorRV"

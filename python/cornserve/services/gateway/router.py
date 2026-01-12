@@ -7,6 +7,7 @@ import base64
 import json
 from collections.abc import AsyncGenerator, AsyncIterator
 
+import grpc
 from fastapi import (
     APIRouter,
     FastAPI,
@@ -18,10 +19,15 @@ from fastapi import (
 )
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import StreamingResponse
+from kubernetes_asyncio import client as kclient
+from kubernetes_asyncio import config as kconfig
 from opentelemetry import trace
 from pydantic import ValidationError
 
-from cornserve.constants import K8S_RESOURCE_MANAGER_GRPC_URL
+from cornserve.constants import (
+    K8S_RESOURCE_MANAGER_GRPC_URL,
+    SYNC_WATCHERS_TIMEOUT,
+)
 from cornserve.logging import get_logger
 from cornserve.services.gateway.app.manager import AppManager
 from cornserve.services.gateway.models import (
@@ -36,12 +42,56 @@ from cornserve.services.gateway.models import (
 )
 from cornserve.services.gateway.session import SessionManager
 from cornserve.services.gateway.task_manager import TaskManager
+from cornserve.services.pb import (
+    common_pb2,
+    resource_manager_pb2_grpc,
+    task_dispatcher_pb2_grpc,
+)
 from cornserve.services.task_registry import TaskRegistry
+from cornserve.services.utils import discover_task_dispatcher_replicas
 from cornserve.task.base import Stream, TaskGraphDispatch, TaskOutput, UnitTaskList, task_manager_context
 
 router = APIRouter()
 logger = get_logger(__name__)
 tracer = trace.get_tracer(__name__)
+
+
+async def _sync_all_control_plane_registries(task_registry: TaskRegistry) -> None:
+    """Sync task registries across all control-plane services."""
+
+    async def sync_resource_manager() -> None:
+        async with grpc.aio.insecure_channel(K8S_RESOURCE_MANAGER_GRPC_URL) as channel:
+            stub = resource_manager_pb2_grpc.ResourceManagerStub(channel)
+            await stub.SyncTaskRegistry(
+                common_pb2.SyncTaskRegistryRequest(),
+                timeout=SYNC_WATCHERS_TIMEOUT,
+            )
+
+    async def _sync_single_task_dispatcher(url: str) -> None:
+        async with grpc.aio.insecure_channel(url) as channel:
+            stub = task_dispatcher_pb2_grpc.TaskDispatcherStub(channel)
+            await stub.SyncTaskRegistry(
+                common_pb2.SyncTaskRegistryRequest(),
+                timeout=SYNC_WATCHERS_TIMEOUT,
+            )
+
+    async def sync_all_task_dispatchers() -> None:
+        try:
+            kconfig.load_incluster_config()
+        except kconfig.ConfigException as e:
+            raise RuntimeError("Could not load Kubernetes configuration") from e
+
+        async with kclient.ApiClient() as api_client:
+            core_api = kclient.CoreV1Api(api_client)
+            task_dispatcher_urls = await discover_task_dispatcher_replicas(core_api)
+        await asyncio.gather(*(_sync_single_task_dispatcher(url) for url in task_dispatcher_urls))
+
+    # Invoke the sync requests
+    await asyncio.gather(
+        task_registry.sync_watchers(),
+        sync_resource_manager(),
+        sync_all_task_dispatchers(),
+    )
 
 
 @router.post("/app/register")
@@ -397,17 +447,49 @@ async def deploy_tasks(request: TasksDeploymentRequest, raw_request: Request):
                     return None
                 raise
 
-        coroutines = [
-            *(create_task_definition(spec) for spec in request.task_definitions),
-            *(create_execution_descriptor(spec) for spec in request.descriptor_definitions),
+        task_def_coroutines = [create_task_definition(spec) for spec in request.task_definitions]
+        descriptor_coroutines = [create_execution_descriptor(spec) for spec in request.descriptor_definitions]
+
+        if not task_def_coroutines and not descriptor_coroutines:
+            return {"status": "ok"}
+
+        # Run all coroutines together but track their counts to split results
+        num_task_defs = len(task_def_coroutines)
+        all_coroutines = task_def_coroutines + descriptor_coroutines
+        results = await asyncio.gather(*all_coroutines, return_exceptions=True)
+
+        errors = [e for e in results if isinstance(e, Exception)]
+        if errors:
+            # Raise if any creation failed
+            raise errors[0]
+
+        # Split results into task definitions and descriptors
+        task_def_results = results[:num_task_defs]
+        descriptor_results = results[num_task_defs:]
+
+        # Compute max RV for each type (use 0 if no results)
+        task_class_rvs = [
+            int(r["metadata"]["resourceVersion"])
+            for r in task_def_results
+            if r is not None and not isinstance(r, BaseException)
+        ]
+        descriptor_rvs = [
+            int(r["metadata"]["resourceVersion"])
+            for r in descriptor_results
+            if r is not None and not isinstance(r, BaseException)
         ]
 
-        if coroutines:
-            results = await asyncio.gather(*coroutines, return_exceptions=True)
-            errors = [e for e in results if isinstance(e, Exception)]
-            if errors:
-                # Raise if any creation failed
-                raise errors[0]
+        max_task_class_rv = max(task_class_rvs) if task_class_rvs else 0
+        max_descriptor_rv = max(descriptor_rvs) if descriptor_rvs else 0
+
+        # Update the CR storing latest tasklib deployment's max rvs
+        # NOTE: Theoretically, if gateway fails after deploying CRs but before updating rv,
+        # an inconsistency is introduced. But in that case, the deployment request is
+        # considered as failed, so the user should re-deploy.
+        await task_registry.update_latest_tasklib_rv(max_task_class_rv, max_descriptor_rv)
+
+        # Sync task registries across all control-plane services except task-managers
+        await _sync_all_control_plane_registries(task_registry)
 
         return {"status": "ok"}
     except Exception as e:

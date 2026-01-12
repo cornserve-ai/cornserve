@@ -19,6 +19,7 @@ classifiers = [
 ]
 requires-python = ">=3.11"
 dependencies = [
+  "grpcio==1.71.0",
   "grpcio-tools==1.71.0",
   "rich",
   "requests",

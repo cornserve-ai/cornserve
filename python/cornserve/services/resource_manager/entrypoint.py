@@ -28,7 +28,7 @@ async def serve() -> None:
     task_registry = TaskRegistry()
     cr_watcher_task = asyncio.create_task(task_registry.watch_updates(), name="resource_manager_cr_watcher")
 
-    resource_manager = await ResourceManager.init()
+    resource_manager = await ResourceManager.init(task_registry)
 
     server = create_server(resource_manager, task_registry)
     await server.start()

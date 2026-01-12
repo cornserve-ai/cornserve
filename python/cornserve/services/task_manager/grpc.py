@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
+
 import grpc
 
+from cornserve.constants import SYNC_WATCHERS_TIMEOUT
 from cornserve.logging import get_logger
 from cornserve.services.pb import common_pb2, task_manager_pb2, task_manager_pb2_grpc
 from cornserve.services.resource import GPU
@@ -103,6 +106,25 @@ class TaskManagerServicer(task_manager_pb2_grpc.TaskManagerServicer):
             task_executor_url=url,
             sidecar_ranks=sidecar_ranks,
         )
+
+    async def SyncTaskRegistry(
+        self,
+        request: common_pb2.SyncTaskRegistryRequest,
+        context: grpc.aio.ServicerContext,
+    ) -> common_pb2.SyncTaskRegistryResponse:
+        """Sync task registry to target resource versions (fetched from LatestTasklibRV CR)."""
+        try:
+            await asyncio.wait_for(
+                self.task_registry.sync_watchers(),
+                timeout=SYNC_WATCHERS_TIMEOUT,
+            )
+            return common_pb2.SyncTaskRegistryResponse(status=common_pb2.Status.STATUS_OK)
+        except TimeoutError:
+            logger.error("SyncTaskRegistry timed out")
+            await context.abort(grpc.StatusCode.DEADLINE_EXCEEDED, "Sync task registry timed out")
+        except Exception as e:
+            logger.exception("SyncTaskRegistry failed: %s", e)
+            await context.abort(grpc.StatusCode.INTERNAL, str(e))
 
 
 def create_server(task_registry: TaskRegistry) -> tuple[grpc.aio.Server, TaskManagerServicer]:
