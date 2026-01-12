@@ -42,7 +42,6 @@ def init_shmem(
         local_ranks: The local ranks of the sidecars that will share the buffer, must be consecutive.
         num_local_sidecars: Total number of sidecars within the same node.
         partition_bytes: Number of bytes in the shared memory buffer used by each device/sidecar.
-        dtype: Data type of the shared memory buffer view. Defaults to uint8.
     """
     # sanity check device_ids
     for i in range(len(local_ranks) - 1):
