@@ -179,10 +179,7 @@ class SidecarServerConfig:
             filename=shm_filename(),
             local_ranks=self.node_info.get_local_ranks(self.group),
             num_local_sidecars=self.node_info.get_sidecar_num(),
-            partition_bytes=partition_bytes,
-            # We say uint8 here, but we'll cast to correct dtype later.
-            # This is to slice the returned slab by bytes.
-            dtype=torch.uint8,
+            partition_bytes=partition_bytes
         )
 
         sender_slab_bytes = slab[:sender_part_size]
