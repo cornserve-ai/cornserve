@@ -121,7 +121,6 @@ class Sidecar:
             local_ranks=[response.local_rank],
             num_local_sidecars=response.num_local_sidecars,
             partition_bytes=response.shm_size,
-            dtype=torch.uint8,
         )
 
         self.base_ptr = self.full_tensor.data_ptr()
