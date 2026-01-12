@@ -398,7 +398,7 @@ class TaskManager:
                         ],
                         resources=kclient.V1ResourceRequirements(
                             limits={
-                                "nvidia.com/gpu": len(gpus),
+                                "nvidia.com/gpu": str(len(gpus)),
                             }
                         ),
                         env=[
