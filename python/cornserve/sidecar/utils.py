@@ -56,7 +56,7 @@ def init_shmem(
         filename=filename,
         shared=True,
         size=total_element_count,
-        dtype=dtype,
+        dtype=torch.uint8,
     )
     start = partition_numel * local_ranks[0]
     end = partition_numel * (local_ranks[-1] + 1)
