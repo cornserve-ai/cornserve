@@ -32,7 +32,7 @@ def init_shmem(
     partition_bytes: int,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """Initialize a shared memory buffer between the sidecar client and server.
-    
+
     Returns the full tensor on the node and the slab used by the current sidecar group in `torch.uint8` type.
 
     All sidecars within the same node will share the same buffer but at different offsets.
@@ -48,6 +48,7 @@ def init_shmem(
     for i in range(len(local_ranks) - 1):
         assert local_ranks[i] + 1 == local_ranks[i + 1], "Device IDs must be consecutive"
 
+    dtype = torch.uint8
     element_size = dtype.itemsize
     assert partition_bytes % element_size == 0, "Partition bytes must be divisible by element size"
     partition_numel = partition_bytes // element_size
@@ -57,7 +58,7 @@ def init_shmem(
         filename=filename,
         shared=True,
         size=total_element_count,
-        dtype=torch.uint8,
+        dtype=dtype,
     )
     start = partition_numel * local_ranks[0]
     end = partition_numel * (local_ranks[-1] + 1)
