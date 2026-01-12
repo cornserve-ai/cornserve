@@ -30,7 +30,6 @@ def init_shmem(
     local_ranks: list[int],
     num_local_sidecars: int,
     partition_bytes: int,
-    dtype: torch.dtype = torch.uint8,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """Initialize a shared memory buffer between the sidecar client and server.
 
