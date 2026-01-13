@@ -145,7 +145,7 @@ class Qwen3OmniMoeCode2Wav(StreamGeriModel, nn.Module):
 
         # Each element of `prompt_embeds` has shape (seqlen, num_quantizers).
         # First, we transpose to (num_quantizers, seqlen).
-        prompt_embeds = [torch.transpose(embed, 0, 1).to(dtype=int) for embed in prompt_embeds]
+        prompt_embeds = [torch.transpose(embed, 0, 1) for embed in prompt_embeds]
 
         # To batch, we pad them all to the same seqlen and then stack them along dim 0.
         code_lens = [embed.shape[-1] for embed in prompt_embeds]
