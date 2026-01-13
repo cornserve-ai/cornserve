@@ -56,11 +56,7 @@ class ImageGeneratorTask(UnitTask[ImageGeneratorInput, ImageGeneratorOutput]):
 
     model_id: str
     max_batch_size: int = 1
-
-    @property
-    def modality(self) -> Modality:
-        """Modality of content this generator can create."""
-        return Modality.IMAGE
+    modality: Modality = Modality.IMAGE
 
     def make_record_output(
         self, task_input: ImageGeneratorInput
@@ -101,11 +97,7 @@ class AudioGeneratorTask(
 
     model_id: str
     max_batch_size: int = 1
-
-    @property
-    def modality(self) -> Modality:
-        """Modality of content this generator can create."""
-        return Modality.AUDIO
+    modality: Modality = Modality.AUDIO
 
     def make_record_output(
         self, task_input: AudioGeneratorInput
