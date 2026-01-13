@@ -18,8 +18,8 @@ class Modality(enum.StrEnum):
     AUDIO = "audio"
 
 
-class GeneratorInput(TaskInput):
-    """Input model for generator tasks.
+class ImageGeneratorInput(TaskInput):
+    """Input model for image generator tasks.
 
     Attributes:
         height: Height of the generated content in pixels.
@@ -36,34 +36,39 @@ class GeneratorInput(TaskInput):
     skip_tokens: int = 0
 
 
-class GeneratorOutput(TaskOutput):
-    """Output model for generator tasks.
+class ImageGeneratorOutput(TaskOutput):
+    """Output model for image generator tasks.
 
     Attributes:
-        generated: Generated content as bytes, encoded in base64. PNG for images.
+        generated: Generated content as bytes, encoded in base64 (PNG).
     """
 
     generated: str
 
 
-class GeneratorTask(UnitTask[GeneratorInput, GeneratorOutput]):
-    """A task that invokes a multimodal content generator.
+class ImageGeneratorTask(UnitTask[ImageGeneratorInput, ImageGeneratorOutput]):
+    """A task that invokes an image content generator.
 
     Attributes:
-        modality: Modality of content this generator can create.
         model_id: The ID of the model to use for the task.
         max_batch_size: Maximum batch size to use for the serving system.
     """
 
-    modality: Modality
     model_id: str
     max_batch_size: int = 1
 
-    def make_record_output(self, task_input: GeneratorInput) -> GeneratorOutput:
-        """Create a task output for task invocation recording."""
-        return GeneratorOutput(generated="")
+    @property
+    def modality(self) -> Modality:
+        """Modality of content this generator can create."""
+        return Modality.IMAGE
 
-    def validate_input(self, task_input: GeneratorInput) -> None:
+    def make_record_output(
+        self, task_input: ImageGeneratorInput
+    ) -> ImageGeneratorOutput:
+        """Create a task output for task invocation recording."""
+        return ImageGeneratorOutput(generated="")
+
+    def validate_input(self, task_input: ImageGeneratorInput) -> None:
         """Validate the input for the generator task."""
         if task_input.height <= 0 or task_input.width <= 0:
             raise ValueError("Height and width must be positive integers.")
@@ -78,7 +83,7 @@ class GeneratorTask(UnitTask[GeneratorInput, GeneratorOutput]):
 
 
 class AudioGeneratorInput(TaskInput):
-    """Input model for generator tasks."""
+    """Input model for audio generator tasks."""
 
     embeddings: DataForward[Tensor]
     chunk_size: int | None = None
@@ -88,16 +93,19 @@ class AudioGeneratorInput(TaskInput):
 class AudioGeneratorTask(
     UnitTask[AudioGeneratorInput, Stream[OpenAIChatCompletionChunk]]
 ):
-    """A task that invokes a multimodal content generator.
+    """A task that invokes an audio content generator.
     Attributes:
-        modality: Modality of content this generator can create.
         model_id: The ID of the model to use for the task.
         max_batch_size: Maximum batch size to use for the serving system.
     """
 
-    modality: Modality
     model_id: str
     max_batch_size: int = 1
+
+    @property
+    def modality(self) -> Modality:
+        """Modality of content this generator can create."""
+        return Modality.AUDIO
 
     def make_record_output(
         self, task_input: AudioGeneratorInput

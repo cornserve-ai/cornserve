@@ -12,9 +12,6 @@ from cornserve_tasklib.task.unit.generator import (
     AudioGeneratorInput,
     AudioGeneratorTask,
 )
-from cornserve_tasklib.task.unit.generator import (
-    Modality as GeneratorModality,
-)
 from cornserve_tasklib.task.unit.llm import (
     ChatCompletionMessageParam,
     OpenAIChatCompletionChunk,
@@ -77,9 +74,7 @@ class OmniTask(Task[OmniInput, Stream[OpenAIChatCompletionChunk]]):
         if self.vocoder_fission:
             self.talker_vocoder = None
             self.talker_embedding = OmniTalkerEmbeddingTask(model_id=self.model_id)
-            self.vocoder_geri = AudioGeneratorTask(
-                modality=GeneratorModality.AUDIO, model_id=self.model_id
-            )
+            self.vocoder_geri = AudioGeneratorTask(model_id=self.model_id)
         else:
             self.talker_vocoder = OmniTalkerVocoderTask(model_id=self.model_id)
             self.talker_embedding = None

@@ -25,9 +25,9 @@ from cornserve.task_executors.geri.api import (
 from cornserve_tasklib.task.unit.generator import (
     AudioGeneratorInput,
     AudioGeneratorTask,
-    GeneratorInput,
-    GeneratorOutput,
-    GeneratorTask,
+    ImageGeneratorInput,
+    ImageGeneratorOutput,
+    ImageGeneratorTask,
 )
 from cornserve_tasklib.task.unit.llm import OpenAIChatCompletionChunk
 
@@ -73,10 +73,12 @@ async def parse_geri_chunks(
             yield completion_obj.model_dump_json()
 
 
-class GeriDescriptor(
-    TaskExecutionDescriptor[GeneratorTask, GeneratorInput, GeneratorOutput]
+class ImageGeriDescriptor(
+    TaskExecutionDescriptor[
+        ImageGeneratorTask, ImageGeneratorInput, ImageGeneratorOutput
+    ]
 ):
-    """Task execution descriptor for Generator tasks.
+    """Task execution descriptor for Image Generator tasks.
 
     This descriptor handles launching Geri (multimodal generator) tasks and converting between
     the external task API types and internal executor types.
@@ -110,7 +112,9 @@ class GeriDescriptor(
         return f"{base}/{self.task.modality.value}/generate"
 
     def to_request(
-        self, task_input: GeneratorInput, task_output: GeneratorOutput
+        self,
+        task_input: ImageGeneratorInput,
+        task_output: ImageGeneratorOutput,
     ) -> dict[str, Any]:
         """Convert TaskInput to a request object for the task executor."""
         req = ImageGeriRequest(
@@ -123,8 +127,8 @@ class GeriDescriptor(
         return req.model_dump()
 
     async def from_response(
-        self, task_output: GeneratorOutput, response: aiohttp.ClientResponse
-    ) -> GeneratorOutput:
+        self, task_output: ImageGeneratorOutput, response: aiohttp.ClientResponse
+    ) -> ImageGeneratorOutput:
         """Convert the task executor response to TaskOutput."""
         response_data = await response.json()
         resp = BatchGeriResponse.model_validate(response_data)
@@ -132,7 +136,7 @@ class GeriDescriptor(
             if resp.generated is None:
                 raise RuntimeError("No generated content received from Geri")
 
-            return GeneratorOutput(generated=resp.generated)
+            return ImageGeneratorOutput(generated=resp.generated)
         else:
             raise RuntimeError(f"Error in generator task: {resp.error_message}")
 
@@ -142,7 +146,7 @@ class AudioGeriDescriptor(
         AudioGeneratorTask, AudioGeneratorInput, Stream[OpenAIChatCompletionChunk]
     ]
 ):
-    """Task execution descriptor for Generator tasks.
+    """Task execution descriptor for Audio Generator tasks.
     This descriptor handles launching Geri (multimodal generator) tasks and converting between
     the external task API types and internal executor types.
     """
