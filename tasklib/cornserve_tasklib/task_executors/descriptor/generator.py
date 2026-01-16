@@ -21,6 +21,7 @@ from cornserve.task_executors.geri.api import (
     Status,
     StreamGeriResponseChunk,
 )
+from openai.types.chat import ChatCompletionChunk
 
 from cornserve_tasklib.task.unit.generator import (
     AudioGeneratorInput,
@@ -69,7 +70,7 @@ async def parse_geri_chunks(
             }
 
             payload_str = json.dumps(payload_dict)
-            completion_obj = OpenAIChatCompletionChunk.model_validate_json(payload_str)
+            completion_obj = ChatCompletionChunk.model_validate_json(payload_str)
             yield completion_obj.model_dump_json()
 
 
