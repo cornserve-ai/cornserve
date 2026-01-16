@@ -32,8 +32,14 @@ spec:
         - name: cornserve-profiles
           mountPath: /etc/cornserve/profiles
           readOnly: true
+        - name: cornserve-logs
+          mountPath: /etc/cornserve/logs
       volumes:
       - name: cornserve-profiles
         configMap:
           name: cornserve-profiles
           optional: true
+      - name: cornserve-logs
+        hostPath:
+          path: /data/cornserve/logs
+          type: DirectoryOrCreate

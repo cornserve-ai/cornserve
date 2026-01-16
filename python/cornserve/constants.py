@@ -79,7 +79,11 @@ SYNC_WATCHERS_POLL_INTERVAL = 0.1  # seconds
 # Volume host paths.
 VOLUME_HF_CACHE = "/data/hfcache"
 VOLUME_SHM = "/dev/shm"
+VOLUME_K8S_LOG = "/data/cornserve/logs"
 VOLUME_VLLM_EXECUTOR_CACHE = "/data/cornserve/cache"
+
+# Task manager and task executor Logs
+K8S_LOG_DIR = "/etc/cornserve/logs"
 
 # Container's internal directory where tasklib modules are written for dynamic import.
 TASKLIB_DIR = "/tmp/cornserve_tasklib"

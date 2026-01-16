@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import os
+from datetime import datetime
+
 import kubernetes_asyncio.client as kclient
 
 from cornserve import constants
@@ -85,3 +88,24 @@ def to_strict_k8s_name(name: str) -> str:
         raise ValueError("Name cannot be empty after normalization.")
 
     return name
+
+
+async def save_pod_logs(kube_client: kclient.CoreV1Api, pod_name: str) -> None:
+    """Fetch and save the logs of a given pod to a file."""
+    try:
+        logs = await kube_client.read_namespaced_pod_log(
+            name=pod_name,
+            namespace=constants.K8S_NAMESPACE,
+        )
+
+        # Save to file
+        log_dir = constants.K8S_LOG_DIR
+        os.makedirs(log_dir, exist_ok=True)
+        timestamp = datetime.now().strftime("%Y%m%dT%H%M%S")
+        log_file = f"{log_dir}/{pod_name}_{timestamp}.log"
+
+        with open(log_file, "w") as f:
+            f.write(logs)
+        logger.info("Pod logs saved to %s", log_file)
+    except Exception as e:
+        logger.exception("Failed to save pod logs for %s: %s", pod_name, e)

@@ -15,7 +15,7 @@ import kubernetes_asyncio.config as kconfig
 from cornserve import constants
 from cornserve.logging import get_logger
 from cornserve.services.resource import GPU
-from cornserve.services.utils import to_strict_k8s_name
+from cornserve.services.utils import save_pod_logs, to_strict_k8s_name
 from cornserve.task.base import UnitTask
 from cornserve.task_executors.profile import UnitTaskProfileManager
 
@@ -537,6 +537,9 @@ class TaskManager:
 
         try:
             if pod_name := self.executor_pod_names.pop(executor_id, None):
+                logger.info("Saving pod logs for %s before deletion", pod_name)
+                await save_pod_logs(self.core_client, pod_name)
+
                 with suppress(kclient.ApiException):
                     await self.core_client.delete_namespaced_pod(
                         name=pod_name,

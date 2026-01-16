@@ -26,11 +26,10 @@ from cornserve.services.pb import (
 from cornserve.services.resource import GPU, CannotColocateError, Resource
 from cornserve.services.sidecar.launch import SidecarLaunchInfo
 from cornserve.services.task_registry import TaskRegistry
-from cornserve.services.utils import discover_task_dispatcher_replicas, to_strict_k8s_name
+from cornserve.services.utils import discover_task_dispatcher_replicas, save_pod_logs, to_strict_k8s_name
 from cornserve.sidecar.constants import grpc_url_from_rank
 from cornserve.task.base import UnitTask
 from cornserve.task_executors.profile import UnitTaskProfileManager
-from cornserve.utils import format_grpc_error
 
 logger = get_logger(__name__)
 tracer = trace.get_tracer(__name__)
@@ -85,6 +84,11 @@ class TaskManagerState:
                     await self.stub.Shutdown(shutdown_req)
             if self.channel is not None:
                 await self.channel.close()
+
+            # Save pod logs before deletion
+            if self.pod_name is not None:
+                logger.info("Saving pod logs for %s before deletion", self.pod_name)
+                await save_pod_logs(kube_client, self.pod_name)
 
             # Release GPU resources
             if self.resources is not None:
@@ -498,7 +502,7 @@ class ResourceManager:
                 state.deployment = deployment
                 logger.info("Successfully deployed unit task %s with task manager %s", task, deployment)
             except Exception as e:
-                logger.error("Failed to spawn task manager for %s: %s", task, e)
+                logger.exception("Failed to spawn task manager for %s: %s", task, e)
                 async with self.task_states_lock:
                     self.task_states.pop(task_manager_id, None)
                     if task_manager_id in self.unit_task_instance_names:
@@ -752,6 +756,10 @@ class ResourceManager:
                                     mount_path=constants.UNIT_TASK_PROFILES_DIR,
                                     read_only=True,
                                 ),
+                                kclient.V1VolumeMount(
+                                    name="cornserve-logs",
+                                    mount_path=constants.K8S_LOG_DIR,
+                                ),
                             ],
                         )
                     ],
@@ -761,6 +769,13 @@ class ResourceManager:
                             config_map=kclient.V1ConfigMapVolumeSource(
                                 name=constants.K8S_UNIT_TASK_PROFILES_CONFIG_MAP_NAME,
                                 optional=True,
+                            ),
+                        ),
+                        kclient.V1Volume(
+                            name="cornserve-logs",
+                            host_path=kclient.V1HostPathVolumeSource(
+                                path=constants.VOLUME_K8S_LOG,
+                                type="DirectoryOrCreate",
                             ),
                         ),
                     ],
@@ -832,13 +847,8 @@ class ResourceManager:
 
         except Exception as e:
             if isinstance(e, grpc.aio.AioRpcError):
-                # pretty print gRPC erros
-                logger.error("gRPC error while spawning task manager: %s", format_grpc_error(e))
                 await state.tear_down(self.kube_core_client)
-                raise RuntimeError(
-                    f"Failed to initialize spawned task manager for {task}: {format_grpc_error(e)}"
-                ) from e
-            logger.exception("Failed to spawn task manager: %s", e)
+                raise RuntimeError(f"gRPC error when spawning task manager for {task}") from e
             await state.tear_down(self.kube_core_client)
             raise RuntimeError(f"Failed to initialize spawned task manager for {task}: {e}") from e
 

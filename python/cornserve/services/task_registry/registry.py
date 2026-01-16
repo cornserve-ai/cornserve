@@ -399,7 +399,7 @@ class TaskRegistry:
 
             await asyncio.gather(*coroutines)
         except client.ApiException as e:
-            logger.error("Failed to list %s for purge: %s", plural, e)
+            logger.exception("Failed to list %s for purge: %s", plural, e)
             raise
 
     def _purge_local_registries_if_needed(self) -> None:

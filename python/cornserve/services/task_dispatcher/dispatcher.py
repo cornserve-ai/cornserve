@@ -144,7 +144,7 @@ class TaskDispatcher:
         results = await asyncio.gather(*coros, return_exceptions=True)
         for result in results:
             if isinstance(result, BaseException):
-                logger.error("Error occured while shutting down task dispatcher: %s", result)
+                logger.exception("Error occured while shutting down task dispatcher: %s", result)
 
         await self.client.close()
 

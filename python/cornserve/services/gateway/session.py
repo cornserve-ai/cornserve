@@ -42,7 +42,7 @@ class SessionManager:
         logger.info("Created session with ID: %s", session_id)
         return session_id
 
-    async def handle_request(self, session_id: str, request: dict) -> TaskResponse:
+    async def handle_request(self, session_id: str, request: dict) -> TaskResponse:  # noqa: PLR0911
         """Handle a request for a session.
 
         Args:
@@ -58,23 +58,28 @@ class SessionManager:
             except Exception:
                 logger.exception("Invalid request")
                 return TaskResponse(status=400, content="Invalid request")
-            if task_request.verb == TaskRequestVerb.DECLARE_USED:
-                logger.info("Declaring tasks as used: %s", task_request.task_list)
-                await self.task_manager.declare_used(task_request.get_tasks())
-                self.sessions[session_id].tasks.update({task.id: task for task in task_request.get_tasks()})
-                return TaskResponse(status=200, content="Tasks declared used")
-            elif task_request.verb == TaskRequestVerb.DECLARE_NOT_USED:
-                logger.info("Declaring tasks as not used: %s", task_request.task_list)
-                await self.task_manager.declare_not_used(task_request.get_tasks())
-                for task in task_request.get_tasks():
-                    if task.id in self.sessions[session_id].tasks:
-                        del self.sessions[session_id].tasks[task.id]
-                return TaskResponse(status=200, content="Tasks declared not used")
-            elif task_request.verb == TaskRequestVerb.HEARTBEAT:
-                return TaskResponse(status=200, content="Session is alive")
-            else:
-                logger.warning("Unknown method %s", task_request.verb)
-                return TaskResponse(status=400, content="Unknown method")
+
+            try:
+                if task_request.verb == TaskRequestVerb.DECLARE_USED:
+                    logger.info("Declaring tasks as used: %s", task_request.task_list)
+                    await self.task_manager.declare_used(task_request.get_tasks())
+                    self.sessions[session_id].tasks.update({task.id: task for task in task_request.get_tasks()})
+                    return TaskResponse(status=200, content="Tasks declared used")
+                elif task_request.verb == TaskRequestVerb.DECLARE_NOT_USED:
+                    logger.info("Declaring tasks as not used: %s", task_request.task_list)
+                    await self.task_manager.declare_not_used(task_request.get_tasks())
+                    for task in task_request.get_tasks():
+                        if task.id in self.sessions[session_id].tasks:
+                            del self.sessions[session_id].tasks[task.id]
+                    return TaskResponse(status=200, content="Tasks declared not used")
+                elif task_request.verb == TaskRequestVerb.HEARTBEAT:
+                    return TaskResponse(status=200, content="Session is alive")
+                else:
+                    logger.warning("Unknown method %s", task_request.verb)
+                    return TaskResponse(status=400, content="Unknown method")
+            except Exception:
+                logger.exception("Error handling request")
+                return TaskResponse(status=500, content="Internal server error")
 
     async def destroy_session(self, session_id: str) -> bool:
         """Destroy a session. Clean up all tasks in use by this session.

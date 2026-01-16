@@ -35,10 +35,6 @@ def format_grpc_error(error: AioRpcError) -> str:
     """Format a gRPC error for better readability."""
     status_code = error.code()
     details = error.details()
-    # debug_error_string = error.debug_error_string()
-    # encoded_error_string = debug_error_string.encode("utf-8", "ignore")
-    # formatted = encoded_error_string.decode("unicode_escape", "ignore")
-    # return f"Status Code: {status_code}\n  Details: {details}\n  Debug Error String: {formatted}"
     formatted = f"\nStatus Code: {status_code}\n  Details: {details}"
     formatted = formatted.replace("\n", "\t\n")
     return formatted
