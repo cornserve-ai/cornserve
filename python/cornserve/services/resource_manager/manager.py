@@ -846,10 +846,9 @@ class ResourceManager:
                     raise RuntimeError(f"Failed to sync task manager registry: {sync_resp}")
 
         except Exception as e:
-            if isinstance(e, grpc.aio.AioRpcError):
-                await state.tear_down(self.kube_core_client)
-                raise RuntimeError(f"gRPC error when spawning task manager for {task}") from e
             await state.tear_down(self.kube_core_client)
+            if isinstance(e, grpc.aio.AioRpcError):
+                raise RuntimeError(f"gRPC error when spawning task manager for {task}") from e
             raise RuntimeError(f"Failed to initialize spawned task manager for {task}: {e}") from e
 
         return UnitTaskDeployment(
