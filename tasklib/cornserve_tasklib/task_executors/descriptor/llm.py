@@ -53,11 +53,10 @@ async def parse_stream_to_completion_chunks(
             # Test validation
             try:
                 _ = OpenAIChatCompletionChunk.model_validate_json(line)
-            except Exception as e:
-                logger.error(
+            except Exception:
+                logger.exception(
                     "Failed to parse OpenAIChatCompletionChunk from line: %s", line
                 )
-                logger.exception(e)
                 break
 
             yield line

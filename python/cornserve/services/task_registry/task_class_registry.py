@@ -162,6 +162,14 @@ class TaskClassRegistry:
                     is_unit_task=is_unit_task,
                 )
                 logger.info("Registered pending task class: %s", task_class_name)
+                # Also bind any pending descriptors for this newly registered task
+                if is_unit_task:
+                    from cornserve.services.task_registry.descriptor_registry import (  # noqa: PLC0415
+                        DESCRIPTOR_REGISTRY,
+                    )
+
+                    task_cls, _, _ = self.get_unit_task(task_class_name)
+                    DESCRIPTOR_REGISTRY.bind_pending_descriptor_for_task_class(task_cls)
             except ModuleNotFoundError as e:
                 missing = getattr(e, "name", "") or str(e)
                 if isinstance(missing, str) and (

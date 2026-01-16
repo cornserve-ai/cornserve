@@ -173,10 +173,10 @@ class TaskManager:
             for resp, deployed_task in zip(responses, to_deploy, strict=True):
                 if isinstance(resp, AioRpcError):
                     # If the response is an AioRpcError, pretty print it
-                    logger.error("gRPC error while deploying task %s: \n%s", deployed_task, format_grpc_error(resp))
+                    logger.exception("gRPC error while deploying task %s: \n%s", deployed_task, format_grpc_error(resp))
                     errors.append(resp)
                 elif isinstance(resp, BaseException):
-                    logger.error("Error while deploying task: %s", resp)
+                    logger.exception("Error while deploying task: %s", resp)
                     errors.append(resp)
                 else:
                     deployed_tasks.append(deployed_task)
@@ -266,7 +266,7 @@ class TaskManager:
             errors: list[BaseException] = []
             for resp, task_id in zip(responses, to_teardown, strict=True):
                 if isinstance(resp, BaseException):
-                    logger.error("Error while tearing down: %r", resp)
+                    logger.exception("Error while tearing down: %r", resp)
                     errors.append(resp)
                 else:
                     del self.tasks[task_id]
@@ -297,7 +297,7 @@ class TaskManager:
             if response.status != common_pb2.Status.STATUS_OK:
                 raise RuntimeError(f"Failed to scale task {task_id} to update {num_gpus} GPUs: {response.message}")
         except Exception as e:
-            logger.error("Error while scaling unit task %s", task_id)
+            logger.exception("Error while scaling unit task %s", task_id)
             raise RuntimeError(f"Error while scaling unit task {task_id}: {e}") from e
 
     def list_tasks(self) -> list[tuple[UnitTask, str, TaskState]]:

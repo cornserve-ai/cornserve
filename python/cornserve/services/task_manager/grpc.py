@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import traceback
 
 import grpc
 
@@ -31,27 +32,34 @@ class TaskManagerServicer(task_manager_pb2_grpc.TaskManagerServicer):
         context: grpc.aio.ServicerContext,
     ) -> task_manager_pb2.RegisterTaskResponse:
         """Become a task manager for a new task."""
-        logger.info(
-            "Registering task manager %s with task CR name %s and %d GPUs",
-            request.task_manager_id,
-            request.task_instance_name,
-            len(request.gpus),
-        )
-
-        if not all(gpu.action == task_manager_pb2.ResourceAction.ADD for gpu in request.gpus):
-            await context.abort(
-                grpc.StatusCode.FAILED_PRECONDITION,
-                "When initializing the task manager, all resources actions must be ADD",
+        try:
+            logger.info(
+                "Registering task manager %s with task CR name %s and %d GPUs",
+                request.task_manager_id,
+                request.task_instance_name,
+                len(request.gpus),
             )
 
-        task = await self.task_registry.get_task_instance(request.task_instance_name)
-        gpus = [GPU(node=gpu.node_id, global_rank=gpu.global_rank, local_rank=gpu.local_rank) for gpu in request.gpus]
+            if not all(gpu.action == task_manager_pb2.ResourceAction.ADD for gpu in request.gpus):
+                await context.abort(
+                    grpc.StatusCode.FAILED_PRECONDITION,
+                    "When initializing the task manager, all resources actions must be ADD",
+                )
 
-        self.manager = await TaskManager.init(id=request.task_manager_id, task=task, gpus=gpus)
+            task = await self.task_registry.get_task_instance(request.task_instance_name)
+            gpus = [
+                GPU(node=gpu.node_id, global_rank=gpu.global_rank, local_rank=gpu.local_rank) for gpu in request.gpus
+            ]
 
-        logger.info("Successfully registered task manager %s", request.task_manager_id)
+            self.manager = await TaskManager.init(id=request.task_manager_id, task=task, gpus=gpus)
 
-        return task_manager_pb2.RegisterTaskResponse(status=common_pb2.Status.STATUS_OK)
+            logger.info("Successfully registered task manager %s", request.task_manager_id)
+
+            return task_manager_pb2.RegisterTaskResponse(status=common_pb2.Status.STATUS_OK)
+        except Exception as e:
+            logger.exception("Failed to register task manager: %s", e)
+            tb = traceback.format_exc()
+            await context.abort(grpc.StatusCode.INTERNAL, f"{str(e)}\n{tb}")
 
     async def UpdateResources(
         self,
