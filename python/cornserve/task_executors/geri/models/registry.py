@@ -29,6 +29,9 @@ class RegistryEntry:
     # Data type to run the model in
     torch_dtype: torch.dtype
 
+    # Data type of inputs passed to the model
+    input_dtype: torch.dtype
+
 
 # Keyed by HuggingFace model_index.json `_class_name` field
 # or by `model_type` field in config.json
@@ -39,6 +42,7 @@ MODEL_REGISTRY: dict[str, RegistryEntry] = {
         modalities=[Modality.IMAGE],
         geri_mode=GeriMode.BATCH,
         torch_dtype=torch.bfloat16,
+        input_dtype=torch.bfloat16,
     ),
     "qwen3_omni_moe": RegistryEntry(
         module="qwen3_omni_moe",
@@ -46,5 +50,6 @@ MODEL_REGISTRY: dict[str, RegistryEntry] = {
         modalities=[Modality.AUDIO],
         geri_mode=GeriMode.STREAMING,
         torch_dtype=torch.bfloat16,
+        input_dtype=torch.int64,
     ),
 }

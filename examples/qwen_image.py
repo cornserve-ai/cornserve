@@ -22,9 +22,8 @@ EOF
 from __future__ import annotations
 
 from cornserve_tasklib.task.unit.generator import (
-    GeneratorInput,
-    GeneratorTask,
-    Modality,
+    ImageGeneratorInput,
+    ImageGeneratorTask,
 )
 from cornserve_tasklib.task.unit.llm import (
     LLMEmbeddingUnitTask,
@@ -60,7 +59,7 @@ class QwenImageTask(Task[QwenImageInput, QwenImageOutput]):
     def post_init(self) -> None:
         """Initialize subtasks."""
         self.text_encoder = LLMEmbeddingUnitTask(model_id="Qwen/Qwen2.5-VL-7B-Instruct", receive_embeddings=False)
-        self.generator = GeneratorTask(modality=Modality.IMAGE, model_id="Qwen/Qwen-Image")
+        self.generator = ImageGeneratorTask(model_id="Qwen/Qwen-Image")
 
         # These two parameters are specific to Qwen/Qwen-Image and should not be changed.
         self.system_prompt = (
@@ -82,7 +81,7 @@ class QwenImageTask(Task[QwenImageInput, QwenImageOutput]):
             )
         )
         encoder_output = self.text_encoder.invoke(encoder_input)
-        generator_input = GeneratorInput(
+        generator_input = ImageGeneratorInput(
             height=task_input.height,
             width=task_input.width,
             num_inference_steps=task_input.num_inference_steps,

@@ -7,13 +7,18 @@ from typing import Any, Literal
 from cornserve.task.base import Stream, Task
 
 from cornserve_tasklib.task.composite.llm import MLLMEmbeddingTask, MLLMTask
-from cornserve_tasklib.task.unit.encoder import Modality
+from cornserve_tasklib.task.unit.encoder import Modality as EncoderModality
+from cornserve_tasklib.task.unit.generator import (
+    AudioGeneratorInput,
+    AudioGeneratorTask,
+)
 from cornserve_tasklib.task.unit.llm import (
     ChatCompletionMessageParam,
     OpenAIChatCompletionChunk,
     OpenAIChatCompletionRequest,
 )
 from cornserve_tasklib.task.unit.omni import (
+    OmniTalkerEmbeddingTask,
     OmniTalkerVocoderInput,
     OmniTalkerVocoderTask,
 )
@@ -47,8 +52,9 @@ class OmniTask(Task[OmniInput, Stream[OpenAIChatCompletionChunk]]):
     model_id: Literal["Qwen/Qwen3-Omni-30B-A3B-Instruct"] = (
         "Qwen/Qwen3-Omni-30B-A3B-Instruct"
     )
-    modalities: list[Modality] = []
+    modalities: list[EncoderModality] = []
     encoder_fission: bool = True
+    vocoder_fission: bool = True
     coalesce_encoder_invocations: bool = True
 
     def post_init(self) -> None:
@@ -65,7 +71,14 @@ class OmniTask(Task[OmniInput, Stream[OpenAIChatCompletionChunk]]):
             modalities=self.modalities,
             coalesce_encoder_invocations=self.coalesce_encoder_invocations,
         )
-        self.talker_vocoder = OmniTalkerVocoderTask(model_id=self.model_id)
+        if self.vocoder_fission:
+            self.talker_vocoder = None
+            self.talker_embedding = OmniTalkerEmbeddingTask(model_id=self.model_id)
+            self.vocoder_geri = AudioGeneratorTask(model_id=self.model_id)
+        else:
+            self.talker_vocoder = OmniTalkerVocoderTask(model_id=self.model_id)
+            self.talker_embedding = None
+            self.vocoder_geri = None
 
     def invoke(self, task_input: OmniInput) -> Stream[OpenAIChatCompletionChunk]:
         """Invoke the task.
@@ -96,4 +109,14 @@ class OmniTask(Task[OmniInput, Stream[OpenAIChatCompletionChunk]]):
             )
         )
 
+        if self.vocoder_fission:
+            assert self.talker_embedding is not None
+            assert self.vocoder_geri is not None
+            talker_embedding_output = self.talker_embedding.invoke(talker_input)
+            vocoder_input = AudioGeneratorInput(
+                embeddings=talker_embedding_output.embeddings,
+            )
+            return self.vocoder_geri.invoke(vocoder_input)
+
+        assert self.talker_vocoder is not None
         return self.talker_vocoder.invoke(talker_input)
