@@ -93,7 +93,7 @@ class EngineClient:
             SidecarConfig(
                 sidecar_rank=sorted(config.sidecar.ranks)[0],
                 group=sorted(config.sidecar.ranks),
-                recv_tensor_dtype=registry_entry.torch_dtype,
+                recv_tensor_dtype=registry_entry.input_dtype,
                 recv_tensor_shape=(-1, embedding_dim),
             )
         )
