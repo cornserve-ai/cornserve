@@ -13,6 +13,9 @@ RUN apt-get update -y \
         ibverbs-providers \
         librdmacm-dev \
         build-essential \
+        ffmpeg \
+        libsm6 \
+        libxext6 \
     && curl -LsSf https://astral.sh/uv/install.sh | sh \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
