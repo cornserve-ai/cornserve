@@ -13,7 +13,9 @@ COPY --from=builder /tmp/wheels/*.whl /tmp/wheels/
 RUN pip install --no-cache-dir /tmp/wheels/*.whl && rm -rf /tmp/wheels
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends build-essential \
+    && apt-get install -y --no-install-recommends \
+    build-essential \
+    ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
 ADD ./python /workspace/cornserve/python
