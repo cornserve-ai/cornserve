@@ -7,6 +7,8 @@ import uuid
 from fastapi import APIRouter, FastAPI, HTTPException, Request, Response, status
 from fastapi.responses import StreamingResponse
 from opentelemetry import trace
+from opentelemetry.propagate import extract
+from opentelemetry.context import attach, detach
 
 from cornserve.logging import get_logger
 from cornserve.task_executors.geri.api import (
@@ -21,7 +23,6 @@ from cornserve.task_executors.geri.engine.client import EngineClient
 router = APIRouter()
 logger = get_logger(__name__)
 tracer = trace.get_tracer(__name__)
-
 
 @router.get("/health")
 async def health_check(request: Request) -> Response:
@@ -48,20 +49,43 @@ async def generate_image(
 
     try:
         request_id = uuid.uuid4().hex
-        trace.get_current_span().set_attribute("request_id", request_id)
-        response = await engine_client.generate_batch(request_id, request)
+        body = await raw_request.json()
+        logger.info(f"{body}")
+        tp = body.get("traceparent")
+        logger.info(f"{tp}")
+        with tracer.start_as_current_span(
+                "geri.image.generate",
+                context=extract({"traceparent": tp})
+            ) as span:
+                logger.info(f"TRACE DATA context {span}")
+                span.set_attribute("request_id", request_id)
 
-        # Set appropriate HTTP status code
-        match response.status:
-            case Status.SUCCESS:
-                raw_response.status_code = status.HTTP_200_OK
-            case Status.ERROR:
-                raw_response.status_code = status.HTTP_500_INTERNAL_SERVER_ERROR
-            case _:
-                logger.error("Unexpected status: %s", response.status)
-                raw_response.status_code = status.HTTP_500_INTERNAL_SERVER_ERROR
+                response = await engine_client.generate_batch(request_id, request)
 
-        return response
+                match response.status:
+                    case Status.SUCCESS:
+                        raw_response.status_code = status.HTTP_200_OK
+                    case Status.ERROR:
+                        raw_response.status_code = status.HTTP_500_INTERNAL_SERVER_ERROR
+                    case _:
+                        raw_response.status_code = status.HTTP_500_INTERNAL_SERVER_ERROR
+
+                return response
+
+        # trace.get_current_span().set_attribute("request_id", request_id)
+        # response = await engine_client.generate_batch(request_id, request)
+        #
+        # # Set appropriate HTTP status code
+        # match response.status:
+        #     case Status.SUCCESS:
+        #         raw_response.status_code = status.HTTP_200_OK
+        #     case Status.ERROR:
+        #         raw_response.status_code = status.HTTP_500_INTERNAL_SERVER_ERROR
+        #     case _:
+        #         logger.error("Unexpected status: %s", response.status)
+        #         raw_response.status_code = status.HTTP_500_INTERNAL_SERVER_ERROR
+        #
+        # return response
 
     except Exception as e:
         logger.exception("Image generation request failed: %s", str(e))

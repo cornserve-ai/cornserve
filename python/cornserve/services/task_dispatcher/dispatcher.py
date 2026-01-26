@@ -12,6 +12,8 @@ from typing import Any
 import aiohttp
 import grpc
 from opentelemetry import trace
+from opentelemetry.trace import set_span_in_context
+from opentelemetry.propagate import inject
 from pydantic import BaseModel
 
 from cornserve.logging import get_logger
@@ -255,6 +257,8 @@ class TaskDispatcher:
                 producer_forwards[producer_forward.id] = producer_forward
 
         logger.info("Connected all DataForward objects in task invocations")
+        logger.info(task_executions)
+        logger.info(span.get_span_context())
 
         # Verify whether all `DataForward` objects are properly connected
         for data_forward in producer_forwards.values():
@@ -271,6 +275,9 @@ class TaskDispatcher:
                         task_input=execution.invocation.task_input,
                         task_output=execution.invocation.task_output,
                     )
+                    ctx = set_span_in_context(span)
+                    inject(request, context=ctx)
+                    logger.info(f"REQUEST {request}")
                     dispatch_coros.append(tg.create_task(self._execute_unit_task(execution, request)))
         except (ExceptionGroup, Exception) as e:
             logger.exception("Error while invoking task")
