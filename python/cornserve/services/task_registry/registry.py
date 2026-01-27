@@ -26,6 +26,7 @@ from cornserve.constants import (
     CR_NAME_LATEST_TASKLIB_RV,
     CRD_GROUP,
     CRD_KIND_EXECUTION_DESCRIPTOR,
+    CRD_KIND_LATEST_TASKLIB_RV,
     CRD_KIND_TASK_DEFINITION,
     CRD_KIND_UNIT_TASK_INSTANCE,
     CRD_PLURAL_EXECUTION_DESCRIPTORS,
@@ -73,6 +74,52 @@ class TaskRegistry:
 
         self._api_client = client.ApiClient()
         self._custom_api = client.CustomObjectsApi(self._api_client)
+
+    async def ensure_latest_tasklib_rv_cr_exists(
+        self, *, namespace: str = K8S_NAMESPACE, name: str = CR_NAME_LATEST_TASKLIB_RV
+    ) -> None:
+        """Ensure the LatestTasklibRV singleton CR exists."""
+        await self._load_config()
+        assert self._custom_api is not None
+
+        # Fast path: if CR exists, return
+        try:
+            await self._custom_api.get_namespaced_custom_object(
+                group=CRD_GROUP,
+                version=CRD_VERSION,
+                namespace=namespace,
+                plural=CRD_PLURAL_LATEST_TASKLIB_RVS,
+                name=name,
+            )
+            return  # already exists
+        except client.ApiException as e:
+            # 404 means the CR haven't been deployed yet
+            if getattr(e, "status", None) != 404:
+                # Unexpected error
+                raise
+
+        body = {
+            "apiVersion": f"{CRD_GROUP}/{CRD_VERSION}",
+            "kind": CRD_KIND_LATEST_TASKLIB_RV,
+            "metadata": {"name": name, "namespace": namespace},
+            "spec": {
+                CR_KEY_MAX_TASK_CLASS_RV: 0,
+                CR_KEY_MAX_DESCRIPTOR_RV: 0,
+            },
+        }
+
+        try:
+            await self._custom_api.create_namespaced_custom_object(
+                group=CRD_GROUP,
+                version=CRD_VERSION,
+                namespace=namespace,
+                plural=CRD_PLURAL_LATEST_TASKLIB_RVS,
+                body=body,
+            )
+            logger.info("Created LatestTasklibRV singleton CR.")
+        except client.ApiException as e:
+            logger.error("Failed to initialize LatestTasklibRV singleton CR: %s", e)
+            raise
 
     async def update_latest_tasklib_rv(
         self,

@@ -36,9 +36,10 @@ async def serve() -> None:
 
     app = create_app()
 
-    # Start task watcher to load tasks from Custom Resources BEFORE starting FastAPI
     logger.info("Starting task watcher for Gateway service")
     task_registry: TaskRegistry = app.state.task_registry
+    await task_registry.ensure_latest_tasklib_rv_cr_exists()
+    # Start task watcher to load tasks from Custom Resources BEFORE starting FastAPI
     cr_watcher_task = asyncio.create_task(task_registry.watch_updates(), name="gateway_cr_watcher")
     FastAPIInstrumentor.instrument_app(app, exclude_spans=["send", "receive"])
 
