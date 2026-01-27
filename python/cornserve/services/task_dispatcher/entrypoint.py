@@ -36,13 +36,13 @@ async def serve() -> None:
     task_registry = TaskRegistry()
     cr_watcher_task = asyncio.create_task(task_registry.watch_updates(), name="task_dispatcher_cr_watcher")
 
-    # FastAPI server
-    app = create_app()
-
-    FastAPIInstrumentor.instrument_app(app)
     AioHttpClientInstrumentor().instrument()
     GrpcInstrumentorClient().instrument()
     GrpcInstrumentorServer().instrument()
+    # FastAPI server
+    app = create_app()
+
+    FastAPIInstrumentor.instrument_app(app, exclude_spans=["send", "receive"])
 
     logger.info("Available HTTP routes are:")
     for route in app.routes:

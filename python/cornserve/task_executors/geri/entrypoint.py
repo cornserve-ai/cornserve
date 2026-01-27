@@ -27,7 +27,7 @@ async def serve(geri_config: GeriConfig) -> None:
 
     app = create_app(geri_config)
 
-    FastAPIInstrumentor().instrument_app(app)
+    FastAPIInstrumentor().instrument_app(app, exclude_spans=["send", "receive"])
     ThreadingInstrumentor().instrument()
 
     logger.info("Available routes are:")
