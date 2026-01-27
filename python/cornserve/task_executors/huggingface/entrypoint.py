@@ -34,7 +34,7 @@ async def serve(config: HuggingFaceConfig) -> None:
     app = create_app(config)
 
     # Instrument with OpenTelemetry
-    FastAPIInstrumentor().instrument_app(app)
+    FastAPIInstrumentor.instrument_app(app, exclude_spans=["send", "receive"])
 
     # Log available routes
     logger.info("Available routes:")

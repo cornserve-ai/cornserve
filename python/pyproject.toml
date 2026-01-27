@@ -89,7 +89,7 @@ eric-no-gpu = [
   "opentelemetry-instrumentation-fastapi",
   "opentelemetry-instrumentation-threading",
 ]
-eric = ["flash-attn==2.7.4.post1", "xformers==0.0.33", "cornserve[eric-no-gpu]"]
+eric = ["flash-attn==2.7.4.post1", "xformers==0.0.33.post1", "cornserve[eric-no-gpu]"]
 eric-audio = ["cornserve[eric,audio]"]
 geri-no-gpu = [
   "fastapi",
