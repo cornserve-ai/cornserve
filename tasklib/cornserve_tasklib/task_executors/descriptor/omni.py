@@ -27,7 +27,6 @@ async def parse_stream_to_audio_chunks(
     response: aiohttp.ClientResponse,
 ) -> AsyncGenerator[str]:
     """Parse the streaming response into audio chunks."""
-    assert not response.closed, "Response must not be closed when parsing."
     try:
         buffer = b""
         # Read in larger chunks to avoid "Chunk too big" error with large base64-encoded audio
@@ -57,7 +56,8 @@ async def parse_stream_to_audio_chunks(
                 chunk = OpenAIChatCompletionChunk.model_validate_json(line)
                 yield chunk.model_dump_json()
     finally:
-        response.close()
+        if not response.closed:
+            response.close()
 
 
 class OmniTalkerVocoderDescriptor(

@@ -257,7 +257,8 @@ class EngineClient:
             else:
                 logger.info("Error detected for request %s", request_id)
                 break
-
+        # Attempt to free all sidecar buffers associated with this request
+        await self.sidecar.mark_done_all(request.embedding_data_id)
         # Cleanup
         self.pending_streams.pop(request_id)
 

@@ -22,6 +22,9 @@ from cornserve.services.sidecar.shm_manager import (
     SharedMemoryManager,
 )
 from cornserve.sidecar.constants import (
+    GRPC_RETRY_BACKOFF_MULTIPLIER,
+    GRPC_RETRY_INITIAL_BACKOFF_SECONDS,
+    GRPC_RETRY_MAX_ATTEMPTS,
     chunk_tag,
     grpc_url_from_rank,
     shm_filename,
@@ -396,7 +399,35 @@ class SidecarReceiver:
             )
             stub = self._get_grpc_stub(chunk_state.intra_node_rank)
             unlink_req = sidecar_pb2.UnlinkRequest(id=mark_done_req.id, chunk_id=mark_done_req.chunk_id)
-            res = await stub.Unlink(unlink_req)
+            res = None
+            for attempt in range(GRPC_RETRY_MAX_ATTEMPTS):
+                try:
+                    res = await stub.Unlink(unlink_req)
+                    break
+                except grpc.RpcError as e:
+                    code = e.code()
+                    if (
+                        code in (grpc.StatusCode.CANCELLED, grpc.StatusCode.UNAVAILABLE)
+                        and attempt < GRPC_RETRY_MAX_ATTEMPTS - 1
+                    ):
+                        backoff_delay = GRPC_RETRY_INITIAL_BACKOFF_SECONDS * (GRPC_RETRY_BACKOFF_MULTIPLIER**attempt)
+                        logger.warning(
+                            "Unlink retry %d for req %s chunk %d in rank %d due to %s, waiting %.3fs",
+                            attempt + 1,
+                            mark_done_req.id,
+                            mark_done_req.chunk_id,
+                            chunk_state.intra_node_rank,
+                            code.name,
+                            backoff_delay,
+                        )
+                        await asyncio.sleep(backoff_delay)
+                        continue
+                    raise
+            if res is None:
+                await context.abort(
+                    grpc.StatusCode.INTERNAL,
+                    f"Failed to unlink for id {mark_done_req.id}: no response received",
+                )
             if res.status != common_pb2.Status.STATUS_OK:
                 await context.abort(grpc.StatusCode.INTERNAL, "Failed to unlink intra node memory")
         else:
@@ -413,3 +444,117 @@ class SidecarReceiver:
             # last chunk
             del self.ledger[mark_done_req.id]
         return sidecar_pb2.MarkDoneResponse(status=common_pb2.Status.STATUS_OK)
+
+    @tracer.start_as_current_span(name="SidecarReceiver.mark_done_all")
+    async def mark_done_all(
+        self,
+        mark_done_all_req: sidecar_pb2.MarkDoneAllRequest,
+        context: grpc.aio.ServicerContext,
+    ) -> sidecar_pb2.MarkDoneAllResponse:
+        """Mark all chunks of a request as done to free the shared memory buffers.
+
+        This is a convenience method that calls mark_done for all chunks of a given data_id.
+        It handles both tensor chunks (RecvTensorState) and object chunks (RecvObjState).
+        """
+        span = trace.get_current_span()
+        span.set_attribute("SidecarReceiver.mark_done_all.id", mark_done_all_req.id)
+
+        if mark_done_all_req.id not in self.ledger:
+            logger.error("mark_done_all: %s not found", mark_done_all_req.id)
+            await context.abort(grpc.StatusCode.NOT_FOUND, "mark_done_all_req not found")
+
+        req_state = self.ledger[mark_done_all_req.id]
+        num_chunks = req_state.num_chunks
+        num_chunks_marked = 0
+
+        logger.info("mark_done_all: marking %d chunks for id %s", num_chunks, mark_done_all_req.id)
+
+        # Group chunks by type and intra_node_rank for efficient processing
+        intra_node_ranks: set[int] = set()
+        local_tensor_buffers: list[tuple[int, RecvTensorState]] = []
+
+        # First pass: categorize chunks
+        for chunk_id in range(num_chunks):
+            if chunk_id not in req_state.chunks:
+                logger.warning("mark_done_all: chunk %d not found for id %s, skipping", chunk_id, mark_done_all_req.id)
+                continue
+
+            chunk_state = req_state.chunks[chunk_id]
+
+            if isinstance(chunk_state, RecvObjState):
+                # Object chunk - just delete it
+                del req_state.chunks[chunk_id]
+                num_chunks_marked += 1
+            elif isinstance(chunk_state, RecvTensorState):
+                # Tensor chunk - categorize by whether it needs unlinking
+                if chunk_state.intra_node_rank >= 0:
+                    intra_node_ranks.add(chunk_state.intra_node_rank)
+                else:
+                    local_tensor_buffers.append((chunk_id, chunk_state))
+                num_chunks_marked += 1
+
+        # Unlink all intra-node tensors per rank
+        for rank in intra_node_ranks:
+            logger.debug(
+                "mark_done_all: calling UnlinkAll for id %s in rank %d",
+                mark_done_all_req.id,
+                rank,
+            )
+            stub = self._get_grpc_stub(rank)
+            unlink_all_req = sidecar_pb2.UnlinkAllRequest(id=mark_done_all_req.id)
+            res = None
+            for attempt in range(GRPC_RETRY_MAX_ATTEMPTS):
+                try:
+                    res = await stub.UnlinkAll(unlink_all_req)
+                    break
+                except grpc.RpcError as e:
+                    code = e.code()
+                    if (
+                        code in (grpc.StatusCode.CANCELLED, grpc.StatusCode.UNAVAILABLE)
+                        and attempt < GRPC_RETRY_MAX_ATTEMPTS - 1
+                    ):
+                        backoff_delay = GRPC_RETRY_INITIAL_BACKOFF_SECONDS * (GRPC_RETRY_BACKOFF_MULTIPLIER**attempt)
+                        logger.warning(
+                            "UnlinkAll retry %d for req %s in rank %d due to %s, waiting %.3fs",
+                            attempt + 1,
+                            mark_done_all_req.id,
+                            rank,
+                            code.name,
+                            backoff_delay,
+                        )
+                        await asyncio.sleep(backoff_delay)
+                        continue
+                    raise
+
+            if res is None:
+                await context.abort(
+                    grpc.StatusCode.INTERNAL,
+                    f"Failed to unlink all for id {mark_done_all_req.id} in rank {rank}: no response received",
+                )
+            if res.status != common_pb2.Status.STATUS_OK:
+                await context.abort(grpc.StatusCode.INTERNAL, f"Failed to unlink all intra node memory in rank {rank}")
+            logger.debug(
+                "mark_done_all: UnlinkAll succeeded for id %s in rank %d, unlinked %d chunks",
+                mark_done_all_req.id,
+                rank,
+                res.num_chunks_unlinked,
+            )
+
+        # Third pass: free local buffers
+        for chunk_id, chunk_state in local_tensor_buffers:
+            await self._free(chunk_state.buffer)
+            logger.debug(
+                "mark_done_all: Freed up %d slots from %s chunk %d",
+                len(chunk_state.buffer.slots),
+                mark_done_all_req.id,
+                chunk_id,
+            )
+
+        # Clean up the ledger entry
+        del self.ledger[mark_done_all_req.id]
+        logger.info("mark_done_all: marked %d/%d chunks for id %s", num_chunks_marked, num_chunks, mark_done_all_req.id)
+
+        return sidecar_pb2.MarkDoneAllResponse(
+            status=common_pb2.Status.STATUS_OK,
+            num_chunks_marked=num_chunks_marked,
+        )
