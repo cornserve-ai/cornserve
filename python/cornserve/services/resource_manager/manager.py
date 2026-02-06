@@ -306,7 +306,7 @@ class ResourceManager:
         span.set_attribute("resource_manager.scale_up_unit_task.num_gpus", num_gpus)
 
         # Check if the number of GPUs to scale up is valid
-        profile = self.profile_manager.get_profile(task)
+        profile = await self.profile_manager.get_profile(task)
         if num_gpus < min(profile.num_gpus_to_profile.keys()):
             logger.warning(
                 "Requested %d GPUs to scale up task %s, but minimum required is %d GPUs according to the profile: %s",
@@ -706,7 +706,7 @@ class ResourceManager:
 
         try:
             # Get GPU requirements from profile
-            profile = self.profile_manager.get_profile(task)
+            profile = await self.profile_manager.get_profile(task)
 
             # Start off the task manager with the minimum number of GPUs required
             num_gpus = min(profile.num_gpus_to_profile.keys())
@@ -752,11 +752,6 @@ class ResourceManager:
                             ],
                             volume_mounts=[
                                 kclient.V1VolumeMount(
-                                    name="cornserve-profiles",
-                                    mount_path=constants.UNIT_TASK_PROFILES_DIR,
-                                    read_only=True,
-                                ),
-                                kclient.V1VolumeMount(
                                     name="cornserve-logs",
                                     mount_path=constants.K8S_LOG_DIR,
                                 ),
@@ -764,13 +759,6 @@ class ResourceManager:
                         )
                     ],
                     volumes=[
-                        kclient.V1Volume(
-                            name="cornserve-profiles",
-                            config_map=kclient.V1ConfigMapVolumeSource(
-                                name=constants.K8S_UNIT_TASK_PROFILES_CONFIG_MAP_NAME,
-                                optional=True,
-                            ),
-                        ),
                         kclient.V1Volume(
                             name="cornserve-logs",
                             host_path=kclient.V1HostPathVolumeSource(

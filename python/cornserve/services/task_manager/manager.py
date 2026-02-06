@@ -61,15 +61,10 @@ class TaskManager:
         self.task_executor_healthy_timeout = constants.K8S_TASK_EXECUTOR_HEALTHY_TIMEOUT
 
         # We only save the profile manager here so that profiles could be updated dynamically
-        self.task_profile_manager = UnitTaskProfileManager(profile_dir=constants.UNIT_TASK_PROFILES_DIR)
+        self.task_profile_manager = UnitTaskProfileManager()
 
         # Round robin routing
         self.rr_counter = 0
-
-    @property
-    def task_profile(self):
-        """Get the unit task profile for the managed task."""
-        return self.task_profile_manager.get_profile(self.task)
 
     @classmethod
     async def init(cls, id: str, task: UnitTask, gpus: list[GPU]) -> TaskManager:
@@ -179,7 +174,8 @@ class TaskManager:
             # |         7 | 1 x 4 GPUs + 1 x 2 GPUs + 1 x 1 GPU |
             # |         8 | 2 x 4 GPUs                          |
             # |-----------|-------------------------------------|
-            feasible_num_gpus = sorted(self.task_profile.num_gpus_to_profile.keys(), reverse=True)
+            task_profile = await self.task_profile_manager.get_profile(self.task)
+            feasible_num_gpus = sorted(task_profile.num_gpus_to_profile.keys(), reverse=True)
             assert feasible_num_gpus, "Task profile must have at least one feasible number of GPUs"
 
             # Determine task executors to spawn based on the free GPUs
@@ -347,12 +343,13 @@ class TaskManager:
 
         # Container arguments are created from the execution descriptor and the task profile
         container_args = self.descriptor.get_container_args(gpus, port)
+        task_profile = await self.task_profile_manager.get_profile(self.task)
         try:
-            container_args += self.task_profile.num_gpus_to_profile[len(gpus)].launch_args
+            container_args += task_profile.num_gpus_to_profile[len(gpus)].launch_args
         except KeyError as e:
             raise RuntimeError(
                 f"Cannot spawn task executor with {len(gpus)} GPUs because the unit task profile "
-                f"does not support that number of GPUs. Unit task profile: {self.task_profile}"
+                f"does not support that number of GPUs. Unit task profile: {task_profile}"
             ) from e
 
         logger.info(

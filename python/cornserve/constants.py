@@ -88,9 +88,6 @@ K8S_LOG_DIR = "/etc/cornserve/logs"
 # Container's internal directory where tasklib modules are written for dynamic import.
 TASKLIB_DIR = "/tmp/cornserve_tasklib"
 
-# Unit task profiles mounted here with a ConfigMap.
-UNIT_TASK_PROFILES_DIR = "/etc/cornserve/profiles"
-K8S_UNIT_TASK_PROFILES_CONFIG_MAP_NAME = "cornserve-profiles"
 
 # Container images name construction.
 if TYPE_CHECKING:
@@ -111,12 +108,14 @@ CRD_VERSION = "v1"
 # CR plural names (must match the spec.names.plural in CRD files)
 CRD_PLURAL_TASK_DEFINITIONS = "taskdefinitions"
 CRD_PLURAL_UNIT_TASK_INSTANCES = "unittaskinstances"
+CRD_PLURAL_UNIT_TASK_PROFILES = "unittaskprofiles"
 CRD_PLURAL_EXECUTION_DESCRIPTORS = "executiondescriptors"
 CRD_PLURAL_LATEST_TASKLIB_RVS = "latesttasklibrvs"
 
 # CR kind names (must match spec.names.kind in CRD files)
 CRD_KIND_TASK_DEFINITION = "TaskDefinition"
 CRD_KIND_UNIT_TASK_INSTANCE = "UnitTaskInstance"
+CRD_KIND_UNIT_TASK_PROFILE = "UnitTaskProfile"
 CRD_KIND_EXECUTION_DESCRIPTOR = "ExecutionDescriptor"
 CRD_KIND_LATEST_TASKLIB_RV = "LatestTasklibRV"
 

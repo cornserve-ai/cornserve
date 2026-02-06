@@ -96,3 +96,16 @@ class TasksDeploymentRequest(BaseModel):
 
     task_definitions: list[TaskDefinitionPayload] = []
     descriptor_definitions: list[DescriptorDefinitionPayload] = []
+
+
+class ProfileDeploymentPayload(BaseModel):
+    """Payload for a single unit task profile."""
+
+    task: dict[str, Any]
+    num_gpus_to_profile: dict[str, dict[str, Any]]
+
+
+class ProfilesDeploymentRequest(BaseModel):
+    """Request to deploy unit task profiles."""
+
+    profiles: list[ProfileDeploymentPayload]

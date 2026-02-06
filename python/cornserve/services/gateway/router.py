@@ -33,6 +33,7 @@ from cornserve.services.gateway.app.manager import AppManager
 from cornserve.services.gateway.models import (
     AppInvocationRequest,
     AppRegistrationRequest,
+    ProfilesDeploymentRequest,
     RegistrationErrorResponse,
     RegistrationFinalResponse,
     RegistrationInitialResponse,
@@ -50,6 +51,7 @@ from cornserve.services.pb import (
 from cornserve.services.task_registry import TaskRegistry
 from cornserve.services.utils import discover_task_dispatcher_replicas
 from cornserve.task.base import Stream, TaskGraphDispatch, TaskOutput, UnitTaskList, task_manager_context
+from cornserve.task_executors.profile import UnitTaskProfileManager
 
 router = APIRouter()
 logger = get_logger(__name__)
@@ -391,6 +393,9 @@ def init_app_state(app: FastAPI) -> None:
     # Create registry for handling unit task instance names
     app.state.task_registry = TaskRegistry()
 
+    # Create profile manager for handling unit task profiles
+    app.state.profile_manager = UnitTaskProfileManager()
+
     # Pass registry to TaskManager for task-based deployment
     app.state.task_manager = TaskManager(K8S_RESOURCE_MANAGER_GRPC_URL, app.state.task_registry)
     app.state.app_manager = AppManager(app.state.task_manager)
@@ -494,6 +499,26 @@ async def deploy_tasks(request: TasksDeploymentRequest, raw_request: Request):
         return {"status": "ok"}
     except Exception as e:
         logger.exception("Failed to deploy tasks")
+        return Response(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, content=str(e))
+
+
+@router.post("/deploy-profiles")
+async def deploy_profiles(request: ProfilesDeploymentRequest, raw_request: Request):
+    """Deploy unit task profiles as CRs."""
+    profile_manager: UnitTaskProfileManager = raw_request.app.state.profile_manager
+
+    try:
+        results = []
+        for profile_payload in request.profiles:
+            profile_name = await profile_manager.create_profile(
+                task_dict=profile_payload.task,
+                num_gpus_to_profile=profile_payload.num_gpus_to_profile,
+            )
+            results.append(profile_name)
+
+        return {"status": "ok", "deployed_profiles": results}
+    except Exception as e:
+        logger.exception("Failed to deploy profiles")
         return Response(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, content=str(e))
 
 
