@@ -88,8 +88,11 @@ async def serve() -> None:
             except asyncio.CancelledError:
                 logger.info("task watcher task cancelled successfully")
 
-        # Close CR manager
+        # Close task CR manager
         await task_registry.shutdown()
+
+        # Close profile manager
+        await app.state.profile_manager.shutdown()
 
         await app_manager.shutdown()
         await server.shutdown()

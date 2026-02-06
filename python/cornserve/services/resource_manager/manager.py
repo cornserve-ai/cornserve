@@ -683,6 +683,7 @@ class ResourceManager:
                 logger.error("Error occured during shutdown: %s", result)
 
         await self.api_client.close()
+        await self.profile_manager.shutdown()
 
         # Close all Task Dispatcher channels
         await asyncio.gather(*[channel.close() for channel in self.task_dispatcher_channels], return_exceptions=True)

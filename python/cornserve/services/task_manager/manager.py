@@ -309,6 +309,7 @@ class TaskManager:
 
         await self.http_client.close()
         await self.k8s_client.close()
+        await self.task_profile_manager.shutdown()
 
         logger.info("Task manager %s shut down", self.id)
 
