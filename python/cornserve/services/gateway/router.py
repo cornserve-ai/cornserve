@@ -508,6 +508,8 @@ async def deploy_profiles(request: ProfilesDeploymentRequest, raw_request: Reque
     profile_manager: UnitTaskProfileManager = raw_request.app.state.profile_manager
 
     try:
+        await profile_manager.delete_all_profiles()
+
         results = []
         for profile_payload in request.profiles:
             profile_name = await profile_manager.create_profile(
