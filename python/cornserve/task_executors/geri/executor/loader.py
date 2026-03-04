@@ -43,7 +43,7 @@ def get_registry_entry(model_id: str) -> tuple[RegistryEntry, PretrainedConfig |
         class_name = model_index["_class_name"]
         logger.info("Found pipeline class: %s", class_name)
     except Exception:
-        logger.exception("Failed to load model_index.json from %s", model_id)
+        logger.warning("Failed to load model_index.json from %s", model_id)
 
     # Then, if that didn't work, try to parse config.json for model_type instead
     if class_name is None:
