@@ -131,10 +131,16 @@ class SidecarReceiver:
         """Close a stream for a given request ID in the receiver."""
         try:
             async with self.recv_done_lock:
-                req_state = self.ledger[request.id]
+                if request.id not in self.ledger:
+                    # CloseStream arrived before PrepareReceive — create a
+                    # placeholder entry.  PrepareReceive will find and update
+                    # this entry when it arrives later.
+                    req_state = RecvRequestState(request.id, request.num_chunks)
+                    self.ledger[request.id] = req_state
+                else:
+                    req_state = self.ledger[request.id]
+                    req_state.num_chunks = request.num_chunks
                 logger.info("Closing stream for request %s with %d chunks", request.id, request.num_chunks)
-                # chunk_ids are 0-indexed, so we need to add 1 to get the total number of chunks
-                req_state.num_chunks = request.num_chunks
                 req_state.done_event.set()
             return sidecar_pb2.CloseStreamResponse(status=common_pb2.Status.STATUS_OK)
         except Exception:
