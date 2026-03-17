@@ -33,6 +33,9 @@ from cornserve.services.sidecar.schema import SidecarNodeInfo, SidecarServerConf
 from cornserve.services.sidecar.sender import SidecarSender
 from cornserve.sidecar.constants import (
     GRPC_BASE_PORT,
+    GRPC_RETRY_BACKOFF_MULTIPLIER,
+    GRPC_RETRY_INITIAL_BACKOFF_SECONDS,
+    GRPC_RETRY_MAX_ATTEMPTS,
     UCX_BASE_PORT,
     grpc_url_from_rank,
     ucx_port_from_rank,
@@ -110,8 +113,30 @@ class SidecarServicer(sidecar_pb2_grpc.SidecarServicer):
             async with grpc.aio.insecure_channel(grpc_url_from_rank(sidecar_rank)) as channel:
                 req = sidecar_pb2.CheckHealthRequest()
                 stub = sidecar_pb2_grpc.SidecarStub(channel)
-                _ = await stub.CheckHealth(req)
-                return True
+                for attempt in range(GRPC_RETRY_MAX_ATTEMPTS):
+                    try:
+                        _ = await stub.CheckHealth(req)
+                        return True
+                    except grpc.RpcError as e:
+                        code = e.code()
+                        if (
+                            code in (grpc.StatusCode.CANCELLED, grpc.StatusCode.UNAVAILABLE)
+                            and attempt < GRPC_RETRY_MAX_ATTEMPTS - 1
+                        ):
+                            backoff_delay = GRPC_RETRY_INITIAL_BACKOFF_SECONDS * (
+                                GRPC_RETRY_BACKOFF_MULTIPLIER**attempt
+                            )
+                            logger.warning(
+                                "CheckHealth retry %d for sidecar rank %d due to %s, waiting %.3fs",
+                                attempt + 1,
+                                sidecar_rank,
+                                code.name,
+                                backoff_delay,
+                            )
+                            await asyncio.sleep(backoff_delay)
+                            continue
+                        raise
+                return False
         except Exception:
             return False
 
@@ -374,6 +399,25 @@ class SidecarServicer(sidecar_pb2_grpc.SidecarServicer):
             logger.exception("Error in MarkDone")
             await context.abort(grpc.StatusCode.INTERNAL, f"Error in MarkDone: {e} \n {tb_str}")
 
+    async def MarkDoneAll(  # noqa: N802
+        self,
+        request: sidecar_pb2.MarkDoneAllRequest,
+        context: grpc.aio.ServicerContext,
+    ) -> sidecar_pb2.MarkDoneAllResponse:
+        """Called by the receiver server to mark all chunks of a request as done."""
+        try:
+            if not self.live:
+                logger.error("Sidecar not online")
+                await context.abort(grpc.StatusCode.FAILED_PRECONDITION, "Sidecar not online")
+            if self.receiver is None:
+                logger.error("Sidecar not registered")
+                await context.abort(grpc.StatusCode.FAILED_PRECONDITION, "Sidecar not registered")
+            return await self.receiver.mark_done_all(request, context)
+        except Exception as e:
+            tb_str = traceback.format_exc()
+            logger.exception("Error in MarkDoneAll")
+            await context.abort(grpc.StatusCode.INTERNAL, f"Error in MarkDoneAll: {e} \n {tb_str}")
+
     async def Unlink(  # noqa: N802
         self,
         request: sidecar_pb2.UnlinkRequest,
@@ -393,6 +437,25 @@ class SidecarServicer(sidecar_pb2_grpc.SidecarServicer):
             tb_str = traceback.format_exc()
             logger.exception("Error in Unlink")
             await context.abort(grpc.StatusCode.INTERNAL, f"Error in Unlink: {e} \n {tb_str}")
+
+    async def UnlinkAll(  # noqa: N802
+        self,
+        request: sidecar_pb2.UnlinkAllRequest,
+        context: grpc.aio.ServicerContext,
+    ) -> sidecar_pb2.UnlinkAllResponse:
+        """Called by the receiver server to mark all chunks of a request as done."""
+        try:
+            if not self.live:
+                logger.error("Sidecar not online")
+                await context.abort(grpc.StatusCode.FAILED_PRECONDITION, "Sidecar not online")
+            if self.sender is None:
+                logger.error("Sidecar not registered")
+                await context.abort(grpc.StatusCode.FAILED_PRECONDITION, "Sidecar not registered")
+            return await self.sender.unlink_all(request, context)
+        except Exception as e:
+            tb_str = traceback.format_exc()
+            logger.exception("Error in UnlinkAll")
+            await context.abort(grpc.StatusCode.INTERNAL, f"Error in UnlinkAll: {e} \n {tb_str}")
 
     async def shutdown(self) -> None:
         """Shutdown the sidecar."""

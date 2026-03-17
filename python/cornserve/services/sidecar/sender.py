@@ -17,6 +17,9 @@ from cornserve.services.sidecar.shm_manager import (
     SharedMemoryManager,
 )
 from cornserve.sidecar.constants import (
+    GRPC_RETRY_BACKOFF_MULTIPLIER,
+    GRPC_RETRY_INITIAL_BACKOFF_SECONDS,
+    GRPC_RETRY_MAX_ATTEMPTS,
     chunk_tag,
     grpc_url_from_rank,
     shm_filename,
@@ -205,6 +208,75 @@ class SidecarSender:
         )
         return sidecar_pb2.UnlinkResponse(status=common_pb2.Status.STATUS_OK)
 
+    @tracer.start_as_current_span(name="SidecarSender.unlink_all")
+    async def unlink_all(
+        self,
+        request: sidecar_pb2.UnlinkAllRequest,
+        context: grpc.aio.ServicerContext,
+    ) -> sidecar_pb2.UnlinkAllResponse:
+        """Mark all chunks of a tensor as consumed.
+
+        Exclusively from intra-node send. This call will decrement the ref count for all chunks
+        of a given data_id. If any ref count reaches 0, the underlying buffer will be freed.
+
+        Args:
+            request: The unlink all request containing the data_id.
+            context: The gRPC context.
+
+        Returns:
+            UnlinkAllResponse with status and number of chunks unlinked.
+        """
+        span = trace.get_current_span()
+        span.set_attribute("SidecarSender.unlink_all.id", request.id)
+
+        num_chunks_unlinked = 0
+        base_id = request.id
+
+        # Find all chunks for this data_id
+        # The id format is "{data_id}-{chunk_id}"
+        chunks_to_unlink = []
+        for buffer_id in list(self.saved_buffers.keys()):
+            if buffer_id.startswith(base_id + "-"):
+                chunks_to_unlink.append(buffer_id)
+        if not chunks_to_unlink:
+            logger.warning("unlink_all: No buffers found for id %s", base_id)
+            return sidecar_pb2.UnlinkAllResponse(
+                status=common_pb2.Status.STATUS_OK,
+                num_chunks_unlinked=0,
+            )
+
+        logger.info("unlink_all: Unlinking %d chunks for id %s", len(chunks_to_unlink), base_id)
+
+        for buffer_id in chunks_to_unlink:
+            if buffer_id not in self.ref_counts:
+                logger.warning("unlink_all: Buffer %s not in ref_counts, skipping", buffer_id)
+                continue
+            self.ref_counts[buffer_id] -= 1
+            if self.ref_counts[buffer_id] == 0:
+                del self.ref_counts[buffer_id]
+                buffer = self.saved_buffers[buffer_id]
+                logger.debug("unlink_all: Freeing buffer %s", buffer_id)
+                await self._free(buffer)
+                del self.saved_buffers[buffer_id]
+            else:
+                logger.debug(
+                    "unlink_all: Decremented ref count for %s, remaining: %d",
+                    buffer_id,
+                    self.ref_counts[buffer_id],
+                )
+            num_chunks_unlinked += 1
+
+        logger.info(
+            "unlink_all: Unlinked %d chunks for id %s, used slots: %d",
+            num_chunks_unlinked,
+            base_id,
+            self.shm_manager.used_slots,
+        )
+        return sidecar_pb2.UnlinkAllResponse(
+            status=common_pb2.Status.STATUS_OK,
+            num_chunks_unlinked=num_chunks_unlinked,
+        )
+
     async def send(
         self,
         request: sidecar_pb2.SendRequest,
@@ -286,8 +358,31 @@ class SidecarSender:
             num_chunks=request.num_chunks,
         )
         stub = self._get_grpc_stub(dst_rank)
-        res = await stub.PrepareReceive(req)
-        if res.status != common_pb2.Status.STATUS_OK:
+        res = None
+        for attempt in range(GRPC_RETRY_MAX_ATTEMPTS):
+            try:
+                res = await stub.PrepareReceive(req)
+                break
+            except grpc.RpcError as e:
+                code = e.code()
+                if (
+                    code in (grpc.StatusCode.CANCELLED, grpc.StatusCode.UNAVAILABLE)
+                    and attempt < GRPC_RETRY_MAX_ATTEMPTS - 1
+                ):
+                    backoff_delay = GRPC_RETRY_INITIAL_BACKOFF_SECONDS * (GRPC_RETRY_BACKOFF_MULTIPLIER**attempt)
+                    logger.warning(
+                        "PrepareReceive retry %d for req %s chunk %d to rank %d due to %s, waiting %.3fs",
+                        attempt + 1,
+                        request.id,
+                        request.chunk_id,
+                        dst_rank,
+                        code.name,
+                        backoff_delay,
+                    )
+                    await asyncio.sleep(backoff_delay)
+                    continue
+                raise
+        if res is None or res.status != common_pb2.Status.STATUS_OK:
             logger.error("Failed to prepare receive")
             return sidecar_pb2.SendResponse(status=common_pb2.Status.STATUS_ERROR)
         return sidecar_pb2.SendResponse(status=common_pb2.Status.STATUS_OK)
@@ -331,8 +426,34 @@ class SidecarSender:
                 num_chunks=request.num_chunks,
             )
             stub = self._get_grpc_stub(dst_rank)
-            res = await stub.PrepareReceive(req)
-            if res.status != common_pb2.Status.STATUS_OK:
+            res = None
+            for attempt in range(GRPC_RETRY_MAX_ATTEMPTS):
+                try:
+                    res = await stub.PrepareReceive(req)
+                    break
+                except grpc.RpcError as e:
+                    code = e.code()
+                    if (
+                        code in (grpc.StatusCode.CANCELLED, grpc.StatusCode.UNAVAILABLE)
+                        and attempt < GRPC_RETRY_MAX_ATTEMPTS - 1
+                    ):
+                        backoff_delay = GRPC_RETRY_INITIAL_BACKOFF_SECONDS * (GRPC_RETRY_BACKOFF_MULTIPLIER**attempt)
+                        logger.warning(
+                            (
+                                "PrepareReceive (concurrent) retry %d for req %s "
+                                "chunk %d to rank %d due to %s, waiting %.3fs"
+                            ),
+                            attempt + 1,
+                            request.id,
+                            request.chunk_id,
+                            dst_rank,
+                            code.name,
+                            backoff_delay,
+                        )
+                        await asyncio.sleep(backoff_delay)
+                        continue
+                    raise
+            if res is None or res.status != common_pb2.Status.STATUS_OK:
                 logger.error("Failed to prepare receive")
                 return sidecar_pb2.SendResponse(status=common_pb2.Status.STATUS_ERROR)
             tag = chunk_tag(request.id, self.sidecar_rank, request.chunk_id, obj.shard_rank)
@@ -357,8 +478,34 @@ class SidecarSender:
                 num_chunks=request.num_chunks,
             )
             stub = self._get_grpc_stub(dst_rank)
-            res = await stub.PrepareReceive(req)
-            if res.status != common_pb2.Status.STATUS_OK:
+            res = None
+            for attempt in range(GRPC_RETRY_MAX_ATTEMPTS):
+                try:
+                    res = await stub.PrepareReceive(req)
+                    break
+                except grpc.RpcError as e:
+                    code = e.code()
+                    if (
+                        code in (grpc.StatusCode.CANCELLED, grpc.StatusCode.UNAVAILABLE)
+                        and attempt < GRPC_RETRY_MAX_ATTEMPTS - 1
+                    ):
+                        backoff_delay = GRPC_RETRY_INITIAL_BACKOFF_SECONDS * (GRPC_RETRY_BACKOFF_MULTIPLIER**attempt)
+                        logger.warning(
+                            (
+                                "PrepareReceive (non-concurrent) retry %d for req %s "
+                                "chunk %d to rank %d due to %s, waiting %.3fs"
+                            ),
+                            attempt + 1,
+                            request.id,
+                            request.chunk_id,
+                            dst_rank,
+                            code.name,
+                            backoff_delay,
+                        )
+                        await asyncio.sleep(backoff_delay)
+                        continue
+                    raise
+            if res is None or res.status != common_pb2.Status.STATUS_OK:
                 logger.error("Failed to prepare receive")
                 return sidecar_pb2.SendResponse(status=common_pb2.Status.STATUS_ERROR)
             # do send

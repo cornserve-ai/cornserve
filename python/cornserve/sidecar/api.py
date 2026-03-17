@@ -7,6 +7,7 @@ import contextlib
 import ctypes
 import json
 import os
+import time
 import weakref
 from concurrent.futures import ThreadPoolExecutor
 from functools import lru_cache
@@ -24,7 +25,13 @@ from opentelemetry.instrumentation.threading import ThreadingInstrumentor
 
 from cornserve.logging import get_logger
 from cornserve.services.pb import common_pb2, sidecar_pb2, sidecar_pb2_grpc
-from cornserve.sidecar.constants import grpc_url_from_rank, shm_filename
+from cornserve.sidecar.constants import (
+    GRPC_RETRY_BACKOFF_MULTIPLIER,
+    GRPC_RETRY_INITIAL_BACKOFF_SECONDS,
+    GRPC_RETRY_MAX_ATTEMPTS,
+    grpc_url_from_rank,
+    shm_filename,
+)
 from cornserve.sidecar.schema import SidecarConfig
 from cornserve.sidecar.serde import MsgpackDecoder, MsgpackEncoder, SharedTensorHandle
 from cornserve.sidecar.utils import device_from_rank, init_shmem
@@ -111,7 +118,27 @@ class Sidecar:
             concurrent_copy=config.concurrent_copy,
         )
 
-        response = self.stub.Register(request)
+        response = None
+        for attempt in range(GRPC_RETRY_MAX_ATTEMPTS):
+            try:
+                response = self.stub.Register(request)
+                break
+            except grpc.RpcError as e:
+                code = e.code()
+                if (
+                    code in (grpc.StatusCode.CANCELLED, grpc.StatusCode.UNAVAILABLE)
+                    and attempt < GRPC_RETRY_MAX_ATTEMPTS - 1
+                ):
+                    logger.warning(
+                        "Register retry %d for sidecar rank %d due to %s",
+                        attempt + 1,
+                        self.sidecar_rank,
+                        code.name,
+                    )
+                    continue
+                raise
+        if response is None:
+            raise RuntimeError(f"Failed to register sidecar rank {self.sidecar_rank}: no response received")
         assert response.shm_size > 0, "Failed to register sidecar"
 
         self.shard_rank = response.local_rank
@@ -254,7 +281,29 @@ class Sidecar:
             chunk_id=chunk_id,
             num_chunks=num_chunks,
         )
-        response = self.stub.Send(request)
+        response = None
+        for attempt in range(GRPC_RETRY_MAX_ATTEMPTS):
+            try:
+                response = self.stub.Send(request)
+                break
+            except grpc.RpcError as e:
+                code = e.code()
+                if (
+                    code in (grpc.StatusCode.CANCELLED, grpc.StatusCode.UNAVAILABLE)
+                    and attempt < GRPC_RETRY_MAX_ATTEMPTS - 1
+                ):
+                    logger.warning(
+                        "Send retry %d for shard %d chunk %d in req %s due to %s",
+                        attempt + 1,
+                        self.shard_rank,
+                        chunk_id,
+                        id,
+                        code.name,
+                    )
+                    continue
+                raise
+        if response is None:
+            raise RuntimeError(f"Failed to send req {id}: no response received.")
         if response.status == common_pb2.Status.STATUS_OK:
             logger.info("Sent shard %d of chunk %d in req %s successfully", self.shard_rank, chunk_id, id)
             if isinstance(obj, torch.Tensor):
@@ -315,7 +364,27 @@ class Sidecar:
             num_chunks=num_chunks,
         )
         grpc_stub = self._get_grpc_stub(sidecar_rank)
-        response = grpc_stub.CloseStream(request)
+        response = None
+        for attempt in range(GRPC_RETRY_MAX_ATTEMPTS):
+            try:
+                response = grpc_stub.CloseStream(request)
+                break
+            except grpc.RpcError as e:
+                code = e.code()
+                if (
+                    code in (grpc.StatusCode.CANCELLED, grpc.StatusCode.UNAVAILABLE)
+                    and attempt < GRPC_RETRY_MAX_ATTEMPTS - 1
+                ):
+                    logger.warning(
+                        "CloseStream retry %d for stream %s due to %s",
+                        attempt + 1,
+                        id,
+                        code.name,
+                    )
+                    continue
+                raise
+        if response is None:
+            raise RuntimeError(f"Failed to close stream {id}: no response received")
         if response.status == common_pb2.Status.STATUS_OK:
             logger.info("Closed stream %s successfully with %d chunks", id, num_chunks)
         else:
@@ -358,7 +427,31 @@ class Sidecar:
         span.set_attribute("sidecar.recv.id", id)
         span.set_attribute("sidecar.recv.chunk_id", chunk_id)
         request = sidecar_pb2.ReceiveRequest(id=id, chunk_id=chunk_id)
-        response = await self.aio_stub.Receive(request)
+        response = None
+        for attempt in range(GRPC_RETRY_MAX_ATTEMPTS):
+            try:
+                response = await self.aio_stub.Receive(request)
+                break
+            except grpc.RpcError as e:
+                code = e.code()
+                if (
+                    code in (grpc.StatusCode.CANCELLED, grpc.StatusCode.UNAVAILABLE)
+                    and attempt < GRPC_RETRY_MAX_ATTEMPTS - 1
+                ):
+                    backoff_delay = GRPC_RETRY_INITIAL_BACKOFF_SECONDS * (GRPC_RETRY_BACKOFF_MULTIPLIER**attempt)
+                    logger.warning(
+                        "Receive retry %d for chunk %d in req %s due to %s, waiting %.3fs",
+                        attempt + 1,
+                        chunk_id,
+                        id,
+                        code.name,
+                        backoff_delay,
+                    )
+                    await asyncio.sleep(backoff_delay)
+                    continue
+                raise
+        if response is None:
+            raise RuntimeError(f"Failed to receive data with id {id}: no response received")
         if response.status != common_pb2.Status.STATUS_OK:
             raise ValueError(f"Failed to receive data with id {id}")
 
@@ -396,7 +489,31 @@ class Sidecar:
         span.set_attribute("sidecar.read.id", id)
         span.set_attribute("sidecar.read.chunk_id", chunk_id)
         request = sidecar_pb2.ReceiveRequest(id=id, chunk_id=chunk_id)
-        response = self.stub.Receive(request)
+        response = None
+        for attempt in range(GRPC_RETRY_MAX_ATTEMPTS):
+            try:
+                response = self.stub.Receive(request)
+                break
+            except grpc.RpcError as e:
+                code = e.code()
+                if (
+                    code in (grpc.StatusCode.CANCELLED, grpc.StatusCode.UNAVAILABLE)
+                    and attempt < GRPC_RETRY_MAX_ATTEMPTS - 1
+                ):
+                    backoff_delay = GRPC_RETRY_INITIAL_BACKOFF_SECONDS * (GRPC_RETRY_BACKOFF_MULTIPLIER**attempt)
+                    logger.warning(
+                        "Receive (sync) retry %d for chunk %d in req %s due to %s, waiting %.3fs",
+                        attempt + 1,
+                        chunk_id,
+                        id,
+                        code.name,
+                        backoff_delay,
+                    )
+                    time.sleep(backoff_delay)
+                    continue
+                raise
+        if response is None:
+            raise RuntimeError(f"Failed to receive data with id {id}: no response received")
         if response.status != common_pb2.Status.STATUS_OK:
             raise ValueError(f"Failed to receive data with id {id}")
 
@@ -430,9 +547,78 @@ class Sidecar:
         span = trace.get_current_span()
         span.set_attribute("sidecar.mark_done.id", id)
         request = sidecar_pb2.MarkDoneRequest(id=id, chunk_id=chunk_id)
-        response = await self.aio_stub.MarkDone(request)
+        response = None
+        for attempt in range(GRPC_RETRY_MAX_ATTEMPTS):
+            try:
+                response = await self.aio_stub.MarkDone(request)
+                break
+            except grpc.RpcError as e:
+                code = e.code()
+                if (
+                    code in (grpc.StatusCode.CANCELLED, grpc.StatusCode.UNAVAILABLE)
+                    and attempt < GRPC_RETRY_MAX_ATTEMPTS - 1
+                ):
+                    backoff_delay = GRPC_RETRY_INITIAL_BACKOFF_SECONDS * (GRPC_RETRY_BACKOFF_MULTIPLIER**attempt)
+                    logger.warning(
+                        "MarkDone retry %d for req %s chunk %d due to %s, waiting %.3fs",
+                        attempt + 1,
+                        id,
+                        chunk_id,
+                        code.name,
+                        backoff_delay,
+                    )
+                    await asyncio.sleep(backoff_delay)
+                    continue
+                raise
+        if response is None:
+            raise RuntimeError(f"Failed to mark done for id {id}: no response received")
         if response.status == common_pb2.Status.STATUS_OK:
             logger.debug("Request %s marked done", id)
+        else:
+            logger.error("Failed to mark request %s done", id)
+
+    @tracer.start_as_current_span(name="Sidecar.mark_done_all")
+    async def mark_done_all(self, id: str) -> int:
+        """Mark all chunks of a tensor as done in the sidecar server to free all shared memory buffers.
+
+        Returns the number of chunks marked.
+        """
+        if _is_mocking():
+            return 0
+
+        span = trace.get_current_span()
+        span.set_attribute("sidecar.mark_done_all.id", id)
+        request = sidecar_pb2.MarkDoneAllRequest(id=id)
+        response = None
+        for attempt in range(GRPC_RETRY_MAX_ATTEMPTS):
+            try:
+                response = await self.aio_stub.MarkDoneAll(request)
+                break
+            except grpc.RpcError as e:
+                code = e.code()
+                if (
+                    code in (grpc.StatusCode.CANCELLED, grpc.StatusCode.UNAVAILABLE)
+                    and attempt < GRPC_RETRY_MAX_ATTEMPTS - 1
+                ):
+                    backoff_delay = GRPC_RETRY_INITIAL_BACKOFF_SECONDS * (GRPC_RETRY_BACKOFF_MULTIPLIER**attempt)
+                    logger.warning(
+                        "MarkDoneAll retry %d for req %s due to %s, waiting %.3fs",
+                        attempt + 1,
+                        id,
+                        code.name,
+                        backoff_delay,
+                    )
+                    await asyncio.sleep(backoff_delay)
+                    continue
+                raise
+        if response is None:
+            raise RuntimeError(f"Failed to mark done all for id {id}: no response received")
+        if response.status == common_pb2.Status.STATUS_OK:
+            logger.info("Request %s marked all %d chunks done", id, response.num_chunks_marked)
+            return response.num_chunks_marked
+        else:
+            logger.error("Failed to mark request %s all chunks done", id)
+            raise RuntimeError(f"Failed to mark done all for id {id}")
 
     def _mark_done_worker(self, id: str, chunk_id: int = 0) -> None:
         """Mark a tensor as done in the sidecar server to free the shared memory buffer.
@@ -444,7 +630,31 @@ class Sidecar:
         span = trace.get_current_span()
         span.set_attribute("sidecar.mark_done.id", id)
         request = sidecar_pb2.MarkDoneRequest(id=id, chunk_id=chunk_id)
-        response = self.stub.MarkDone(request)
+        response = None
+        for attempt in range(GRPC_RETRY_MAX_ATTEMPTS):
+            try:
+                response = self.stub.MarkDone(request)
+                break
+            except grpc.RpcError as e:
+                code = e.code()
+                if (
+                    code in (grpc.StatusCode.CANCELLED, grpc.StatusCode.UNAVAILABLE)
+                    and attempt < GRPC_RETRY_MAX_ATTEMPTS - 1
+                ):
+                    backoff_delay = GRPC_RETRY_INITIAL_BACKOFF_SECONDS * (GRPC_RETRY_BACKOFF_MULTIPLIER**attempt)
+                    logger.warning(
+                        "MarkDone (worker) retry %d for req %s chunk %d due to %s, waiting %.3fs",
+                        attempt + 1,
+                        id,
+                        chunk_id,
+                        code.name,
+                        backoff_delay,
+                    )
+                    time.sleep(backoff_delay)
+                    continue
+                raise
+        if response is None:
+            raise RuntimeError(f"Failed to mark done for id {id}: no response received")
         if response.status == common_pb2.Status.STATUS_OK:
             logger.debug("Request %s marked done", id)
         else:
