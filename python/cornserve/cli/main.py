@@ -6,7 +6,7 @@ import base64
 import json
 import os
 import sys
-from contextlib import suppress
+from contextlib import ExitStack, suppress
 from pathlib import Path
 from typing import Annotated, Any, Literal
 
@@ -625,30 +625,46 @@ def _handle_streaming_audio_response(
     console = rich.get_console()
 
     # Lazy import to avoid requiring audio dependencies on systems that don't need them
+    pcm_player_cls: Any | None = None
     try:
         from cornserve.cli.audio_streamer import PCMStreamPlayer  # noqa: PLC0415
-
     except (ImportError, OSError) as e:
         rich.print(
             Panel(
-                f"Error: {e}",
-                style="red",
+                f"Audio playback unavailable on this machine ({e}); continuing without playback.",
+                style="yellow",
                 expand=False,
             )
         )
-        return
+    else:
+        pcm_player_cls = PCMStreamPlayer
 
     # If aggregation mode: accumulate values for specified keys
     accumulated_data = {key: "" for key in aggregate_keys} if aggregate_keys else {}
     audio_panel_shown = False
 
     try:
-        with (
-            PCMStreamPlayer(
-                sample_rate=audio_sample_rate, channels=audio_channels, pcm_format=audio_pcm_format
-            ) as player,
-            Live("Waiting for response...", vertical_overflow="visible") as live,
-        ):
+        with ExitStack() as stack:
+            live = stack.enter_context(Live("Waiting for response...", vertical_overflow="visible"))
+            player: Any | None = None
+            try:
+                if pcm_player_cls is not None:
+                    player = stack.enter_context(
+                        pcm_player_cls(
+                            sample_rate=audio_sample_rate,
+                            channels=audio_channels,
+                            pcm_format=audio_pcm_format,
+                        )
+                    )
+            except Exception as e:
+                rich.print(
+                    Panel(
+                        f"Audio playback unavailable on this machine ({e}); continuing without playback.",
+                        style="yellow",
+                        expand=False,
+                    )
+                )
+
             for line in response.iter_lines(chunk_size=None, decode_unicode=True):
                 line = line.strip()
                 if not line:
@@ -659,7 +675,7 @@ def _handle_streaming_audio_response(
                     response_data = json.loads(line)
 
                     value = _extract_nested_value(response_data, audio_key)
-                    if value is not None:
+                    if value is not None and player is not None:
                         pcm_bytes = base64.b64decode(str(value))
                         player.feed(pcm_bytes)
 
@@ -667,6 +683,9 @@ def _handle_streaming_audio_response(
                             # Since we won't be showing a table, show text instead.
                             live.update(Panel("Receiving audio...", style="green"))
                             audio_panel_shown = True
+                    elif value is not None and not aggregate_keys and not audio_panel_shown:
+                        live.update(Panel("Receiving audio (playback disabled)...", style="green"))
+                        audio_panel_shown = True
 
                     if aggregate_keys:
                         # Extract and accumulate values for each aggregate key
