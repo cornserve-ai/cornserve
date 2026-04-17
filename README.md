@@ -32,6 +32,32 @@ You can quickly try out Cornserve on top of Minikube. Check out our [getting sta
 Cornserve can be deployed on Kubernetes with a single command. More on our [docs](https://cornserve.ai/getting_started/).
 
 
+## Research
+
+These research papers describe Cornserve's system architecture and planner.
+
+1. Cornserve (CAIS 26): [Paper](https://arxiv.org/abs/2603.12118)
+1. Cornfigurator: [Paper](https://arxiv.org/abs/2512.14098) | [Repository](https://github.com/cornserve-ai/cornfigurator)
+
+If you find Cornserve relevant to your research, please consider citing:
+
+```bibtex
+@inproceedings{cornserve-cais26,
+    title     = {Cornserve: A Distributed Serving System for Any-to-Any Multimodal Models},
+    author    = {Chung, Jae-Won and Ma, Jeff J. and Ahn, Jisang and Liang, Yizhuo and Jajoo, Akshay and Lee, Myungjin and Chowdhury, Mosharaf},
+    booktitle = {ACM CAIS},
+    year      = {2026}
+}
+
+@article{cornfigurator-arxiv25,
+    title   = {Cornfigurator: Automated Planning for Any-to-Any Multimodal Model Serving},
+    author  = {Ma, Jeff J. and Chung, Jae-Won and Ahn, Jisang and Liang, Yizhuo and Lu, Runyu and Jajoo, Akshay and Lee, Myungjin and Chowdhury, Mosharaf},
+    journal = {arXiv preprint arXiv:2512.14098},
+    year    = {2025}
+}
+```
+
+
 ## Contributing
 
 Cornserve is an open-source project, and we welcome contributions!
