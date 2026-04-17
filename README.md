@@ -3,7 +3,7 @@
 
 [![Docker Hub](https://custom-icon-badges.demolab.com/badge/Docker-cornserve-1D63ED.svg?logo=docker&logoColor=white)](https://hub.docker.com/r/cornserve/gateway)
 [![Homepage](https://custom-icon-badges.demolab.com/badge/Docs-cornserve.ai-dddddd.svg?logo=home&logoColor=white&logoSource=feather)](https://cornserve.ai/)
-[![Paper](https://img.shields.io/badge/Paper-arXiv-b31b1b?logo=arxiv&logoColor=white)](https://arxiv.org/abs/2512.14098)
+[![Paper](https://img.shields.io/badge/Paper-arXiv-b31b1b?logo=arxiv&logoColor=white)](https://arxiv.org/abs/2603.12118)
 [![Apache-2.0 License](https://custom-icon-badges.herokuapp.com/github/license/cornserve-ai/cornserve?logo=law)](/LICENSE)
 </div>
 
@@ -13,7 +13,8 @@ https://github.com/user-attachments/assets/583796e8-da20-4918-9311-db05e94726eb
 ---
 **Project News**  
 
-- \[2025/12/16\] Our paper preprint ("Cornserve: Efficiently Serving Any-to-Any Multimodal Models") is now available on [arXiv](https://arxiv.org/abs/2512.14098).
+- \[2026/04/15\] Our paper ("Cornserve: A Distributed Serving System for Any-to-Any Multimodal Models") has been accepted to ACM CAIS 2026!
+- \[2025/12/16\] Our planner paper preprint ("Cornfigurator: Automated Planning for Any-to-Any Multimodal Model Serving") is now available on [arXiv](https://arxiv.org/abs/2512.14098).
 - \[2025/11/14\] Cornserve project announced with v0.1.0 release!
 ---
 
@@ -21,6 +22,8 @@ https://github.com/user-attachments/assets/583796e8-da20-4918-9311-db05e94726eb
 
 Cornserve is a distributed inference platform for complex, Any-to-Any multimodal AI.
 Split complex models into smaller separately scalable components (**model fission**) and share common components across multiple applications (**sharing**), all on your own infrastructure.
+
+See also [Cornfigurator](https://github.com/cornserve-ai/cornfigurator), an automated deployment planner for Cornserve.
 
 
 ## Getting Started
