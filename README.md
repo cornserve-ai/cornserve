@@ -13,7 +13,7 @@ https://github.com/user-attachments/assets/583796e8-da20-4918-9311-db05e94726eb
 ---
 **Project News**  
 
-- \[2026/04/15\] Our paper ("Cornserve: A Distributed Serving System for Any-to-Any Multimodal Models") has been accepted to ACM CAIS 2026!
+- \[2026/04/15\] Our paper ("Cornserve: A Distributed Serving System for Any-to-Any Multimodal Models") has been accepted to ACM CAIS 2026! [Paper](https://arxiv.org/abs/2603.12118)
 - \[2025/12/16\] Our planner paper preprint ("Cornfigurator: Automated Planning for Any-to-Any Multimodal Model Serving") is now available on [arXiv](https://arxiv.org/abs/2512.14098).
 - \[2025/11/14\] Cornserve project announced with v0.1.0 release!
 ---
@@ -24,7 +24,6 @@ Cornserve is a distributed inference platform for complex, Any-to-Any multimodal
 Split complex models into smaller separately scalable components (**model fission**) and share common components across multiple applications (**sharing**), all on your own infrastructure.
 
 See also [Cornfigurator](https://github.com/cornserve-ai/cornfigurator), an automated deployment planner for Cornserve.
-
 
 ## Getting Started
 
