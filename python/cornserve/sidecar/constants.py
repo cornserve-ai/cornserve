@@ -11,6 +11,11 @@ CHUNK_OFFSET = 1000
 GRPC_BASE_PORT = 10000
 UCX_BASE_PORT = 12000
 
+# Retry configuration for gRPC calls
+GRPC_RETRY_MAX_ATTEMPTS = 3  # 3 total attempts (1 initial + 2 retries)
+GRPC_RETRY_INITIAL_BACKOFF_SECONDS = 0.05  # Initial backoff delay in seconds
+GRPC_RETRY_BACKOFF_MULTIPLIER = 2.0  # Exponential backoff multiplier
+
 
 def chunk_tag(id: str, rank: int, chunk_id: int, shard_rank: int) -> int:
     """Generate a tag for the chunk.

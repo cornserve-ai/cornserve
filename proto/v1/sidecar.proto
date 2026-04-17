@@ -24,10 +24,19 @@ service Sidecar {
   // Mark a chunk of forwarded data as done.
   rpc MarkDone(MarkDoneRequest) returns (MarkDoneResponse);
 
+  // Consumer sidecar client --> Its sidecar server (==> Producer sidecar server).
+  // Mark all chunks of forwarded data as done for a given data_id.
+  rpc MarkDoneAll(MarkDoneAllRequest) returns (MarkDoneAllResponse);
+
   // Consumer sidecar server --> Producer sidecar server.
   // Used exclusively during intra-node /dev/shm ping-pong.
   // Decrement the reference count of a chunk.
   rpc Unlink(UnlinkRequest) returns (UnlinkResponse);
+
+  // Consumer sidecar server --> Producer sidecar server.
+  // Used exclusively during intra-node /dev/shm ping-pong.
+  // Decrement the reference count of all chunks for a given data_id.
+  rpc UnlinkAll(UnlinkAllRequest) returns (UnlinkAllResponse);
 
   // Producer sidecar server --> Consumer sidecar server.
   // Ask the receiver sidecar to prepare for receiving a chunk of data,
@@ -108,6 +117,15 @@ message MarkDoneResponse {
   common.Status status = 1;
 }
 
+message MarkDoneAllRequest {
+  string id = 1;
+}
+
+message MarkDoneAllResponse {
+  common.Status status = 1;
+  int32 num_chunks_marked = 2;  // number of chunks that were marked done
+}
+
 message UnlinkRequest {
   string id = 1;
   int32 chunk_id = 2;
@@ -115,6 +133,15 @@ message UnlinkRequest {
 
 message UnlinkResponse {
   common.Status status = 1;
+}
+
+message UnlinkAllRequest {
+  string id = 1;
+}
+
+message UnlinkAllResponse {
+  common.Status status = 1;
+  int32 num_chunks_unlinked = 2;  // number of chunks that were unlinked
 }
 
 
