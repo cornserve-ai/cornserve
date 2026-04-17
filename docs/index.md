@@ -99,3 +99,6 @@ Cornserve performs **model fission** and **automatic sharing** of common compone
     [GitHub](https://github.com/cornserve-ai/cornserve).
 
 </div>
+
+!!! tip "Cornfigurator"
+    [Cornfigurator](https://github.com/cornserve-ai/cornfigurator) is our automated deployment planner for multimodal AI. Given a model and workload, it searches the space of colocation and disaggregation strategies and emits a goodput-optimal plan that runs on Cornserve.
