@@ -71,9 +71,11 @@ class TaskOutput(BaseModel):
 
 class TaskProfileConfig(BaseModel):
     """Base class for task profile config."""
+
     @abstractmethod
     def to_profile_str(self) -> str:
         """Return a string representation of the profile configuration."""
+
 
 InputT = TypeVar("InputT", bound=TaskInput)
 OutputT = TypeVar("OutputT", bound=TaskOutput)
@@ -524,15 +526,22 @@ class UnitTask(Task, Generic[InputT, OutputT]):
 
         raise AssertionError("Task context is neither in recording nor replay mode.")
 
+    def make_name(self) -> str:
+        """Create a concise string representation of the task."""
+        return self.__class__.__name__.lower()
+
 
 class MacroUnitTask(UnitTask[InputT, OutputT]):
+    """A unit task that expands into a sequence of sub-task invocations."""
+
     is_macro_unit_task: ClassVar[bool] = True
 
     @abstractmethod
     def expand(self, task_input: InputT) -> OutputT:
-        pass
+        """Define the sub-task invocations that compose this macro task."""
 
     def expand_invocations(self, task_input: InputT) -> tuple[list[TaskInvocation], int]:
+        """Run expand() and collect the resulting task invocations and output token count."""
         ctx = TaskContext()
         token = task_context.set(ctx)
         try:
@@ -543,10 +552,6 @@ class MacroUnitTask(UnitTask[InputT, OutputT]):
         if not ctx.invocations:
             raise ValueError(f"Macro task {self} expanded into zero invocations")
         return ctx.invocations, len(ctx.invocations) - 1
-
-    def make_name(self) -> str:
-        """Create a concise string representation of the task."""
-        return self.__class__.__name__.lower()
 
 
 class TaskInvocation(BaseModel, Generic[InputT, OutputT]):
@@ -624,7 +629,10 @@ class TaskGraphDispatch(BaseModel):
         """
         span = trace.get_current_span()
         span.set_attributes(
-            {f"dispatch.invocation.{i}": invocation.model_dump_json()[:OTEL_SPAN_ATTRIBUTE_MAX_LENGTH] for i, invocation in enumerate(self.invocations)}
+            {
+                f"dispatch.invocation.{i}": invocation.model_dump_json()[:OTEL_SPAN_ATTRIBUTE_MAX_LENGTH]
+                for i, invocation in enumerate(self.invocations)
+            }
         )
 
         try:
@@ -632,9 +640,7 @@ class TaskGraphDispatch(BaseModel):
                 response = await client.post(url, json=self.model_dump())
                 if response.status != 200:
                     body = await response.text()
-                    raise RuntimeError(
-                        f"Dispatch to {url} failed (HTTP {response.status}): {body}"
-                    )
+                    raise RuntimeError(f"Dispatch to {url} failed (HTTP {response.status}): {body}")
 
                 # Create a chunked iterator to avoid "chunk too big" error with large audio data
                 async def chunked_line_iterator():
@@ -666,9 +672,7 @@ class TaskGraphDispatch(BaseModel):
                 async with client.post(url, json=self.model_dump()) as response:
                     if response.status != 200:
                         body = await response.text()
-                        raise RuntimeError(
-                            f"Dispatch to {url} failed (HTTP {response.status}): {body}"
-                        )
+                        raise RuntimeError(f"Dispatch to {url} failed (HTTP {response.status}): {body}")
                     dispatch_outputs = await response.json()
         except aiohttp.ClientError as e:
             logger.exception("Failed to send dispatch request to %s: %s", url, e)
@@ -799,7 +803,9 @@ class TaskContext:
         # Parse the response to the right task output type.
         for i, (invocation, output) in enumerate(zip(self.invocations, dispatch_outputs, strict=True)):
             task_output = invocation.task_output.__class__.model_validate(output)
-            span.set_attribute(f"task_context.task.{i}.output", task_output.model_dump_json()[:OTEL_SPAN_ATTRIBUTE_MAX_LENGTH])
+            span.set_attribute(
+                f"task_context.task.{i}.output", task_output.model_dump_json()[:OTEL_SPAN_ATTRIBUTE_MAX_LENGTH]
+            )
             self.task_outputs[invocation.task.id].append(task_output)
 
     def replay_invocation(self, task: Task[InputT, OutputT]) -> OutputT:

@@ -17,7 +17,9 @@ from transformers.configuration_utils import PretrainedConfig
 from transformers.models.auto.configuration_auto import AutoConfig
 
 from cornserve.logging import get_logger
+from cornserve.task_executors.geri.executor.worker import broadcast_generate_command
 from cornserve.task_executors.geri.models.base import BatchGeriModel
+from cornserve.task_executors.geri.models.sp_wrapper import execute_sp_generate, patch_pipeline_for_sp
 
 logger = get_logger(__name__)
 
@@ -27,6 +29,7 @@ ENV_EAGER_TEXT_ENCODER = "CORNSERVE_GERI_QWEN_IMAGE_EAGER_TEXT_ENCODER"
 
 
 def env_flag(name: str) -> bool:
+    """Return True if the environment variable is set to a truthy value."""
     value = os.getenv(name)
     if value is None:
         return False
@@ -34,6 +37,7 @@ def env_flag(name: str) -> bool:
 
 
 def read_positive_int_env(name: str) -> int | None:
+    """Read an environment variable as a positive integer, returning None if unset."""
     value = os.getenv(name)
     if value is None or value.strip() == "":
         return None
@@ -203,8 +207,6 @@ class QwenImageModel(BatchGeriModel):
         Args:
             sp_group: The :class:`SPGroup` instance.
         """
-        from cornserve.task_executors.geri.models.sp_wrapper import patch_pipeline_for_sp
-
         patch_pipeline_for_sp(self.pipeline, sp_group)
         self._sp_group = sp_group
         logger.info("QwenImage model patched for SP (sp_size=%d).", sp_group.world_size)
@@ -314,9 +316,6 @@ class QwenImageModel(BatchGeriModel):
         num_inference_steps: int,
     ) -> list[str]:
         """SP-parallel generation (rank 0 drives, all ranks participate)."""
-        from cornserve.task_executors.geri.executor.worker import broadcast_generate_command
-        from cornserve.task_executors.geri.models.sp_wrapper import execute_sp_generate
-
         assert self._sp_group is not None
         batch_size = padded_embeds.shape[0]
         max_seq_len = padded_embeds.shape[1]

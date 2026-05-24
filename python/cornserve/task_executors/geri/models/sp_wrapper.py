@@ -12,10 +12,15 @@ Design principles:
 
 from __future__ import annotations
 
+import base64
+import io
 import os
 
 import torch
-import torch.nn.functional as F
+import torch.nn.functional as F  # noqa: N812
+from diffusers.models.transformers.transformer_qwenimage import apply_rotary_emb_qwen
+from diffusers.pipelines.qwenimage.pipeline_qwenimage import QwenImagePipeline, calculate_shift
+from PIL import Image
 
 from cornserve.logging import get_logger
 from cornserve.task_executors.geri.distributed.parallel import SPGroup
@@ -27,6 +32,7 @@ ENV_MAX_SINGLE_BLOCKS = "CORNSERVE_GERI_QWEN_IMAGE_MAX_SINGLE_BLOCKS"
 
 
 def read_positive_int_env(name: str) -> int | None:
+    """Read an environment variable as a positive integer, returning None if unset."""
     value = os.getenv(name)
     if value is None or value.strip() == "":
         return None
@@ -37,6 +43,7 @@ def read_positive_int_env(name: str) -> int | None:
 
 
 def apply_qwen_image_dev_layer_overrides(pipeline) -> None:
+    """Truncate transformer block counts based on environment variable overrides."""
     transformer = pipeline.transformer
 
     max_double_blocks = read_positive_int_env(ENV_MAX_DOUBLE_BLOCKS)
@@ -107,8 +114,6 @@ class SPQwenDoubleStreamAttnProcessor:
         image_rotary_emb=None,
     ) -> torch.Tensor:
         """Execute SP joint attention."""
-        from diffusers.models.transformers.transformer_qwenimage import apply_rotary_emb_qwen
-
         if encoder_hidden_states is None:
             raise ValueError("SPQwenDoubleStreamAttnProcessor requires encoder_hidden_states (text stream)")
 
@@ -171,7 +176,11 @@ class SPQwenDoubleStreamAttnProcessor:
 
         # Local attention: full joint sequence, subset of heads
         joint_hidden_states = F.scaled_dot_product_attention(
-            joint_query, joint_key, joint_value, dropout_p=0.0, is_causal=False,
+            joint_query,
+            joint_key,
+            joint_value,
+            dropout_p=0.0,
+            is_causal=False,
         )
 
         # All-to-All back: head-split → seq-split
@@ -224,8 +233,6 @@ class SPQwenSingleStreamAttnProcessor:
         image_rotary_emb=None,
     ) -> torch.Tensor:
         """Execute SP single-stream attention."""
-        from diffusers.models.transformers.transformer_qwenimage import apply_rotary_emb_qwen
-
         # QKV projection
         qkv = attn.to_qkv(hidden_states)
         split_size = qkv.shape[-1] // 3
@@ -396,8 +403,6 @@ def load_and_patch_pipeline_for_sp(
     Returns:
         Tuple of (pipeline, embedding_dim).
     """
-    from diffusers.pipelines.qwenimage.pipeline_qwenimage import QwenImagePipeline
-
     logger.info("Loading QwenImage pipeline from %s for SP worker.", model_id)
 
     pipeline = QwenImagePipeline.from_pretrained(model_id, torch_dtype=torch_dtype)
@@ -461,15 +466,11 @@ def execute_sp_generate(
         max_seq_len: Maximum sequence length of prompt embeddings.
         initial_latents: Pre-generated packed latents [B, num_patches, C] for
             deterministic testing. If None, latents are generated from random noise.
+        output_type: Output format, either "png" (base64 strings) or "latent" (raw tensor).
 
     Returns:
         List of base64-encoded PNG strings on rank 0; None on other ranks.
     """
-    import base64
-    import io
-
-    from PIL import Image
-
     device = torch.device("cuda")
     dtype = pipeline.dtype if hasattr(pipeline, "dtype") else torch.bfloat16
 
@@ -516,8 +517,6 @@ def execute_sp_generate(
     latents = scatter_latents(latents, sp_group, dim=1)
 
     # --- Prepare timesteps ---
-    from diffusers.pipelines.qwenimage.pipeline_qwenimage import calculate_shift
-
     vae_scale_factor = pipeline.vae_scale_factor
     latent_h = 2 * (int(height) // (vae_scale_factor * 2))
     latent_w = 2 * (int(width) // (vae_scale_factor * 2))

@@ -39,6 +39,7 @@ from cornserve.constants import (
 )
 from cornserve.logging import get_logger
 from cornserve.services.gateway.app.manager import AppManager
+from cornserve.services.gateway.app_registry import AppRegistry
 from cornserve.services.gateway.models import (
     AppInvocationRequest,
     AppRegistrationRequest,
@@ -63,7 +64,6 @@ from cornserve.services.pb import (
     task_dispatcher_pb2_grpc,
 )
 from cornserve.services.task_registry import TaskRegistry
-from cornserve.services.gateway.app_registry import AppRegistry
 from cornserve.services.utils import discover_gateway_replicas, discover_task_dispatcher_replicas
 from cornserve.task.base import Stream, TaskGraphDispatch, TaskOutput, UnitTaskList, task_manager_context
 from cornserve.task_executors.profile import UnitTaskProfileManager
@@ -87,6 +87,7 @@ tracer = trace.get_tracer(__name__)
 # ---------------------------------------------------------------------------
 # Sync helpers
 # ---------------------------------------------------------------------------
+
 
 async def _sync_all_control_plane_registries(task_registry: TaskRegistry) -> None:
     """Sync task registries across all control-plane services."""
@@ -144,7 +145,7 @@ async def _sync_all_gateway_replicas(app: FastAPI) -> None:
         gateway_urls = await discover_gateway_replicas(core_api)
 
     async def _sync_single_gateway(url: str) -> None:
-        async with aiohttp.ClientSession(
+        async with aiohttp.ClientSession(  # noqa: SIM117
             timeout=aiohttp.ClientTimeout(total=SYNC_WATCHERS_TIMEOUT),
         ) as session:
             async with session.post(f"{url}/internal/sync") as resp:
@@ -158,6 +159,7 @@ async def _sync_all_gateway_replicas(app: FastAPI) -> None:
 # ---------------------------------------------------------------------------
 # Common routes (mounted on ALL pods)
 # ---------------------------------------------------------------------------
+
 
 @common_router.get("/health")
 async def health_check():
@@ -188,6 +190,7 @@ async def internal_sync(raw_request: Request):
 # ---------------------------------------------------------------------------
 # Master-only routes (state-altering)
 # ---------------------------------------------------------------------------
+
 
 @master_router.post("/app/register")
 async def register_app(request: AppRegistrationRequest, raw_request: Request):
@@ -560,6 +563,7 @@ async def apply_resource_snapshot(request: ResourceSnapshot):
 # Worker routes (invoke + read-only, mounted on ALL pods)
 # ---------------------------------------------------------------------------
 
+
 @worker_router.post("/app/invoke/{app_id}")
 async def invoke_app(app_id: str, request: AppInvocationRequest, raw_request: Request):
     """Invoke a registered application."""
@@ -568,7 +572,10 @@ async def invoke_app(app_id: str, request: AppInvocationRequest, raw_request: Re
     span = trace.get_current_span()
     span.set_attribute("gateway.invoke_app.app_id", app_id)
     span.set_attributes(
-        {f"gateway.invoke_app.request.{key}": str(value)[:OTEL_SPAN_ATTRIBUTE_MAX_LENGTH] for key, value in request.request_data.items()},
+        {
+            f"gateway.invoke_app.request.{key}": str(value)[:OTEL_SPAN_ATTRIBUTE_MAX_LENGTH]
+            for key, value in request.request_data.items()
+        },
     )
 
     async def stream_app_response(
@@ -757,6 +764,7 @@ async def get_resource_snapshot():
 # ---------------------------------------------------------------------------
 # App init / factory
 # ---------------------------------------------------------------------------
+
 
 def init_app_state(app: FastAPI) -> None:
     """Initialize the app state with required components."""

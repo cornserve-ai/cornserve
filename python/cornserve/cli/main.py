@@ -229,7 +229,7 @@ def register(
     console = rich.get_console()
 
     # Parse responses from stream
-    response_iter = response.iter_lines(decode_unicode=True)
+    response_iter = response.iter_lines(chunk_size=None, decode_unicode=True)  # type: ignore[reportArgumentType, reportCallIssue]
 
     app_id: str | None = None
     task_names: list[str] = []
@@ -239,7 +239,7 @@ def register(
 
     # Get immediate initial response
     for line in response_iter:
-        if not line or not line.startswith("data: "):
+        if not line or not line.startswith("data: "):  # type: ignore[reportArgumentType]
             continue
 
         try:
@@ -296,7 +296,7 @@ def register(
     try:
         with Status(spinner_message, spinner="dots", console=console):
             for line in response_iter:
-                if not line or not line.startswith("data: "):
+                if not line or not line.startswith("data: "):  # type: ignore[reportArgumentType]
                     continue
 
                 try:
@@ -487,6 +487,7 @@ def invoke(
             _handle_non_streaming_response(raw_response, png_key, save_png_path)
 
     except requests.exceptions.HTTPError as e:
+        assert e.response is not None
         error_details = f"HTTP {e.response.status_code}: {e.response.reason}"
         try:
             # Try to extract error details from response body
@@ -553,7 +554,7 @@ def _handle_streaming_response(
 
         try:
             with Live("Waiting for response...", vertical_overflow="visible") as live:
-                for line in response.iter_lines(chunk_size=None, decode_unicode=True):
+                for line in response.iter_lines(chunk_size=None, decode_unicode=True)  # type: ignore[reportArgumentType, reportCallIssue]:
                     line = line.strip()
                     if not line:
                         continue
@@ -586,12 +587,12 @@ def _handle_streaming_response(
 
         try:
             with Live("Waiting for response...") as live:
-                for line_idx, line in enumerate(response.iter_lines(chunk_size=None, decode_unicode=True)):
+                for line_idx, line in enumerate(response.iter_lines(chunk_size=None, decode_unicode=True)  # type: ignore[reportArgumentType, reportCallIssue]):
                     line = line.strip()
                     if not line:
                         continue
 
-                    accumulated_data[str(line_idx)] = line
+                    accumulated_data[str(line_idx)] = line if isinstance(line, str) else line.decode()
                     table = _create_response_table(accumulated_data)
                     live.update(table, refresh=True)
 
@@ -671,7 +672,7 @@ def _handle_streaming_audio_response(
                     )
                 )
 
-            for line in response.iter_lines(chunk_size=None, decode_unicode=True):
+            for line in response.iter_lines(chunk_size=None, decode_unicode=True)  # type: ignore[reportArgumentType, reportCallIssue]:
                 line = line.strip()
                 if not line:
                     continue

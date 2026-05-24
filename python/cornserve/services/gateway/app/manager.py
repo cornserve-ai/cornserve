@@ -16,10 +16,10 @@ from pydantic import BaseModel
 from cornserve.app.base import AppConfig
 from cornserve.logging import get_logger
 from cornserve.services.gateway.app.models import AppComponents, AppDefinition, AppState
-from cornserve.services.gateway.task_manager import TaskManager
-from cornserve.task.base import discover_unit_tasks
 from cornserve.services.gateway.app_registry import AppRegistry
+from cornserve.services.gateway.task_manager import TaskManager
 from cornserve.services.utils import to_strict_k8s_name
+from cornserve.task.base import discover_unit_tasks
 
 logger = get_logger(__name__)
 tracer = trace.get_tracer(__name__)
@@ -152,7 +152,9 @@ class AppManager:
                 if not any(unique_task.is_equivalent_to(task) for unique_task in unique_tasks):
                     unique_tasks.append(task)
 
-            task_names = [to_strict_k8s_name(t.execution_descriptor.create_executor_name().lower()) for t in unique_tasks]
+            task_names = [
+                to_strict_k8s_name(t.execution_descriptor.create_executor_name().lower()) for t in unique_tasks
+            ]
 
             try:
                 await self.app_registry.create_app_instance(

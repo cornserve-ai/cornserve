@@ -119,9 +119,7 @@ class TaskManagerState:
                             break
                         raise
                 else:
-                    logger.warning(
-                        "Pod %s did not terminate within 120s", self.pod_name
-                    )
+                    logger.warning("Pod %s did not terminate within 120s", self.pod_name)
             # Delete K8s service
             if self.service_name is not None:
                 with suppress(kclient.ApiException):
@@ -675,7 +673,8 @@ class ResourceManager:
             except Exception as e:
                 logger.error(
                     "Failed to tear down orphaned task state for %s: %s",
-                    task_instance_name, e,
+                    task_instance_name,
+                    e,
                 )
 
     async def healthcheck(self) -> tuple[bool, list[tuple[UnitTask, bool]]]:
@@ -1109,7 +1108,9 @@ class ResourceManager:
                 for sync_attempt in range(3):
                     try:
                         sync_resp = await state.stub.SyncTaskRegistry(
-                            sync_req, wait_for_ready=True, timeout=constants.SYNC_WATCHERS_TIMEOUT,
+                            sync_req,
+                            wait_for_ready=True,
+                            timeout=constants.SYNC_WATCHERS_TIMEOUT,
                         )
                         if sync_resp.status != common_pb2.Status.STATUS_OK:
                             raise RuntimeError(f"Failed to sync task manager registry: {sync_resp}")
@@ -1119,7 +1120,9 @@ class ResourceManager:
                         sync_last_exc = e
                         logger.warning(
                             "SyncTaskRegistry attempt %d/3 failed for %s: %s",
-                            sync_attempt + 1, state.pod_name, e,
+                            sync_attempt + 1,
+                            state.pod_name,
+                            e,
                         )
                 if sync_last_exc is not None:
                     raise sync_last_exc

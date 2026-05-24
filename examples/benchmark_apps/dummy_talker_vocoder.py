@@ -9,7 +9,7 @@ Sidecar. The generated audio output is garbage and is discarded by the descripto
 $ cornserve register examples/dummy_talker_vocoder.py
 
 
-NOTE:
+Note:
 - ignore_eos is necessary because with random simulated input tensors, Talker produces
 random outputs and that means EOS token can appear early, stopping the run.
 - With ignore_eos enabled, max_completion_tokens is necessary to explicitly control

@@ -3,15 +3,16 @@
 from __future__ import annotations
 
 import asyncio
-import os
+import enum
 import hashlib
 import json
-import enum
+import os
 import uuid
 from collections import defaultdict
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
-from typing import Any, AsyncIterator
+from datetime import UTC, datetime
+from typing import Any
 
 import aiohttp
 import grpc
@@ -147,7 +148,7 @@ class TaskManager:
         deadline = asyncio.get_running_loop().time() + self._lease_acquire_timeout_seconds
 
         while True:
-            now = datetime.now(timezone.utc)
+            now = datetime.now(UTC)
             create_body = client.V1Lease(
                 metadata=client.V1ObjectMeta(name=lease_name, namespace=K8S_NAMESPACE),
                 spec=client.V1LeaseSpec(
@@ -180,7 +181,7 @@ class TaskManager:
             spec = current.spec or client.V1LeaseSpec()
             renew_time = spec.renew_time
             if renew_time is not None and renew_time.tzinfo is None:
-                renew_time = renew_time.replace(tzinfo=timezone.utc)
+                renew_time = renew_time.replace(tzinfo=UTC)
             lease_duration = spec.lease_duration_seconds or self._lease_duration_seconds
             is_expired = renew_time is None or (now - renew_time).total_seconds() > lease_duration
             held_by_self = spec.holder_identity == self._lease_holder_identity
@@ -232,7 +233,7 @@ class TaskManager:
         if spec is None or spec.holder_identity != self._lease_holder_identity:
             return
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         current_meta = current.metadata or client.V1ObjectMeta(name=lease_name, namespace=K8S_NAMESPACE)
         release_body = client.V1Lease(
             metadata=client.V1ObjectMeta(
@@ -433,7 +434,8 @@ class TaskManager:
                         await self._patch_usage_refcount(instance_name, current_refcount + 1)
                         # Read back to get the post-patch RV (safe for watch-sync)
                         updated: Any = await custom_api.get_namespaced_custom_object(
-                            group=CRD_GROUP, version=CRD_VERSION,
+                            group=CRD_GROUP,
+                            version=CRD_VERSION,
                             namespace=K8S_NAMESPACE,
                             plural=CRD_PLURAL_UNIT_TASK_INSTANCES,
                             name=instance_name,
@@ -455,7 +457,8 @@ class TaskManager:
             await self._patch_usage_refcount(instance_name, 1)
             # Read back the CR to get the post-patch RV
             created: Any = await custom_api.get_namespaced_custom_object(
-                group=CRD_GROUP, version=CRD_VERSION,
+                group=CRD_GROUP,
+                version=CRD_VERSION,
                 namespace=K8S_NAMESPACE,
                 plural=CRD_PLURAL_UNIT_TASK_INSTANCES,
                 name=instance_name,
@@ -683,8 +686,8 @@ class TaskManager:
         # ------------------------------------------------------------------
         task_ids: list[str] = []
         to_deploy: list[str] = []
-        newly_added: list[str] = []       # task_ids we inserted (for rollback)
-        incremented: list[str] = []        # task_ids whose counter we bumped
+        newly_added: list[str] = []  # task_ids we inserted (for rollback)
+        incremented: list[str] = []  # task_ids whose counter we bumped
         to_bump_refcount: list[str] = []  # task_ids needing CR refcount bump (watch-synced, first local use)
 
         async with self.task_lock:
@@ -744,7 +747,8 @@ class TaskManager:
                     # No need for gRPC deploy; just adopt it locally.
                     logger.info(
                         "Task %s already deployed in cluster (CR %s), skipping gRPC deploy",
-                        task_id, instance_name,
+                        task_id,
+                        instance_name,
                     )
                     tasks_already_deployed_in_cluster.append(task_id)
                 else:
@@ -766,7 +770,9 @@ class TaskManager:
                 errors: list[BaseException] = []
                 for resp, deployed_task in zip(responses, tasks_needing_grpc_deploy, strict=True):
                     if isinstance(resp, AioRpcError):
-                        logger.exception("gRPC error while deploying task %s: \n%s", deployed_task, format_grpc_error(resp))
+                        logger.exception(
+                            "gRPC error while deploying task %s: \n%s", deployed_task, format_grpc_error(resp)
+                        )
                         errors.append(resp)
                     elif isinstance(resp, BaseException):
                         logger.exception("Error while deploying task: %s", resp)
@@ -785,7 +791,10 @@ class TaskManager:
                     await self._patch_usage_refcount(instance_name, current + 1)
                     logger.info(
                         "Bumped CR refcount for watch-synced task %s (%s): %d -> %d",
-                        task_id, instance_name, current, current + 1,
+                        task_id,
+                        instance_name,
+                        current,
+                        current + 1,
                     )
 
         except BaseException as e:
@@ -882,8 +891,7 @@ class TaskManager:
                             # purge from local state — there is nothing to tear
                             # down on the RM side.
                             logger.warning(
-                                "Purging ghost task %s (no CR name, likely from a "
-                                "cancelled deploy)",
+                                "Purging ghost task %s (no CR name, likely from a cancelled deploy)",
                                 task_id,
                             )
                             self.tasks.pop(task_id, None)
@@ -904,12 +912,12 @@ class TaskManager:
                 else:
                     logger.warning("Cannot find task, skipping teardown: %r", task)
 
-        fully_done: list[str] = []     # local counter=0, remove from local state
+        fully_done: list[str] = []  # local counter=0, remove from local state
         refcount_only: list[str] = []  # local counter>0, keep local state
         errors: list[BaseException] = []
         for task_id, task, instance_name in to_release:
             try:
-                did_teardown = await self._release_task_reference(task, instance_name)
+                await self._release_task_reference(task, instance_name)
                 if self.task_usage_counter.get(task_id, 0) == 0:
                     fully_done.append(task_id)
                 else:
@@ -968,6 +976,7 @@ class TaskManager:
             raise RuntimeError(f"Error while scaling unit task {task_id}: {e}") from e
 
     async def list_tasks(self) -> list[tuple[UnitTask, str, TaskState]]:
+        """Return all registered tasks with their IDs and current states."""
         await self.sync_unit_task_instance_watchers()
         return [(task, task_id, self.task_states[task_id]) for task_id, task in self.tasks.items()]
 

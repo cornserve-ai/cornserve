@@ -11,7 +11,7 @@ is discarded by the descriptor instead of being returned.
 $ cornserve register examples/dummy_talker.py
 
 
-NOTE:
+Note:
 - ignore_eos is necessary because with random simulated input tensors, Talker produces
 random outputs and that means EOS token can appear early, stopping the run.
 - With ignore_eos enabled, max_completion_tokens is necessary to explicitly control

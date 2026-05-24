@@ -25,8 +25,11 @@ omni = Qwen3OmniMacroUnitTask(
 
 
 class Config(AppConfig):
+    """App configuration model."""
+
     tasks = {"omni": omni}
 
 
 async def serve(request: OmniInput) -> AsyncIterator[OpenAIChatCompletionChunk]:
+    """Main serve function for the app."""
     return await omni(request)

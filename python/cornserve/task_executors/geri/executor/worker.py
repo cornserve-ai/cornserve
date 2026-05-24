@@ -47,6 +47,7 @@ from cornserve.task_executors.geri.distributed.parallel import (
     get_sp_group,
     init_sp_distributed,
 )
+from cornserve.task_executors.geri.models.sp_wrapper import execute_sp_generate, load_and_patch_pipeline_for_sp
 from cornserve.task_executors.geri.utils.zmq import get_open_zmq_ipc_path, zmq_sync_socket_ctx
 
 logger = get_logger(__name__)
@@ -188,8 +189,6 @@ class SPWorker:
             init_method: Rendezvous URL for ``torch.distributed``.
             error_zmq_path: ZMQ IPC path for error reporting back to executor.
         """
-        from cornserve.task_executors.geri.models.sp_wrapper import load_and_patch_pipeline_for_sp
-
         self.sp_rank = sp_rank
         self.sp_size = sp_size
         self.error_zmq_path = error_zmq_path
@@ -199,10 +198,11 @@ class SPWorker:
         self._error_sock: zmq.Socket | None = None
         if error_zmq_path:
             self._error_zmq_ctx = zmq.Context(io_threads=1)
-            self._error_sock = self._error_zmq_ctx.socket(zmq.PUSH)
-            self._error_sock.setsockopt(zmq.SNDHWM, 0)
-            self._error_sock.setsockopt(zmq.LINGER, 1000)
-            self._error_sock.connect(error_zmq_path)
+            error_sock = self._error_zmq_ctx.socket(zmq.PUSH)
+            error_sock.setsockopt(zmq.SNDHWM, 0)
+            error_sock.setsockopt(zmq.LINGER, 1000)
+            error_sock.connect(error_zmq_path)
+            self._error_sock = error_sock
 
         # Initialize torch.distributed and SP group
         init_sp_distributed(world_size=sp_size, rank=sp_rank, init_method=init_method)
@@ -226,21 +226,19 @@ class SPWorker:
         """Send an exception to the executor via ZMQ."""
         if self._error_sock is not None:
             try:
-                error_data = pickle.dumps({
-                    "rank": self.sp_rank,
-                    "error": str(exc),
-                    "traceback": traceback.format_exc(),
-                })
+                error_data = pickle.dumps(
+                    {
+                        "rank": self.sp_rank,
+                        "error": str(exc),
+                        "traceback": traceback.format_exc(),
+                    }
+                )
                 self._error_sock.send(error_data, zmq.NOBLOCK)
             except Exception:
                 logger.warning("SP worker %d: failed to send error via ZMQ.", self.sp_rank)
 
     def run(self) -> None:
         """Main worker loop: wait for commands from rank 0 and execute them."""
-        from cornserve.task_executors.geri.models.sp_wrapper import (
-            execute_sp_generate,
-        )
-
         sp_group = get_sp_group()
         logger.info("SP worker %d entering command loop.", self.sp_rank)
 
@@ -253,11 +251,11 @@ class SPWorker:
                 break
 
             elif cmd_type == _CMD_GENERATE:
-                height = cmd[1].item()
-                width = cmd[2].item()
-                num_inference_steps = cmd[3].item()
-                batch_size = cmd[4].item()
-                max_seq_len = cmd[5].item()
+                height = int(cmd[1].item())
+                width = int(cmd[2].item())
+                num_inference_steps = int(cmd[3].item())
+                batch_size = int(cmd[4].item())
+                max_seq_len = int(cmd[5].item())
 
                 logger.info(
                     "SP worker %d executing generate: h=%d, w=%d, steps=%d, batch=%d, max_seq=%d",
@@ -297,9 +295,7 @@ class SPWorker:
             elif cmd_type == _CMD_METHOD:
                 # Generic method dispatch (future extensibility).
                 # Receive pickled (method_name, args, kwargs) via a follow-up broadcast.
-                logger.warning(
-                    "SP worker %d received _CMD_METHOD — not yet implemented.", self.sp_rank
-                )
+                logger.warning("SP worker %d received _CMD_METHOD — not yet implemented.", self.sp_rank)
 
             else:
                 logger.warning("SP worker %d received unknown command type %d", self.sp_rank, cmd_type)

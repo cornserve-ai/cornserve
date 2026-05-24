@@ -86,8 +86,7 @@ class SPGroup:
             gather_dim += input_.dim()
 
         assert input_.size(scatter_dim) % self.world_size == 0, (
-            f"scatter_dim size ({input_.size(scatter_dim)}) must be divisible "
-            f"by world_size ({self.world_size})"
+            f"scatter_dim size ({input_.size(scatter_dim)}) must be divisible by world_size ({self.world_size})"
         )
 
         # Split input along scatter_dim into world_size chunks.

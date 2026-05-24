@@ -64,9 +64,7 @@ mllm_tp1_bs64_fission = MLLMTask(
     llm_gpu_memory_utilization=0.9,
 )
 
-qwen25vl_router = RouterApp[
-    OpenAIChatCompletionRequest, Stream[OpenAIChatCompletionChunk]
-](
+qwen25vl_router = RouterApp[OpenAIChatCompletionRequest, Stream[OpenAIChatCompletionChunk]](
     routing_tasks=[mllm_tp2_bs32, mllm_tp1_bs64_fission],
     routing_weights=[0.3, 0.7],
 )

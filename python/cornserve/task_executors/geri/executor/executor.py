@@ -23,7 +23,17 @@ import torch
 import zmq
 
 from cornserve.logging import get_logger
+from cornserve.task_executors.eric.utils.network import get_open_port
 from cornserve.task_executors.geri.api import Status
+from cornserve.task_executors.geri.distributed.parallel import destroy_sp_distributed, get_sp_group, init_sp_distributed
+from cornserve.task_executors.geri.executor.loader import load_model
+from cornserve.task_executors.geri.executor.worker import (
+    SPWorker,
+    SPWorkerHandle,
+    broadcast_profile_start_command,
+    broadcast_profile_stop_command,
+    broadcast_shutdown_command,
+)
 from cornserve.task_executors.geri.models.base import (
     BatchGeriModel,
     GeriModel,
@@ -162,14 +172,6 @@ class SPBatchExecutor(ModelExecutor[BatchGeriModel]):
             registry_entry: Geri model registry entry.
             model_config: Optional HF model config.
         """
-        from cornserve.task_executors.eric.utils.network import get_open_port
-        from cornserve.task_executors.geri.distributed.parallel import (
-            get_sp_group,
-            init_sp_distributed,
-        )
-        from cornserve.task_executors.geri.executor.loader import load_model
-        from cornserve.task_executors.geri.executor.worker import SPWorker, SPWorkerHandle
-
         self.sp_size = sp_size
         self.sp_workers: list[SPWorkerHandle] = []
 
@@ -217,13 +219,11 @@ class SPBatchExecutor(ModelExecutor[BatchGeriModel]):
         )
 
         if not isinstance(model, BatchGeriModel):
-            raise TypeError(
-                f"SPBatchExecutor requires a BatchGeriModel, got {type(model).__name__}"
-            )
+            raise TypeError(f"SPBatchExecutor requires a BatchGeriModel, got {type(model).__name__}")
 
         sp_group = get_sp_group()
         if hasattr(model, "patch_for_sp"):
-            model.patch_for_sp(sp_group)
+            model.patch_for_sp(sp_group)  # type: ignore[reportAttributeAccessIssue]
 
         self.model = model
 
@@ -238,16 +238,14 @@ class SPBatchExecutor(ModelExecutor[BatchGeriModel]):
         If a worker reported an error, raise it as a RuntimeError.
         Non-blocking: returns immediately if no errors.
         """
-        for i, sock in enumerate(self._error_sockets):
+        for _i, sock in enumerate(self._error_sockets):
             if sock.poll(timeout=0):
                 try:
                     error_data = pickle.loads(sock.recv(zmq.NOBLOCK))
                     rank = error_data.get("rank", "?")
                     error_msg = error_data.get("error", "Unknown error")
                     tb = error_data.get("traceback", "")
-                    raise RuntimeError(
-                        f"SP worker rank {rank} reported error: {error_msg}\n{tb}"
-                    )
+                    raise RuntimeError(f"SP worker rank {rank} reported error: {error_msg}\n{tb}")
                 except zmq.Again:
                     pass
 
@@ -277,7 +275,10 @@ class SPBatchExecutor(ModelExecutor[BatchGeriModel]):
         try:
             logger.info(
                 "SP generating content with size %dx%d, %d inference steps, sp_size=%d",
-                height, width, num_inference_steps, self.sp_size,
+                height,
+                width,
+                num_inference_steps,
+                self.sp_size,
             )
 
             generated_bytes = self.model.generate(
@@ -306,9 +307,6 @@ class SPBatchExecutor(ModelExecutor[BatchGeriModel]):
         Returns:
             List of trace file paths (rank 0 + workers).
         """
-        from cornserve.task_executors.geri.distributed.parallel import get_sp_group
-        from cornserve.task_executors.geri.executor.worker import broadcast_profile_start_command
-
         os.makedirs(output_dir, exist_ok=True)
         trace_paths: list[str] = []
 
@@ -347,9 +345,6 @@ class SPBatchExecutor(ModelExecutor[BatchGeriModel]):
         Returns:
             List of trace file paths saved.
         """
-        from cornserve.task_executors.geri.distributed.parallel import get_sp_group
-        from cornserve.task_executors.geri.executor.worker import broadcast_profile_stop_command
-
         trace_paths: list[str] = []
 
         # Stop profiler on rank 0
@@ -386,9 +381,6 @@ class SPBatchExecutor(ModelExecutor[BatchGeriModel]):
 
         # Send shutdown command to workers via NCCL broadcast
         try:
-            from cornserve.task_executors.geri.distributed.parallel import get_sp_group
-            from cornserve.task_executors.geri.executor.worker import broadcast_shutdown_command
-
             sp_group = get_sp_group()
             broadcast_shutdown_command(sp_group)
         except Exception:
@@ -420,8 +412,6 @@ class SPBatchExecutor(ModelExecutor[BatchGeriModel]):
 
         # Destroy distributed process group
         try:
-            from cornserve.task_executors.geri.distributed.parallel import destroy_sp_distributed
-
             destroy_sp_distributed()
         except Exception:
             logger.debug("Failed to destroy SP distributed group (may already be destroyed).")

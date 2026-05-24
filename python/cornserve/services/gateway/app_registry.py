@@ -47,6 +47,7 @@ class AppRegistry:
     """
 
     def __init__(self) -> None:
+        """Initialize the AppRegistry."""
         self._api_client: client.ApiClient | None = None
         self._custom_api: client.CustomObjectsApi | None = None
 

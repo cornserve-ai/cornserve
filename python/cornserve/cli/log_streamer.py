@@ -88,8 +88,8 @@ class LogStreamer:
         api = client.CoreV1Api()
         while not self.stop_event.is_set():
             try:
-                pods = api.list_namespaced_pod(K8S_NAMESPACE, timeout_seconds=5)
-                for pod in pods.items:
+                pods = api.list_namespaced_pod(K8S_NAMESPACE, timeout_seconds=5)  # type: ignore[union-attr]
+                for pod in pods.items:  # type: ignore[union-attr]
                     pod_name = pod.metadata.name
                     if pod_name in self.monitored_pods:
                         continue
@@ -136,7 +136,7 @@ class LogStreamer:
                     time.sleep(1)
 
             # This worker don't need to close resp, the stop() shuts it down.
-            resp: HTTPResponse = api.read_namespaced_pod_log(
+            resp: HTTPResponse = api.read_namespaced_pod_log(  # type: ignore[assignment]
                 name=pod_name,
                 namespace=K8S_NAMESPACE,
                 follow=True,

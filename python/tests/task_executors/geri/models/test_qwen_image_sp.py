@@ -57,9 +57,7 @@ if (visible_devices := os.getenv("CUDA_VISIBLE_DEVICES")) is not None:
 else:
     try:
         _CURR_NUM_GPUS = int(
-            subprocess.check_output(
-                ["nvidia-smi", "--query-gpu=count", "--format=csv,noheader,nounits", "-i", "0"]
-            )
+            subprocess.check_output(["nvidia-smi", "--query-gpu=count", "--format=csv,noheader,nounits", "-i", "0"])
             .strip()
             .decode()
         )
@@ -89,9 +87,7 @@ def _png_b64_to_tensor(png_b64: str) -> torch.Tensor:
     png_bytes = base64.b64decode(png_b64.encode("ascii"))
     img = Image.open(io.BytesIO(png_bytes)).convert("RGB")
     return (
-        torch.tensor(list(img.getdata()), dtype=torch.float32)
-        .reshape(img.height, img.width, 3)
-        .permute(2, 0, 1)
+        torch.tensor(list(img.getdata()), dtype=torch.float32).reshape(img.height, img.width, 3).permute(2, 0, 1)
         / 255.0
     )
 
@@ -114,8 +110,7 @@ def _create_seeded_embeddings(
     """Create reproducible dummy prompt embeddings."""
     gen = torch.Generator(device=device).manual_seed(seed)
     return [
-        torch.randn(seq_len, hidden_size, dtype=torch.bfloat16, device=device, generator=gen)
-        for _ in range(batch_size)
+        torch.randn(seq_len, hidden_size, dtype=torch.bfloat16, device=device, generator=gen) for _ in range(batch_size)
     ]
 
 
@@ -180,9 +175,7 @@ def _baseline_main(result_queue: mp.Queue) -> None:
         torch_device=torch.device("cuda:0"),
     )
 
-    embeddings = _create_seeded_embeddings(
-        DEFAULT_BATCH_SIZE, DEFAULT_SEQ_LEN, model.embedding_dim, DEFAULT_SEED
-    )
+    embeddings = _create_seeded_embeddings(DEFAULT_BATCH_SIZE, DEFAULT_SEQ_LEN, model.embedding_dim, DEFAULT_SEED)
 
     initial_latents = _create_initial_latents(
         model.pipeline, DEFAULT_BATCH_SIZE, DEFAULT_HEIGHT, DEFAULT_WIDTH, DEFAULT_SEED
@@ -265,9 +258,7 @@ def _sp_worker_main(
         if rank == 0:
             from torch.nn.utils.rnn import pad_sequence
 
-            embeddings = _create_seeded_embeddings(
-                batch_size, seq_len, embedding_dim, seed, device=f"cuda:{rank}"
-            )
+            embeddings = _create_seeded_embeddings(batch_size, seq_len, embedding_dim, seed, device=f"cuda:{rank}")
             prompt_embeds = pad_sequence(embeddings, batch_first=True, padding_value=0.0)
             lengths = torch.tensor([e.size(0) for e in embeddings], device=f"cuda:{rank}")
             prompt_embeds_mask = (
@@ -297,6 +288,7 @@ def _sp_worker_main(
 
     except Exception as e:
         import traceback
+
         result_queue.put(("error", f"Rank {rank}: {e}\n{traceback.format_exc()}"))
     finally:
         try:
@@ -335,10 +327,18 @@ def _run_sp_generation(
         p = ctx.Process(
             target=_sp_worker_main,
             args=(
-                rank, sp_size, model_id,
-                height, width, steps,
-                batch_size, seq_len, seed,
-                init_method, result_queue, initial_latents_cpu,
+                rank,
+                sp_size,
+                model_id,
+                height,
+                width,
+                steps,
+                batch_size,
+                seq_len,
+                seed,
+                init_method,
+                result_queue,
+                initial_latents_cpu,
             ),
         )
         p.start()
@@ -453,6 +453,5 @@ def test_sp_correctness(sp_size: int, baseline_results: tuple[list[str], torch.T
         mse = torch.nn.functional.mse_loss(baseline_tensors[i], sp_tensors[i]).item()
 
         assert cos_sim > SP_COSINE_THRESHOLD, (
-            f"SP={sp_size} image {i}: cosine similarity {cos_sim:.6f} < {SP_COSINE_THRESHOLD} "
-            f"(MSE={mse:.8f})"
+            f"SP={sp_size} image {i}: cosine similarity {cos_sim:.6f} < {SP_COSINE_THRESHOLD} (MSE={mse:.8f})"
         )

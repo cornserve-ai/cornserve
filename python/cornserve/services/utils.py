@@ -58,6 +58,7 @@ async def discover_task_dispatcher_replicas(kube_client: kclient.CoreV1Api) -> l
     except Exception as e:
         raise RuntimeError(f"Failed to discover Task Dispatcher replicas: {e}") from e
 
+
 async def discover_gateway_replicas(kube_client: kclient.CoreV1Api) -> list[str]:
     """Discover all Gateway replica HTTP endpoints via headless service.
 

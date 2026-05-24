@@ -61,11 +61,7 @@ def test_invalid_group_index_rejected():
     with pytest.raises(ValueError, match="group index 5 out of range"):
         OmniFlexTask(
             model_id=MODEL_ID,
-            groups=[
-                OmniFlexGroupConfig(
-                    thinkers=[ThinkerLLMConfig(tp_size=2, max_num_seqs=32)]
-                )
-            ],
+            groups=[OmniFlexGroupConfig(thinkers=[ThinkerLLMConfig(tp_size=2, max_num_seqs=32)])],
             type_routing_weights={1: {5: 1.0}},
         )
 
@@ -75,12 +71,8 @@ def test_negative_weight_rejected():
         OmniFlexTask(
             model_id=MODEL_ID,
             groups=[
-                OmniFlexGroupConfig(
-                    thinkers=[ThinkerLLMConfig(tp_size=2, max_num_seqs=32)]
-                ),
-                OmniFlexGroupConfig(
-                    thinkers=[ThinkerLLMConfig(tp_size=1, max_num_seqs=64)]
-                ),
+                OmniFlexGroupConfig(thinkers=[ThinkerLLMConfig(tp_size=2, max_num_seqs=32)]),
+                OmniFlexGroupConfig(thinkers=[ThinkerLLMConfig(tp_size=1, max_num_seqs=64)]),
             ],
             type_routing_weights={1: {0: 1.0, 1: -0.5}},
         )
@@ -90,11 +82,7 @@ def test_single_group_no_type_routing_ok():
     """Single group with empty type_routing_weights is valid."""
     task = OmniFlexTask(
         model_id=MODEL_ID,
-        groups=[
-            OmniFlexGroupConfig(
-                thinkers=[ThinkerLLMConfig(tp_size=2, max_num_seqs=32)]
-            )
-        ],
+        groups=[OmniFlexGroupConfig(thinkers=[ThinkerLLMConfig(tp_size=2, max_num_seqs=32)])],
     )
     assert len(task.groups) == 1
 
@@ -115,9 +103,7 @@ def test_select_group_distribution():
     """Group selection follows weight distribution."""
     # Weights: group0=30%, group1=70%
     cdf = [(0, 0.3), (1, 1.0)]
-    counts = Counter(
-        _select_group(uuid.uuid4().hex, cdf) for _ in range(N_SAMPLES)
-    )
+    counts = Counter(_select_group(uuid.uuid4().hex, cdf) for _ in range(N_SAMPLES))
     total = sum(counts.values())
     assert abs(counts[0] / total - 0.3) < TOLERANCE
     assert abs(counts[1] / total - 0.7) < TOLERANCE
@@ -126,9 +112,7 @@ def test_select_group_distribution():
 def test_select_group_three_way():
     """Three-way split: 20/50/30."""
     cdf = [(0, 0.2), (1, 0.7), (2, 1.0)]
-    counts = Counter(
-        _select_group(uuid.uuid4().hex, cdf) for _ in range(N_SAMPLES)
-    )
+    counts = Counter(_select_group(uuid.uuid4().hex, cdf) for _ in range(N_SAMPLES))
     total = sum(counts.values())
     assert abs(counts[0] / total - 0.2) < TOLERANCE
     assert abs(counts[1] / total - 0.5) < TOLERANCE
@@ -151,9 +135,7 @@ def test_select_thinker_distribution():
     """Thinker selection follows weight distribution."""
     # 40/60 split
     cdf = [0.4, 1.0]
-    counts = Counter(
-        _select_thinker(uuid.uuid4().hex, cdf) for _ in range(N_SAMPLES)
-    )
+    counts = Counter(_select_thinker(uuid.uuid4().hex, cdf) for _ in range(N_SAMPLES))
     total = sum(counts.values())
     assert abs(counts[0] / total - 0.4) < TOLERANCE
     assert abs(counts[1] / total - 0.6) < TOLERANCE
@@ -178,11 +160,7 @@ def test_get_group_idx_single_group():
     """Single group always returns 0."""
     task = OmniFlexTask(
         model_id=MODEL_ID,
-        groups=[
-            OmniFlexGroupConfig(
-                thinkers=[ThinkerLLMConfig(tp_size=2, max_num_seqs=32)]
-            )
-        ],
+        groups=[OmniFlexGroupConfig(thinkers=[ThinkerLLMConfig(tp_size=2, max_num_seqs=32)])],
     )
     for _ in range(100):
         assert task._get_group_idx(uuid.uuid4().hex, 1) == 0
@@ -198,15 +176,11 @@ def test_get_group_idx_distribution():
                 eric_max_batch_sizes={"img": 4},
                 thinkers=[ThinkerLLMConfig(tp_size=2, max_num_seqs=32)],
             ),
-            OmniFlexGroupConfig(
-                thinkers=[ThinkerLLMConfig(tp_size=1, max_num_seqs=64)]
-            ),
+            OmniFlexGroupConfig(thinkers=[ThinkerLLMConfig(tp_size=1, max_num_seqs=64)]),
         ],
         type_routing_weights={1: {0: 0.6, 1: 0.4}},
     )
-    counts = Counter(
-        task._get_group_idx(uuid.uuid4().hex, 1) for _ in range(N_SAMPLES)
-    )
+    counts = Counter(task._get_group_idx(uuid.uuid4().hex, 1) for _ in range(N_SAMPLES))
     total = sum(counts.values())
     assert abs(counts[0] / total - 0.6) < TOLERANCE
     assert abs(counts[1] / total - 0.4) < TOLERANCE
@@ -219,11 +193,7 @@ def test_get_thinker_idx_single():
     """Single thinker always returns 0."""
     task = OmniFlexTask(
         model_id=MODEL_ID,
-        groups=[
-            OmniFlexGroupConfig(
-                thinkers=[ThinkerLLMConfig(tp_size=2, max_num_seqs=32)]
-            )
-        ],
+        groups=[OmniFlexGroupConfig(thinkers=[ThinkerLLMConfig(tp_size=2, max_num_seqs=32)])],
     )
     for _ in range(100):
         assert task._get_thinker_idx(uuid.uuid4().hex, 0) == 0
@@ -242,9 +212,7 @@ def test_get_thinker_idx_distribution():
             )
         ],
     )
-    counts = Counter(
-        task._get_thinker_idx(uuid.uuid4().hex, 0) for _ in range(N_SAMPLES)
-    )
+    counts = Counter(task._get_thinker_idx(uuid.uuid4().hex, 0) for _ in range(N_SAMPLES))
     total = sum(counts.values())
     assert abs(counts[0] / total - 0.3) < TOLERANCE
     assert abs(counts[1] / total - 0.7) < TOLERANCE
@@ -259,11 +227,7 @@ def test_subtask_discovery_mono():
 
     task = OmniFlexTask(
         model_id=MODEL_ID,
-        groups=[
-            OmniFlexGroupConfig(
-                thinkers=[ThinkerLLMConfig(tp_size=2, max_num_seqs=32)]
-            )
-        ],
+        groups=[OmniFlexGroupConfig(thinkers=[ThinkerLLMConfig(tp_size=2, max_num_seqs=32)])],
     )
     unit_tasks = discover_unit_tasks([task])
     # LLMUnitTask + LLMEmbeddingUnitTask + OmniTalkerVocoderTask
@@ -282,9 +246,7 @@ def test_subtask_discovery_multi_group():
                 eric_max_batch_sizes={"img": 4},
                 thinkers=[ThinkerLLMConfig(tp_size=2, max_num_seqs=32)],
             ),
-            OmniFlexGroupConfig(
-                thinkers=[ThinkerLLMConfig(tp_size=1, max_num_seqs=64)]
-            ),
+            OmniFlexGroupConfig(thinkers=[ThinkerLLMConfig(tp_size=1, max_num_seqs=64)]),
         ],
         type_routing_weights={1: {0: 0.6, 1: 0.4}},
     )
@@ -302,11 +264,7 @@ def test_subtask_discovery_vocoder_fission():
 
     task = OmniFlexTask(
         model_id=MODEL_ID,
-        groups=[
-            OmniFlexGroupConfig(
-                thinkers=[ThinkerLLMConfig(tp_size=2, max_num_seqs=32)]
-            )
-        ],
+        groups=[OmniFlexGroupConfig(thinkers=[ThinkerLLMConfig(tp_size=2, max_num_seqs=32)])],
         vocoder_fission=True,
     )
     unit_tasks = discover_unit_tasks([task])
