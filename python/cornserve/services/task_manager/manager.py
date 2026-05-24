@@ -333,8 +333,9 @@ class TaskManager:
 
         executor_id = self.descriptor.create_executor_name().lower()
         executor_id = "-".join([executor_id, *(f"{gpu.global_rank}" for gpu in gpus)])
+        executor_id = to_strict_k8s_name(executor_id, max_len=60)  # 60 = 63 - len("te-")
         pod_name = f"te-{executor_id}"
-        service_name = to_strict_k8s_name(f"te-{executor_id}")
+        service_name = f"te-{executor_id}"
         additional_service_ports = self.descriptor.get_service_ports(gpus)
         port = 8000
 

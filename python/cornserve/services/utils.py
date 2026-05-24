@@ -58,8 +58,52 @@ async def discover_task_dispatcher_replicas(kube_client: kclient.CoreV1Api) -> l
     except Exception as e:
         raise RuntimeError(f"Failed to discover Task Dispatcher replicas: {e}") from e
 
+async def discover_gateway_replicas(kube_client: kclient.CoreV1Api) -> list[str]:
+    """Discover all Gateway replica HTTP endpoints via headless service.
 
-def to_strict_k8s_name(name: str) -> str:
+    Uses Kubernetes service discovery to find all Gateway pod IPs
+    and return their HTTP endpoints for broadcasting sync notifications.
+
+    Args:
+        kube_client: Kubernetes API client for service discovery
+
+    Returns:
+        List of Gateway HTTP URLs (e.g., ["http://10.1.2.3:8000", "http://10.1.2.4:8000"])
+
+    Raises:
+        RuntimeError: If Gateway replicas cannot be discovered.
+    """
+    try:
+        endpoints = await kube_client.list_namespaced_endpoints(
+            namespace=constants.K8S_NAMESPACE,
+            field_selector=f"metadata.name={constants.K8S_GATEWAY_HEADLESS_SERVICE}",
+        )
+
+        gateway_urls = []
+        for endpoint in endpoints.items:
+            if endpoint.subsets:
+                for subset in endpoint.subsets:
+                    if subset.addresses and subset.ports:
+                        for address in subset.addresses:
+                            for port in subset.ports:
+                                if port.name == "http":
+                                    gateway_urls.append(f"http://{address.ip}:{port.port}")
+
+        if not gateway_urls:
+            raise RuntimeError(
+                f"No Gateway replicas found in headless service "
+                f"{constants.K8S_GATEWAY_HEADLESS_SERVICE}. "
+                "Ensure Gateway pods are running and healthy."
+            )
+
+        logger.info("Discovered %d Gateway replicas: %s", len(gateway_urls), gateway_urls)
+        return gateway_urls
+
+    except Exception as e:
+        raise RuntimeError(f"Failed to discover Gateway replicas: {e}") from e
+
+
+def to_strict_k8s_name(name: str, max_len: int = 63) -> str:
     """Normalize a name to be suitable even for the strictest Kubernetes requirements.
 
     RFC 1035 Label Names are the most restrictive:
@@ -75,7 +119,7 @@ def to_strict_k8s_name(name: str) -> str:
     name = "".join(c if c.isalnum() or c == "-" else "-" for c in name)
 
     # Ensure length
-    name = name[:63]
+    name = name[:max_len]
 
     # Starts and ends with an alphanumeric character
     name = name.strip("-")

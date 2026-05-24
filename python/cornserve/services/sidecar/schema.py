@@ -299,9 +299,11 @@ class RecvRequestState:
         num_chunks: The number of chunks in the request. `0` for streaming unkown number of chunks,
             and `-1` when the receiver client creates the state before receiving the first chunk.
         chunks: A dictionary of chunk id to RecvChunkState
+        chunks_freed: Number of chunks that have been mark_done'd.
     """
 
     id: str
     num_chunks: int = -1
     chunks: dict[int, RecvTensorState | RecvObjState] = field(default_factory=dict)
     done_event: asyncio.Event = field(default_factory=asyncio.Event)
+    chunks_freed: int = 0

@@ -1,19 +1,23 @@
+# Gateway Master — single replica, handles all state-altering operations
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: gateway
+  name: gateway-master
   namespace: cornserve
   labels:
     app: gateway
+    gateway-role: master
 spec:
   selector:
     matchLabels:
       app: gateway
+      gateway-role: master
   replicas: 1
   template:
     metadata:
       labels:
         app: gateway
+        gateway-role: master
     spec:
       serviceAccountName: gateway-sa
       nodeSelector:
@@ -25,6 +29,9 @@ spec:
         ports:
         - containerPort: 8000
           name: http
+        env:
+        - name: GATEWAY_ROLE
+          value: "master"
         envFrom:
         - configMapRef:
             name: cornserve-config

@@ -1,0 +1,25 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: latestapprvs.cornserve.ai
+spec:
+  group: cornserve.ai
+  scope: Namespaced
+  names:
+    plural: latestapprvs
+    singular: latestapprv
+    kind: LatestAppRV
+  versions:
+    - name: v1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              properties:
+                maxAppRV:
+                  type: integer
+              required: ["maxAppRV"]

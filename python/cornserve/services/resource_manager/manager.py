@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import uuid
 from contextlib import suppress
 from dataclasses import dataclass, field
 
@@ -14,6 +13,11 @@ from opentelemetry import trace
 
 from cornserve import constants
 from cornserve.logging import get_logger
+from cornserve.services.gateway.models import (
+    GPUStatusPayload,
+    NodeStatusPayload,
+    ResourceSnapshot,
+)
 from cornserve.services.pb import (
     common_pb2,
     sidecar_pb2,
@@ -95,13 +99,29 @@ class TaskManagerState:
                 for gpu in self.resources:
                     gpu.free()
 
-            # Delete K8s pod
+            # Delete K8s pod and wait for it to be fully terminated
             if self.pod_name is not None:
                 with suppress(kclient.ApiException):
                     await kube_client.delete_namespaced_pod(
                         name=self.pod_name,
                         namespace=constants.K8S_NAMESPACE,
                     )  # type: ignore
+                # Poll until the pod is gone to avoid 409 conflicts on re-creation
+                for _ in range(120):
+                    try:
+                        await kube_client.read_namespaced_pod(
+                            name=self.pod_name,
+                            namespace=constants.K8S_NAMESPACE,
+                        )  # type: ignore
+                        await asyncio.sleep(1)
+                    except kclient.ApiException as e:
+                        if e.status == 404:
+                            break
+                        raise
+                else:
+                    logger.warning(
+                        "Pod %s did not terminate within 120s", self.pod_name
+                    )
             # Delete K8s service
             if self.service_name is not None:
                 with suppress(kclient.ApiException):
@@ -489,8 +509,14 @@ class ResourceManager:
                     logger.info("Task %s is already running, returning immediately", task)
                     return
 
-            # Create a new task manager state
-            task_manager_id = f"{task.make_name()}-{uuid.uuid4().hex[:8]}"
+            # Create a new task manager state.
+            # Include macro_ut_deployment_id in the name so that tasks from
+            # different deployment groups (which are non-equivalent due to
+            # differing macro_ut_deployment_id) get distinct pod names.
+            base_name = task.make_name()
+            if task.macro_ut_deployment_id:
+                base_name = f"{base_name}-{task.macro_ut_deployment_id}"
+            task_manager_id = to_strict_k8s_name(base_name, max_len=60)
             state = TaskManagerState(id=task_manager_id)
             self.task_states[task_manager_id] = state
             self.unit_task_instance_names[task_manager_id] = task_instance_name
@@ -619,6 +645,39 @@ class ResourceManager:
                 logger.error("Failed to clean up task manager for %s: %s", task, e)
                 raise RuntimeError(f"Failed to clean up task manager for {task}: {e}") from e
 
+    async def teardown_unit_task_by_instance_name(self, task_instance_name: str) -> None:
+        """Tear down a unit task by its instance name when the CR is already gone.
+
+        Searches task_states for a matching instance name and frees GPUs.
+        This handles the case where the CR was deleted (e.g. by another gateway
+        replica) but the RM still holds GPU ownership for the task.
+        """
+        task_state = None
+        async with self.task_states_lock:
+            for state_id, state in list(self.task_states.items()):
+                if self.unit_task_instance_names.get(state_id) == task_instance_name:
+                    task_state = state
+                    self.task_states.pop(state_id)
+                    self.unit_task_instance_names.pop(state_id, None)
+                    break
+
+        if task_state is None:
+            logger.info(
+                "No active task state for instance %s, nothing to tear down",
+                task_instance_name,
+            )
+            return
+
+        logger.info("Tearing down orphaned task state for instance %s", task_instance_name)
+        async with task_state.lock:
+            try:
+                await task_state.tear_down(self.kube_core_client)
+            except Exception as e:
+                logger.error(
+                    "Failed to tear down orphaned task state for %s: %s",
+                    task_instance_name, e,
+                )
+
     async def healthcheck(self) -> tuple[bool, list[tuple[UnitTask, bool]]]:
         """Check the health of all task managers.
 
@@ -662,6 +721,241 @@ class ResourceManager:
                 task_manager_statuses.append((task, is_healthy))
 
         return all_healthy, task_manager_statuses
+
+    def get_resource_snapshot(self) -> ResourceSnapshot:
+        """Get a snapshot of resource allocation status."""
+        nodes = []
+        for node_name, gpus in self.resource.node_to_gpus.items():
+            node_free = sum(1 for gpu in gpus if gpu.is_free)
+            gpu_list = [
+                GPUStatusPayload(
+                    node=gpu.node,
+                    global_rank=gpu.global_rank,
+                    local_rank=gpu.local_rank,
+                    owner=gpu.owner,
+                )
+                for gpu in gpus
+            ]
+            nodes.append(
+                NodeStatusPayload(
+                    node=node_name,
+                    total_gpus=len(gpus),
+                    free_gpus=node_free,
+                    gpus=gpu_list,
+                )
+            )
+
+        return ResourceSnapshot(nodes=nodes)
+
+    def get_deployed_task_managers(self) -> list[tuple[str, str, int]]:
+        """Get list of deployed task managers.
+
+        Returns:
+            A list of tuples containing (task_manager_id, task_instance_name, num_gpus).
+        """
+        result = []
+        for task_manager_id, state in self.task_states.items():
+            task_instance_name = self.unit_task_instance_names.get(task_manager_id, "")
+            num_gpus = len(state.resources) if state.resources else 0
+            result.append((task_manager_id, task_instance_name, num_gpus))
+        return result
+
+    async def apply_resource_snapshot(self, snapshot: ResourceSnapshot) -> None:
+        """Apply a resource allocation snapshot.
+
+        This method validates and applies a GPU allocation snapshot. It will:
+        1. Validate that all nodes in the snapshot exist
+        2. Validate that all non-null owners are valid task manager IDs
+        3. Optimistically update GPU ownership to target state
+        4. Send gRPC calls to notify task managers
+        5. Rollback if any gRPC call fails
+
+        Args:
+            snapshot: The resource snapshot to apply.
+
+        Raises:
+            ValueError: If validation fails (unknown nodes, unknown task managers, etc.)
+            RuntimeError: If gRPC calls to task managers fail.
+        """
+        # Build a map of global_rank -> requested_owner from the snapshot
+        # Validate nodes exist (node_to_gpus is static after init, no lock needed)
+        requested_allocation: dict[int, str | None] = {}
+        for node_data in snapshot.nodes:
+            if node_data.node not in self.resource.node_to_gpus:
+                raise ValueError(f"Unknown node in snapshot: {node_data.node}")
+
+            for gpu_data in node_data.gpus:
+                requested_allocation[gpu_data.global_rank] = gpu_data.owner
+
+        # Validate all GPUs in snapshot exist (gpus list is static after init)
+        all_global_ranks = {gpu.global_rank for gpu in self.resource.gpus}
+        for global_rank in requested_allocation:
+            if global_rank not in all_global_ranks:
+                raise ValueError(f"Unknown GPU global_rank in snapshot: {global_rank}")
+
+        # Hold lock for task_states access and GPU ownership modifications
+        async with self.task_states_lock:
+            # Validate all requested owners exist as task manager IDs
+            valid_task_manager_ids = set(self.task_states.keys())
+            for global_rank, owner in requested_allocation.items():
+                if owner is not None and owner not in valid_task_manager_ids:
+                    raise ValueError(f"Unknown task manager ID in snapshot: {owner} for GPU global_rank={global_rank}")
+
+            # Build a map of global_rank -> GPU object for quick lookup
+            rank_to_gpu = {gpu.global_rank: gpu for gpu in self.resource.gpus}
+
+            # Collect all GPU changes: (gpu, old_owner, new_owner)
+            # Also group by task manager for gRPC calls
+            gpu_changes: list[tuple[GPU, str | None, str | None]] = []
+            gpus_to_remove: dict[str, list[GPU]] = {}  # old_owner -> GPUs
+            gpus_to_add: dict[str, list[GPU]] = {}  # new_owner -> GPUs
+
+            for global_rank, new_owner in requested_allocation.items():
+                gpu = rank_to_gpu[global_rank]
+                old_owner = gpu.owner
+
+                if old_owner == new_owner:
+                    continue
+
+                gpu_changes.append((gpu, old_owner, new_owner))
+
+                if old_owner is not None:
+                    if old_owner not in gpus_to_remove:
+                        gpus_to_remove[old_owner] = []
+                    gpus_to_remove[old_owner].append(gpu)
+
+                if new_owner is not None:
+                    if new_owner not in gpus_to_add:
+                        gpus_to_add[new_owner] = []
+                    gpus_to_add[new_owner].append(gpu)
+
+            if not gpu_changes:
+                logger.info("No GPU changes needed for snapshot")
+                return
+
+            # Step 1: Optimistically update all GPU owners and state.resources
+            for gpu, old_owner, new_owner in gpu_changes:
+                # Remove from old owner's state.resources
+                if old_owner is not None:
+                    old_state = self.task_states[old_owner]
+                    if old_state.resources and gpu in old_state.resources:
+                        old_state.resources.remove(gpu)
+
+                # Update GPU owner directly (bypass allocate_to/free checks)
+                gpu.owner = new_owner
+
+                # Add to new owner's state.resources
+                if new_owner is not None:
+                    new_state = self.task_states[new_owner]
+                    if new_state.resources is None:
+                        new_state.resources = []
+                    new_state.resources.append(gpu)
+
+            # Helper to rollback all changes
+            def rollback() -> None:
+                for gpu, old_owner, new_owner in gpu_changes:
+                    # Remove from new owner's state.resources
+                    if new_owner is not None:
+                        new_state = self.task_states[new_owner]
+                        if new_state.resources and gpu in new_state.resources:
+                            new_state.resources.remove(gpu)
+
+                    # Restore GPU owner
+                    gpu.owner = old_owner
+
+                    # Add back to old owner's state.resources
+                    if old_owner is not None:
+                        old_state = self.task_states[old_owner]
+                        if old_state.resources is None:
+                            old_state.resources = []
+                        old_state.resources.append(gpu)
+
+            # Helper to remove GPUs from a single task manager
+            async def remove_gpus_from_task_manager(task_manager_id: str, gpus: list[GPU]) -> None:
+                state = self.task_states[task_manager_id]
+                if state.stub is None:
+                    raise RuntimeError(f"Task manager {task_manager_id} has no gRPC stub")
+
+                async with state.lock:
+                    gpu_resources = [
+                        task_manager_pb2.GPUResource(
+                            action=task_manager_pb2.ResourceAction.REMOVE,
+                            node_id=gpu.node,
+                            global_rank=gpu.global_rank,
+                            local_rank=gpu.local_rank,
+                        )
+                        for gpu in gpus
+                    ]
+                    update_req = task_manager_pb2.UpdateResourcesRequest(
+                        task_manager_id=task_manager_id,
+                        gpus=gpu_resources,
+                    )
+                    response = await state.stub.UpdateResources(update_req)
+                    if response.status != common_pb2.Status.STATUS_OK:
+                        raise RuntimeError(f"Failed to remove GPUs from task manager {task_manager_id}: {response}")
+                    logger.info(
+                        "Removed %d GPUs from task manager %s",
+                        len(gpus),
+                        task_manager_id,
+                    )
+
+            # Helper to add GPUs to a single task manager
+            async def add_gpus_to_task_manager(task_manager_id: str, gpus: list[GPU]) -> None:
+                state = self.task_states[task_manager_id]
+                if state.stub is None:
+                    raise RuntimeError(f"Task manager {task_manager_id} has no gRPC stub")
+
+                async with state.lock:
+                    gpu_resources = [
+                        task_manager_pb2.GPUResource(
+                            action=task_manager_pb2.ResourceAction.ADD,
+                            node_id=gpu.node,
+                            global_rank=gpu.global_rank,
+                            local_rank=gpu.local_rank,
+                        )
+                        for gpu in gpus
+                    ]
+                    update_req = task_manager_pb2.UpdateResourcesRequest(
+                        task_manager_id=task_manager_id,
+                        gpus=gpu_resources,
+                    )
+                    response = await state.stub.UpdateResources(update_req)
+                    if response.status != common_pb2.Status.STATUS_OK:
+                        raise RuntimeError(f"Failed to add GPUs to task manager {task_manager_id}: {response}")
+                    logger.info(
+                        "Added %d GPUs to task manager %s",
+                        len(gpus),
+                        task_manager_id,
+                    )
+
+            # Step 2: Send REMOVE and ADD requests concurrently
+            try:
+                all_tasks = []
+                all_tasks.extend(
+                    remove_gpus_from_task_manager(task_manager_id, gpus)
+                    for task_manager_id, gpus in gpus_to_remove.items()
+                )
+                all_tasks.extend(
+                    add_gpus_to_task_manager(task_manager_id, gpus) for task_manager_id, gpus in gpus_to_add.items()
+                )
+
+                if all_tasks:
+                    results = await asyncio.gather(*all_tasks, return_exceptions=True)
+                    for result in results:
+                        if isinstance(result, Exception):
+                            raise result
+            except Exception as e:
+                logger.error("Failed to apply resource snapshot, rolling back: %s", e)
+                rollback()
+                raise
+
+            self.resource.print_resource_status()
+            logger.info(
+                "Applied resource snapshot: %d GPU changes, removed from %d task managers, added to %d task managers",
+                len(gpu_changes),
+                len(gpus_to_remove),
+                len(gpus_to_add),
+            )
 
     async def shutdown(self) -> None:
         """Shutdown the ResourceManager."""
@@ -715,17 +1009,17 @@ class ResourceManager:
             logger.info("Allocating %d GPUs for task %s based on profile", num_gpus, task)
 
             # Allocate resource starter pack for the task manager
-            state.resources = self.resource.allocate(num_gpus=num_gpus, owner=state.id)
+            # state.resources = self.resource.allocate(num_gpus=num_gpus, owner=state.id)
             # uncomment below during benchmarking to speedup
-            # state.resources = []
+            state.resources = []
             span.set_attribute(
                 "resource_manager._spawn_task_manager.gpu_global_ranks",
                 [gpu.global_rank for gpu in state.resources],
             )
 
             # Create a new task manager pod and service
-            state.pod_name = f"tm-{state.id}".lower()
-            state.service_name = to_strict_k8s_name(state.pod_name)
+            state.pod_name = f"tm-{state.id}"
+            state.service_name = state.pod_name
             port = 50051
 
             pod = kclient.V1Pod(
@@ -805,6 +1099,31 @@ class ResourceManager:
             state.channel = grpc.aio.insecure_channel(f"{state.service_name}:{port}")
             state.stub = task_manager_pb2_grpc.TaskManagerStub(state.channel)
 
+            # Ensure new task manager's registry is up-to-date before registering the task,
+            # so that the task class is available when RegisterTask resolves the CR.
+            # Retry up to 3 times — under rapid pod churn the K8s watchers may need
+            # extra time to catch up to the target resource versions.
+            with tracer.start_as_current_span("ResourceManager._spawn_task_manager.sync_task_registry"):
+                sync_req = common_pb2.SyncTaskRegistryRequest()
+                sync_last_exc: Exception | None = None
+                for sync_attempt in range(3):
+                    try:
+                        sync_resp = await state.stub.SyncTaskRegistry(
+                            sync_req, wait_for_ready=True, timeout=constants.SYNC_WATCHERS_TIMEOUT,
+                        )
+                        if sync_resp.status != common_pb2.Status.STATUS_OK:
+                            raise RuntimeError(f"Failed to sync task manager registry: {sync_resp}")
+                        sync_last_exc = None
+                        break
+                    except Exception as e:
+                        sync_last_exc = e
+                        logger.warning(
+                            "SyncTaskRegistry attempt %d/3 failed for %s: %s",
+                            sync_attempt + 1, state.pod_name, e,
+                        )
+                if sync_last_exc is not None:
+                    raise sync_last_exc
+
             # Initialize the task manager by providing it with the unit task instance name it will manage
             # and an initial set of GPU resources to work with.
             with tracer.start_as_current_span("ResourceManager._spawn_task_manager.register_task"):
@@ -827,18 +1146,15 @@ class ResourceManager:
                 if response.status != common_pb2.Status.STATUS_OK:
                     raise RuntimeError(f"Failed to register task manager: {response}")
 
-            # Ensure new task manager's registry is up-to-date before proceeding
-            with tracer.start_as_current_span("ResourceManager._spawn_task_manager.sync_task_registry"):
-                sync_req = common_pb2.SyncTaskRegistryRequest()
-                sync_resp = await state.stub.SyncTaskRegistry(sync_req, timeout=constants.SYNC_WATCHERS_TIMEOUT)
-                if sync_resp.status != common_pb2.Status.STATUS_OK:
-                    raise RuntimeError(f"Failed to sync task manager registry: {sync_resp}")
-
         except Exception as e:
             await state.tear_down(self.kube_core_client)
             if isinstance(e, grpc.aio.AioRpcError):
-                raise RuntimeError(f"gRPC error when spawning task manager for {task}") from e
-            raise RuntimeError(f"Failed to initialize spawned task manager for {task}: {e}") from e
+                raise RuntimeError(
+                    f"gRPC error when spawning task manager for {task} (attempted pod name: {state.pod_name})"
+                ) from e
+            raise RuntimeError(
+                f"Failed to initialize spawned task manager for {task} (attempted pod name: {state.pod_name}): {e}"
+            ) from e
 
         return UnitTaskDeployment(
             task=task, task_instance_name=task_instance_name, id=state.id, url=f"{state.service_name}:{port}"

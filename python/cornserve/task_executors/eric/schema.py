@@ -227,6 +227,7 @@ class BatchResult:
     receiver_ranks: list[list[list[int]] | None]
     status: Status
     error_message: str | None = None
+    output_shapes: dict[ID, list[int]] | None = None
 
 
 @dataclass

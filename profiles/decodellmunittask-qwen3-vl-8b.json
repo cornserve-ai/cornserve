@@ -1,0 +1,14 @@
+{
+  "task": {
+    "__class__": "DecodeLLMUnitTask",
+    "model_id": "Qwen/Qwen3-VL-8B-Instruct",
+    "receive_embeddings": true,
+    "execution_descriptor_name": null,
+    "tp_size": 1,
+    "max_num_seqs": 32,
+    "gpu_memory_utilization": 0.9
+  },
+  "num_gpus_to_profile": {
+    "1": {"launch_args": ["--max-model-len", "128000"]}
+  }
+}

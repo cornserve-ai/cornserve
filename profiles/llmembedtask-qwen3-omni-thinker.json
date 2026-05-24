@@ -3,7 +3,10 @@
     "__class__": "LLMEmbeddingUnitTask",
     "model_id": "Qwen/Qwen3-Omni-30B-A3B-Instruct",
     "receive_embeddings": false,
-    "execution_descriptor_name": null
+    "execution_descriptor_name": null,
+    "tp_size": 2,
+    "max_num_seqs": 256,
+    "gpu_memory_utilization": 0.9
   },
   "num_gpus_to_profile": {
     "2": {"launch_args": []}

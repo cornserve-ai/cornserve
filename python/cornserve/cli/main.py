@@ -42,6 +42,12 @@ except KeyError:
     )
     GATEWAY_URL = "http://localhost:30080"
 
+# Master URL for state-altering operations (register, unregister, deploy-tasks, purge, profiles)
+try:
+    GATEWAY_MASTER_URL = os.environ["CORNSERVE_GATEWAY_MASTER_URL"]
+except KeyError:
+    GATEWAY_MASTER_URL = GATEWAY_URL.replace(":30080", ":30081") if ":30080" in GATEWAY_URL else GATEWAY_URL
+
 STATE_DIR = Path.home() / ".local/state/cornserve"
 STATE_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -209,7 +215,7 @@ def register(
 
     try:
         response = requests.post(
-            f"{GATEWAY_URL}/app/register",
+            f"{GATEWAY_MASTER_URL}/app/register",
             json=request.model_dump(),
             timeout=(5, 1200),  # Short connection timeout but longer timeout waiting for streaming response
             stream=True,
@@ -347,7 +353,7 @@ def unregister(
         alias.remove(app_id_or_alias)
 
     raw_response = requests.post(
-        f"{GATEWAY_URL}/app/unregister/{app_id}",
+        f"{GATEWAY_MASTER_URL}/app/unregister/{app_id}",
     )
     if raw_response.status_code == 404:
         rich.print(Panel(f"App {app_id} not found.", style="red", expand=False))
@@ -747,7 +753,7 @@ def deploy_tasklib() -> None:
                 task_definitions=unit_task_entries,
                 descriptor_definitions=descriptor_entries,
             )
-            resp = requests.post(f"{GATEWAY_URL}/deploy-tasks", json=payload.model_dump())
+            resp = requests.post(f"{GATEWAY_MASTER_URL}/deploy-tasks", json=payload.model_dump())
             resp.raise_for_status()
             unit_list = ", ".join(e.task_class_name for e in unit_task_entries) or "-"
             desc_list = ", ".join(e.descriptor_class_name for e in descriptor_entries) or "-"
@@ -772,7 +778,7 @@ def deploy_tasklib() -> None:
                 task_definitions=composite_task_entries,
                 descriptor_definitions=[],
             )
-            resp = requests.post(f"{GATEWAY_URL}/deploy-tasks", json=payload.model_dump())
+            resp = requests.post(f"{GATEWAY_MASTER_URL}/deploy-tasks", json=payload.model_dump())
             resp.raise_for_status()
             comp_list = ", ".join(e.task_class_name for e in composite_task_entries)
             rich.print(
@@ -797,7 +803,7 @@ def purge_tasklib(quiet: bool = False) -> bool:
     Fails if the cluster is not idle (active UnitTaskInstance CRs).
     """
     try:
-        resp = requests.post(f"{GATEWAY_URL}/purge-tasklib")
+        resp = requests.post(f"{GATEWAY_MASTER_URL}/purge-tasklib")
         if resp.status_code == 409:
             rich.print(
                 Panel(
@@ -868,7 +874,7 @@ def profile_deploy(
     # POST to Gateway
     try:
         response = requests.post(
-            f"{GATEWAY_URL}/deploy-profiles",
+            f"{GATEWAY_MASTER_URL}/deploy-profiles",
             json={"profiles": profiles},
         )
         response.raise_for_status()

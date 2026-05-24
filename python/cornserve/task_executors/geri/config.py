@@ -23,6 +23,9 @@ class ModelConfig(BaseModel):
     # Modality type
     modality: Modality
 
+    # Sequence parallel degree (number of GPUs for SP)
+    sp_size: PositiveInt = 1
+
 
 class ServerConfig(BaseModel):
     """Serving config."""
@@ -50,11 +53,13 @@ class GeriConfig(BaseModel):
     model: ModelConfig
     server: ServerConfig
     sidecar: SidecarConfig
+    dummy: bool = False
 
     @model_validator(mode="after")
     def validator(self) -> Self:
         """Audit the config for correctness and apply any transformations."""
-        # For now, we don't use tensor parallelism, so we just need one rank
+        # Sidecar only needs one rank — rank 0 receives embeddings and
+        # broadcasts to other SP ranks via NCCL.
         if len(self.sidecar.ranks) != 1:
             raise ValueError(f"Currently only single-rank sidecar is supported, got {len(self.sidecar.ranks)} ranks")
 

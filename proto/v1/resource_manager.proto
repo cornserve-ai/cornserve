@@ -19,6 +19,15 @@ service ResourceManager {
 
   // Sync task registry to a target resource version
   rpc SyncTaskRegistry(common.SyncTaskRegistryRequest) returns (common.SyncTaskRegistryResponse);
+
+  // Get a snapshot of resource allocation status
+  rpc GetResourceSnapshot(GetResourceSnapshotRequest) returns (GetResourceSnapshotResponse);
+
+  // Apply a resource allocation snapshot
+  rpc ApplyResourceSnapshot(ApplyResourceSnapshotRequest) returns (ApplyResourceSnapshotResponse);
+
+  // Get list of deployed task managers
+  rpc GetDeployedTaskManagers(GetDeployedTaskManagersRequest) returns (GetDeployedTaskManagersResponse);
 }
 
 // Deploy a new task
@@ -67,5 +76,50 @@ message ScaleUnitTaskRequest {
 message ScaleUnitTaskResponse {
   // Success or failure
   common.Status status = 1;
+}
+
+// Resource snapshot
+message GPUStatus {
+  string node = 1;
+  int32 global_rank = 2;
+  int32 local_rank = 3;
+  // Owner task manager ID, empty string if free
+  string owner = 4;
+}
+
+message NodeStatus {
+  string node = 1;
+  int32 total_gpus = 2;
+  int32 free_gpus = 3;
+  repeated GPUStatus gpus = 4;
+}
+
+message GetResourceSnapshotRequest {}
+
+message GetResourceSnapshotResponse {
+  common.Status status = 1;
+  repeated NodeStatus nodes = 2;
+}
+
+message ApplyResourceSnapshotRequest {
+  repeated NodeStatus nodes = 1;
+}
+
+message ApplyResourceSnapshotResponse {
+  common.Status status = 1;
+  string message = 2;
+}
+
+message DeployedTaskManager {
+  string task_manager_id = 1;
+  string task_instance_name = 2;
+  int32 num_gpus = 3;
+}
+
+message GetDeployedTaskManagersRequest {}
+
+message GetDeployedTaskManagersResponse {
+  common.Status status = 1;
+  repeated DeployedTaskManager task_managers = 2;
 }
 

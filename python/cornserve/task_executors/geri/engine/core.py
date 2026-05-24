@@ -8,7 +8,7 @@ import signal
 import threading
 from abc import ABC, abstractmethod
 from multiprocessing.context import SpawnProcess
-from typing import Any, Protocol
+from typing import Any, Protocol, runtime_checkable
 
 import torch
 import zmq
@@ -25,12 +25,15 @@ from cornserve.task_executors.geri.engine.scheduler import (
     AudioSchedulerBatch,
     ImageScheduler,
     ImageSchedulerBatch,
+    ScheduledImageRequest,
+    ScheduledRequest,
     Scheduler,
     SchedulerBatch,
 )
 from cornserve.task_executors.geri.executor.executor import (
     BatchExecutor,
     ModelExecutor,
+    SPBatchExecutor,
     StreamExecutor,
 )
 from cornserve.task_executors.geri.executor.loader import load_model
@@ -68,6 +71,15 @@ class EngineModeProtocol(Protocol):
     scheduler: Scheduler
 
 
+@runtime_checkable
+class PromptEncodingModel(Protocol):
+    """Protocol for models that can encode raw prompt strings."""
+
+    def encode_prompts(self, prompts: list[str]) -> list[torch.Tensor]:
+        """Encode raw prompts into per-request prompt embedding tensors."""
+        ...
+
+
 class Engine(EngineModeProtocol, ABC):
     """Geri core engine.
 
@@ -94,18 +106,25 @@ class Engine(EngineModeProtocol, ABC):
             model_config (optional): Configuration for the model to be loaded.
         """
         self.geri_config = geri_config
+        self.dummy = geri_config.dummy
 
         # Set up serialization
         self.encoder = MsgpackEncoder()
 
-        self.sidecar = Sidecar(
-            SidecarConfig(
-                sidecar_rank=sorted(geri_config.sidecar.ranks)[0],
-                group=sorted(geri_config.sidecar.ranks),
-                recv_tensor_dtype=self.model.dtype,
-                recv_tensor_shape=(-1, self.model.embedding_dim),
+        # Initialize sidecar (skipped in dummy mode)
+        if not self.dummy:
+            logger.info("Initializing sidecar...")
+            self.sidecar = Sidecar(
+                SidecarConfig(
+                    sidecar_rank=sorted(geri_config.sidecar.ranks)[0],
+                    group=sorted(geri_config.sidecar.ranks),
+                    recv_tensor_dtype=self.model.dtype,
+                    recv_tensor_shape=(-1, self.model.embedding_dim),
+                )
             )
-        )
+        else:
+            self.sidecar = None
+            logger.info("Dummy mode: skipping sidecar initialization in engine core")
 
         # Background thread that continuously receives from the request
         # ZMQ socket and pushes it into the request queue
@@ -161,8 +180,42 @@ class Engine(EngineModeProtocol, ABC):
             # Step the engine core
             self.step()
 
-    def _collect_embed_chunks(self, embedding_data_id: str, skip_tokens: int = 0) -> torch.Tensor:
-        """Collect all chunks for a given embedding data ID."""
+    def _collect_embed_chunks(self, request: ScheduledRequest) -> torch.Tensor:
+        """Collect all embedding chunks for a given scheduled request.
+
+        In dummy mode, generates a random tensor instead of reading from sidecar.
+
+        Args:
+            request: The scheduled request containing embedding_data_id,
+                and optionally skip_tokens and dummy_seq_len.
+        """
+        embedding_data_id = request.embedding_data_id
+        skip_tokens = getattr(request, "skip_tokens", 0)
+        dummy_seq_len = getattr(request, "dummy_seq_len", None)
+
+        if not embedding_data_id:
+            raise RuntimeError("embedding_data_id is required for sidecar-embedding mode requests.")
+
+        if self.dummy:
+            if dummy_seq_len is None:
+                raise RuntimeError("dummy_seq_len is required in dummy mode")
+            seq_len = dummy_seq_len - skip_tokens
+            if self.model.dtype.is_floating_point:
+                embedding = torch.randn(
+                    seq_len,
+                    self.model.embedding_dim,
+                    dtype=self.model.dtype,
+                )
+            else:
+                embedding = torch.randint(0, 1024, (seq_len, self.model.embedding_dim), dtype=self.model.dtype)
+            logger.info(
+                "Dummy mode: generated random embedding with shape %s for data ID %s",
+                list(embedding.shape),
+                embedding_data_id,
+            )
+            return embedding
+
+        assert self.sidecar
         # Since data was already awaited by the engine client, these
         # `recv_sync` calls should return immediately.
         embedding_chunks = []
@@ -400,6 +453,9 @@ class BatchGeriEngine(Engine):
 
     When content is generated, the engine sends response back to the router
     in a batched, non-streaming manner.
+
+    Supports sequence parallelism (SP) when ``sp_size > 1`` in the config.
+    SP worker lifecycle is managed by :class:`SPBatchExecutor`.
     """
 
     def __init__(
@@ -419,19 +475,37 @@ class BatchGeriEngine(Engine):
             model_registry_entry: Geri Model Registry entry for the model to be loaded.
             model_config (optional): Configuration for the model to be loaded.
         """
-        # Initialize model executor
-        model = load_model(
-            model_id=geri_config.model.id,
-            torch_device=torch.device("cuda"),
-            registry_entry=model_registry_entry,
-            config=model_config,
-        )
+        sp_size = geri_config.model.sp_size
 
-        if not isinstance(model, BatchGeriModel):
-            raise TypeError(f"BatchGeriEngine should be initialized with BatchGeriModel, not {type(model).__name__}")
+        if sp_size > 1:
+            # SP mode: SPBatchExecutor handles worker spawning, distributed
+            # init, model loading, and SP patching — all encapsulated.
+            executor = SPBatchExecutor(
+                model_id=geri_config.model.id,
+                sp_size=sp_size,
+                torch_dtype=model_registry_entry.torch_dtype,
+                torch_device=torch.device("cuda"),
+                registry_entry=model_registry_entry,
+                model_config=model_config,
+            )
+            self.model = executor.model
+            self.executor = executor
+        else:
+            # Single-GPU mode: load model directly, wrap in BatchExecutor.
+            model = load_model(
+                model_id=geri_config.model.id,
+                torch_device=torch.device("cuda"),
+                registry_entry=model_registry_entry,
+                config=model_config,
+            )
 
-        self.model = model
-        self.executor = BatchExecutor(model=model)
+            if not isinstance(model, BatchGeriModel):
+                raise TypeError(
+                    f"BatchGeriEngine should be initialized with BatchGeriModel, not {type(model).__name__}"
+                )
+
+            self.model = model
+            self.executor = BatchExecutor(model=model)
 
         # Currently, the batch Engine core only supports image requests.
         # To add more request types, specify it in configs and add a match statement here.
@@ -462,9 +536,39 @@ class BatchGeriEngine(Engine):
 
     def _execute_batch(self, batch: ImageSchedulerBatch) -> list[EngineResponse]:
         """Execute requests in the given batch."""
-        prompt_embeds = []
-        for embedding_data_id, skip_tokens in zip(batch.embedding_data_ids, batch.skip_tokens, strict=True):
-            prompt_embeds.append(self._collect_embed_chunks(embedding_data_id, skip_tokens))
+        prompt_embeds_per_request: list[torch.Tensor | None] = [None] * len(batch.requests)
+        text_prompt_indices: list[int] = []
+        text_prompts: list[str] = []
+
+        # First collect embeddings that arrive via sidecar.
+        for request_idx, request in enumerate(batch.requests):
+            assert isinstance(request, ScheduledImageRequest)
+            if request.prompt is None:
+                prompt_embeds_per_request[request_idx] = self._collect_embed_chunks(request)
+            else:
+                text_prompt_indices.append(request_idx)
+                text_prompts.append(request.prompt)
+
+        # Then encode prompt-text requests directly in Geri.
+        if text_prompts:
+            if not isinstance(self.model, PromptEncodingModel):
+                raise RuntimeError(f"Model {type(self.model).__name__} does not support direct prompt encoding.")
+
+            encoded_prompt_embeds = self.model.encode_prompts(text_prompts)
+            if len(encoded_prompt_embeds) != len(text_prompt_indices):
+                raise RuntimeError(
+                    f"Prompt encoding returned {len(encoded_prompt_embeds)} embeddings "
+                    f"for {len(text_prompt_indices)} prompts."
+                )
+
+            for request_idx, encoded_embed in zip(text_prompt_indices, encoded_prompt_embeds, strict=True):
+                prompt_embeds_per_request[request_idx] = encoded_embed
+
+        prompt_embeds: list[torch.Tensor] = []
+        for embed in prompt_embeds_per_request:
+            if embed is None:
+                raise RuntimeError("Internal error: missing prompt embedding for one or more batch requests.")
+            prompt_embeds.append(embed)
 
         # Create a batch-level span for the entire generation operation
         with tracer.start_as_current_span("geri.engine.execute_batch") as batch_span:
@@ -513,7 +617,16 @@ class BatchGeriEngine(Engine):
             if isinstance(request, ImageEngineRequest):
                 span.set_attribute("geri.engine.process_request.height", request.height)
                 span.set_attribute("geri.engine.process_request.width", request.width)
-                return span
+                span.set_attribute("geri.engine.process_request.num_inference_steps", request.num_inference_steps)
+                if request.prompt is None:
+                    span.set_attribute("geri.engine.process_request.input_mode", "embedding")
+                    span.set_attribute("geri.engine.process_request.skip_tokens", request.skip_tokens)
+                else:
+                    span.set_attribute("geri.engine.process_request.input_mode", "prompt")
+                    span.set_attribute("geri.engine.process_request.prompt_chars", len(request.prompt))
+                if request.dummy_seq_len is not None:
+                    span.set_attribute("geri.engine.process_request.dummy_seq_len", request.dummy_seq_len)
+            return span
         return None
 
 
@@ -586,8 +699,8 @@ class StreamGeriEngine(Engine):
     def _execute_batch(self, batch: AudioSchedulerBatch) -> None:
         """Execute requests in the given batch."""
         prompt_embeds = []
-        for embedding_data_id in batch.embedding_data_ids:
-            prompt_embeds.append(self._collect_embed_chunks(embedding_data_id))
+        for request in batch.requests:
+            prompt_embeds.append(self._collect_embed_chunks(request))
 
         # Create a batch-level span for the entire generation operation
         with tracer.start_as_current_span("geri.engine.execute_batch") as batch_span:
@@ -671,5 +784,7 @@ class StreamGeriEngine(Engine):
                     span.set_attribute("geri.engine.process_request.chunk_size", request.chunk_size)
                 if request.left_context_size:
                     span.set_attribute("geri.engine.process_request.left_context_size", request.left_context_size)
+                if request.dummy_seq_len is not None:
+                    span.set_attribute("geri.engine.process_request.dummy_seq_len", request.dummy_seq_len)
             return span
         return None

@@ -3,9 +3,12 @@
     "__class__": "LLMUnitTask",
     "model_id": "Qwen/Qwen2.5-VL-32B-Instruct",
     "receive_embeddings": true,
-    "execution_descriptor_name": null
+    "execution_descriptor_name": null,
+    "tp_size": 4,
+    "max_num_seqs": 256,
+    "gpu_memory_utilization": 0.9
   },
   "num_gpus_to_profile": {
-    "4": {"launch_args": ["--max-num-seqs", "256"]}
+    "4": {"launch_args": []}
   }
 }

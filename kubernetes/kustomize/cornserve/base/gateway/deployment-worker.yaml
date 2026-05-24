@@ -1,0 +1,37 @@
+# Gateway Workers — handle invoke + read-only endpoints
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gateway-worker
+  namespace: cornserve
+  labels:
+    app: gateway
+    gateway-role: worker
+spec:
+  selector:
+    matchLabels:
+      app: gateway
+      gateway-role: worker
+  replicas: 4 # increase this to add more gateway worker replicas
+  template:
+    metadata:
+      labels:
+        app: gateway
+        gateway-role: worker
+    spec:
+      serviceAccountName: gateway-sa
+      nodeSelector:
+        node-role.kubernetes.io/control-plane: "true"
+      containers:
+      - name: gateway
+        image: cornserve/gateway:latest
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 8000
+          name: http
+        env:
+        - name: GATEWAY_ROLE
+          value: "worker"
+        envFrom:
+        - configMapRef:
+            name: cornserve-config

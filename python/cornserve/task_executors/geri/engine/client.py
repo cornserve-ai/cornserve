@@ -19,8 +19,8 @@ from cornserve.logging import get_logger
 from cornserve.sidecar.api import Sidecar
 from cornserve.sidecar.schema import SidecarConfig
 from cornserve.task_executors.geri.api import (
-    BatchGeriRequest,
     BatchGeriResponse,
+    ImageGeriRequest,
     Status,
     StreamGeriRequest,
     StreamGeriResponseChunk,
@@ -88,15 +88,21 @@ class EngineClient:
         # For streaming responses, we need producer-consumer queues
         self.pending_streams: dict[str, asyncio.Queue[StreamEngineResponse]] = {}
 
-        # Initialize the sidecar client
-        self.sidecar = Sidecar(
-            SidecarConfig(
-                sidecar_rank=sorted(config.sidecar.ranks)[0],
-                group=sorted(config.sidecar.ranks),
-                recv_tensor_dtype=registry_entry.input_dtype,
-                recv_tensor_shape=(-1, embedding_dim),
+        # Initialize the sidecar client (skipped in dummy mode)
+        self.dummy = config.dummy
+        if not self.dummy:
+            logger.info("Initializing sidecar...")
+            self.sidecar = Sidecar(
+                SidecarConfig(
+                    sidecar_rank=sorted(config.sidecar.ranks)[0],
+                    group=sorted(config.sidecar.ranks),
+                    recv_tensor_dtype=registry_entry.input_dtype,
+                    recv_tensor_shape=(-1, embedding_dim),
+                )
             )
-        )
+        else:
+            self.sidecar = None
+            logger.info("Dummy mode: skipping sidecar initialization")
 
         # Set up serialization
         self.encoder = MsgpackEncoder()
@@ -151,7 +157,7 @@ class EngineClient:
         self.ctx.destroy()
 
     @tracer.start_as_current_span("engine_client.generate_batch")
-    async def generate_batch(self, request_id: str, request: BatchGeriRequest) -> BatchGeriResponse:
+    async def generate_batch(self, request_id: str, request: ImageGeriRequest) -> BatchGeriResponse:
         """Generate image content using the engine process."""
         if self.geri_mode != GeriMode.BATCH:
             raise RuntimeError(f"Wrong type of request (generate_batch) for Geri mode {self.geri_mode}")
@@ -160,14 +166,18 @@ class EngineClient:
         span_context = {}
         propagator.inject(span_context)
 
-        # Wait for the embeddings to arrive in the sidecar
-        with tracer.start_as_current_span("engine_client.generate_batch.sidecar_recv_wait"):
-            chunk_id = 0
-            while True:
-                result = await self.sidecar.recv(id=request.embedding_data_id, chunk_id=chunk_id)
-                if result is None:
-                    break
-                chunk_id += 1
+        # Wait for embeddings to arrive in sidecar when embedding mode is used.
+        # Prompt mode bypasses sidecar and does text encoding directly in Geri.
+        embedding_data_id = request.embedding_data_id
+        if not self.dummy and embedding_data_id:
+            assert self.sidecar
+            with tracer.start_as_current_span("engine_client.generate_batch.sidecar_recv_wait"):
+                chunk_id = 0
+                while True:
+                    result = await self.sidecar.recv(id=embedding_data_id, chunk_id=chunk_id)
+                    if result is None:
+                        break
+                    chunk_id += 1
 
         # Create message
         message: BatchEngineRequest = BatchEngineRequestFactory.from_geri_request(request, request_id, span_context)
@@ -218,14 +228,16 @@ class EngineClient:
         span_context = {}
         propagator.inject(span_context)
 
-        # Wait for *all* embeddings to arrive in the sidecar
-        with tracer.start_as_current_span("engine_client.generate_streaming.sidecar_recv_wait"):
-            chunk_id = 0
-            while True:
-                result = await self.sidecar.recv(id=request.embedding_data_id, chunk_id=chunk_id)
-                if result is None:
-                    break
-                chunk_id += 1
+        # Wait for *all* embeddings to arrive in the sidecar (skipped in dummy mode)
+        if not self.dummy:
+            assert self.sidecar
+            with tracer.start_as_current_span("engine_client.generate_streaming.sidecar_recv_wait"):
+                chunk_id = 0
+                while True:
+                    result = await self.sidecar.recv(id=request.embedding_data_id, chunk_id=chunk_id)
+                    if result is None:
+                        break
+                    chunk_id += 1
 
         # Create a producer-consumer queue for this request.
         # Will contain EngineResponse objects which hold bytes of wav data.

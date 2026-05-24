@@ -8,6 +8,8 @@ from cornserve.task.base import TaskInput, TaskOutput, UnitTask
 from cornserve.task.forward import DataForward, Tensor
 from pydantic import field_validator
 
+from cornserve.task.base import TaskProfileConfig
+
 
 class Modality(enum.StrEnum):
     """Supported modalities for encoder tasks."""
@@ -15,6 +17,16 @@ class Modality(enum.StrEnum):
     IMAGE = "image"
     VIDEO = "video"
     AUDIO = "audio"
+
+
+class EricProfileConfig(TaskProfileConfig):
+    """Eric-specific profiling configuration fields."""
+    tp_size: int = 1
+    max_batch_size: int = 1
+
+    def to_profile_str(self) -> str:
+        """Return a string representation of the profile configuration."""
+        return f"tp{self.tp_size}+maxbs{self.max_batch_size}"
 
 
 class EncoderInput(TaskInput):
@@ -40,7 +52,7 @@ class EncoderOutput(TaskOutput):
     embeddings: list[DataForward[Tensor]]
 
 
-class EncoderTask(UnitTask[EncoderInput, EncoderOutput]):
+class EncoderTask(UnitTask[EncoderInput, EncoderOutput], EricProfileConfig):
     """A task that invokes an encoder.
 
     Attributes:
@@ -53,7 +65,6 @@ class EncoderTask(UnitTask[EncoderInput, EncoderOutput]):
 
     modality: Modality
     model_ids: set[str]
-    max_batch_size: int = 1
 
     @field_validator("model_ids")
     @classmethod
@@ -82,14 +93,14 @@ class EncoderTask(UnitTask[EncoderInput, EncoderOutput]):
     def make_name(self) -> str:
         """Create a concise string representation of the task."""
         first_model_name = sorted(self.model_ids)[0].split("/")[-1].lower()
-        return f"encoder-{self.modality.lower()}-{first_model_name}"
+        return f"encoder-{self.modality.lower()}-{first_model_name}-{self.to_profile_str()}"
 
 
 class DummyEncoderOutput(TaskOutput):
     """Dummpy Output model for encoder tasks."""
 
 
-class DummyEncoderTask(UnitTask[EncoderInput, DummyEncoderOutput]):
+class DummyEncoderTask(UnitTask[EncoderInput, DummyEncoderOutput], EricProfileConfig):
     """A dummy task that invokes an encoder without dataforward.
 
     Attributes:
@@ -102,7 +113,6 @@ class DummyEncoderTask(UnitTask[EncoderInput, DummyEncoderOutput]):
 
     modality: Modality
     model_ids: set[str]
-    max_batch_size: int = 1
 
     @field_validator("model_ids")
     @classmethod
@@ -129,4 +139,4 @@ class DummyEncoderTask(UnitTask[EncoderInput, DummyEncoderOutput]):
     def make_name(self) -> str:
         """Create a concise string representation of the task."""
         first_model_name = sorted(self.model_ids)[0].split("/")[-1].lower()
-        return f"encoder-{self.modality.lower()}-{first_model_name}"
+        return f"encoder-{self.modality.lower()}-{first_model_name}-{self.to_profile_str()}"

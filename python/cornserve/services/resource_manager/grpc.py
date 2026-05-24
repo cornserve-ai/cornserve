@@ -8,6 +8,11 @@ import grpc
 
 from cornserve.constants import SYNC_WATCHERS_TIMEOUT
 from cornserve.logging import get_logger
+from cornserve.services.gateway.models import (
+    GPUStatusPayload,
+    NodeStatusPayload,
+    ResourceSnapshot,
+)
 from cornserve.services.pb import common_pb2, resource_manager_pb2, resource_manager_pb2_grpc
 from cornserve.services.resource_manager.manager import ResourceManager
 from cornserve.services.task_registry import TaskRegistry
@@ -38,22 +43,25 @@ class ResourceManagerServicer(resource_manager_pb2_grpc.ResourceManagerServicer)
         request: resource_manager_pb2.TeardownUnitTaskRequest,
         context: grpc.aio.ServicerContext,
     ) -> resource_manager_pb2.TeardownUnitTaskResponse:
-        """Reconcile a removed app by shutting down task managers if needed."""
-        task = await self.task_registry.get_task_instance(request.task_instance_name)
-        await self.manager.teardown_unit_task(task, request.task_instance_name)
-        # TODO: theoretically, a resource-manager can fail exactly right here, where the unit task
-        # is already gone, but the CR is still there. So when we implement real failure-recovery,
-        # we still need to double check the executor states against the CRs.
+        """Tear down a unit task's task manager (free GPUs, kill pods).
+
+        CR lifecycle is owned by the gateway — the RM only manages the
+        task-manager deployment.  If the CR is already gone (gateway
+        deleted it, or another replica cleaned up), fall back to
+        looking up the task state by instance name.
+        """
         try:
-            await self.task_registry.delete_task_instance(request.task_instance_name)
-        except Exception as e:
-            # Propagate an error so the caller can react; other tasks teardown may still proceed
-            logger.exception(
-                "Failed to delete UnitTaskInstance CR %s: %s",
+            task = await self.task_registry.get_task_instance(request.task_instance_name)
+        except (ValueError, KeyError):
+            # CR already deleted by the gateway.  Still free GPU state.
+            logger.warning(
+                "Task instance CR %s not found, attempting teardown by instance name",
                 request.task_instance_name,
-                e,
             )
-            raise RuntimeError(f"Failed to delete UnitTaskInstance CR {request.task_instance_name}: {e}") from e
+            await self.manager.teardown_unit_task_by_instance_name(request.task_instance_name)
+            return resource_manager_pb2.TeardownUnitTaskResponse(status=common_pb2.Status.STATUS_OK)
+
+        await self.manager.teardown_unit_task(task, request.task_instance_name)
         return resource_manager_pb2.TeardownUnitTaskResponse(status=common_pb2.Status.STATUS_OK)
 
     async def ScaleUnitTask(
@@ -132,6 +140,117 @@ class ResourceManagerServicer(resource_manager_pb2_grpc.ResourceManagerServicer)
             logger.exception("Healthcheck failed: %s", e)
             return resource_manager_pb2.HealthcheckResponse(
                 status=common_pb2.Status.STATUS_ERROR, task_manager_statuses=[]
+            )
+
+    async def GetResourceSnapshot(
+        self,
+        request: resource_manager_pb2.GetResourceSnapshotRequest,
+        context: grpc.aio.ServicerContext,
+    ) -> resource_manager_pb2.GetResourceSnapshotResponse:
+        """Get a snapshot of resource allocation status."""
+        try:
+            snapshot = self.manager.get_resource_snapshot()
+
+            # Convert Pydantic models to protobuf format
+            nodes = [
+                resource_manager_pb2.NodeStatus(
+                    node=node.node,
+                    total_gpus=node.total_gpus,
+                    free_gpus=node.free_gpus,
+                    gpus=[
+                        resource_manager_pb2.GPUStatus(
+                            node=gpu.node,
+                            global_rank=gpu.global_rank,
+                            local_rank=gpu.local_rank,
+                            owner=gpu.owner if gpu.owner else "",
+                        )
+                        for gpu in node.gpus
+                    ],
+                )
+                for node in snapshot.nodes
+            ]
+
+            return resource_manager_pb2.GetResourceSnapshotResponse(
+                status=common_pb2.Status.STATUS_OK,
+                nodes=nodes,
+            )
+        except Exception as e:
+            logger.exception("GetResourceSnapshot failed: %s", e)
+            return resource_manager_pb2.GetResourceSnapshotResponse(
+                status=common_pb2.Status.STATUS_ERROR,
+                nodes=[],
+            )
+
+    async def ApplyResourceSnapshot(
+        self,
+        request: resource_manager_pb2.ApplyResourceSnapshotRequest,
+        context: grpc.aio.ServicerContext,
+    ) -> resource_manager_pb2.ApplyResourceSnapshotResponse:
+        """Apply a resource allocation snapshot."""
+        try:
+            # Convert protobuf to Pydantic models
+            snapshot = ResourceSnapshot(
+                nodes=[
+                    NodeStatusPayload(
+                        node=node.node,
+                        total_gpus=node.total_gpus,
+                        free_gpus=node.free_gpus,
+                        gpus=[
+                            GPUStatusPayload(
+                                node=gpu.node,
+                                global_rank=gpu.global_rank,
+                                local_rank=gpu.local_rank,
+                                owner=gpu.owner if gpu.owner else None,
+                            )
+                            for gpu in node.gpus
+                        ],
+                    )
+                    for node in request.nodes
+                ]
+            )
+            await self.manager.apply_resource_snapshot(snapshot)
+
+            return resource_manager_pb2.ApplyResourceSnapshotResponse(
+                status=common_pb2.Status.STATUS_OK,
+                message="Resource snapshot applied successfully",
+            )
+        except ValueError as e:
+            logger.warning("ApplyResourceSnapshot validation failed: %s", e)
+            return resource_manager_pb2.ApplyResourceSnapshotResponse(
+                status=common_pb2.Status.STATUS_ERROR,
+                message=str(e),
+            )
+        except Exception as e:
+            logger.exception("ApplyResourceSnapshot failed: %s", e)
+            return resource_manager_pb2.ApplyResourceSnapshotResponse(
+                status=common_pb2.Status.STATUS_ERROR,
+                message=str(e),
+            )
+
+    async def GetDeployedTaskManagers(
+        self,
+        request: resource_manager_pb2.GetDeployedTaskManagersRequest,
+        context: grpc.aio.ServicerContext,
+    ) -> resource_manager_pb2.GetDeployedTaskManagersResponse:
+        """Get list of deployed task managers."""
+        try:
+            task_managers = self.manager.get_deployed_task_managers()
+            return resource_manager_pb2.GetDeployedTaskManagersResponse(
+                status=common_pb2.Status.STATUS_OK,
+                task_managers=[
+                    resource_manager_pb2.DeployedTaskManager(
+                        task_manager_id=tm_id,
+                        task_instance_name=instance_name,
+                        num_gpus=num_gpus,
+                    )
+                    for tm_id, instance_name, num_gpus in task_managers
+                ],
+            )
+        except Exception as e:
+            logger.exception("GetDeployedTaskManagers failed: %s", e)
+            return resource_manager_pb2.GetDeployedTaskManagersResponse(
+                status=common_pb2.Status.STATUS_ERROR,
+                task_managers=[],
             )
 
 

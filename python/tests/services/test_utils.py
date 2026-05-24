@@ -18,6 +18,7 @@ def test_to_strict_k8s_name():
     assert to_strict_k8s_name(".start-dot-") == "start-dot"
     assert to_strict_k8s_name("a" * 64) == "a" * 63
     assert to_strict_k8s_name("a" * 63) == "a" * 63
+    assert to_strict_k8s_name("a" * 64, max_len=60) == "a" * 60
 
     with pytest.raises(ValueError):
         to_strict_k8s_name("")

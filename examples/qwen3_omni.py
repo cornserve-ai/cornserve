@@ -53,6 +53,10 @@ omni = OmniTask(
     modalities=[Modality.IMAGE, Modality.VIDEO, Modality.AUDIO],
     encoder_fission=False,
     vocoder_fission=True,
+    eric_max_batch_size=1,
+    llm_tp_size=1,
+    llm_max_num_seqs=32,
+    llm_gpu_memory_utilization=0.9,
 )
 
 

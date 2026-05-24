@@ -46,7 +46,9 @@ class ScheduledImageRequest(ScheduledRequest):
     height: int
     width: int
     num_inference_steps: int
+    prompt: str | None = None
     skip_tokens: int = 0
+    dummy_seq_len: int | None = None
 
     @classmethod
     def from_engine_request(cls, engine_request: EngineRequest, span: trace.Span | None) -> ScheduledImageRequest:
@@ -59,7 +61,9 @@ class ScheduledImageRequest(ScheduledRequest):
             height=engine_request.height,
             width=engine_request.width,
             num_inference_steps=engine_request.num_inference_steps,
+            prompt=engine_request.prompt,
             skip_tokens=engine_request.skip_tokens,
+            dummy_seq_len=engine_request.dummy_seq_len,
         )
 
     def requests_compatible(self, other: ScheduledRequest) -> bool:
@@ -85,6 +89,7 @@ class ScheduledAudioRequest(ScheduledRequest):
 
     chunk_size: int | None = None
     left_context_size: int | None = None
+    dummy_seq_len: int | None = None
 
     @classmethod
     def from_engine_request(cls, engine_request: EngineRequest, span: trace.Span | None) -> ScheduledAudioRequest:
@@ -96,6 +101,7 @@ class ScheduledAudioRequest(ScheduledRequest):
             span=span,
             chunk_size=engine_request.chunk_size,
             left_context_size=engine_request.left_context_size,
+            dummy_seq_len=engine_request.dummy_seq_len,
         )
 
     def requests_compatible(self, other: ScheduledRequest) -> bool:
@@ -172,11 +178,6 @@ class ImageSchedulerBatch(SchedulerBatch):
     num_inference_steps: int
 
     sched_request_type: ClassVar[type[ScheduledRequest]] = ScheduledImageRequest
-
-    @property
-    def skip_tokens(self) -> list[int]:
-        """Get list of skip tokens for this batch."""
-        return [getattr(req, "skip_tokens", 0) for req in self.requests]
 
 
 @dataclass

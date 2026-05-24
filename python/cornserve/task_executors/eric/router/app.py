@@ -52,9 +52,13 @@ async def embeddings(
     """Handler for embedding requests."""
     span = trace.get_current_span()
     for data_item in request.data:
+        # Truncate data URIs to avoid exceeding Badger's 65KB key limit
+        url_val = data_item.url
+        if len(url_val) > 256:
+            url_val = url_val[:256] + "...<truncated>"
         span.set_attribute(
             f"eric.embeddings.data.{data_item.id}.url",
-            data_item.url,
+            url_val,
         )
 
     # Request validation: model id and modality
@@ -74,10 +78,14 @@ async def embeddings(
     engine_client: EngineClient = raw_request.app.state.engine_client
 
     # Load data from URLs and apply processing
+    span.add_event("processor.process.start")
     processed = await processor.process(request.data)
+    span.add_event("processor.process.done")
 
     # Send to engine process (embedding + transmission via Tensor Sidecar)
+    span.add_event("engine.embed.start")
     response = await engine_client.embed(uuid.uuid4().hex, processed)
+    span.add_event("engine.embed.done")
 
     match response.status:
         case Status.SUCCESS:

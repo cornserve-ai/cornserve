@@ -325,7 +325,9 @@ class ModalityDataLoader:
         start_time = time.monotonic()
 
         span = trace.get_current_span()
-        span.set_attribute("data.url", url)
+        # Truncate data URIs to avoid exceeding Badger's 65KB key limit
+        url_val = url if len(url) <= 256 else url[:256] + "...<truncated>"
+        span.set_attribute("data.url", url_val)
         span.set_attribute("data.modality", modality.value)
 
         url_spec = urlparse(url)

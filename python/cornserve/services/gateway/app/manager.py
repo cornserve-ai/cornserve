@@ -18,6 +18,8 @@ from cornserve.logging import get_logger
 from cornserve.services.gateway.app.models import AppComponents, AppDefinition, AppState
 from cornserve.services.gateway.task_manager import TaskManager
 from cornserve.task.base import discover_unit_tasks
+from cornserve.services.gateway.app_registry import AppRegistry
+from cornserve.services.utils import to_strict_k8s_name
 
 logger = get_logger(__name__)
 tracer = trace.get_tracer(__name__)
@@ -109,9 +111,10 @@ def validate_app_module(module: ModuleType) -> AppComponents:
 class AppManager:
     """Manages registration and execution of user applications."""
 
-    def __init__(self, task_manager: TaskManager) -> None:
+    def __init__(self, task_manager: TaskManager, app_registry: AppRegistry) -> None:
         """Initialize the AppManager."""
         self.task_manager = task_manager
+        self.app_registry = app_registry
 
         # One lock protects all app-related state dicts below
         self.app_lock = asyncio.Lock()
@@ -133,27 +136,40 @@ class AppManager:
         """
         span = trace.get_current_span()
 
-        async with self.app_lock:
-            # Generate a unique app ID
-            while True:
-                app_id = f"app-{uuid.uuid4().hex}"
-                if app_id not in self.app_states:
-                    break
+        app_id = f"app-{uuid.uuid4().hex}"
+        # if collision happens (this id was previously used, regenerate and retry)
+        while True:
+            try:
+                module = load_module_from_source(source_code, app_id)
+                app_components = validate_app_module(module)
+                tasks = discover_unit_tasks(app_components.config_cls.tasks.values())
+            except (ImportError, ValueError) as e:
+                raise ValueError(f"App source code validation failed: {e}") from e
+
+            # Deduplicate unit tasks
+            unique_tasks = []
+            for task in tasks:
+                if not any(unique_task.is_equivalent_to(task) for unique_task in unique_tasks):
+                    unique_tasks.append(task)
+
+            task_names = [to_strict_k8s_name(t.execution_descriptor.create_executor_name().lower()) for t in unique_tasks]
+
+            try:
+                await self.app_registry.create_app_instance(
+                    app_id=app_id,
+                    source_code=source_code,
+                    task_keys=task_names,
+                    is_streaming=app_components.is_streaming,
+                    state=AppState.NOT_READY,
+                )
+                break
+            except ValueError as e:
+                if "already registered" in str(e):
+                    app_id = f"app-{uuid.uuid4().hex}"
+                    continue
+                raise
 
         span.set_attribute("app_manager.validate_and_create_app.app_id", app_id)
-
-        try:
-            module = load_module_from_source(source_code, app_id)
-            app_components = validate_app_module(module)
-            tasks = discover_unit_tasks(app_components.config_cls.tasks.values())
-        except (ImportError, ValueError) as e:
-            raise ValueError(f"App source code validation failed: {e}") from e
-
-        # Deduplicate unit tasks
-        unique_tasks = []
-        for task in tasks:
-            if not any(unique_task.is_equivalent_to(task) for unique_task in unique_tasks):
-                unique_tasks.append(task)
 
         async with self.app_lock:
             self.apps[app_id] = AppDefinition(
@@ -164,8 +180,6 @@ class AppManager:
                 tasks=unique_tasks,
             )
             self.app_states[app_id] = AppState.NOT_READY
-
-        task_names = [t.execution_descriptor.create_executor_name().lower() for t in unique_tasks]
 
         return app_id, task_names
 
@@ -192,7 +206,13 @@ class AppManager:
             # Deploy unit tasks
             await self.task_manager.declare_used(tasks_to_deploy)
 
-            # Update app state
+            # Update AppInstance CR state to READY
+            resp = await self.app_registry.update_app_state(app_id, AppState.READY)
+            rv = int(resp["metadata"]["resourceVersion"])
+            await self.app_registry.update_latest_app_rv(rv)
+            await self.app_registry.sync_watchers()
+
+            # Update local cache state
             async with self.app_lock:
                 self.app_states[app_id] = AppState.READY
 
@@ -200,6 +220,8 @@ class AppManager:
 
         except Exception as e:
             logger.exception("Failed to deploy tasks (count: %d) for app '%s': %s", len(tasks_to_deploy), app_id, e)
+            # On failure, clean up the CR and local cache
+            await self.app_registry.delete_app_instance(app_id)
             async with self.app_lock:
                 self.apps.pop(app_id, None)
                 self.app_states.pop(app_id, None)
@@ -211,6 +233,9 @@ class AppManager:
     async def unregister_app(self, app_id: str) -> None:
         """Unregister an application.
 
+        Only called on the gateway-master.  If the app is not in local memory
+        (e.g. master restarted), it is reconstructed from the AppRegistry CR cache.
+
         Args:
             app_id: ID of the application to unregister
 
@@ -220,15 +245,45 @@ class AppManager:
         """
         async with self.app_lock:
             if app_id not in self.apps:
-                raise KeyError(f"App ID '{app_id}' does not exist")
+                # Master may have restarted — reconstruct from CR cache
+                spec = self.app_registry.get_app(app_id)
+                if spec is None:
+                    raise KeyError(f"App ID '{app_id}' does not exist")
 
-            # Clean up app from internal state
+                source_code = spec["sourceCode"]
+                try:
+                    module = load_module_from_source(source_code, app_id)
+                    app_components = validate_app_module(module)
+                    tasks = discover_unit_tasks(app_components.config_cls.tasks.values())
+
+                    unique_tasks = []
+                    for task in tasks:
+                        if not any(unique_task.is_equivalent_to(task) for unique_task in unique_tasks):
+                            unique_tasks.append(task)
+
+                    self.apps[app_id] = AppDefinition(
+                        app_id=app_id,
+                        module=module,
+                        components=app_components,
+                        source_code=source_code,
+                        tasks=unique_tasks,
+                    )
+                    self.app_states[app_id] = AppState.READY
+                    logger.info("Reconstructed app '%s' from CR for unregistration.", app_id)
+                except Exception as e:
+                    logger.exception("Failed to reconstruct app '%s' from CR: %s", app_id, e)
+                    raise KeyError(f"App '{app_id}' exists in CR but failed to reconstruct: {e}") from e
+
             app = self.apps.pop(app_id)
             self.app_states.pop(app_id, None)
 
-        # Let the task manager know that this app no longer needs these tasks
         try:
             await self.task_manager.declare_not_used(app.tasks)
+
+            # Delete the AppInstance CR and publish the RV for watcher sync
+            delete_rv = await self.app_registry.delete_app_instance(app_id)
+            if delete_rv > 0:
+                await self.app_registry.update_latest_app_rv(delete_rv)
         except Exception as e:
             logger.exception("Errors while unregistering app '%s': %s", app_id, e)
             raise RuntimeError(f"Errors while unregistering app '{app_id}': {e}") from e
@@ -238,6 +293,11 @@ class AppManager:
     @tracer.start_as_current_span(name="AppManager.invoke_app")
     async def invoke_app(self, app_id: str, request_data: dict[str, Any]) -> Any:
         """Invoke an application with the given request data.
+
+        No cache-miss path: the gateway-master syncs all replicas before returning
+        from register, so workers are guaranteed to have the app in their watcher
+        cache.  If the app is in the AppRegistry watcher cache but not yet loaded
+        as a Python module, we load it on first invoke.
 
         Args:
             app_id: ID of the application to invoke
@@ -252,6 +312,40 @@ class AppManager:
             ValidationError: If request data is invalid
         """
         async with self.app_lock:
+            if app_id not in self.apps:
+                # The watcher cache should have the CR spec (no on-demand fetch).
+                # We only need to load the Python module from the cached source code.
+                spec = self.app_registry.get_app(app_id)
+                if spec is None:
+                    raise KeyError(f"App ID '{app_id}' does not exist")
+
+                if spec["state"] != AppState.READY:
+                    raise ValueError(f"App '{app_id}' is not ready")
+
+                # Load the Python module from watcher-cached source code
+                source_code = spec["sourceCode"]
+                try:
+                    module = load_module_from_source(source_code, app_id)
+                    app_components = validate_app_module(module)
+                    tasks = discover_unit_tasks(app_components.config_cls.tasks.values())
+
+                    unique_tasks = []
+                    for task in tasks:
+                        if not any(unique_task.is_equivalent_to(task) for unique_task in unique_tasks):
+                            unique_tasks.append(task)
+
+                    self.apps[app_id] = AppDefinition(
+                        app_id=app_id,
+                        module=module,
+                        components=app_components,
+                        source_code=source_code,
+                        tasks=unique_tasks,
+                    )
+                    self.app_states[app_id] = AppState.READY
+                except Exception as e:
+                    logger.exception("Failed to load app module '%s': %s", app_id, e)
+                    raise ValueError(f"Failed to load app '{app_id}': {e}") from e
+
             if self.app_states[app_id] != AppState.READY:
                 raise ValueError(f"App '{app_id}' is not ready")
 
@@ -265,21 +359,6 @@ class AppManager:
         app_driver: asyncio.Task[BaseModel | AsyncIterator[BaseModel]] | None = None
 
         try:
-            # There are two types of apps:
-            # 1. Streaming apps (`is_streaming=True`)
-            # 2. Non-streaming apps (`is_streaming=False`)
-            #
-            # And 1. Streaming apps have two types of serve functions:
-            # 1.1. Async generator functions
-            # 1.2. Async functions that return an AsyncIterator
-            #
-            # 1.2 and 2 can be `await`ed, whereas 1.1 cannot be `await`ed.
-            # The only way to drive 1.1 is to asynchronously iterate over it.
-            # 1.1 can be identified by checking if `serve_fn` is an async generator function.
-            #
-            # After the app driver is returned out of this function, the values from 1.1 and 1.2
-            # can be asynchronously iterated, and the value from 2 is a concrete response object.
-
             # Case 1.1: Async generator function
             if inspect.isasyncgenfunction(app_def.components.serve_fn):
                 assert app_def.components.is_streaming
@@ -307,9 +386,10 @@ class AppManager:
         Returns:
             dict[str, AppState]: Mapping of app IDs to their states
         """
-        async with self.app_lock:  # Ensure thread-safe access for reading states
-            return self.app_states.copy()
+        # Return app states from the AppRegistry cache (not just local memory)
+        return {app_id: AppState(spec["state"]) for app_id, spec in self.app_registry.get_all_apps().items()}
 
     async def shutdown(self) -> None:
         """Shut down the server."""
         await self.task_manager.shutdown()
+        await self.app_registry.shutdown()

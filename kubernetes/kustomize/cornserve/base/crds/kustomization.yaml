@@ -6,3 +6,6 @@ resources:
 - unit-task-instance-crd.yaml
 - unit-task-profile-crd.yaml
 - latest-tasklib-rv-crd.yaml
+- app-instance-crd.yaml
+- latest-app-rv-crd.yaml
+- latest-unit-task-instance-rv-crd.yaml

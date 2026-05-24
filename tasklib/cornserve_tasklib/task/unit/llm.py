@@ -8,7 +8,7 @@ from __future__ import annotations
 import uuid
 from typing import Generic, Literal, TypeAlias, TypeVar
 
-from cornserve.task.base import Stream, TaskInput, TaskOutput, UnitTask
+from cornserve.task.base import Stream, TaskInput, TaskOutput, TaskProfileConfig, UnitTask
 from cornserve.task.forward import DataForward, Tensor
 from openai.types.chat import ChatCompletionChunk
 from pydantic import BaseModel, Field
@@ -19,9 +19,12 @@ class StreamOptions(BaseModel):
 
     Attributes:
         include_usage: If set, the final chunk will include token usage statistics.
+        continuous_usage_stats: If set, usage statistics are included on every
+            streaming chunk (not just the final one).
     """
 
     include_usage: bool = True
+    continuous_usage_stats: bool = False
 
 
 class ChatCompletionContentPartTextParam(BaseModel):
@@ -123,7 +126,28 @@ InputT = TypeVar("InputT", bound=TaskInput)
 OutputT = TypeVar("OutputT", bound=TaskOutput)
 
 
-class LLMBaseUnitTask(UnitTask[InputT, OutputT], Generic[InputT, OutputT]):
+def llm_executor_name(prefix: str, model_id: str, receive_embeddings: bool, profile_str: str) -> str:
+    """Build the canonical executor name for an LLM task executor.
+
+    Shared by :class:`TaskExecutionDescriptor` subclasses and the benchmark
+    Prometheus helpers so that naming stays consistent.
+    """
+    re_suffix = "re1" if receive_embeddings else "re0"
+    return "-".join([prefix, model_id.split("/")[-1], re_suffix, profile_str]).lower()
+
+
+class LLMProfileConfig(TaskProfileConfig):
+    """LLM-specific profiling configuration fields."""
+    tp_size: int
+    max_num_seqs: int
+    gpu_memory_utilization: float
+
+    def to_profile_str(self) -> str:
+        """Return a string representation of the profile configuration."""
+        return f"tp{self.tp_size}+bs{self.max_num_seqs}+gpu{self.gpu_memory_utilization}"
+
+
+class LLMBaseUnitTask(UnitTask[InputT, OutputT], LLMProfileConfig, Generic[InputT, OutputT]):
     """Base class for LLM unit tasks.
 
     Attributes:
@@ -134,10 +158,15 @@ class LLMBaseUnitTask(UnitTask[InputT, OutputT], Generic[InputT, OutputT]):
 
     model_id: str
     receive_embeddings: bool = True
+    enable_prefix_caching: bool = False
+
+    def _re_suffix(self) -> str:
+        return "re1" if self.receive_embeddings else "re0"
 
     def make_name(self) -> str:
         """Create a concise string representation of the task."""
-        return f"llm-{self.model_id.split('/')[-1].lower()}"
+        pc_suffix = "+pc1" if self.enable_prefix_caching else ""
+        return f"llm-{self.model_id.split('/')[-1].lower()}-{self._re_suffix()}-{self.to_profile_str()}{pc_suffix}"
 
 
 class OpenAIChatCompletionChunk(TaskOutput, ChatCompletionChunk):
@@ -153,6 +182,8 @@ class LLMUnitTask(
         model_id: The ID of the model to use for the task.
         receive_embeddings: Whether to receive multimodal embeddings from
             a separate encoder task. If False, the task will compute them itself.
+        enable_prefix_caching: Whether to enable vLLM prefix caching at startup.
+            Used for decode profiling to simulate a pre-populated KV cache.
     """
 
     def make_record_output(
@@ -161,6 +192,70 @@ class LLMUnitTask(
     ) -> Stream[OpenAIChatCompletionChunk]:
         """Create a mock task output object for invocation recording."""
         return Stream[OpenAIChatCompletionChunk]()
+
+
+class DummyMLLMUnitTask(
+    UnitTask[OpenAIChatCompletionRequest, Stream[OpenAIChatCompletionChunk]],
+    LLMProfileConfig,
+):
+    """A task that invokes an MLLM and returns a stream of chat completion chunks.
+
+    Attributes:
+        model_id: The ID of the model to use for the task.
+        receive_embeddings: Use random embeddings when set to True
+    """
+
+    model_id: str
+    receive_embeddings: bool = True
+
+    def make_record_output(
+        self,
+        task_input: OpenAIChatCompletionRequest,
+    ) -> Stream[OpenAIChatCompletionChunk]:
+        """Create a mock task output object for invocation recording."""
+        return Stream[OpenAIChatCompletionChunk]()
+
+    def make_name(self) -> str:
+        """Create a concise string representation of the task."""
+        re = "re1" if self.receive_embeddings else "re0"
+        return f"dummy-mllm-{self.model_id.split('/')[-1].lower()}-{re}-{self.to_profile_str()}"
+
+
+class OmniMLLMUnitTask(
+    UnitTask[OpenAIChatCompletionRequest, Stream[OpenAIChatCompletionChunk]],
+    LLMProfileConfig,
+):
+    """MLLM unit task with selective per-modality encoder disabling.
+
+    When disable_*_enc is True for a modality, the descriptor rewrites
+    that modality's data URLs so gpu_model_runner skips the real encoder
+    and uses torch.randn via CORNSERVE_PROFILING instead.
+    """
+
+    model_id: str
+    disable_audio_enc: bool = False
+    disable_image_enc: bool = False
+    disable_video_enc: bool = False
+
+    def make_record_output(
+        self,
+        task_input: OpenAIChatCompletionRequest,
+    ) -> Stream[OpenAIChatCompletionChunk]:
+        """Create a mock task output object for invocation recording."""
+        return Stream[OpenAIChatCompletionChunk]()
+
+    def _enc_flags_str(self) -> str:
+        """Short string encoding which encoders are disabled."""
+        parts = [
+            f"i{'0' if self.disable_image_enc else '1'}",
+            f"a{'0' if self.disable_audio_enc else '1'}",
+            f"v{'0' if self.disable_video_enc else '1'}",
+        ]
+        return "+".join(parts)
+
+    def make_name(self) -> str:
+        """Create a concise string representation of the task."""
+        return f"omni-mllm-{self.model_id.split('/')[-1].lower()}-{self._enc_flags_str()}-{self.to_profile_str()}"
 
 
 class LLMEmbeddingResponse(TaskOutput):
@@ -195,7 +290,8 @@ class PrefillChatCompletionResponse(TaskOutput):
 
 
 class PrefillLLMUnitTask(
-    UnitTask[OpenAIChatCompletionRequest, PrefillChatCompletionResponse]
+    UnitTask[OpenAIChatCompletionRequest, PrefillChatCompletionResponse],
+    LLMProfileConfig,
 ):
     """A task that invokes a vLLM to perform prefill."""
 
@@ -205,7 +301,8 @@ class PrefillLLMUnitTask(
 
     def make_name(self) -> str:
         """Create a concise string representation of the task."""
-        return f"prefill-{self.model_id.split('/')[-1].lower()}"
+        re = "re1" if self.receive_embeddings else "re0"
+        return f"prefill-{self.model_id.split('/')[-1].lower()}-{re}-{self.to_profile_str()}"
 
     def make_record_output(
         self, task_input: OpenAIChatCompletionRequest
@@ -224,7 +321,8 @@ class PrefillLLMUnitTask(
 
 
 class DecodeLLMUnitTask(
-    UnitTask[OpenAIChatCompletionRequest, Stream[OpenAIChatCompletionChunk]]
+    UnitTask[OpenAIChatCompletionRequest, Stream[OpenAIChatCompletionChunk]],
+    LLMProfileConfig,
 ):
     """A task that invokes a vLLM decoder and returns a stream of chat completion chunks."""
 
@@ -233,7 +331,8 @@ class DecodeLLMUnitTask(
 
     def make_name(self) -> str:
         """Create a concise string representation of the task."""
-        return f"decode-{self.model_id.split('/')[-1].lower()}"
+        re = "re1" if self.receive_embeddings else "re0"
+        return f"decode-{self.model_id.split('/')[-1].lower()}-{re}-{self.to_profile_str()}"
 
     def make_record_output(
         self, task_input: OpenAIChatCompletionRequest
