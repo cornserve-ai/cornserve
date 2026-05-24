@@ -1,0 +1,29 @@
+"""An app that runs an OmniFlexTask with per-group encoders/thinkers and shared audio output."""
+
+from __future__ import annotations
+
+from collections.abc import AsyncIterator
+
+from cornserve.app.base import AppConfig
+from cornserve.task.base import Stream
+from cornserve_tasklib.task.composite.omni import (
+    OmniFlexGroupConfig,
+    OmniFlexTask,
+    OmniInput,
+    ThinkerLLMConfig,
+)
+from cornserve_tasklib.task.unit.encoder import Modality
+from cornserve_tasklib.task.unit.llm import OpenAIChatCompletionChunk
+
+$TASK_DEFINITION
+
+
+class Config(AppConfig):
+    """App configuration model."""
+
+    tasks = {"omni_flex": omni_flex}
+
+
+async def serve(request: OmniInput) -> AsyncIterator[OpenAIChatCompletionChunk]:
+    """Main serve function for the app."""
+    return await omni_flex(request)

@@ -1,0 +1,31 @@
+"""An app that runs a SuperGroup of Qwen-Image sub-tasks with weighted routing."""
+
+from __future__ import annotations
+
+from typing import cast
+
+from cornserve.app.base import AppConfig
+from cornserve.task.base import Task
+from cornserve_tasklib.task.composite.router import RouterApp
+from cornserve_tasklib.task.composite.image_gen import (
+    QwenImageInput,
+    QwenImageOutput,
+)
+
+$SUB_TASK_DEFINITIONS
+
+supergroup_router = RouterApp[QwenImageInput, QwenImageOutput](
+    routing_tasks=cast(list[Task], [$SUB_TASK_NAMES]),
+    routing_weights=[$ROUTING_WEIGHTS],
+)
+
+
+class Config(AppConfig):
+    """App configuration model."""
+
+    tasks = {"supergroup_router": supergroup_router}
+
+
+async def serve(request: QwenImageInput) -> QwenImageOutput:
+    """Main serve function for the app."""
+    return await supergroup_router(request)

@@ -1,0 +1,32 @@
+"""An app that runs an Omni MLLM task with selective encoder disabling."""
+
+from __future__ import annotations
+
+from collections.abc import AsyncIterator
+
+from cornserve.app.base import AppConfig
+from cornserve_tasklib.task.unit.llm import (
+    OmniMLLMUnitTask,
+    OpenAIChatCompletionRequest,
+    OpenAIChatCompletionChunk,
+)
+
+llm = OmniMLLMUnitTask(
+    model_id="$MODEL_ID",
+    tp_size=$TP_SIZE,
+    max_num_seqs=$MAX_NUM_SEQS,
+    gpu_memory_utilization=$GPU_MEMORY_UTILIZATION,
+    disable_audio_enc=$DISABLE_AUDIO_ENC,
+    disable_image_enc=$DISABLE_IMAGE_ENC,
+    disable_video_enc=$DISABLE_VIDEO_ENC,
+)
+
+class Config(AppConfig):
+    """App configuration model."""
+
+    tasks = {"llm": llm}
+
+
+async def serve(request: OpenAIChatCompletionRequest) -> AsyncIterator[OpenAIChatCompletionChunk]:
+    """Main serve function for the app."""
+    return await llm(request)

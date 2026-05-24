@@ -1,0 +1,29 @@
+"""An app that runs mixed SP monolithic Qwen-Image generation."""
+
+from __future__ import annotations
+
+from cornserve.app.base import AppConfig
+from cornserve_tasklib.task.unit.generator import QwenImageTextGeneratorTask
+from cornserve_tasklib.task.composite.image_gen import (
+    MixedMonoQwenImageTask,
+    QwenImageInput,
+    QwenImageOutput,
+)
+
+$MONO_ROUTING_TASK_DEFINITIONS
+
+mixed_mono_qwen_image = MixedMonoQwenImageTask(
+    mono_routing_tasks=[$ROUTING_TASK_NAMES],
+    routing_weights=[$ROUTING_WEIGHTS],
+)
+
+
+class Config(AppConfig):
+    """App configuration model."""
+
+    tasks = {"mixed_mono_qwen_image": mixed_mono_qwen_image}
+
+
+async def serve(request: QwenImageInput) -> QwenImageOutput:
+    """Main serve function for the app."""
+    return await mixed_mono_qwen_image(request)

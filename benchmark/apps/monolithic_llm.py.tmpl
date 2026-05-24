@@ -1,0 +1,30 @@
+"""An app that runs a Monolithic LLM task."""
+
+from __future__ import annotations
+
+from collections.abc import AsyncIterator
+
+from cornserve.app.base import AppConfig
+from cornserve_tasklib.task.unit.llm import (
+    DummyMLLMUnitTask,
+    OpenAIChatCompletionRequest,
+    OpenAIChatCompletionChunk,
+)
+
+llm = DummyMLLMUnitTask(
+    model_id="$MODEL_ID",
+    receive_embeddings=False,
+    tp_size=$TP_SIZE,
+    max_num_seqs=$MAX_NUM_SEQS,
+    gpu_memory_utilization=$GPU_MEMORY_UTILIZATION,
+)
+
+class Config(AppConfig):
+    """App configuration model."""
+
+    tasks = {"llm": llm}
+
+
+async def serve(request: OpenAIChatCompletionRequest) -> AsyncIterator[OpenAIChatCompletionChunk]:
+    """Main serve function for the app."""
+    return await llm(request)

@@ -8,8 +8,9 @@ from cornserve_tasklib.task.unit.encoder import DummyEncoderTask, EncoderInput, 
 
 eric = DummyEncoderTask(
     model_ids={"$MODEL_ID"},
-    modality=Modality.IMAGE,
+    modality=Modality.$MODALITY,
     max_batch_size=$MAX_BATCH_SIZE,
+    tp_size=$TP_SIZE,
 )
 
 class Config(AppConfig):
