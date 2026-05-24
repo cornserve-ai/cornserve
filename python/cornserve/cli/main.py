@@ -554,7 +554,7 @@ def _handle_streaming_response(
 
         try:
             with Live("Waiting for response...", vertical_overflow="visible") as live:
-                for line in response.iter_lines(chunk_size=None, decode_unicode=True)  # type: ignore[reportArgumentType, reportCallIssue]:
+                for line in response.iter_lines(chunk_size=None, decode_unicode=True):  # type: ignore[reportArgumentType, reportCallIssue]
                     line = line.strip()
                     if not line:
                         continue
@@ -587,7 +587,8 @@ def _handle_streaming_response(
 
         try:
             with Live("Waiting for response...") as live:
-                for line_idx, line in enumerate(response.iter_lines(chunk_size=None, decode_unicode=True)  # type: ignore[reportArgumentType, reportCallIssue]):
+                lines = response.iter_lines(chunk_size=None, decode_unicode=True)  # type: ignore[reportArgumentType, reportCallIssue]
+                for line_idx, line in enumerate(lines):
                     line = line.strip()
                     if not line:
                         continue
@@ -672,7 +673,7 @@ def _handle_streaming_audio_response(
                     )
                 )
 
-            for line in response.iter_lines(chunk_size=None, decode_unicode=True)  # type: ignore[reportArgumentType, reportCallIssue]:
+            for line in response.iter_lines(chunk_size=None, decode_unicode=True):  # type: ignore[reportArgumentType, reportCallIssue]
                 line = line.strip()
                 if not line:
                     continue

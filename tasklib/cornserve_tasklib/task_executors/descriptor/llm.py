@@ -1,19 +1,21 @@
 """Built-in task execution descriptor for OpenAI-compatible tasks."""
 
 from __future__ import annotations
+
 from collections.abc import AsyncGenerator
 from secrets import token_hex
 from typing import Any, ClassVar
 
 import aiohttp
+import kubernetes_asyncio.client as kclient
 from cornserve import constants
 from cornserve.logging import get_logger
 from cornserve.services.resource import GPU
 from cornserve.task.base import Stream, TaskOutput
 from cornserve.task_executors.descriptor.base import TaskExecutionDescriptor
-import kubernetes_asyncio.client as kclient
 
 from cornserve_tasklib.task.unit.llm import (
+    URL,
     DecodeLLMUnitTask,
     DummyMLLMUnitTask,
     LLMBaseUnitTask,
@@ -23,7 +25,6 @@ from cornserve_tasklib.task.unit.llm import (
     OpenAIChatCompletionRequest,
     PrefillChatCompletionResponse,
     PrefillLLMUnitTask,
-    URL,
     extract_multimodal_content,
     llm_executor_name,
 )
@@ -117,7 +118,12 @@ class DummyVLLMDescriptor(
 
     def create_executor_name(self) -> str:
         """Create a name for the task executor."""
-        return llm_executor_name("dummy-vllm", self.task.model_id, self.task.receive_embeddings, self.task.to_profile_str())
+        return llm_executor_name(
+            "dummy-vllm",
+            self.task.model_id,
+            self.task.receive_embeddings,
+            self.task.to_profile_str(),
+        )
 
     def get_container_image(self) -> str:
         """Get the container image name for the task executor."""
@@ -146,8 +152,11 @@ class DummyVLLMDescriptor(
     def get_container_args(self, gpus: list[GPU], port: int) -> list[str]:
         """Get the container command for the task executor."""
         args = _base_vllm_container_args(
-            self.task.model_id, gpus, port,
-            self.task.gpu_memory_utilization, self.task.max_num_seqs,
+            self.task.model_id,
+            gpus,
+            port,
+            self.task.gpu_memory_utilization,
+            self.task.max_num_seqs,
         )
         if self.task.receive_embeddings:
             args.append("--skip-mm-profiling")
@@ -236,12 +245,14 @@ class OmniVLLMDescriptor(
 
     def create_executor_name(self) -> str:
         """Create a name for the task executor."""
-        return "-".join([
-            "omni-vllm",
-            self.task.model_id.split("/")[-1],
-            self.task._enc_flags_str(),
-            self.task.to_profile_str(),
-        ]).lower()
+        return "-".join(
+            [
+                "omni-vllm",
+                self.task.model_id.split("/")[-1],
+                self.task._enc_flags_str(),
+                self.task.to_profile_str(),
+            ]
+        ).lower()
 
     def get_container_image(self) -> str:
         """Get the container image name for the task executor."""
@@ -261,8 +272,11 @@ class OmniVLLMDescriptor(
     def get_container_args(self, gpus: list[GPU], port: int) -> list[str]:
         """Get the container command for the task executor."""
         return _base_vllm_container_args(
-            self.task.model_id, gpus, port,
-            self.task.gpu_memory_utilization, self.task.max_num_seqs,
+            self.task.model_id,
+            gpus,
+            port,
+            self.task.gpu_memory_utilization,
+            self.task.max_num_seqs,
         )
 
     def get_api_url(self, base: str) -> str:
@@ -283,7 +297,9 @@ class OmniVLLMDescriptor(
         """
         multimodal_data = extract_multimodal_content(task_input.messages)
         for multimodal_content in multimodal_data:
-            modality = multimodal_content.type.split("_")[0]  # "audio", "image", "video"
+            modality = multimodal_content.type.split("_")[
+                0
+            ]  # "audio", "image", "video"
             should_disable = (
                 (modality == "audio" and self.task.disable_audio_enc)
                 or (modality == "image" and self.task.disable_image_enc)
@@ -316,9 +332,7 @@ class OmniVLLMDescriptor(
                 async_iterator=parse_stream_to_completion_chunks(response),
                 response=response,
             )
-        raise ValueError(
-            f"Expected task output to be Stream, got {type(task_output)}"
-        )
+        raise ValueError(f"Expected task output to be Stream, got {type(task_output)}")
 
     def get_container_volumes(self) -> list[tuple[str, str, str]]:
         """Get the container volumes for the task manager."""
@@ -343,7 +357,9 @@ class VLLMDescriptor(
         profile_str = self.task.to_profile_str()
         if self.task.enable_prefix_caching:
             profile_str = profile_str + "+pc1"
-        return llm_executor_name("vllm", self.task.model_id, self.task.receive_embeddings, profile_str)
+        return llm_executor_name(
+            "vllm", self.task.model_id, self.task.receive_embeddings, profile_str
+        )
 
     def get_container_image(self) -> str:
         """Get the container image name for the task executor."""
@@ -353,7 +369,10 @@ class VLLMDescriptor(
         """Get the container environment variables for the task executor."""
         envs = super().get_container_envs(gpus)
         envs.append(
-            ("VLLM_OBJECT_STORAGE_SHM_BUFFER_NAME", f"VLLM_OBJECT_STORAGE_SHM_BUFFER_NAME_{token_hex(3)}")
+            (
+                "VLLM_OBJECT_STORAGE_SHM_BUFFER_NAME",
+                f"VLLM_OBJECT_STORAGE_SHM_BUFFER_NAME_{token_hex(3)}",
+            )
         )
         envs.append(("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True"))
         # Always set CORNSERVE_BENCHMARKING so that time-sharing partial
@@ -372,8 +391,11 @@ class VLLMDescriptor(
     def get_container_args(self, gpus: list[GPU], port: int) -> list[str]:
         """Get the container command for the task executor."""
         args = _base_vllm_container_args(
-            self.task.model_id, gpus, port,
-            self.task.gpu_memory_utilization, self.task.max_num_seqs,
+            self.task.model_id,
+            gpus,
+            port,
+            self.task.gpu_memory_utilization,
+            self.task.max_num_seqs,
         )
         if self.task.receive_embeddings:
             args.append("--skip-mm-profiling")
@@ -491,7 +513,12 @@ class PrefillVLLMDescriptor(
 
     def create_executor_name(self) -> str:
         """Create a name for the task executor."""
-        return llm_executor_name("prefill", self.task.model_id, self.task.receive_embeddings, self.task.to_profile_str())
+        return llm_executor_name(
+            "prefill",
+            self.task.model_id,
+            self.task.receive_embeddings,
+            self.task.to_profile_str(),
+        )
 
     def get_container_image(self) -> str:
         """Get the container image name for the task executor."""
@@ -541,15 +568,20 @@ class PrefillVLLMDescriptor(
     def get_container_args(self, gpus: list[GPU], port: int) -> list[str]:
         """Get the container command for the task executor."""
         args = _base_vllm_container_args(
-            self.task.model_id, gpus, port,
-            self.task.gpu_memory_utilization, self.task.max_num_seqs,
+            self.task.model_id,
+            gpus,
+            port,
+            self.task.gpu_memory_utilization,
+            self.task.max_num_seqs,
         )
         if self.task.receive_embeddings:
             args.append("--skip-mm-profiling")
-        args.extend([
-            "--kv-transfer-config",
-            '{"kv_connector":"NixlConnector","kv_role":"kv_producer"}',
-        ])
+        args.extend(
+            [
+                "--kv-transfer-config",
+                '{"kv_connector":"NixlConnector","kv_role":"kv_producer"}',
+            ]
+        )
         return args
 
     def get_container_volumes(self) -> list[tuple[str, str, str]]:
@@ -674,7 +706,12 @@ class DecodeVLLMDescriptor(
 
     def create_executor_name(self) -> str:
         """Create a name for the task executor."""
-        return llm_executor_name("decode", self.task.model_id, self.task.receive_embeddings, self.task.to_profile_str())
+        return llm_executor_name(
+            "decode",
+            self.task.model_id,
+            self.task.receive_embeddings,
+            self.task.to_profile_str(),
+        )
 
     def get_container_image(self) -> str:
         """Get the container image name for the task executor."""
@@ -723,15 +760,20 @@ class DecodeVLLMDescriptor(
     def get_container_args(self, gpus: list[GPU], port: int) -> list[str]:
         """Get the container command for the task executor."""
         args = _base_vllm_container_args(
-            self.task.model_id, gpus, port,
-            self.task.gpu_memory_utilization, self.task.max_num_seqs,
+            self.task.model_id,
+            gpus,
+            port,
+            self.task.gpu_memory_utilization,
+            self.task.max_num_seqs,
         )
         if self.task.receive_embeddings:
             args.append("--skip-mm-profiling")
-        args.extend([
-            "--kv-transfer-config",
-            '{"kv_connector":"NixlConnector","kv_role":"kv_consumer"}',
-        ])
+        args.extend(
+            [
+                "--kv-transfer-config",
+                '{"kv_connector":"NixlConnector","kv_role":"kv_consumer"}',
+            ]
+        )
         return args
 
     def get_container_volumes(self) -> list[tuple[str, str, str]]:

@@ -3,9 +3,14 @@
 from __future__ import annotations
 
 import enum
-from typing import Literal
 
-from cornserve.task.base import Stream, TaskInput, TaskOutput, TaskProfileConfig, UnitTask
+from cornserve.task.base import (
+    Stream,
+    TaskInput,
+    TaskOutput,
+    TaskProfileConfig,
+    UnitTask,
+)
 from cornserve.task.forward import DataForward, Tensor
 
 from cornserve_tasklib.task.unit.llm import OpenAIChatCompletionChunk
@@ -21,6 +26,7 @@ class Modality(enum.StrEnum):
 
 class ImageGeriProfileConfig(TaskProfileConfig):
     """Image generator-specific profiling configuration fields."""
+
     sp_size: int
     max_batch_size: int = 1
 
@@ -31,6 +37,7 @@ class ImageGeriProfileConfig(TaskProfileConfig):
 
 class AudioGeriProfileConfig(TaskProfileConfig):
     """Audio generator-specific profiling configuration fields."""
+
     max_batch_size: int = 1
 
     def to_profile_str(self) -> str:
@@ -300,8 +307,7 @@ class DummyAudioGeneratorTask(
         max_batch_size: Maximum batch size for the serving system.
     """
 
-    model_id: Literal["Qwen/Qwen3-Omni-30B-A3B-Instruct"] = ( "Qwen/Qwen3-Omni-30B-A3B-Instruct"
-    )
+    model_id: str = "Qwen/Qwen3-Omni-30B-A3B-Instruct"
     modality: Modality = Modality.AUDIO
 
     def make_record_output(

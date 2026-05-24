@@ -6,10 +6,9 @@ import hashlib
 from threading import Lock
 from typing import Generic, TypeVar, cast
 
-from pydantic import PrivateAttr, model_validator
-
 from cornserve.logging import get_logger
 from cornserve.task.base import Task, TaskInput, TaskOutput, task_context
+from pydantic import PrivateAttr, model_validator
 
 InputT = TypeVar("InputT", bound=TaskInput)
 OutputT = TypeVar("OutputT", bound=TaskOutput)

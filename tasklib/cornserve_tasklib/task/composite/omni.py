@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import uuid
 from collections import defaultdict
-from typing import Any, Literal
+from typing import Any
 
 from cornserve.task.base import MacroUnitTask, Stream, Task
 from cornserve.task.forward import DataForward, Tensor
@@ -15,6 +15,8 @@ from cornserve_tasklib.task.unit.encoder import (
     EncoderInput,
     EncoderOutput,
     EncoderTask,
+)
+from cornserve_tasklib.task.unit.encoder import (
     Modality as EncoderModality,
 )
 from cornserve_tasklib.task.unit.generator import (
@@ -24,7 +26,6 @@ from cornserve_tasklib.task.unit.generator import (
 from cornserve_tasklib.task.unit.llm import (
     URL,
     ChatCompletionMessageParam,
-    LLMEmbeddingResponse,
     LLMEmbeddingUnitTask,
     LLMUnitTask,
     OpenAIChatCompletionChunk,
@@ -71,9 +72,7 @@ class OmniTask(Task[OmniInput, Stream[OpenAIChatCompletionChunk]]):
         modalities: List of input modalities other than text.
     """
 
-    model_id: Literal["Qwen/Qwen3-Omni-30B-A3B-Instruct"] = (
-        "Qwen/Qwen3-Omni-30B-A3B-Instruct"
-    )
+    model_id: str = "Qwen/Qwen3-Omni-30B-A3B-Instruct"
     modalities: list[EncoderModality] = []
     encoder_fission: bool = True
     vocoder_fission: bool = True
@@ -432,7 +431,9 @@ class OmniTimeSharingMLLMTask(Task[OmniInput, Stream[OpenAIChatCompletionChunk]]
                     embeddings: list[DataForward[Tensor]] = []
                     for mm in multimodal_contents:
                         modality = EncoderModality(mm.type.split("_")[0])
-                        short_name = _MODALITY_TO_SHORT.get(modality.value, modality.value)
+                        short_name = _MODALITY_TO_SHORT.get(
+                            modality.value, modality.value
+                        )
                         if short_name in selected_mode and modality in self.encoders:
                             data_url: URL = getattr(mm, mm.type)
                             encoder_output = self.encoders[modality].invoke(
@@ -455,9 +456,7 @@ class OmniTimeSharingMLLMTask(Task[OmniInput, Stream[OpenAIChatCompletionChunk]]
                     if short_name in selected_mode and modality in self.encoders:
                         data_url: URL = getattr(mm, mm.type)
                         forward = embeddings[embed_idx]
-                        data_url.url = (
-                            f"data:{modality.value}/uuid;data_id={forward.id};url={data_url.url},"
-                        )
+                        data_url.url = f"data:{modality.value}/uuid;data_id={forward.id};url={data_url.url},"
                         embed_idx += 1
 
         # Save original input before thinker invocation — the thinker/encoder
@@ -637,9 +636,7 @@ class OmniFlexTask(Task[OmniInput, Stream[OpenAIChatCompletionChunk]]):
             self._group_encoders.append(encoders)
 
         # ── Per-group LLM pairs (text + embedding) ──────────────────
-        self._group_llm_pairs: list[
-            list[tuple[LLMUnitTask, LLMEmbeddingUnitTask]]
-        ] = []
+        self._group_llm_pairs: list[list[tuple[LLMUnitTask, LLMEmbeddingUnitTask]]] = []
         self._group_llm_cdfs: list[list[float]] = []
         for i, group in enumerate(self.groups):
             group_dep_id = f"{base_id}_g{i}" if base_id else None
@@ -779,16 +776,12 @@ class OmniFlexTask(Task[OmniInput, Stream[OpenAIChatCompletionChunk]]):
             for mm in multimodal_contents:
                 modality = EncoderModality(mm.type.split("_")[0])
                 if modality in encoder_outputs:
-                    embeddings.append(
-                        encoder_outputs[modality].embeddings.pop(0)
-                    )
+                    embeddings.append(encoder_outputs[modality].embeddings.pop(0))
         else:
             embeddings = []
             for mm in multimodal_contents:
                 modality = EncoderModality(mm.type.split("_")[0])
-                short_name = _MODALITY_TO_SHORT.get(
-                    modality.value, modality.value
-                )
+                short_name = _MODALITY_TO_SHORT.get(modality.value, modality.value)
                 if short_name in offloaded_short and modality in encoders:
                     data_url = getattr(mm, mm.type)
                     encoder_output = encoders[modality].invoke(
@@ -815,9 +808,7 @@ class OmniFlexTask(Task[OmniInput, Stream[OpenAIChatCompletionChunk]]):
                 )
                 embed_idx += 1
 
-    def invoke(
-        self, task_input: OmniInput
-    ) -> Stream[OpenAIChatCompletionChunk]:
+    def invoke(self, task_input: OmniInput) -> Stream[OpenAIChatCompletionChunk]:
         """Invoke with per-type group routing and within-group thinker selection."""
         # Non-Qwen models have no audio output; force return_audio off so
         # _compute_type_index doesn't set BIT_RETURN_AUDIO.
@@ -845,11 +836,7 @@ class OmniFlexTask(Task[OmniInput, Stream[OpenAIChatCompletionChunk]]):
 
         # Audio path: strip stream_options (vLLM rejects without stream=True)
         thinker_input = OpenAIChatCompletionRequest.model_validate(
-            dict(
-                **task_input.model_dump(
-                    exclude={"return_audio", "stream_options"}
-                )
-            )
+            dict(**task_input.model_dump(exclude={"return_audio", "stream_options"}))
         )
         embedding_output = emb_llm.invoke(thinker_input)
 
@@ -881,14 +868,12 @@ class OmniFlexTask(Task[OmniInput, Stream[OpenAIChatCompletionChunk]]):
 class Qwen3OmniMacroUnitTask(
     MacroUnitTask[OmniInput, Stream[OpenAIChatCompletionChunk]]
 ):
-    model_id: Literal["Qwen/Qwen3-Omni-30B-A3B-Instruct"] = (
-        "Qwen/Qwen3-Omni-30B-A3B-Instruct"
-    )
+    model_id: str = "Qwen/Qwen3-Omni-30B-A3B-Instruct"
     modalities: list[EncoderModality] = []
     encoder_fission: bool = True
     vocoder_fission: bool = True
     coalesce_encoder_invocations: bool = True
-    macro_ut_deployment_id: str = Field(default_factory=lambda: uuid.uuid4().hex)
+    macro_ut_deployment_id: str | None = Field(default_factory=lambda: uuid.uuid4().hex)
 
     eric_max_batch_size: int
     llm_tp_size: int

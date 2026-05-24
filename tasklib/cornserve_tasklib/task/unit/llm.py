@@ -8,7 +8,13 @@ from __future__ import annotations
 import uuid
 from typing import Generic, Literal, TypeAlias, TypeVar
 
-from cornserve.task.base import Stream, TaskInput, TaskOutput, TaskProfileConfig, UnitTask
+from cornserve.task.base import (
+    Stream,
+    TaskInput,
+    TaskOutput,
+    TaskProfileConfig,
+    UnitTask,
+)
 from cornserve.task.forward import DataForward, Tensor
 from openai.types.chat import ChatCompletionChunk
 from pydantic import BaseModel, Field
@@ -126,7 +132,9 @@ InputT = TypeVar("InputT", bound=TaskInput)
 OutputT = TypeVar("OutputT", bound=TaskOutput)
 
 
-def llm_executor_name(prefix: str, model_id: str, receive_embeddings: bool, profile_str: str) -> str:
+def llm_executor_name(
+    prefix: str, model_id: str, receive_embeddings: bool, profile_str: str
+) -> str:
     """Build the canonical executor name for an LLM task executor.
 
     Shared by :class:`TaskExecutionDescriptor` subclasses and the benchmark
@@ -138,16 +146,21 @@ def llm_executor_name(prefix: str, model_id: str, receive_embeddings: bool, prof
 
 class LLMProfileConfig(TaskProfileConfig):
     """LLM-specific profiling configuration fields."""
+
     tp_size: int
     max_num_seqs: int
     gpu_memory_utilization: float
 
     def to_profile_str(self) -> str:
         """Return a string representation of the profile configuration."""
-        return f"tp{self.tp_size}+bs{self.max_num_seqs}+gpu{self.gpu_memory_utilization}"
+        return (
+            f"tp{self.tp_size}+bs{self.max_num_seqs}+gpu{self.gpu_memory_utilization}"
+        )
 
 
-class LLMBaseUnitTask(UnitTask[InputT, OutputT], LLMProfileConfig, Generic[InputT, OutputT]):
+class LLMBaseUnitTask(
+    UnitTask[InputT, OutputT], LLMProfileConfig, Generic[InputT, OutputT]
+):
     """Base class for LLM unit tasks.
 
     Attributes:

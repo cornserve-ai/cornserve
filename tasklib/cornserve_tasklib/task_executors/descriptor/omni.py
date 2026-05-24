@@ -267,7 +267,11 @@ class DummyOmniTalkerEmbeddingDescriptor(
     def create_executor_name(self) -> str:
         """Create a name for the task executor."""
         return "-".join(
-            ["dummy-vllm", self.task.model_id.split("/")[-1].replace(".", "-"), "talker"]
+            [
+                "dummy-vllm",
+                self.task.model_id.split("/")[-1].replace(".", "-"),
+                "talker",
+            ]
         ).lower()
 
     def get_container_image(self) -> str:

@@ -79,9 +79,7 @@ class MixedQwenImageTask(Task[QwenImageInput, QwenImageOutput]):
             max_num_seqs=self.encoder_max_num_seqs,
             gpu_memory_utilization=self.encoder_gpu_memory_utilization,
         )
-        self.generator_router = RouterApp[
-            ImageGeneratorInput, ImageGeneratorOutput
-        ](
+        self.generator_router = RouterApp[ImageGeneratorInput, ImageGeneratorOutput](
             routing_tasks=cast(list[Task], self.generator_routing_tasks),
             routing_weights=self.routing_weights,
         )
@@ -135,9 +133,7 @@ class MixedMonoQwenImageTask(Task[QwenImageInput, QwenImageOutput]):
 
     def post_init(self) -> None:
         """Initialize the mono generator router."""
-        self.router = RouterApp[
-            QwenImageTextGeneratorInput, ImageGeneratorOutput
-        ](
+        self.router = RouterApp[QwenImageTextGeneratorInput, ImageGeneratorOutput](
             routing_tasks=cast(list[Task], self.mono_routing_tasks),
             routing_weights=self.routing_weights,
         )

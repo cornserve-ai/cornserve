@@ -4,11 +4,9 @@ from __future__ import annotations
 
 import enum
 
-from cornserve.task.base import TaskInput, TaskOutput, UnitTask
+from cornserve.task.base import TaskInput, TaskOutput, TaskProfileConfig, UnitTask
 from cornserve.task.forward import DataForward, Tensor
 from pydantic import field_validator
-
-from cornserve.task.base import TaskProfileConfig
 
 
 class Modality(enum.StrEnum):
@@ -21,6 +19,7 @@ class Modality(enum.StrEnum):
 
 class EricProfileConfig(TaskProfileConfig):
     """Eric-specific profiling configuration fields."""
+
     tp_size: int = 1
     max_batch_size: int = 1
 

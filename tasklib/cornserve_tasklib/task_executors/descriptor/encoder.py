@@ -36,7 +36,9 @@ class EricDescriptor(TaskExecutionDescriptor[EncoderTask, EncoderInput, EncoderO
     def create_executor_name(self) -> str:
         """Create a name for the task executor."""
         first_model_name = sorted(self.task.model_ids)[0].split("/")[-1].lower()
-        name = "-".join(["eric", self.task.modality, first_model_name, self.task.to_profile_str()]).lower()
+        name = "-".join(
+            ["eric", self.task.modality, first_model_name, self.task.to_profile_str()]
+        ).lower()
         return name
 
     def get_container_image(self) -> str:
@@ -112,7 +114,9 @@ class DummyEricDescriptor(
     def create_executor_name(self) -> str:
         """Create a name for the task executor."""
         first_model_name = sorted(self.task.model_ids)[0].split("/")[-1].lower()
-        name = "-".join(["eric", self.task.modality, first_model_name, self.task.to_profile_str()]).lower()
+        name = "-".join(
+            ["eric", self.task.modality, first_model_name, self.task.to_profile_str()]
+        ).lower()
         return name
 
     def get_container_image(self) -> str:
