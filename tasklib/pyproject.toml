@@ -15,6 +15,9 @@ dependencies = [
   "aiohttp",
   "pydantic",
   "openai",
-  "kubernetes_asyncio",
+  "kubernetes_asyncio==35.0.1",
   "cornserve",
 ]
+
+[tool.pyright]
+reportPrivateImportUsage = "none"

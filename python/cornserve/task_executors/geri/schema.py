@@ -92,7 +92,9 @@ class ImageEngineRequest(BatchEngineRequest):
     height: int
     width: int
     num_inference_steps: int
+    prompt: str | None = None
     skip_tokens: int = 0
+    dummy_seq_len: int | None = None
 
     @classmethod
     def from_geri_request(
@@ -106,20 +108,23 @@ class ImageEngineRequest(BatchEngineRequest):
             raise TypeError(f"Expected ImageGeriRequest, got {type(geri_request).__name__}")
         return cls(
             request_id=request_id,
-            embedding_data_id=geri_request.embedding_data_id,
+            embedding_data_id=geri_request.embedding_data_id or "",
             span_context=span_context,
             height=geri_request.height,
             width=geri_request.width,
             num_inference_steps=geri_request.num_inference_steps,
+            prompt=geri_request.prompt,
             skip_tokens=geri_request.skip_tokens,
+            dummy_seq_len=geri_request.dummy_seq_len,
         )
 
 
 class AudioEngineRequest(StreamEngineRequest):
-    """Engine generation request for images."""
+    """Engine generation request for audio."""
 
     chunk_size: int | None
     left_context_size: int | None
+    dummy_seq_len: int | None = None
 
     @classmethod
     def from_geri_request(
@@ -137,6 +142,7 @@ class AudioEngineRequest(StreamEngineRequest):
             span_context=span_context,
             chunk_size=geri_request.chunk_size,
             left_context_size=geri_request.left_context_size,
+            dummy_seq_len=geri_request.dummy_seq_len,
         )
 
 

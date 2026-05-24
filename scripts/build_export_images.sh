@@ -3,9 +3,11 @@
 # Usage:
 #
 #     export REGISTRY=see-below-for-local-vs-distributed
-#     bash scripts/build_export_images.sh [service1 service2 ...]
+#     bash scripts/build_export_images.sh [--max-jobs N] [service1 service2 ...]
+#     bash scripts/build_export_images.sh [--max-jobs N] list
 #
 # If no services are specified, it builds all services found in the docker/ directory except for `dev`.
+# If `list` is specified, it prints all available services (from `docker/*.Dockerfile`) and exits.
 #
 # The `REGISTRY` environment variable:
 # - If set to `local`, it builds the images directly within the local k3s containerd.
@@ -13,10 +15,59 @@
 # - If set to `minikube`, it builds the images with Docker and loads them into Minikube.
 # - If set to a URL (e.g., `localhost:30070`), it builds the images with Docker and pushes them to that registry.
 # More details: https://cornserve.ai/contributor_guide/kubernetes/
+#
+# The `CACHE_REGISTRY` environment variable (optional):
+# - If set (e.g., `docker.io/yourusername`), build cache is pushed to and pulled from
+#   `${CACHE_REGISTRY}/${SERVICE}:${CACHE_TAG}` for each service (default tag: devcache).
+# - This enables sharing BuildKit layer cache across machines via a remote registry.
+# CACHE_TO_TAG=devcache PUSH_CACHE=1 CACHE_REGISTRY=docker.io/cornserve REGISTRY=local bash scripts/build_export_images.sh
 
 set -euo pipefail
 
 NAMESPACE="cornserve"
+CACHE_REGISTRY="${CACHE_REGISTRY:-docker.io/cornserve}"
+CACHE_FROM_TAG="${CACHE_FROM_TAG:-buildcache}"
+CACHE_TO_TAG="${CACHE_TO_TAG:-devcache}"
+MAX_JOBS=2
+
+list_services() {
+  local include_dev="${1:-true}"
+  local services=()
+  local service
+  local file
+
+  while IFS= read -r file; do
+    [[ -f "${file}" ]] || continue
+    service=$(basename "${file}" .Dockerfile)
+    if [[ "${include_dev}" == "false" && "${service}" == "dev" ]]; then
+      continue
+    fi
+    services+=("${service}")
+  done < <(find docker -type f -name '*.Dockerfile' | sort)
+
+  printf '%s\n' "${services[@]}"
+}
+
+# Parse --max-jobs flag
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --max-jobs)
+      MAX_JOBS="$2"
+      shift 2
+      ;;
+    *)
+      break
+      ;;
+  esac
+done
+
+# `list` mode: print available images/services and exit.
+if [[ "$#" -eq 1 && "$1" == "list" ]]; then
+  mapfile -t SERVICES < <(list_services true)
+  echo "Available services:"
+  echo "${SERVICES[*]}"
+  exit 0
+fi
 
 # Ensure the REGISTRY environment variable is set.
 if [ -z "${REGISTRY:-}" ]; then
@@ -59,15 +110,7 @@ if [ "$#" -ge 1 ]; then
   BUILD_LIST=("$@")
 else
   echo "Building all services found in the docker directory."
-  BUILD_LIST=()
-  while IFS= read -r file; do
-    if [[ -f "$file" ]]; then
-      service=$(basename "$file" .Dockerfile)
-      if [[ "$service" != "dev" ]]; then
-        BUILD_LIST+=("$service")
-      fi
-    fi
-  done < <(find docker -type f -name '*.Dockerfile')
+  mapfile -t BUILD_LIST < <(list_services false)
 fi
 
 echo "Building: ${BUILD_LIST[@]}"
@@ -89,19 +132,38 @@ build_and_export() {
 
   IMAGE="${NAMESPACE}/${SERVICE}:latest"
   PUSH_IMAGE="${REGISTRY}/${NAMESPACE}/${SERVICE}:latest"
-  
+
+  # Remote build cache flags (requires CACHE_REGISTRY to be set)
+  # Set PUSH_CACHE=1 to also push cache to the remote registry (default: pull only)
+  CACHE_FLAGS=()
+  if [[ -n "${CACHE_REGISTRY:-}" ]]; then
+    CACHE_FLAGS=(
+      --cache-from "type=registry,ref=${CACHE_REGISTRY}/${SERVICE}:${CACHE_FROM_TAG}"
+    )
+    if [[ "${PUSH_CACHE:-0}" == "1" ]]; then
+      CACHE_FLAGS+=(--cache-to "type=registry,ref=${CACHE_REGISTRY}/${SERVICE}:${CACHE_TO_TAG},mode=max")
+    fi
+  fi
+
   if [[ "${REGISTRY}" == "local" ]]; then
     echo "Building image directly within local k3s containerd..."
-    sudo nerdctl build --progress=plain -f "${DOCKERFILE}" -t "${IMAGE}" .
+    sudo nerdctl build --progress=plain --build-arg max_jobs="${MAX_JOBS}" \
+      "${CACHE_FLAGS[@]}" \
+      -f "${DOCKERFILE}" -t "${IMAGE}" .
   elif [[ "${REGISTRY}" == "none" ]]; then
-    docker build --progress=plain -f "${DOCKERFILE}" -t "${IMAGE}" .
+    docker buildx build --progress=plain --build-arg max_jobs="${MAX_JOBS}" \
+      "${CACHE_FLAGS[@]}" \
+      -f "${DOCKERFILE}" -t "${IMAGE}" --load .
   elif [[ "${REGISTRY}" == "minikube" ]]; then
-    docker build --progress=plain -f "${DOCKERFILE}" -t "${IMAGE}" .
+    docker buildx build --progress=plain --build-arg max_jobs="${MAX_JOBS}" \
+      "${CACHE_FLAGS[@]}" \
+      -f "${DOCKERFILE}" -t "${IMAGE}" --load .
     echo "Loading ${IMAGE} into Minikube..."
     minikube image load "${IMAGE}"
   else
-    docker build --progress=plain -f "${DOCKERFILE}" -t "${PUSH_IMAGE}" .
-    docker push "${PUSH_IMAGE}"
+    docker buildx build --progress=plain --build-arg max_jobs="${MAX_JOBS}" \
+      "${CACHE_FLAGS[@]}" \
+      -f "${DOCKERFILE}" -t "${PUSH_IMAGE}" --push .
   fi
 
   echo "Successfully built ${IMAGE}"

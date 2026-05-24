@@ -163,7 +163,11 @@ class ModelExecutor:
             "Batch data: %s",
             {k: [t.shape if t.numel() > 10 else t for t in tensor] for k, tensor in batch.data.items()},
         )
-        self.run_workers("execute_model", kwargs={"batch": batch})
+        results = self.run_workers("execute_model", kwargs={"batch": batch})
+
+        # All workers return the same output shapes (tensor parallel), so use rank 0
+        output_shapes = results[0] if results else None
+
         return BatchResult(
             request_ids=batch.request_ids,
             data_ids=batch.data_ids,
@@ -171,6 +175,7 @@ class ModelExecutor:
             num_chunks=batch.num_chunks,
             receiver_ranks=batch.receiver_ranks,
             status=Status.SUCCESS,
+            output_shapes=output_shapes,
         )
 
     def start_profile(self, output_dir: str = "./profiler_output") -> list[str]:

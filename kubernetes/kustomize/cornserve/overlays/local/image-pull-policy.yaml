@@ -1,7 +1,19 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: gateway
+  name: gateway-master
+  namespace: cornserve
+spec:
+  template:
+    spec:
+      containers:
+      - name: gateway
+        imagePullPolicy: Never
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gateway-worker
   namespace: cornserve
 spec:
   template:

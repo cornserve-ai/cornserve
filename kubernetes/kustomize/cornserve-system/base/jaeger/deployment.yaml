@@ -38,11 +38,11 @@ spec:
           mountPath: /config
         resources:
           limits:
-            cpu: 500m
-            memory: 1Gi
+            cpu: "8"
+            memory: 32Gi
           requests:
-            cpu: 100m
-            memory: 200Mi
+            cpu: "4"
+            memory: 8Gi
       volumes:
       - name: config-volume
         configMap:

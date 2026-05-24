@@ -24,8 +24,8 @@ dependencies = [
   "rich",
   "requests",
   "tyro",
-  "kubernetes",
-  "kubernetes_asyncio",
+  "kubernetes==35.0.0",
+  "kubernetes_asyncio==35.0.1",
   "aiohttp",
   "pydantic>=2.11",
   "opentelemetry-api",
@@ -172,6 +172,7 @@ ignore = [
 
 [tool.pyright]
 extraPaths = ["../tasklib", "../tasklib/build/lib"]
+reportPrivateImportUsage = "none"
 exclude = [
   "**/*_pb2.py",
   "**/*_pb2_grpc.py",

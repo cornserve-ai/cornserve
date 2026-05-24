@@ -53,6 +53,10 @@ from cornserve.app.base import AppConfig
 mllm = MLLMTask(
     model_id="Qwen/Qwen3-VL-8B-Instruct",
     modalities=[Modality.IMAGE],
+    eric_max_batch_size=1,
+    llm_tp_size=1,
+    llm_max_num_seqs=32,
+    llm_gpu_memory_utilization=0.9,
 )
 
 

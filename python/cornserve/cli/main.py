@@ -42,6 +42,12 @@ except KeyError:
     )
     GATEWAY_URL = "http://localhost:30080"
 
+# Master URL for state-altering operations (register, unregister, deploy-tasks, purge, profiles)
+try:
+    GATEWAY_MASTER_URL = os.environ["CORNSERVE_GATEWAY_MASTER_URL"]
+except KeyError:
+    GATEWAY_MASTER_URL = GATEWAY_URL.replace(":30080", ":30081") if ":30080" in GATEWAY_URL else GATEWAY_URL
+
 STATE_DIR = Path.home() / ".local/state/cornserve"
 STATE_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -209,7 +215,7 @@ def register(
 
     try:
         response = requests.post(
-            f"{GATEWAY_URL}/app/register",
+            f"{GATEWAY_MASTER_URL}/app/register",
             json=request.model_dump(),
             timeout=(5, 1200),  # Short connection timeout but longer timeout waiting for streaming response
             stream=True,
@@ -223,7 +229,7 @@ def register(
     console = rich.get_console()
 
     # Parse responses from stream
-    response_iter = response.iter_lines(decode_unicode=True)
+    response_iter = response.iter_lines(chunk_size=None, decode_unicode=True)  # type: ignore[reportArgumentType, reportCallIssue]
 
     app_id: str | None = None
     task_names: list[str] = []
@@ -233,7 +239,7 @@ def register(
 
     # Get immediate initial response
     for line in response_iter:
-        if not line or not line.startswith("data: "):
+        if not line or not line.startswith("data: "):  # type: ignore[reportArgumentType]
             continue
 
         try:
@@ -290,7 +296,7 @@ def register(
     try:
         with Status(spinner_message, spinner="dots", console=console):
             for line in response_iter:
-                if not line or not line.startswith("data: "):
+                if not line or not line.startswith("data: "):  # type: ignore[reportArgumentType]
                     continue
 
                 try:
@@ -347,7 +353,7 @@ def unregister(
         alias.remove(app_id_or_alias)
 
     raw_response = requests.post(
-        f"{GATEWAY_URL}/app/unregister/{app_id}",
+        f"{GATEWAY_MASTER_URL}/app/unregister/{app_id}",
     )
     if raw_response.status_code == 404:
         rich.print(Panel(f"App {app_id} not found.", style="red", expand=False))
@@ -481,6 +487,7 @@ def invoke(
             _handle_non_streaming_response(raw_response, png_key, save_png_path)
 
     except requests.exceptions.HTTPError as e:
+        assert e.response is not None
         error_details = f"HTTP {e.response.status_code}: {e.response.reason}"
         try:
             # Try to extract error details from response body
@@ -547,7 +554,7 @@ def _handle_streaming_response(
 
         try:
             with Live("Waiting for response...", vertical_overflow="visible") as live:
-                for line in response.iter_lines(chunk_size=None, decode_unicode=True):
+                for line in response.iter_lines(chunk_size=None, decode_unicode=True):  # type: ignore[reportArgumentType, reportCallIssue]
                     line = line.strip()
                     if not line:
                         continue
@@ -580,12 +587,13 @@ def _handle_streaming_response(
 
         try:
             with Live("Waiting for response...") as live:
-                for line_idx, line in enumerate(response.iter_lines(chunk_size=None, decode_unicode=True)):
+                lines = response.iter_lines(chunk_size=None, decode_unicode=True)  # type: ignore[reportArgumentType, reportCallIssue]
+                for line_idx, line in enumerate(lines):
                     line = line.strip()
                     if not line:
                         continue
 
-                    accumulated_data[str(line_idx)] = line
+                    accumulated_data[str(line_idx)] = line if isinstance(line, str) else line.decode()
                     table = _create_response_table(accumulated_data)
                     live.update(table, refresh=True)
 
@@ -665,7 +673,7 @@ def _handle_streaming_audio_response(
                     )
                 )
 
-            for line in response.iter_lines(chunk_size=None, decode_unicode=True):
+            for line in response.iter_lines(chunk_size=None, decode_unicode=True):  # type: ignore[reportArgumentType, reportCallIssue]
                 line = line.strip()
                 if not line:
                     continue
@@ -747,7 +755,7 @@ def deploy_tasklib() -> None:
                 task_definitions=unit_task_entries,
                 descriptor_definitions=descriptor_entries,
             )
-            resp = requests.post(f"{GATEWAY_URL}/deploy-tasks", json=payload.model_dump())
+            resp = requests.post(f"{GATEWAY_MASTER_URL}/deploy-tasks", json=payload.model_dump())
             resp.raise_for_status()
             unit_list = ", ".join(e.task_class_name for e in unit_task_entries) or "-"
             desc_list = ", ".join(e.descriptor_class_name for e in descriptor_entries) or "-"
@@ -772,7 +780,7 @@ def deploy_tasklib() -> None:
                 task_definitions=composite_task_entries,
                 descriptor_definitions=[],
             )
-            resp = requests.post(f"{GATEWAY_URL}/deploy-tasks", json=payload.model_dump())
+            resp = requests.post(f"{GATEWAY_MASTER_URL}/deploy-tasks", json=payload.model_dump())
             resp.raise_for_status()
             comp_list = ", ".join(e.task_class_name for e in composite_task_entries)
             rich.print(
@@ -797,7 +805,7 @@ def purge_tasklib(quiet: bool = False) -> bool:
     Fails if the cluster is not idle (active UnitTaskInstance CRs).
     """
     try:
-        resp = requests.post(f"{GATEWAY_URL}/purge-tasklib")
+        resp = requests.post(f"{GATEWAY_MASTER_URL}/purge-tasklib")
         if resp.status_code == 409:
             rich.print(
                 Panel(
@@ -868,7 +876,7 @@ def profile_deploy(
     # POST to Gateway
     try:
         response = requests.post(
-            f"{GATEWAY_URL}/deploy-profiles",
+            f"{GATEWAY_MASTER_URL}/deploy-profiles",
             json={"profiles": profiles},
         )
         response.raise_for_status()

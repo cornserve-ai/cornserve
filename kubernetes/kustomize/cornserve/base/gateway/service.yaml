@@ -10,3 +10,34 @@ spec:
   - name: gateway
     port: 8000
     targetPort: http
+---
+# Headless service — for pod discovery (used by _sync_all_gateway_replicas)
+apiVersion: v1
+kind: Service
+metadata:
+  name: gateway-headless
+  namespace: cornserve
+spec:
+  clusterIP: None
+  selector:
+    app: gateway
+  ports:
+  - name: http
+    port: 8000
+    targetPort: http
+---
+# Master-only service — routes to the single gateway-master pod
+# Used by CLI for state-altering operations (register, unregister, deploy, etc.)
+apiVersion: v1
+kind: Service
+metadata:
+  name: gateway-master
+  namespace: cornserve
+spec:
+  selector:
+    app: gateway
+    gateway-role: master
+  ports:
+  - name: gateway
+    port: 8000
+    targetPort: http

@@ -109,3 +109,39 @@ class ProfilesDeploymentRequest(BaseModel):
     """Request to deploy unit task profiles."""
 
     profiles: list[ProfileDeploymentPayload]
+
+
+class GPUStatusPayload(BaseModel):
+    """GPU status in a resource snapshot."""
+
+    node: str
+    global_rank: int
+    local_rank: int
+    owner: str | None = None
+
+
+class NodeStatusPayload(BaseModel):
+    """Node status in a resource snapshot."""
+
+    node: str
+    total_gpus: int
+    free_gpus: int
+    gpus: list[GPUStatusPayload]
+
+
+class ResourceSnapshot(BaseModel):
+    """Resource allocation snapshot used for both get and apply operations."""
+
+    nodes: list[NodeStatusPayload]
+
+
+class DeployedTaskInfo(BaseModel):
+    """Information about a deployed task."""
+
+    task_id: str
+    task_manager_id: str
+    task_instance_name: str
+    task_class: str
+    state: str
+    num_gpus: int
+    task_definition: dict[str, Any] = {}

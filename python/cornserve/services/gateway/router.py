@@ -1,4 +1,10 @@
-"""Gateway FastAPI app definition."""
+"""Gateway FastAPI app definition.
+
+Routes are split into master-only (state-altering) and worker-safe (invoke/read-only).
+The ``GATEWAY_ROLE`` env var controls which routers are mounted:
+  - ``master``: all routes (state-altering + invoke)
+  - ``worker``: invoke, read-only, and internal sync only
+"""
 
 from __future__ import annotations
 
@@ -7,6 +13,7 @@ import base64
 import json
 from collections.abc import AsyncGenerator, AsyncIterator
 
+import aiohttp
 import grpc
 from fastapi import (
     APIRouter,
@@ -25,19 +32,26 @@ from opentelemetry import trace
 from pydantic import ValidationError
 
 from cornserve.constants import (
+    GATEWAY_ROLE_MASTER,
     K8S_RESOURCE_MANAGER_GRPC_URL,
+    OTEL_SPAN_ATTRIBUTE_MAX_LENGTH,
     SYNC_WATCHERS_TIMEOUT,
 )
 from cornserve.logging import get_logger
 from cornserve.services.gateway.app.manager import AppManager
+from cornserve.services.gateway.app_registry import AppRegistry
 from cornserve.services.gateway.models import (
     AppInvocationRequest,
     AppRegistrationRequest,
+    DeployedTaskInfo,
+    GPUStatusPayload,
+    NodeStatusPayload,
     ProfilesDeploymentRequest,
     RegistrationErrorResponse,
     RegistrationFinalResponse,
     RegistrationInitialResponse,
     RegistrationStatusEvent,
+    ResourceSnapshot,
     ScaleTaskRequest,
     TasksDeploymentRequest,
 )
@@ -45,17 +59,34 @@ from cornserve.services.gateway.session import SessionManager
 from cornserve.services.gateway.task_manager import TaskManager
 from cornserve.services.pb import (
     common_pb2,
+    resource_manager_pb2,
     resource_manager_pb2_grpc,
     task_dispatcher_pb2_grpc,
 )
 from cornserve.services.task_registry import TaskRegistry
-from cornserve.services.utils import discover_task_dispatcher_replicas
+from cornserve.services.utils import discover_gateway_replicas, discover_task_dispatcher_replicas
 from cornserve.task.base import Stream, TaskGraphDispatch, TaskOutput, UnitTaskList, task_manager_context
 from cornserve.task_executors.profile import UnitTaskProfileManager
 
-router = APIRouter()
+# ---------------------------------------------------------------------------
+# Routers
+# ---------------------------------------------------------------------------
+# master_router: state-altering endpoints (register, unregister, scale, deploy, etc.)
+#   Only mounted on the gateway-master pod.
+# worker_router: invoke + read-only endpoints
+#   Mounted on ALL pods (master + workers) so invocations are load-balanced.
+# common_router: health + internal sync, mounted on ALL pods.
+master_router = APIRouter()
+worker_router = APIRouter()
+common_router = APIRouter()
+
 logger = get_logger(__name__)
 tracer = trace.get_tracer(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Sync helpers
+# ---------------------------------------------------------------------------
 
 
 async def _sync_all_control_plane_registries(task_registry: TaskRegistry) -> None:
@@ -96,7 +127,72 @@ async def _sync_all_control_plane_registries(task_registry: TaskRegistry) -> Non
     )
 
 
-@router.post("/app/register")
+async def _sync_all_gateway_replicas(app: FastAPI) -> None:
+    """Sync all gateway replicas' watchers (app registry + task manager + task registry).
+
+    Discovers every gateway pod via the headless service and calls
+    ``POST /internal/sync`` on each one.  Each pod's handler waits for its
+    local watchers to catch up to the latest published RVs, so by the time
+    this function returns ALL replicas are guaranteed to be up-to-date.
+    """
+    try:
+        kconfig.load_incluster_config()
+    except kconfig.ConfigException as e:
+        raise RuntimeError("Could not load Kubernetes configuration") from e
+
+    async with kclient.ApiClient() as api_client:
+        core_api = kclient.CoreV1Api(api_client)
+        gateway_urls = await discover_gateway_replicas(core_api)
+
+    async def _sync_single_gateway(url: str) -> None:
+        async with aiohttp.ClientSession(  # noqa: SIM117
+            timeout=aiohttp.ClientTimeout(total=SYNC_WATCHERS_TIMEOUT),
+        ) as session:
+            async with session.post(f"{url}/internal/sync") as resp:
+                if resp.status != 200:
+                    body = await resp.text()
+                    logger.warning("Sync on %s returned %d: %s", url, resp.status, body)
+
+    await asyncio.gather(*(_sync_single_gateway(url) for url in gateway_urls))
+
+
+# ---------------------------------------------------------------------------
+# Common routes (mounted on ALL pods)
+# ---------------------------------------------------------------------------
+
+
+@common_router.get("/health")
+async def health_check():
+    """Health check endpoint."""
+    return Response(status_code=status.HTTP_200_OK)
+
+
+@common_router.post("/internal/sync")
+async def internal_sync(raw_request: Request):
+    """Wait for all local watchers to catch up to the latest published RVs.
+
+    Called by the gateway-master after state-altering operations to ensure
+    every replica has observed the latest CR changes before the master
+    returns a response to the client.
+    """
+    task_registry: TaskRegistry = raw_request.app.state.task_registry
+    app_registry: AppRegistry = raw_request.app.state.app_registry
+    task_manager: TaskManager = raw_request.app.state.task_manager
+
+    await asyncio.gather(
+        app_registry.sync_watchers(),
+        task_manager.sync_unit_task_instance_watchers(),
+        task_registry.sync_watchers(),
+    )
+    return Response(status_code=status.HTTP_200_OK)
+
+
+# ---------------------------------------------------------------------------
+# Master-only routes (state-altering)
+# ---------------------------------------------------------------------------
+
+
+@master_router.post("/app/register")
 async def register_app(request: AppRegistrationRequest, raw_request: Request):
     """Register a new application with streaming response for deployment progress."""
     app_manager: AppManager = raw_request.app.state.app_manager
@@ -127,8 +223,13 @@ async def register_app(request: AppRegistrationRequest, raw_request: Request):
             )
             yield f"data: {initial_event.model_dump_json()}\n\n"
 
-            # Now deploy tasks and send final result
+            # Now deploy tasks (syncs master's own watchers internally)
             await app_manager.deploy_app_tasks(app_id)
+
+            # Sync ALL gateway replicas before sending final event, so workers
+            # are guaranteed to know about this app before the client can invoke.
+            await _sync_all_gateway_replicas(raw_request.app)
+
             final_event = RegistrationStatusEvent(
                 event=RegistrationFinalResponse(message=f"Successfully deployed {len(task_names)} unit tasks")
             )
@@ -146,7 +247,7 @@ async def register_app(request: AppRegistrationRequest, raw_request: Request):
     )
 
 
-@router.post("/app/unregister/{app_id}")
+@master_router.post("/app/unregister/{app_id}")
 async def unregister_app(app_id: str, raw_request: Request):
     """Unregister the application with the given ID."""
     app_manager: AppManager = raw_request.app.state.app_manager
@@ -155,6 +256,10 @@ async def unregister_app(app_id: str, raw_request: Request):
 
     try:
         await app_manager.unregister_app(app_id)
+
+        # Sync ALL gateway replicas so workers drop this app from cache
+        await _sync_all_gateway_replicas(raw_request.app)
+
         return Response(status_code=status.HTTP_200_OK)
     except KeyError as e:
         return Response(status_code=status.HTTP_404_NOT_FOUND, content=str(e))
@@ -166,68 +271,7 @@ async def unregister_app(app_id: str, raw_request: Request):
         )
 
 
-@router.post("/app/invoke/{app_id}")
-async def invoke_app(app_id: str, request: AppInvocationRequest, raw_request: Request):
-    """Invoke a registered application."""
-    app_manager: AppManager = raw_request.app.state.app_manager
-
-    span = trace.get_current_span()
-    span.set_attribute("gateway.invoke_app.app_id", app_id)
-    span.set_attributes(
-        {f"gateway.invoke_app.request.{key}": str(value) for key, value in request.request_data.items()},
-    )
-
-    async def stream_app_response(
-        app_response_iter: AsyncIterator[TaskOutput],
-    ) -> AsyncGenerator[str]:
-        """Stream the response for a streaming app."""
-        async for response_item in app_response_iter:
-            response_json = response_item.model_dump_json()
-            yield response_json + "\n"
-
-    try:
-        response = await app_manager.invoke_app(app_id, request.request_data)
-
-        if isinstance(response, AsyncIterator):
-            return StreamingResponse(
-                stream_app_response(response),
-                media_type="text/plain",
-                headers={"Cache-Control": "no-cache"},
-            )
-        else:
-            return response
-
-    except ValidationError as e:
-        raise RequestValidationError(errors=e.errors()) from e
-    except KeyError as e:
-        return Response(status_code=status.HTTP_404_NOT_FOUND, content=str(e))
-    except ValueError as e:
-        logger.info("Error while running app %s: %s", app_id, e)
-        return Response(status_code=status.HTTP_400_BAD_REQUEST, content=str(e))
-    except Exception as e:
-        logger.exception("Unexpected error while running app %s", app_id)
-        return Response(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            content=str(e),
-        )
-
-
-@router.get("/app/list")
-async def list_apps(raw_request: Request):
-    """List all registered applications."""
-    app_manager: AppManager = raw_request.app.state.app_manager
-
-    try:
-        return await app_manager.list_apps()
-    except Exception as e:
-        logger.exception("Unexpected error while listing apps")
-        return Response(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            content=str(e),
-        )
-
-
-@router.websocket("/session")
+@master_router.websocket("/session")
 async def session(socket: WebSocket):
     """WebSocket endpoint for developers to interact with the gateway.
 
@@ -251,13 +295,13 @@ async def session(socket: WebSocket):
         await session_manager.destroy_session(session_id)
 
 
-@router.post("/task/register")
+@master_router.post("/task/register")
 async def register_task(raw_request: Request):
     """Register a new task and its execution descriptor with the given its source code."""
     raise NotImplementedError("Task registration is not implemented yet.")
 
 
-@router.post("/task/scale")
+@master_router.post("/task/scale")
 async def scale_task(request: ScaleTaskRequest, raw_request: Request):
     """Scale the number of GPUs for a unit task.
 
@@ -283,22 +327,7 @@ async def scale_task(request: ScaleTaskRequest, raw_request: Request):
         )
 
 
-@router.get("/tasks/list")
-async def list_tasks(raw_request: Request):
-    """List all deployed unit tasks."""
-    task_manager: TaskManager = raw_request.app.state.task_manager
-
-    try:
-        return task_manager.list_tasks()
-    except Exception as e:
-        logger.exception("Unexpected error while listing tasks")
-        return Response(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            content=str(e),
-        )
-
-
-@router.post("/tasks/usage")
+@master_router.post("/tasks/usage")
 async def declare_task_usage(request: UnitTaskList, raw_request: Request):
     """Ensure that one or more unit tasks are deployed.
 
@@ -308,6 +337,10 @@ async def declare_task_usage(request: UnitTaskList, raw_request: Request):
 
     try:
         await task_manager.declare_used(request.tasks)
+
+        # Sync ALL gateway replicas so workers see the newly deployed tasks
+        await _sync_all_gateway_replicas(raw_request.app)
+
         return Response(status_code=status.HTTP_200_OK)
     except Exception as e:
         logger.exception("Unexpected error while deploying tasks")
@@ -317,7 +350,7 @@ async def declare_task_usage(request: UnitTaskList, raw_request: Request):
         )
 
 
-@router.delete("/tasks/usage")
+@master_router.delete("/tasks/usage")
 async def declare_unused_tasks(request: UnitTaskList, raw_request: Request):
     """Notify the gateway that one or more unit tasks are no longer in use.
 
@@ -327,6 +360,10 @@ async def declare_unused_tasks(request: UnitTaskList, raw_request: Request):
 
     try:
         await task_manager.declare_not_used(request.tasks)
+
+        # Sync ALL gateway replicas so workers see the task removal
+        await _sync_all_gateway_replicas(raw_request.app)
+
         return Response(status_code=status.HTTP_200_OK)
     except Exception as e:
         logger.exception("Unexpected error while tearing down tasks")
@@ -336,84 +373,7 @@ async def declare_unused_tasks(request: UnitTaskList, raw_request: Request):
         )
 
 
-@router.post("/tasks/invoke")
-async def invoke_tasks(request: TaskGraphDispatch, raw_request: Request):
-    """Invoke a unit task graph."""
-    task_manager: TaskManager = raw_request.app.state.task_manager
-
-    async def stream_response(results: list) -> AsyncGenerator[str | bytes, None]:
-        """Stream the response for a streaming task results."""
-        *results_with_empty_stream, stream = results
-        results_with_empty_stream.append({})
-        all_outputs = json.dumps(results_with_empty_stream)
-        yield all_outputs + "\n"
-
-        stream_obj = request.invocations[-1].task_output.__class__.model_validate(stream)
-        assert isinstance(stream_obj, Stream), "Last result must be a Stream"
-        async for chunk in stream_obj.aiter_raw():
-            chunk = chunk.strip()
-            if not chunk:
-                continue
-            if isinstance(chunk, bytes):
-                yield chunk + b"\n"
-            else:
-                yield chunk + "\n"
-
-    try:
-        results = await task_manager.invoke_tasks(request)
-    except KeyError as e:
-        return Response(status_code=status.HTTP_404_NOT_FOUND, content=str(e))
-    except ValueError as e:
-        logger.info("Error while invoking tasks: %s", e)
-        return Response(status_code=status.HTTP_400_BAD_REQUEST, content=str(e))
-    except Exception as e:
-        logger.exception("Unexpected error while invoking tasks")
-        return Response(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            content=str(e),
-        )
-
-    if request.is_streaming:
-        return StreamingResponse(
-            stream_response(results),
-            media_type="text/plain",
-            headers={"Cache-Control": "no-cache"},
-        )
-    return results
-
-
-@router.get("/health")
-async def health_check():
-    """Health check endpoint."""
-    return Response(status_code=status.HTTP_200_OK)
-
-
-def init_app_state(app: FastAPI) -> None:
-    """Initialize the app state with required components."""
-    # Create registry for handling unit task instance names
-    app.state.task_registry = TaskRegistry()
-
-    # Create profile manager for handling unit task profiles
-    app.state.profile_manager = UnitTaskProfileManager()
-
-    # Pass registry to TaskManager for task-based deployment
-    app.state.task_manager = TaskManager(K8S_RESOURCE_MANAGER_GRPC_URL, app.state.task_registry)
-    app.state.app_manager = AppManager(app.state.task_manager)
-    app.state.session_manager = SessionManager(app.state.task_manager)
-
-    # Make the Task Manager available to `cornserve.task.base.TaskContext`
-    task_manager_context.set(app.state.task_manager)
-
-
-def create_app() -> FastAPI:
-    """Create a FastAPI app for the Gateway service."""
-    app = FastAPI(title="Cornserve Gateway")
-    app.include_router(router)
-    init_app_state(app)
-    return app
-
-
-@router.post("/deploy-tasks")
+@master_router.post("/deploy-tasks")
 async def deploy_tasks(request: TasksDeploymentRequest, raw_request: Request):
     """Deploy tasks (unit or composite) and their descriptors from provided sources."""
     task_registry: TaskRegistry = raw_request.app.state.task_registry
@@ -496,13 +456,16 @@ async def deploy_tasks(request: TasksDeploymentRequest, raw_request: Request):
         # Sync task registries across all control-plane services except task-managers
         await _sync_all_control_plane_registries(task_registry)
 
+        # Also sync ALL gateway replicas so workers have the latest tasklib definitions
+        await _sync_all_gateway_replicas(raw_request.app)
+
         return {"status": "ok"}
     except Exception as e:
         logger.exception("Failed to deploy tasks")
         return Response(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, content=str(e))
 
 
-@router.post("/deploy-profiles")
+@master_router.post("/deploy-profiles")
 async def deploy_profiles(request: ProfilesDeploymentRequest, raw_request: Request):
     """Deploy unit task profiles as CRs."""
     profile_manager: UnitTaskProfileManager = raw_request.app.state.profile_manager
@@ -524,7 +487,7 @@ async def deploy_profiles(request: ProfilesDeploymentRequest, raw_request: Reque
         return Response(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, content=str(e))
 
 
-@router.post("/purge-tasklib")
+@master_router.post("/purge-tasklib")
 async def purge_tasklib(raw_request: Request):
     """Purge tasklib by deleting all TaskDefinition/ExecutionDescriptor CRs.
 
@@ -545,3 +508,310 @@ async def purge_tasklib(raw_request: Request):
     except Exception as e:
         logger.exception("Failed to purge tasklib")
         return Response(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, content=str(e))
+
+
+@master_router.post("/resources/apply_snapshot")
+async def apply_resource_snapshot(request: ResourceSnapshot):
+    """Apply a resource allocation snapshot.
+
+    Takes a JSON input similar to the return value of /resources/snapshot.
+    Validates the snapshot, then reallocates GPUs to match the requested state.
+    """
+    try:
+        async with grpc.aio.insecure_channel(K8S_RESOURCE_MANAGER_GRPC_URL) as channel:
+            stub = resource_manager_pb2_grpc.ResourceManagerStub(channel)
+
+            # Convert Pydantic model to protobuf
+            proto_nodes = [
+                resource_manager_pb2.NodeStatus(
+                    node=node.node,
+                    total_gpus=node.total_gpus,
+                    free_gpus=node.free_gpus,
+                    gpus=[
+                        resource_manager_pb2.GPUStatus(
+                            node=gpu.node,
+                            global_rank=gpu.global_rank,
+                            local_rank=gpu.local_rank,
+                            owner=gpu.owner if gpu.owner else "",
+                        )
+                        for gpu in node.gpus
+                    ],
+                )
+                for node in request.nodes
+            ]
+
+            response = await stub.ApplyResourceSnapshot(
+                resource_manager_pb2.ApplyResourceSnapshotRequest(nodes=proto_nodes)
+            )
+
+            if response.status != common_pb2.Status.STATUS_OK:
+                return Response(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    content=response.message,
+                )
+
+            return {"status": "ok", "message": response.message}
+    except Exception as e:
+        logger.exception("Failed to apply resource snapshot")
+        return Response(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content=str(e),
+        )
+
+
+# ---------------------------------------------------------------------------
+# Worker routes (invoke + read-only, mounted on ALL pods)
+# ---------------------------------------------------------------------------
+
+
+@worker_router.post("/app/invoke/{app_id}")
+async def invoke_app(app_id: str, request: AppInvocationRequest, raw_request: Request):
+    """Invoke a registered application."""
+    app_manager: AppManager = raw_request.app.state.app_manager
+
+    span = trace.get_current_span()
+    span.set_attribute("gateway.invoke_app.app_id", app_id)
+    span.set_attributes(
+        {
+            f"gateway.invoke_app.request.{key}": str(value)[:OTEL_SPAN_ATTRIBUTE_MAX_LENGTH]
+            for key, value in request.request_data.items()
+        },
+    )
+
+    async def stream_app_response(
+        app_response_iter: AsyncIterator[TaskOutput],
+    ) -> AsyncGenerator[str]:
+        """Stream the response for a streaming app."""
+        async for response_item in app_response_iter:
+            response_json = response_item.model_dump_json()
+            yield response_json + "\n"
+
+    try:
+        response = await app_manager.invoke_app(app_id, request.request_data)
+
+        if isinstance(response, AsyncIterator):
+            return StreamingResponse(
+                stream_app_response(response),
+                media_type="text/plain",
+                headers={"Cache-Control": "no-cache"},
+            )
+        else:
+            return response
+
+    except ValidationError as e:
+        raise RequestValidationError(errors=e.errors()) from e
+    except KeyError as e:
+        return Response(status_code=status.HTTP_404_NOT_FOUND, content=str(e))
+    except ValueError as e:
+        logger.info("Error while running app %s: %s", app_id, e)
+        return Response(status_code=status.HTTP_400_BAD_REQUEST, content=str(e))
+    except Exception as e:
+        logger.exception("Unexpected error while running app %s", app_id)
+        return Response(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content=str(e),
+        )
+
+
+@worker_router.get("/app/list")
+async def list_apps(raw_request: Request):
+    """List all registered applications."""
+    app_manager: AppManager = raw_request.app.state.app_manager
+
+    try:
+        return await app_manager.list_apps()
+    except Exception as e:
+        logger.exception("Unexpected error while listing apps")
+        return Response(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content=str(e),
+        )
+
+
+@worker_router.get("/tasks/list", response_model=list[DeployedTaskInfo])
+async def list_tasks(raw_request: Request):
+    """List all deployed unit tasks with their task_manager_ids."""
+    task_manager: TaskManager = raw_request.app.state.task_manager
+
+    try:
+        # Get tasks from gateway's task manager
+        tasks = await task_manager.list_tasks()
+
+        # Get task_manager_ids from resource manager
+        async with grpc.aio.insecure_channel(K8S_RESOURCE_MANAGER_GRPC_URL) as channel:
+            stub = resource_manager_pb2_grpc.ResourceManagerStub(channel)
+            response = await stub.GetDeployedTaskManagers(resource_manager_pb2.GetDeployedTaskManagersRequest())
+
+            # Build a map of task_instance_name -> (task_manager_id, num_gpus)
+            instance_to_tm: dict[str, tuple[str, int]] = {}
+            if response.status == common_pb2.Status.STATUS_OK:
+                for tm in response.task_managers:
+                    instance_to_tm[tm.task_instance_name] = (tm.task_manager_id, tm.num_gpus)
+
+        # Combine the information
+        result = []
+        for task, task_id, state in tasks:
+            task_instance_name = task_manager.unit_task_instance_names.get(task_id, "")
+            task_manager_id, num_gpus = instance_to_tm.get(task_instance_name, ("", 0))
+            result.append(
+                DeployedTaskInfo(
+                    task_id=task_id,
+                    task_manager_id=task_manager_id,
+                    task_instance_name=task_instance_name,
+                    task_class=task.__class__.__name__,
+                    state=str(state),
+                    num_gpus=num_gpus,
+                    task_definition=task.model_dump(mode="json"),
+                )
+            )
+        return result
+    except Exception as e:
+        logger.exception("Unexpected error while listing tasks")
+        return Response(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content=str(e),
+        )
+
+
+@worker_router.post("/tasks/invoke")
+async def invoke_tasks(request: TaskGraphDispatch, raw_request: Request):
+    """Invoke a unit task graph."""
+    task_manager: TaskManager = raw_request.app.state.task_manager
+
+    async def stream_response(results: list) -> AsyncGenerator[str | bytes, None]:
+        """Stream the response for a streaming task results."""
+        *results_with_empty_stream, stream = results
+        results_with_empty_stream.append({})
+        all_outputs = json.dumps(results_with_empty_stream)
+        yield all_outputs + "\n"
+
+        stream_obj = request.invocations[-1].task_output.__class__.model_validate(stream)
+        assert isinstance(stream_obj, Stream), "Last result must be a Stream"
+        async for chunk in stream_obj.aiter_raw():
+            chunk = chunk.strip()
+            if not chunk:
+                continue
+            if isinstance(chunk, bytes):
+                yield chunk + b"\n"
+            else:
+                yield chunk + "\n"
+
+    try:
+        results = await task_manager.invoke_tasks(request)
+    except KeyError as e:
+        return Response(status_code=status.HTTP_404_NOT_FOUND, content=str(e))
+    except ValueError as e:
+        logger.info("Error while invoking tasks: %s", e)
+        return Response(status_code=status.HTTP_400_BAD_REQUEST, content=str(e))
+    except Exception as e:
+        logger.exception("Unexpected error while invoking tasks")
+        return Response(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content=str(e),
+        )
+
+    if request.is_streaming:
+        return StreamingResponse(
+            stream_response(results),
+            media_type="text/plain",
+            headers={"Cache-Control": "no-cache"},
+        )
+    return results
+
+
+@worker_router.get("/resources/snapshot", response_model=ResourceSnapshot)
+async def get_resource_snapshot():
+    """Get a snapshot of GPU resource allocation status."""
+    try:
+        async with grpc.aio.insecure_channel(K8S_RESOURCE_MANAGER_GRPC_URL) as channel:
+            stub = resource_manager_pb2_grpc.ResourceManagerStub(channel)
+            response = await stub.GetResourceSnapshot(resource_manager_pb2.GetResourceSnapshotRequest())
+
+            if response.status != common_pb2.Status.STATUS_OK:
+                return Response(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    content="Failed to get resource snapshot",
+                )
+
+            # Convert protobuf response to Pydantic models
+            return ResourceSnapshot(
+                nodes=[
+                    NodeStatusPayload(
+                        node=node.node,
+                        total_gpus=node.total_gpus,
+                        free_gpus=node.free_gpus,
+                        gpus=[
+                            GPUStatusPayload(
+                                node=gpu.node,
+                                global_rank=gpu.global_rank,
+                                local_rank=gpu.local_rank,
+                                owner=gpu.owner if gpu.owner else None,
+                            )
+                            for gpu in node.gpus
+                        ],
+                    )
+                    for node in response.nodes
+                ]
+            )
+    except Exception as e:
+        logger.exception("Failed to get resource snapshot")
+        return Response(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content=str(e),
+        )
+
+
+# ---------------------------------------------------------------------------
+# App init / factory
+# ---------------------------------------------------------------------------
+
+
+def init_app_state(app: FastAPI) -> None:
+    """Initialize the app state with required components."""
+    # Create registry for handling unit task instance names
+    app.state.task_registry = TaskRegistry()
+
+    # Create profile manager for handling unit task profiles
+    app.state.profile_manager = UnitTaskProfileManager()
+
+    # Create app registry for distributed app state across gateway replicas
+    app.state.app_registry = AppRegistry()
+
+    # Pass registry to TaskManager for task-based deployment
+    app.state.task_manager = TaskManager(K8S_RESOURCE_MANAGER_GRPC_URL, app.state.task_registry)
+    app.state.app_manager = AppManager(app.state.task_manager, app.state.app_registry)
+    app.state.session_manager = SessionManager(app.state.task_manager)
+
+    # Make the Task Manager available to `cornserve.task.base.TaskContext`
+    task_manager_context.set(app.state.task_manager)
+
+
+def create_app(role: str = GATEWAY_ROLE_MASTER) -> FastAPI:
+    """Create a FastAPI app for the Gateway service.
+
+    Args:
+        role: ``"master"`` mounts all routers (state-altering + invoke).
+              ``"worker"`` mounts only the worker + common routers.
+    """
+    app = FastAPI(title=f"Cornserve Gateway ({role})")
+
+    # Common routes are always mounted (health, internal/sync)
+    app.include_router(common_router)
+
+    # Worker routes (invoke + read-only) are always mounted so that
+    # invocations can be load-balanced across master AND workers.
+    app.include_router(worker_router)
+
+    if role == GATEWAY_ROLE_MASTER:
+        # State-altering routes are only available on the master
+        app.include_router(master_router)
+        logger.info("Gateway role: MASTER — all routes mounted")
+    else:
+        logger.info("Gateway role: WORKER — invoke + read-only routes only")
+
+    init_app_state(app)
+
+    # Store role in app state for introspection
+    app.state.gateway_role = role
+
+    return app

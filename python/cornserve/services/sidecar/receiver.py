@@ -88,6 +88,11 @@ class SidecarReceiver:
         self.encoder = MsgpackEncoder()
         self.decoder = MsgpackDecoder()
 
+        # Track request ids that have been fully mark_done'd so that a
+        # later receive() for the same id returns None immediately instead
+        # of hanging forever.
+        self.freed_ids: set[str] = set()
+
         logger.info("SidecarReceiver initialized, using slot size %s", config.slot_numel)
 
     async def _allocate(self, size: int) -> SharedMemoryBuffer:
@@ -307,6 +312,14 @@ class SidecarReceiver:
         span.set_attribute("SidecarReceiver.receive.chunk_id", recv_req.chunk_id)
 
         async with self.recv_done_lock:
+            if recv_req.id in self.freed_ids:
+                # This id was already mark_done'd.  Return None so the
+                # caller can fall back (e.g. random tensors after eviction).
+                logger.warning("receive: request %s already freed, returning None", recv_req.id)
+                return sidecar_pb2.ReceiveResponse(
+                    status=common_pb2.Status.STATUS_OK,
+                    data=self.encoder.encode(None),
+                )
             if recv_req.id not in self.ledger:
                 req_state = RecvRequestState(recv_req.id, -1)
                 self.ledger[recv_req.id] = req_state
@@ -386,14 +399,15 @@ class SidecarReceiver:
         if isinstance(chunk_state, RecvObjState):
             span.set_attribute("SidecarReceiver.mark_done.type", "Object")
             del req_state.chunks[mark_done_req.chunk_id]
-            # TODO: make this counter instead of assuming sequential access
-            if req_state.num_chunks == mark_done_req.chunk_id + 1:
-                # last chunk
+            req_state.chunks_freed += 1
+            if req_state.num_chunks > 0 and req_state.chunks_freed >= req_state.num_chunks:
                 del self.ledger[mark_done_req.id]
+                self.freed_ids.add(mark_done_req.id)
             return sidecar_pb2.MarkDoneResponse(status=common_pb2.Status.STATUS_OK)
 
         assert isinstance(chunk_state, RecvTensorState)
 
+        # Free the chunk's memory first (may yield for intra-node Unlink).
         if chunk_state.intra_node_rank >= 0:
             logger.info(
                 "mark_done: unlink refcount for id %s in rank %d",
@@ -414,8 +428,12 @@ class SidecarReceiver:
                 self.shm_manager.used_slots,
             )
 
-        # TODO: make this counter instead of assuming sequential access
-        if req_state.num_chunks == mark_done_req.chunk_id + 1:
-            # last chunk
+        # Increment counter and clean up ledger entry when all chunks freed.
+        # Safe with concurrent mark_done calls: the counter increment and
+        # check are not separated by any await.
+        del req_state.chunks[mark_done_req.chunk_id]
+        req_state.chunks_freed += 1
+        if req_state.num_chunks > 0 and req_state.chunks_freed >= req_state.num_chunks:
             del self.ledger[mark_done_req.id]
+            self.freed_ids.add(mark_done_req.id)
         return sidecar_pb2.MarkDoneResponse(status=common_pb2.Status.STATUS_OK)

@@ -55,6 +55,10 @@ gemma_tasks = {
         modalities=[Modality.IMAGE],
         model_id=model_id,
         encoder_model_ids=set(gemma_model_ids.values()),
+        eric_max_batch_size=1,
+        llm_tp_size=1,
+        llm_max_num_seqs=64,
+        llm_gpu_memory_utilization=0.9,
     )
     for name, model_id in gemma_model_ids.items()
 }

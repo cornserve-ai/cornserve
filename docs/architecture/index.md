@@ -77,6 +77,8 @@ Package: `cornserve.services.gateway`
 
 The gateway is the entry point for all apps and incoming requests to each app.
 
+For notes on scaling the gateway to multiple replicas, see [Gateway Horizontal Scaling](gateway_scaleout.md).
+
 An app is registered with Cornserve by the cluster admin by sending a request to the gateway, including the app's Python source code as string.
 The gateway then validates the app definition (primarily whether it has all the required classes and the `serve` function) and registers it with the App Manager singleton class.
 

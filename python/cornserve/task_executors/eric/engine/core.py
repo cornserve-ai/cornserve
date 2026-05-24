@@ -222,6 +222,15 @@ class Engine:
             batch_result.data_ids,
         )
 
+        # Record output shapes on engine spans (one per request, covering all batches)
+        if batch_result.output_shapes:
+            for data_id, span in zip(batch.data_ids, batch.otel_spans, strict=True):
+                if span is not None and data_id in batch_result.output_shapes:
+                    span.set_attribute(
+                        f"worker.output.{data_id}.shape",
+                        batch_result.output_shapes[data_id],
+                    )
+
         for req_id, span in zip(batch.request_ids, batch.otel_spans, strict=True):
             if req_id in done_request_ids and span is not None:
                 span.end()

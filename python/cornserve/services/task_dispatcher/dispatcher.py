@@ -14,9 +14,17 @@ import grpc
 from opentelemetry import trace
 from pydantic import BaseModel
 
+from cornserve.constants import OTEL_SPAN_ATTRIBUTE_MAX_LENGTH
 from cornserve.logging import get_logger
 from cornserve.services.pb import task_manager_pb2, task_manager_pb2_grpc
-from cornserve.task.base import TASK_TIMEOUT, Stream, TaskInvocation, TaskOutput, UnitTask
+from cornserve.task.base import (
+    TASK_TIMEOUT,
+    MacroUnitTask,
+    Stream,
+    TaskInvocation,
+    TaskOutput,
+    UnitTask,
+)
 from cornserve.task.forward import DataForward
 
 logger = get_logger(__name__)
@@ -161,18 +169,23 @@ class TaskDispatcher:
         4. Transforms executor responses back to task outputs
         """
         span = trace.get_current_span()
-        span.set_attributes(
-            {
-                f"task_dispatcher.invoke.invocations.{i}": invocation.model_dump_json()
-                for i, invocation in enumerate(invocations)
-            }
-        )
+        for i, invocation in enumerate(invocations):
+            span.set_attribute(
+                f"task_dispatcher.invoke.invocations.{i}.task_class",
+                invocation.task.__class__.__name__,
+            )
+            span.set_attribute(
+                f"task_dispatcher.invoke.invocations.{i}.task",
+                invocation.task.model_dump_json()[:OTEL_SPAN_ATTRIBUTE_MAX_LENGTH],
+            )
+
+        expanded_invocations, expanded_output_idx_per_invocation = self._expand_macro_invocations(invocations)
 
         # Check if all tasks are registered with the dispatcher
         task_infos: list[TaskInfo] = []
         async with self.task_lock:
             logger.info("TaskDispatcher: registered tasks: %s", list(self.task_infos.keys()))
-            for invocation in invocations:
+            for invocation in expanded_invocations:
                 for task_id, task_info in self.task_infos.items():
                     eq = task_info.task.is_equivalent_to(invocation.task)
                     logger.info(
@@ -187,7 +200,7 @@ class TaskDispatcher:
                 else:
                     logger.error("Task not found for invocation %s (no equivalent registered task)", invocation)
                     raise ValueError(f"Task {invocation.task} not found in task dispatcher.")
-        assert len(task_infos) == len(invocations), "Task info count mismatch"
+        assert len(task_infos) == len(expanded_invocations), "Task info count mismatch"
 
         # Get task executor routes and sidecar ranks
         task_executions: list[UnitTaskExecution] = []
@@ -197,7 +210,9 @@ class TaskDispatcher:
             get_route_coros.append(
                 task_info.task_manager_stub.GetRoute(task_manager_pb2.GetRouteRequest(request_id=request_id))
             )
-        for invocation, route_response in zip(invocations, await asyncio.gather(*get_route_coros), strict=True):
+        for invocation, route_response in zip(
+            expanded_invocations, await asyncio.gather(*get_route_coros), strict=True
+        ):
             task_executions.append(
                 UnitTaskExecution(
                     invocation=invocation,
@@ -280,7 +295,31 @@ class TaskDispatcher:
                 raise RuntimeError(f"Task invocation failed: {e}") from e
 
         # Collect responses from task executors
-        return [task.result() for task in dispatch_coros]
+        expanded_outputs = [task.result() for task in dispatch_coros]
+        return [expanded_outputs[idx] for idx in expanded_output_idx_per_invocation]
+
+    def _expand_macro_invocations(self, invocations: list[TaskInvocation]) -> tuple[list[TaskInvocation], list[int]]:
+        expanded_invocations: list[TaskInvocation] = []
+        expanded_output_idx_per_invocation: list[int] = []
+
+        for invocation in invocations:
+            if not isinstance(invocation.task, MacroUnitTask):
+                expanded_output_idx_per_invocation.append(len(expanded_invocations))
+                expanded_invocations.append(invocation)
+                continue
+
+            macro_invocations, macro_return_output_idx = invocation.task.expand_invocations(invocation.task_input)
+            if macro_return_output_idx < 0 or macro_return_output_idx >= len(macro_invocations):
+                raise ValueError(
+                    f"Macro task {invocation.task} returned invalid terminal index {macro_return_output_idx} "
+                    f"for {len(macro_invocations)} expanded invocations"
+                )
+
+            start_idx = len(expanded_invocations)
+            expanded_invocations.extend(macro_invocations)
+            expanded_output_idx_per_invocation.append(start_idx + macro_return_output_idx)
+
+        return expanded_invocations, expanded_output_idx_per_invocation
 
     async def _execute_unit_task(self, execution: UnitTaskExecution, request: dict[str, Any]) -> TaskOutput:
         """Execute a single task by sending request to executor and processing response."""

@@ -122,7 +122,7 @@ def _sanitize_k8s_name(name: str) -> str:
     # Must be <= 63 chars and start with alphanumeric
     if name and not name[0].isalnum():
         name = "p" + name
-    return name[:63]
+    return name[:63].rstrip("-")
 
 
 def _generate_profile_name(task_dict: dict[str, Any]) -> str:
@@ -270,6 +270,10 @@ class UnitTaskProfileManager:
         Returns:
             Default profile that can only run with 1 GPU
         """
+        if (tp_size := getattr(task, "tp_size", 1)) > 1:
+            return UnitTaskProfile(task=task, num_gpus_to_profile={tp_size: ProfileInfo()})
+        if (sp_size := getattr(task, "sp_size", 1)) > 1:
+            return UnitTaskProfile(task=task, num_gpus_to_profile={sp_size: ProfileInfo()})
         return UnitTaskProfile(task=task, num_gpus_to_profile={1: ProfileInfo()})
 
     async def delete_all_profiles(self, namespace: str = K8S_NAMESPACE) -> None:

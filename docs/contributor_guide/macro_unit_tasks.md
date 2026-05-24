@@ -1,0 +1,6 @@
+### 1. Routing cope isolation via `macro_ut_deployment_id`
+
+All sub-tasks of a `MacroUnitTask` carry the same `macro_ut_deployment_id` (a UUID). A standalone deployment of the same model has `macro_ut_deployment_id=None`. The `is_equivalent_to()` method compares this field, so the apps using ordinary unit tasks will NOT get their requests routed to a unit task that belongs to a MacroUnitTask.
+
+### 2. Dispatcher Expanding MacroUnitTask
+We updated `TaskDispatcher.invoke()` to support MacroUnitTask by firstly flattening the original invocation list that contains MacroUnitTasks into an `expanded_invocations` list of pure unit tasks, then dispatching this chain of tasks as normal. To keep the return semantic of `TaskDispatcher.invoke()` unchanged, we compute the `expanded_output_idx_per_invocation`, which provides, for each original unexpanded invocation, the returned output. So in this list, there's original pure-unit-tasks maps to itself, and a MacroUnitTask invocation maps to its last unit task.

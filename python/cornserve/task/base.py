@@ -18,7 +18,7 @@ import aiohttp
 from opentelemetry import trace
 from pydantic import BaseModel, ConfigDict, Field, model_serializer, model_validator
 
-from cornserve.constants import K8S_GATEWAY_SERVICE_HTTP_URL
+from cornserve.constants import K8S_GATEWAY_SERVICE_HTTP_URL, OTEL_SPAN_ATTRIBUTE_MAX_LENGTH
 from cornserve.logging import get_logger
 
 if TYPE_CHECKING:
@@ -28,7 +28,7 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 tracer = trace.get_tracer(__name__)
 
-TASK_TIMEOUT = 30 * 60
+TASK_TIMEOUT = 3 * 60 * 60
 
 # Global shared HTTP client used when we are outside of the Gateway service.
 _CLIENT: aiohttp.ClientSession | None = None
@@ -67,6 +67,14 @@ class TaskInput(BaseModel):
 
 class TaskOutput(BaseModel):
     """Base class for task output."""
+
+
+class TaskProfileConfig(BaseModel):
+    """Base class for task profile config."""
+
+    @abstractmethod
+    def to_profile_str(self) -> str:
+        """Return a string representation of the profile configuration."""
 
 
 InputT = TypeVar("InputT", bound=TaskInput)
@@ -331,8 +339,10 @@ def discover_unit_tasks(tasks: Iterable[Task]) -> list[UnitTask]:
     """
     unit_tasks: list[UnitTask] = []
     for task in tasks:
-        if isinstance(task, UnitTask):
+        if isinstance(task, UnitTask) and not getattr(task, "is_macro_unit_task", False):
             unit_tasks.append(task)
+        elif isinstance(task, UnitTask):
+            unit_tasks.extend(discover_unit_tasks(getattr(task, attr) for attr in task.subtask_attr_names))
         else:
             unit_tasks.extend(discover_unit_tasks(getattr(task, attr) for attr in task.subtask_attr_names))
 
@@ -383,8 +393,10 @@ class UnitTask(Task, Generic[InputT, OutputT]):
     """
 
     root_unit_task_cls: ClassVar[type[UnitTask]]
+    is_macro_unit_task: ClassVar[bool] = False
 
     execution_descriptor_name: str | None = None
+    macro_ut_deployment_id: str | None = None
 
     def __init_subclass__(cls, **kwargs):
         """A hook that runs when a subclass is created.
@@ -519,6 +531,29 @@ class UnitTask(Task, Generic[InputT, OutputT]):
         return self.__class__.__name__.lower()
 
 
+class MacroUnitTask(UnitTask[InputT, OutputT]):
+    """A unit task that expands into a sequence of sub-task invocations."""
+
+    is_macro_unit_task: ClassVar[bool] = True
+
+    @abstractmethod
+    def expand(self, task_input: InputT) -> OutputT:
+        """Define the sub-task invocations that compose this macro task."""
+
+    def expand_invocations(self, task_input: InputT) -> tuple[list[TaskInvocation], int]:
+        """Run expand() and collect the resulting task invocations and output token count."""
+        ctx = TaskContext()
+        token = task_context.set(ctx)
+        try:
+            with ctx.record():
+                _ = self.expand(task_input)
+        finally:
+            task_context.reset(token)
+        if not ctx.invocations:
+            raise ValueError(f"Macro task {self} expanded into zero invocations")
+        return ctx.invocations, len(ctx.invocations) - 1
+
+
 class TaskInvocation(BaseModel, Generic[InputT, OutputT]):
     """An invocation of a task.
 
@@ -594,13 +629,18 @@ class TaskGraphDispatch(BaseModel):
         """
         span = trace.get_current_span()
         span.set_attributes(
-            {f"dispatch.invocation.{i}": invocation.model_dump_json() for i, invocation in enumerate(self.invocations)}
+            {
+                f"dispatch.invocation.{i}": invocation.model_dump_json()[:OTEL_SPAN_ATTRIBUTE_MAX_LENGTH]
+                for i, invocation in enumerate(self.invocations)
+            }
         )
 
         try:
             if self.is_streaming:
                 response = await client.post(url, json=self.model_dump())
-                response.raise_for_status()
+                if response.status != 200:
+                    body = await response.text()
+                    raise RuntimeError(f"Dispatch to {url} failed (HTTP {response.status}): {body}")
 
                 # Create a chunked iterator to avoid "chunk too big" error with large audio data
                 async def chunked_line_iterator():
@@ -630,14 +670,13 @@ class TaskGraphDispatch(BaseModel):
                 _ = stream_cls.model_validate(dispatch_outputs[-1])  # validation
             else:
                 async with client.post(url, json=self.model_dump()) as response:
-                    response.raise_for_status()
+                    if response.status != 200:
+                        body = await response.text()
+                        raise RuntimeError(f"Dispatch to {url} failed (HTTP {response.status}): {body}")
                     dispatch_outputs = await response.json()
-        except aiohttp.ClientResponseError as e:
-            logger.exception("Received error response from %s: %s", url, e)
-            raise RuntimeError(f"Received error response from {url}.") from e
         except aiohttp.ClientError as e:
             logger.exception("Failed to send dispatch request to %s: %s", url, e)
-            raise RuntimeError(f"Failed to send dispatch request to {url}.") from e
+            raise RuntimeError(f"Failed to send dispatch request to {url}: {e}") from e
 
         if not isinstance(dispatch_outputs, list):
             raise RuntimeError(f"Expected a list of task outputs, but got {type(dispatch_outputs)}.")
@@ -731,7 +770,7 @@ class TaskContext:
         span = trace.get_current_span()
         span.set_attributes(
             {
-                f"task_context.task.{i}.invocation": invocation.model_dump_json()
+                f"task_context.task.{i}.invocation": invocation.model_dump_json()[:OTEL_SPAN_ATTRIBUTE_MAX_LENGTH]
                 for i, invocation in enumerate(self.invocations)
             }
         )
@@ -764,7 +803,9 @@ class TaskContext:
         # Parse the response to the right task output type.
         for i, (invocation, output) in enumerate(zip(self.invocations, dispatch_outputs, strict=True)):
             task_output = invocation.task_output.__class__.model_validate(output)
-            span.set_attribute(f"task_context.task.{i}.output", task_output.model_dump_json())
+            span.set_attribute(
+                f"task_context.task.{i}.output", task_output.model_dump_json()[:OTEL_SPAN_ATTRIBUTE_MAX_LENGTH]
+            )
             self.task_outputs[invocation.task.id].append(task_output)
 
     def replay_invocation(self, task: Task[InputT, OutputT]) -> OutputT:

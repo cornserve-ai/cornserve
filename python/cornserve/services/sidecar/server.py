@@ -442,6 +442,13 @@ async def main(
     assert len(peers) > 0, "Invalid SIDECAR_LOCAL_PEER_RANKS"
     assert sidecar_rank in peers, "Sidecar rank not in local peers"
 
+    # Determine the local device ID for this sidecar and set it as the default
+    # CUDA device BEFORE any CUDA operations (e.g., ucxx.create_listener).
+    # Without this, each sidecar process initializes a CUDA context on GPU 0,
+    # wasting ~400 MiB per process on that device.
+    device_id = int(os.environ.get("SIDECAR_DEVICE_ID", str(sorted(peers).index(sidecar_rank))))
+    torch.cuda.set_device(device_id)
+
     set_ulimit()
 
     # OpenTelemetry setup

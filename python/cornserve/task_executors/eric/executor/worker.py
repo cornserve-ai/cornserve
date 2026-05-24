@@ -277,8 +277,12 @@ class Worker:
                 raise
 
     @torch.inference_mode()
-    def execute_model(self, batch: WorkerBatch) -> None:
-        """Run the model on a batch of data."""
+    def execute_model(self, batch: WorkerBatch) -> dict[str, list[int]]:
+        """Run the model on a batch of data.
+
+        Returns:
+            Dictionary mapping data_id to output shape.
+        """
         unique_spans = {}
         for request_id, carrier in zip(batch.request_ids, batch.otel_carriers, strict=True):
             if carrier and request_id not in unique_spans:
@@ -309,6 +313,11 @@ class Worker:
         for worker_span in unique_spans.values():
             worker_span.add_event("model_forward.done")
 
+        # Collect output shapes to return to engine
+        output_shapes = {}
+        for i, data_id in enumerate(batch.data_ids):
+            output_shapes[data_id] = list(output[i].shape)
+
         logger.info(
             "Worker %d processed batch with request IDs %s and returned a tensor of shape %s",
             self.tp_rank,
@@ -317,6 +326,7 @@ class Worker:
         )
 
         # Send to sidecar
+        ended_spans = set()
         if self.sender_sidecar_client is not None:
             for i, request_id in enumerate(batch.request_ids):
                 if (dst_sidecar_ranks := batch.receiver_ranks[i]) is None:
@@ -334,7 +344,14 @@ class Worker:
                 )
                 if token:
                     context_api.detach(token)
-                    unique_spans[request_id].end()
+                    if request_id not in ended_spans:
+                        unique_spans[request_id].end()
+                        ended_spans.add(request_id)
+
+        # End any spans that weren't ended in the sidecar loop
+        for request_id, span in unique_spans.items():
+            if request_id not in ended_spans:
+                span.end()
 
         # Dump tensors for debugging if requested
         if batch._dump_prefix is not None and self.tp_rank == 0:
@@ -342,6 +359,8 @@ class Worker:
                 [o.cpu() for o in output],
                 batch._dump_prefix + f"-tp{self.tp_size}.pt",
             )
+
+        return output_shapes
 
     def start_profile(self, output_dir: str = "./profiler_output") -> str:
         """Start PyTorch profiler.
