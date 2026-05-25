@@ -24,6 +24,7 @@ from schema import (
     MLLMRouterRouteConfig,
     ModServeApp,
     MonolithicLLMApp,
+    OmniApp,
     OmniFlexApp,
     OmniMLLMApp,
     OmniRouterApp,
@@ -68,6 +69,7 @@ GROUPED_MIXED_MLLM_TEMPLATE_PATH = (
 OMNI_MLLM_TEMPLATE_PATH = BENCHMARK_ROOT / "apps" / "omni_mllm.py.tmpl"
 OMNI_ROUTER_TEMPLATE_PATH = BENCHMARK_ROOT / "apps" / "omni_router.py.tmpl"
 OMNI_FLEX_TEMPLATE_PATH = BENCHMARK_ROOT / "apps" / "omni_flex.py.tmpl"
+OMNI_TEMPLATE_PATH = BENCHMARK_ROOT / "apps" / "omni.py.tmpl"
 MLLM_ROUTER_TEMPLATE_PATH = BENCHMARK_ROOT / "apps" / "mllm_router.py.tmpl"
 PREFILL_LLM_TEMPLATE_PATH = BENCHMARK_ROOT / "apps" / "prefill_llm.py.tmpl"
 DECODE_LLM_TEMPLATE_PATH = BENCHMARK_ROOT / "apps" / "decode_llm.py.tmpl"
@@ -215,6 +217,7 @@ def create_app_source(app: AppType) -> str:
                     f'        sp_size={inner.generator_sp_size},',
                     f'    )],',
                     f'    routing_weights=[1.0],',
+                    f'    encoder_tp_size={inner.encoder_tp_size},',
                     f'    encoder_tp_size={inner.encoder_tp_size},',
                     f'    encoder_max_num_seqs={inner.encoder_max_num_seqs},',
                     f'    encoder_gpu_memory_utilization={inner.encoder_gpu_memory_utilization},',
@@ -602,6 +605,8 @@ def create_app_source(app: AppType) -> str:
                                 "    llm_gpu_memory_utilization="
                                 f"{_format_float(route.llm_gpu_memory_utilization)},"
                             ),
+                            f"    talker_max_num_seqs={route.talker_max_num_seqs},",
+                            f"    audio_geri_max_batch_size={route.audio_geri_max_batch_size},",
                             ")",
                         ]
                     )
@@ -638,6 +643,8 @@ def create_app_source(app: AppType) -> str:
                                 "    llm_gpu_memory_utilization="
                                 f"{_format_float(route.llm_gpu_memory_utilization)},"
                             ),
+                            f"    talker_max_num_seqs={route.talker_max_num_seqs},",
+                            f"    audio_geri_max_batch_size={route.audio_geri_max_batch_size},",
                             ")",
                         ]
                     )
@@ -702,10 +709,37 @@ def create_app_source(app: AppType) -> str:
             f'    groups={groups_str},\n'
             f'    type_routing_weights={trw_str},\n'
             f'    vocoder_fission={app.vocoder_fission},\n'
+            f'    talker_max_num_seqs={app.talker_max_num_seqs},\n'
+            f'    audio_geri_max_batch_size={app.audio_geri_max_batch_size},\n'
             f'    coalesce_encoder_invocations=True,\n'
             f')'
         )
 
+        rendered = Template(src).substitute(TASK_DEFINITION=task_def)
+    elif isinstance(app, OmniApp):
+        src = OMNI_TEMPLATE_PATH.read_text()
+
+        modalities_str = "[Modality.IMAGE, Modality.VIDEO, Modality.AUDIO]"
+        task_def = "\n".join(
+            [
+                "omni = OmniTask(",
+                f'    model_id="{app.model_id}",',
+                f"    modalities={modalities_str},",
+                f"    encoder_fission={app.encoder_fission},",
+                f"    vocoder_fission={app.vocoder_fission},",
+                "    coalesce_encoder_invocations=True,",
+                f"    eric_max_batch_size={app.eric_max_batch_size},",
+                f"    llm_tp_size={app.llm_tp_size},",
+                f"    llm_max_num_seqs={app.llm_max_num_seqs},",
+                (
+                    "    llm_gpu_memory_utilization="
+                    f"{_format_float(app.llm_gpu_memory_utilization)},"
+                ),
+                f"    talker_max_num_seqs={app.talker_max_num_seqs},",
+                f"    audio_geri_max_batch_size={app.audio_geri_max_batch_size},",
+                ")",
+            ]
+        )
         rendered = Template(src).substitute(TASK_DEFINITION=task_def)
     else:
         raise NotImplementedError(f"App type {type(app).__name__} is not supported.")
@@ -872,6 +906,10 @@ def app_to_expected_task(app: AppType):
     elif isinstance(app, OmniFlexApp):
         raise NotImplementedError(
             "OmniFlexApp has multiple sub-tasks. Use app_to_expected_tasks() instead."
+        )
+    elif isinstance(app, OmniApp):
+        raise NotImplementedError(
+            "OmniApp has multiple sub-tasks. Use app_to_expected_tasks() instead."
         )
     else:
         raise NotImplementedError(f"App type {type(app).__name__} is not supported.")
@@ -1315,6 +1353,7 @@ def app_to_expected_task_replica_specs(app: AppType) -> list[tuple[UnitTask, int
                         (
                             OmniTalkerEmbeddingTask(
                                 model_id=app.model_id,  # type: ignore[arg-type]
+                                max_num_seqs=route.talker_max_num_seqs,
                             ),
                             route.talker_num_replicas,
                         )
@@ -1326,6 +1365,7 @@ def app_to_expected_task_replica_specs(app: AppType) -> list[tuple[UnitTask, int
                         (
                             AudioGeneratorTask(
                                 model_id=app.model_id,  # type: ignore[arg-type]
+                                max_batch_size=route.audio_geri_max_batch_size,
                             ),
                             route.audio_geri_num_replicas,
                         )
@@ -1337,10 +1377,93 @@ def app_to_expected_task_replica_specs(app: AppType) -> list[tuple[UnitTask, int
                         (
                             OmniTalkerVocoderTask(
                                 model_id=app.model_id,  # type: ignore[arg-type]
+                                max_num_seqs=route.talker_max_num_seqs,
                             ),
                             route.talker_vocoder_num_replicas,
                         )
                     )
+
+        return _merge_task_replica_specs(specs)
+
+    if isinstance(app, OmniApp):
+        from cornserve_tasklib.task.unit.encoder import (
+            EncoderTask,
+            Modality as EncoderModality,
+        )
+        from cornserve_tasklib.task.unit.llm import LLMUnitTask
+        from cornserve_tasklib.task.unit.omni import OmniTalkerVocoderTask
+
+        specs: list[tuple[UnitTask, int]] = []
+
+        # Per-modality encoders (only when encoder_fission)
+        for modality, n_replicas in [
+            ("image", app.img_eric_num_replicas),
+            ("video", app.vid_eric_num_replicas),
+            ("audio", app.audio_eric_num_replicas),
+        ]:
+            if n_replicas > 0:
+                specs.append(
+                    (
+                        EncoderTask(
+                            model_ids={app.model_id},
+                            modality=EncoderModality(modality),
+                            max_batch_size=app.eric_max_batch_size,
+                        ),
+                        n_replicas,
+                    )
+                )
+
+        # LLM (thinker)
+        specs.append(
+            (
+                LLMUnitTask(
+                    model_id=app.model_id,
+                    receive_embeddings=app.encoder_fission,
+                    tp_size=app.llm_tp_size,
+                    max_num_seqs=app.llm_max_num_seqs,
+                    gpu_memory_utilization=app.llm_gpu_memory_utilization,
+                ),
+                app.llm_num_replicas,
+            )
+        )
+
+        # Audio output
+        if app.vocoder_fission:
+            if app.talker_num_replicas > 0:
+                from cornserve_tasklib.task.unit.omni import OmniTalkerEmbeddingTask
+
+                specs.append(
+                    (
+                        OmniTalkerEmbeddingTask(
+                            model_id=app.model_id,  # type: ignore[arg-type]
+                            max_num_seqs=app.talker_max_num_seqs,
+                        ),
+                        app.talker_num_replicas,
+                    )
+                )
+            if app.audio_geri_num_replicas > 0:
+                from cornserve_tasklib.task.unit.generator import AudioGeneratorTask
+
+                specs.append(
+                    (
+                        AudioGeneratorTask(
+                            model_id=app.model_id,  # type: ignore[arg-type]
+                            max_batch_size=app.audio_geri_max_batch_size,
+                        ),
+                        app.audio_geri_num_replicas,
+                    )
+                )
+        else:
+            if app.talker_vocoder_num_replicas > 0:
+                specs.append(
+                    (
+                        OmniTalkerVocoderTask(
+                            model_id=app.model_id,  # type: ignore[arg-type]
+                            max_num_seqs=app.talker_max_num_seqs,
+                        ),
+                        app.talker_vocoder_num_replicas,
+                    )
+                )
 
         return _merge_task_replica_specs(specs)
 
@@ -1411,6 +1534,7 @@ def app_to_expected_task_replica_specs(app: AppType) -> list[tuple[UnitTask, int
                         OmniTalkerEmbeddingTask(
                             model_id=app.model_id,  # type: ignore[arg-type]
                             macro_ut_deployment_id=ao_dep_id,
+                            max_num_seqs=app.talker_max_num_seqs,
                         ),
                         app.talker_num_replicas,
                     )
@@ -1421,6 +1545,7 @@ def app_to_expected_task_replica_specs(app: AppType) -> list[tuple[UnitTask, int
                         AudioGeneratorTask(
                             model_id=app.model_id,  # type: ignore[arg-type]
                             macro_ut_deployment_id=ao_dep_id,
+                            max_batch_size=app.audio_geri_max_batch_size,
                         ),
                         app.audio_geri_num_replicas,
                     )
@@ -1434,6 +1559,7 @@ def app_to_expected_task_replica_specs(app: AppType) -> list[tuple[UnitTask, int
                         OmniTalkerVocoderTask(
                             model_id=app.model_id,  # type: ignore[arg-type]
                             macro_ut_deployment_id=ao_dep_id,
+                            max_num_seqs=app.talker_max_num_seqs,
                         ),
                         app.talker_vocoder_num_replicas,
                     )

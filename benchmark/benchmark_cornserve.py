@@ -69,6 +69,7 @@ from schema import (
     MLLMRouterMixedRouteConfig,
     ModServeApp,
     MonolithicLLMApp,
+    OmniApp,
     OmniMLLMApp,
     OmniFlexApp,
     OmniRouterApp,
@@ -992,7 +993,7 @@ def _make_otel_processor(app: Any, app_id: str) -> OtelProcessor:
     """Create the appropriate OtelProcessor for *app*."""
     if isinstance(app, DummyEricApp):
         return EricOtelProcessor(app_id=app_id, modality=app.modality)
-    elif isinstance(app, (OmniRouterApp, OmniFlexApp)):
+    elif isinstance(app, (OmniApp, OmniRouterApp, OmniFlexApp)):
         return OmniRouterOtelProcessor(app_id=app_id)
     elif isinstance(
         app,
@@ -1071,14 +1072,31 @@ async def _collect_otel(
             f"Waiting for OTel traces to arrive at Jaeger (expecting {num_expected})..."
         )
         traces: list[dict[str, Any]] = []
-        for _ in range(12):
-            await asyncio.sleep(5)
+        # Poll up to ~3 minutes; bail early if the trace count stops growing
+        # for two consecutive polls (Jaeger has nothing new for us).
+        max_polls = 36
+        poll_interval = 5
+        stale_polls = 0
+        prev_count = -1
+        for _ in range(max_polls):
+            await asyncio.sleep(poll_interval)
             traces = await otel_processor._get_traces(
                 limit=num_expected + 100, lookback="1h"
             )
             print(f"  {len(traces)}/{num_expected} traces available...")
             if len(traces) >= num_expected:
                 break
+            if len(traces) == prev_count:
+                stale_polls += 1
+                if stale_polls >= 4:
+                    print(
+                        f"  Jaeger trace count stuck at {len(traces)} for "
+                        f"{stale_polls * poll_interval}s; giving up wait."
+                    )
+                    break
+            else:
+                stale_polls = 0
+                prev_count = len(traces)
 
         trace_metrics_by_id = await asyncio.to_thread(
             _process_traces_sync, otel_processor, traces
@@ -1401,7 +1419,7 @@ class BenchmarkSession:
                 )
                 inputs = to_eric_inputs(requests, app_id, app.model_id)
                 print(f"Sampled and transformed {len(inputs)} Eric inputs")
-        elif isinstance(app, (OmniRouterApp, OmniFlexApp)):
+        elif isinstance(app, (OmniApp, OmniRouterApp, OmniFlexApp)):
             if inputs is None:
                 requests = await asyncio.to_thread(
                     self.experiment.dataset.sample, app.model_id
@@ -1600,6 +1618,7 @@ class BenchmarkSession:
                 DummyLLMApp,
                 MonolithicLLMApp,
                 OmniMLLMApp,
+                OmniApp,
                 OmniRouterApp,
                 OmniFlexApp,
                 ModServeApp,
@@ -1624,6 +1643,8 @@ class BenchmarkSession:
                     route.llm_num_replicas * route.llm_max_num_seqs
                     for route in app.routes
                 )
+            elif isinstance(app, OmniApp):
+                max_num_seqs = app.llm_num_replicas * app.llm_max_num_seqs
             elif isinstance(app, (ModServeApp, TimeSharingApp)):
                 max_num_seqs = app.num_llms * app.llm_max_num_seqs
             elif isinstance(app, (MLLMRouterApp, MixedMLLMApp)):

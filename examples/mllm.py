@@ -4,7 +4,7 @@
 $ cornserve register examples/mllm.py
 
 $ cornserve invoke mllm --aggregate-keys choices.0.delta.content --data - <<EOF
-model: "Qwen/Qwen3-VL-8B-Instruct"
+model: "Qwen/Qwen2.5-VL-8B-Instruct"
 messages:
 - role: "user"
   content:
@@ -19,7 +19,7 @@ messages:
 EOF
 
 $ cornserve invoke mllm --aggregate-keys choices.0.delta.content usage --data - <<EOF
-model: "Qwen/Qwen3-VL-8B-Instruct"
+model: "Qwen/Qwen2.5-VL-7B-Instruct"
 messages:
 - role: "user"
   content:
@@ -51,12 +51,13 @@ from cornserve_tasklib.task.unit.llm import (
 from cornserve.app.base import AppConfig
 
 mllm = MLLMTask(
-    model_id="Qwen/Qwen3-VL-8B-Instruct",
+    model_id="Qwen/Qwen2.5-VL-7B-Instruct",
     modalities=[Modality.IMAGE],
     eric_max_batch_size=1,
     llm_tp_size=1,
-    llm_max_num_seqs=32,
+    llm_max_num_seqs=64,
     llm_gpu_memory_utilization=0.9,
+    encoder_fission=False,
 )
 
 

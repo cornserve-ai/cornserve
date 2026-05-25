@@ -58,6 +58,7 @@ from schema import (
     ModServeApp,
     MonolithicLLMApp,
     OmniMLLMApp,
+    OmniApp,
     OmniFlexApp,
     OmniRouterApp,
     PrefillLLMApp,
@@ -131,6 +132,18 @@ def _experiment_label(app: Any) -> str:
         return f"MonoLLM {model} tp={app.tp_size} bs={app.max_num_seqs}"
     elif isinstance(app, OmniMLLMApp):
         return f"OmniMLLM {model} tp={app.tp_size} bs={app.max_num_seqs} {app._enc_flags_str()}"
+    elif isinstance(app, OmniApp):
+        enc = "fission" if app.encoder_fission else "mono"
+        ao = (
+            f"tk{app.talker_num_replicas}bs{app.talker_max_num_seqs}_"
+            f"ag{app.audio_geri_num_replicas}bs{app.audio_geri_max_batch_size}"
+            if app.vocoder_fission
+            else f"tv{app.talker_vocoder_num_replicas}bs{app.talker_max_num_seqs}"
+        )
+        return (
+            f"Omni {model} {enc} "
+            f"llm={app.llm_num_replicas}x[tp{app.llm_tp_size}bs{app.llm_max_num_seqs}] {ao}"
+        )
     elif isinstance(app, OmniFlexApp):
         group_strs = []
         for gi, group in enumerate(app.groups):

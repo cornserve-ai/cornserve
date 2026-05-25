@@ -209,6 +209,53 @@ class OmniMLLMApp(AppType, LLMProfileConfig):
         return f"replicas{self.num_replicas}+{self._enc_flags_str()}+{self.to_profile_str()}"
 
 
+class OmniApp(AppType):
+    """Single Omni deployment: encoders + thinker + audio output, no routing."""
+
+    model_id: str
+
+    # Encoder config
+    encoder_fission: bool = True
+    img_eric_num_replicas: int = 0
+    vid_eric_num_replicas: int = 0
+    audio_eric_num_replicas: int = 0
+    eric_max_batch_size: int = 1
+
+    # LLM (thinker) config
+    llm_num_replicas: int = 1
+    llm_tp_size: int = 1
+    llm_max_num_seqs: int = 32
+    llm_gpu_memory_utilization: float = 0.9
+
+    # Audio output config
+    vocoder_fission: bool = False
+    talker_vocoder_num_replicas: int = 0  # for vocoder_fission=False
+    talker_num_replicas: int = 0          # for vocoder_fission=True
+    audio_geri_num_replicas: int = 0      # for vocoder_fission=True
+    talker_max_num_seqs: int = 256
+    audio_geri_max_batch_size: int = 1
+
+    def _to_app_dir(self) -> str:
+        return "omni"
+
+    def _to_config_dir(self) -> str:
+        enc = (
+            f"ei{self.img_eric_num_replicas}"
+            f"_ev{self.vid_eric_num_replicas}"
+            f"_ea{self.audio_eric_num_replicas}"
+        )
+        llm = f"tp{self.llm_tp_size}x{self.llm_num_replicas}bs{self.llm_max_num_seqs}"
+        if self.vocoder_fission:
+            ao = f"tk{self.talker_num_replicas}_ag{self.audio_geri_num_replicas}"
+        else:
+            ao = f"tv{self.talker_vocoder_num_replicas}"
+        if self.talker_max_num_seqs != 256:
+            ao += f"_tkbs{self.talker_max_num_seqs}"
+        if self.vocoder_fission and self.audio_geri_max_batch_size != 1:
+            ao += f"_agbs{self.audio_geri_max_batch_size}"
+        return f"{enc}_{llm}_{ao}"
+
+
 class DummyImageGeriApp(AppType, ImageGeriProfileConfig):
     """Dummy Image Generator standalone."""
 
@@ -1393,6 +1440,8 @@ class OmniRouterRouteConfig(BaseModel):
     talker_vocoder_num_replicas: int = 0  # for vocoder_fission=False
     talker_num_replicas: int = 0          # for vocoder_fission=True
     audio_geri_num_replicas: int = 0      # for vocoder_fission=True
+    talker_max_num_seqs: int = 256        # TalkerProfileConfig default
+    audio_geri_max_batch_size: int = 1    # AudioGeriProfileConfig default
 
     def total_eric_replicas(self) -> int:
         return (
@@ -1427,6 +1476,10 @@ class OmniRouterApp(AppType):
                 ao = f"tk{route.talker_num_replicas}_ag{route.audio_geri_num_replicas}"
             else:
                 ao = f"tv{route.talker_vocoder_num_replicas}"
+            if route.talker_max_num_seqs != 256:
+                ao += f"_tkbs{route.talker_max_num_seqs}"
+            if route.vocoder_fission and route.audio_geri_max_batch_size != 1:
+                ao += f"_agbs{route.audio_geri_max_batch_size}"
             parts.append(f"r{i}_{rt}_{enc}_{llm}_{ao}_w{_format_float(w)}")
         return "+".join(parts)
 
@@ -1455,6 +1508,8 @@ class OmniRouterVerifyRoute(BaseModel):
     talker_vocoder_num_replicas: int = 0
     talker_num_replicas: int = 0
     audio_geri_num_replicas: int = 0
+    talker_max_num_seqs: int = 256
+    audio_geri_max_batch_size: int = 1
 
     # Optional group ID to prevent merging routes with same encoder signature.
     # Routes with different group_id are never merged into the same group.
@@ -1493,6 +1548,8 @@ class OmniFlexApp(AppType):
     talker_vocoder_num_replicas: int = 0
     talker_num_replicas: int = 0
     audio_geri_num_replicas: int = 0
+    talker_max_num_seqs: int = 256
+    audio_geri_max_batch_size: int = 1
 
     def _to_app_dir(self) -> str:
         return "omni-flex"
@@ -1524,6 +1581,10 @@ class OmniFlexApp(AppType):
             if self.vocoder_fission
             else f"tv{self.talker_vocoder_num_replicas}"
         )
+        if self.talker_max_num_seqs != 256:
+            ao += f"_tkbs{self.talker_max_num_seqs}"
+        if self.vocoder_fission and self.audio_geri_max_batch_size != 1:
+            ao += f"_agbs{self.audio_geri_max_batch_size}"
         return "+".join(parts) + f"_{ao}"
 
 
@@ -1557,6 +1618,8 @@ class OmniRouterVerifyPayload(BaseModel):
                     talker_vocoder_num_replicas=route.talker_vocoder_num_replicas,
                     talker_num_replicas=route.talker_num_replicas,
                     audio_geri_num_replicas=route.audio_geri_num_replicas,
+                    talker_max_num_seqs=route.talker_max_num_seqs,
+                    audio_geri_max_batch_size=route.audio_geri_max_batch_size,
                 )
             )
             weights.append(route.weight)
@@ -1669,6 +1732,8 @@ class OmniRouterVerifyPayload(BaseModel):
         tv_reps = max(r.talker_vocoder_num_replicas for r in self.routes)
         tk_reps = max(r.talker_num_replicas for r in self.routes)
         ag_reps = max(r.audio_geri_num_replicas for r in self.routes)
+        tk_bs = max(r.talker_max_num_seqs for r in self.routes)
+        ag_bs = max(r.audio_geri_max_batch_size for r in self.routes)
 
         return OmniFlexApp(
             model_id=model_id,
@@ -1678,6 +1743,8 @@ class OmniRouterVerifyPayload(BaseModel):
             talker_vocoder_num_replicas=tv_reps,
             talker_num_replicas=tk_reps,
             audio_geri_num_replicas=ag_reps,
+            talker_max_num_seqs=tk_bs,
+            audio_geri_max_batch_size=ag_bs,
         )
 
 

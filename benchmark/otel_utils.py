@@ -1339,7 +1339,7 @@ if __name__ == "__main__":
         import json as _json
         traces = _json.load(f).get("data", [])
 
-    print(f"\nPer-trace breakdown (first 10):")
+    print("\nPer-trace breakdown (first 10):")
     for trace in traces[:10]:
         for m in processor._process_trace(trace):
             print(

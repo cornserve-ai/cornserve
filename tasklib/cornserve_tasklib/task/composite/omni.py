@@ -83,6 +83,8 @@ class OmniTask(Task[OmniInput, Stream[OpenAIChatCompletionChunk]]):
     llm_tp_size: int
     llm_max_num_seqs: int
     llm_gpu_memory_utilization: float
+    talker_max_num_seqs: int = 256
+    audio_geri_max_batch_size: int = 1
 
     def post_init(self) -> None:
         """Initialize subtasks."""
@@ -113,15 +115,18 @@ class OmniTask(Task[OmniInput, Stream[OpenAIChatCompletionChunk]]):
             self.talker_embedding = OmniTalkerEmbeddingTask(
                 model_id=self.model_id,
                 macro_ut_deployment_id=self.macro_ut_deployment_id,
+                max_num_seqs=self.talker_max_num_seqs,
             )
             self.vocoder_geri = AudioGeneratorTask(
                 model_id=self.model_id,
                 macro_ut_deployment_id=self.macro_ut_deployment_id,
+                max_batch_size=self.audio_geri_max_batch_size,
             )
         else:
             self.talker_vocoder = OmniTalkerVocoderTask(
                 model_id=self.model_id,
                 macro_ut_deployment_id=self.macro_ut_deployment_id,
+                max_num_seqs=self.talker_max_num_seqs,
             )
             self.talker_embedding = None
             self.vocoder_geri = None
@@ -132,20 +137,26 @@ class OmniTask(Task[OmniInput, Stream[OpenAIChatCompletionChunk]]):
         Given multimodal data and a text prompt, run the corresponding encoder
         for multimodal data and then pass the embeddings and text prompt to the LLM.
         """
-        thinker_input = OpenAIChatCompletionRequest.model_validate(
-            dict(
-                **task_input.model_dump(exclude={"return_audio"}),
-            )
-        )
         # if only text response is needed, skip talker vocoder
         if not task_input.return_audio:
+            thinker_input = OpenAIChatCompletionRequest.model_validate(
+                dict(**task_input.model_dump(exclude={"return_audio"}))
+            )
             return self.thinker_text.invoke(thinker_input)
 
-        thinker_embedding_output = self.thinker_embedding.invoke(thinker_input)
+        # Save original input before thinker invocation — the thinker pipeline
+        # may rewrite multimodal URLs in-place, and the talker needs originals.
+        original_dump = task_input.model_dump(exclude={"return_audio"})
 
+        # Embedding path: strip stream_options because vLLM rejects
+        # stream_options without stream=True (non-streaming embedding request).
+        thinker_input = OpenAIChatCompletionRequest.model_validate(
+            dict(**task_input.model_dump(exclude={"return_audio", "stream_options"}))
+        )
+        thinker_embedding_output = self.thinker_embedding.invoke(thinker_input)
         talker_input = OmniTalkerVocoderInput.model_validate(
             dict(
-                **task_input.model_dump(exclude={"return_audio"}),
+                **original_dump,
                 thinker_hidden_states=thinker_embedding_output.embeddings,
             )
         )
@@ -186,6 +197,8 @@ class OmniMLLMTask(Task[OmniInput, Stream[OpenAIChatCompletionChunk]]):
     llm_tp_size: int
     llm_max_num_seqs: int
     llm_gpu_memory_utilization: float
+    talker_max_num_seqs: int = 256
+    audio_geri_max_batch_size: int = 1
 
     def post_init(self) -> None:
         """Initialize subtasks."""
@@ -216,15 +229,18 @@ class OmniMLLMTask(Task[OmniInput, Stream[OpenAIChatCompletionChunk]]):
             self.talker_embedding = OmniTalkerEmbeddingTask(
                 model_id=self.model_id,
                 macro_ut_deployment_id=self.macro_ut_deployment_id,
+                max_num_seqs=self.talker_max_num_seqs,
             )
             self.vocoder_geri = AudioGeneratorTask(
                 model_id=self.model_id,
                 macro_ut_deployment_id=self.macro_ut_deployment_id,
+                max_batch_size=self.audio_geri_max_batch_size,
             )
         else:
             self.talker_vocoder = OmniTalkerVocoderTask(
                 model_id=self.model_id,
                 macro_ut_deployment_id=self.macro_ut_deployment_id,
+                max_num_seqs=self.talker_max_num_seqs,
             )
             self.talker_embedding = None
             self.vocoder_geri = None
@@ -342,6 +358,8 @@ class OmniTimeSharingMLLMTask(Task[OmniInput, Stream[OpenAIChatCompletionChunk]]
     llm_tp_size: int
     llm_max_num_seqs: int
     llm_gpu_memory_utilization: float
+    talker_max_num_seqs: int = 256
+    audio_geri_max_batch_size: int = 1
 
     def post_init(self) -> None:
         """Initialize subtasks."""
@@ -375,15 +393,18 @@ class OmniTimeSharingMLLMTask(Task[OmniInput, Stream[OpenAIChatCompletionChunk]]
             self.talker_embedding_task = OmniTalkerEmbeddingTask(
                 model_id=self.model_id,
                 macro_ut_deployment_id=self.macro_ut_deployment_id,
+                max_num_seqs=self.talker_max_num_seqs,
             )
             self.vocoder_geri = AudioGeneratorTask(
                 model_id=self.model_id,
                 macro_ut_deployment_id=self.macro_ut_deployment_id,
+                max_batch_size=self.audio_geri_max_batch_size,
             )
         else:
             self.talker_vocoder = OmniTalkerVocoderTask(
                 model_id=self.model_id,
                 macro_ut_deployment_id=self.macro_ut_deployment_id,
+                max_num_seqs=self.talker_max_num_seqs,
             )
             self.talker_embedding_task = None
             self.vocoder_geri = None
@@ -581,6 +602,8 @@ class OmniFlexTask(Task[OmniInput, Stream[OpenAIChatCompletionChunk]]):
 
     # Shared audio output
     vocoder_fission: bool = False
+    talker_max_num_seqs: int = 256
+    audio_geri_max_batch_size: int = 1
     coalesce_encoder_invocations: bool = True
     macro_ut_deployment_id: str | None = None
 
@@ -700,15 +723,18 @@ class OmniFlexTask(Task[OmniInput, Stream[OpenAIChatCompletionChunk]]):
             self.flex_talker_embedding = OmniTalkerEmbeddingTask(
                 model_id=self.model_id,
                 macro_ut_deployment_id=ao_dep_id,
+                max_num_seqs=self.talker_max_num_seqs,
             )
             self.flex_vocoder_geri = AudioGeneratorTask(
                 model_id=self.model_id,
                 macro_ut_deployment_id=ao_dep_id,
+                max_batch_size=self.audio_geri_max_batch_size,
             )
         else:
             self.talker_vocoder = OmniTalkerVocoderTask(
                 model_id=self.model_id,
                 macro_ut_deployment_id=ao_dep_id,
+                max_num_seqs=self.talker_max_num_seqs,
             )
             self.flex_talker_embedding = None
             self.flex_vocoder_geri = None

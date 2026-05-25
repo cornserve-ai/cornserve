@@ -28,9 +28,11 @@ class OmniTalkerVocoderTask(
 
     Attributes:
         model_id: The ID of the model to use for the task.
+        max_num_seqs: Maximum batch size for the talker-vocoder serving system.
     """
 
     model_id: str = "Qwen/Qwen3-Omni-30B-A3B-Instruct"
+    max_num_seqs: int = 256
 
     def make_name(self) -> str:
         """Create a concise string representation of the task."""
@@ -55,9 +57,11 @@ class OmniTalkerEmbeddingTask(
     """A task that represents the Qwen Omni Talker embedding operation.
     Attributes:
         model_id: The ID of the model to use for the task.
+        max_num_seqs: Maximum batch size for the talker serving system.
     """
 
     model_id: str = "Qwen/Qwen3-Omni-30B-A3B-Instruct"
+    max_num_seqs: int = 256
 
     def make_name(self) -> str:
         """Create a concise string representation of the task."""

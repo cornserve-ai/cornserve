@@ -423,11 +423,63 @@ def _place_replicas(
         )
 
 
-async def scale(experiment: Experiment) -> None:
+def _owned_replica_groups(
+    snapshot: ResourceSnapshot,
+    tm_id: str,
+    tp_size: int,
+) -> list[list]:
+    """Return current replica groups owned by *tm_id*.
+
+    Each group is a list of *tp_size* contiguous GPUs (same node, consecutive
+    local ranks). Lone GPUs that don't form a complete contiguous group are
+    skipped (they won't appear in any group and won't be released).
+    """
+    groups: list[list] = []
+    for node in snapshot.nodes:
+        owned = sorted(
+            [gpu for gpu in node.gpus if gpu.owner == tm_id],
+            key=lambda g: g.local_rank,
+        )
+        i = 0
+        while i + tp_size <= len(owned):
+            group = owned[i : i + tp_size]
+            ranks = [g.local_rank for g in group]
+            if ranks == list(range(ranks[0], ranks[0] + tp_size)):
+                groups.append(group)
+                i += tp_size
+            else:
+                i += 1
+    return groups
+
+
+def _release_replicas(
+    snapshot: ResourceSnapshot,
+    tm_id: str,
+    num_to_release: int,
+    tp_size: int,
+) -> int:
+    """Release the last *num_to_release* replica groups owned by *tm_id*.
+
+    Mutates *snapshot* in place by setting ``owner = None`` on the released
+    GPUs. Returns the number of groups actually released.
+    """
+    groups = _owned_replica_groups(snapshot, tm_id, tp_size)
+    to_release = groups[-num_to_release:] if num_to_release > 0 else []
+    for group in to_release:
+        for gpu in group:
+            gpu.owner = None
+    return len(to_release)
+
+
+async def scale(experiment: Experiment, preserve_placement: bool = True) -> None:
     """Scale tasks based on the provided experiment configuration using snapshot API.
 
     Args:
         experiment: The experiment configuration containing app and replica info
+        preserve_placement: When True (default), keep existing replicas in place
+            and only add or remove the delta. When False, release every GPU
+            currently owned by these task managers and re-place from scratch
+            starting at the lowest local rank — useful for a clean reset.
     """
     app = experiment.app
 
@@ -467,17 +519,28 @@ async def scale(experiment: Experiment) -> None:
 
     snapshot = ResourceSnapshot.model_validate(snapshot_data)
 
-    # 3. Release all GPUs currently owned by our task(s)
+    # 3. Adjust ownership. When `preserve_placement` is True, keep existing
+    # replicas in place and only add/remove the delta. Otherwise, release every
+    # GPU owned by these task managers and re-place from scratch.
     our_tm_ids = set(tm_ids)
-    for node in snapshot.nodes:
-        for gpu in node.gpus:
-            if gpu.owner in our_tm_ids:
-                gpu.owner = None
+    if not preserve_placement:
+        for node in snapshot.nodes:
+            for gpu in node.gpus:
+                if gpu.owner in our_tm_ids:
+                    gpu.owner = None
 
-    # 4. Place replicas for each unit task.
+    # 4. Place / release replicas for each unit task.
     placement_plan: list[str] = []
     for tm_id, num_replicas, parallel_size, task_name in deployed_specs:
-        _place_replicas(snapshot, tm_id, num_replicas, parallel_size)
+        if preserve_placement:
+            current = len(_owned_replica_groups(snapshot, tm_id, parallel_size))
+            if current < num_replicas:
+                _place_replicas(snapshot, tm_id, num_replicas - current, parallel_size)
+            elif current > num_replicas:
+                _release_replicas(snapshot, tm_id, current - num_replicas, parallel_size)
+            # current == num_replicas: nothing to do
+        else:
+            _place_replicas(snapshot, tm_id, num_replicas, parallel_size)
         placement_plan.append(
             f"{task_name} ({tm_id}) -> {num_replicas} x {parallel_size} GPUs"
         )

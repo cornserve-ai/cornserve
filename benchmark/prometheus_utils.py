@@ -36,6 +36,7 @@ from schema import (
     MLLMRouterRouteConfig,
     ModServeApp,
     MonolithicLLMApp,
+    OmniApp,
     OmniMLLMApp,
     OmniFlexApp,
     OmniRouterApp,
@@ -573,6 +574,32 @@ def executor_pod_prefixes(app: Any) -> list[str]:
             elif route.talker_vocoder_num_replicas > 0:
                 tv_name = model_name.lower().replace(".", "-")
                 raws.append(f"vllm-{tv_name}-tv")
+    elif isinstance(app, OmniApp):
+        model_name = app.model_id.split("/")[-1]
+        for modality, n in [
+            ("image", app.img_eric_num_replicas),
+            ("video", app.vid_eric_num_replicas),
+            ("audio", app.audio_eric_num_replicas),
+        ]:
+            if n > 0:
+                eric_profile = f"tp1+maxbs{app.eric_max_batch_size}"
+                raws.append(f"eric-{modality}-{model_name}-{eric_profile}")
+        llm_profile = (
+            f"tp{app.llm_tp_size}+bs{app.llm_max_num_seqs}"
+            f"+gpu{app.llm_gpu_memory_utilization}"
+        )
+        raws.append(
+            llm_executor_name("vllm", app.model_id, app.encoder_fission, llm_profile)
+        )
+        if app.vocoder_fission:
+            if app.talker_num_replicas > 0:
+                tk_name = model_name.lower().replace(".", "-")
+                raws.append(f"vllm-{tk_name}-talker")
+            if app.audio_geri_num_replicas > 0:
+                raws.append(f"geri-audio-{model_name}")
+        elif app.talker_vocoder_num_replicas > 0:
+            tv_name = model_name.lower().replace(".", "-")
+            raws.append(f"vllm-{tv_name}-tv")
     elif isinstance(app, OmniFlexApp):
         model_name = app.model_id.split("/")[-1]
         for group in app.groups:
@@ -773,6 +800,26 @@ def prometheus_pod_prefixes(app: Any) -> list[str]:
             "te-" + to_strict_k8s_name(raw, max_len=60)
             for raw in _dedupe_preserve_order(raws)
         ]
+    elif isinstance(app, OmniApp):
+        raws: list[str] = []
+        model_name = app.model_id.split("/")[-1]
+        llm_profile = (
+            f"tp{app.llm_tp_size}+bs{app.llm_max_num_seqs}"
+            f"+gpu{app.llm_gpu_memory_utilization}"
+        )
+        raws.append(
+            llm_executor_name("vllm", app.model_id, app.encoder_fission, llm_profile)
+        )
+        if app.vocoder_fission and app.talker_num_replicas > 0:
+            tk_name = model_name.lower().replace(".", "-")
+            raws.append(f"vllm-{tk_name}-talker")
+        elif app.talker_vocoder_num_replicas > 0:
+            tv_name = model_name.lower().replace(".", "-")
+            raws.append(f"vllm-{tv_name}-tv")
+        return [
+            "te-" + to_strict_k8s_name(raw, max_len=60)
+            for raw in _dedupe_preserve_order(raws)
+        ]
     elif isinstance(app, OmniFlexApp):
         raws: list[str] = []
         model_name = app.model_id.split("/")[-1]
@@ -833,6 +880,11 @@ class PortForwardManager:
         self._procs: list[tuple[str, asyncio.subprocess.Process]] = []
         self.metrics_urls: list[str] = []
         self.pod_urls: list[tuple[str, str]] = []  # (pod_name, metrics_url)
+        # Saved kwargs from start() to support restart on subprocess death.
+        self._namespace: str = CORNSERVE_NAMESPACE
+        self._container_port: int = VLLM_CONTAINER_PORT
+        # Background drain tasks so kubectl's stdout/stderr pipes never fill.
+        self._drain_tasks: list[asyncio.Task] = []
 
     async def start(
         self,
@@ -901,56 +953,101 @@ class PortForwardManager:
 
         logger.info("Found %d task-executor pods: %s", len(pod_names), pod_names)
 
+        # Save for restart().
+        self._namespace = namespace
+        self._container_port = container_port
+
         urls: list[str] = []
         for pod_name in pod_names:
-            # :container_port lets kubectl pick an available local port.
-            pf_proc = await asyncio.create_subprocess_exec(
-                "kubectl",
-                "port-forward",
-                pod_name,
-                f":{container_port}",
-                "-n",
-                namespace,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-
-            # Read the first stdout line to learn the assigned local port.
-            # kubectl prints: "Forwarding from 127.0.0.1:<local> -> <remote>"
-            local_port: int | None = None
-            assert pf_proc.stdout is not None
-            try:
-                line = await asyncio.wait_for(pf_proc.stdout.readline(), timeout=10.0)
-                match = re.search(r"127\.0\.0\.1:(\d+)", line.decode())
-                if match:
-                    local_port = int(match.group(1))
-            except asyncio.TimeoutError:
-                logger.warning(
-                    "Timed out waiting for port-forward stdout from %s",
-                    pod_name,
-                )
-
-            if local_port is None:
-                logger.warning(
-                    "Could not determine local port for %s; skipping",
-                    pod_name,
-                )
-                pf_proc.terminate()
+            url = await self._spawn_one(pod_name)
+            if url is None:
                 continue
-
-            self._procs.append((pod_name, pf_proc))
-            url = f"http://localhost:{local_port}/metrics"
             urls.append(url)
             self.pod_urls.append((pod_name, url))
-            logger.info(
-                "Port-forwarding %s:%d -> localhost:%d",
-                pod_name,
-                container_port,
-                local_port,
-            )
 
         self.metrics_urls = urls
         return urls
+
+    async def _spawn_one(self, pod_name: str) -> str | None:
+        """Spawn one ``kubectl port-forward`` subprocess; return its metrics URL."""
+        pf_proc = await asyncio.create_subprocess_exec(
+            "kubectl",
+            "port-forward",
+            pod_name,
+            f":{self._container_port}",
+            "-n",
+            self._namespace,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+
+        # Read the first stdout line to learn the assigned local port.
+        # kubectl prints: "Forwarding from 127.0.0.1:<local> -> <remote>"
+        local_port: int | None = None
+        assert pf_proc.stdout is not None
+        try:
+            line = await asyncio.wait_for(pf_proc.stdout.readline(), timeout=10.0)
+            match = re.search(r"127\.0\.0\.1:(\d+)", line.decode())
+            if match:
+                local_port = int(match.group(1))
+        except asyncio.TimeoutError:
+            logger.warning(
+                "Timed out waiting for port-forward stdout from %s",
+                pod_name,
+            )
+
+        if local_port is None:
+            logger.warning(
+                "Could not determine local port for %s; skipping",
+                pod_name,
+            )
+            pf_proc.terminate()
+            return None
+
+        self._procs.append((pod_name, pf_proc))
+        # Drain kubectl's stdout/stderr in the background so the pipes never
+        # fill (kubectl prints "Handling connection for ..." per scrape; an
+        # unread pipe eventually stalls the subprocess and the port-forward
+        # silently dies).
+        assert pf_proc.stderr is not None
+        self._drain_tasks.append(
+            asyncio.create_task(self._drain_stream(pf_proc.stdout, pod_name, "stdout"))
+        )
+        self._drain_tasks.append(
+            asyncio.create_task(self._drain_stream(pf_proc.stderr, pod_name, "stderr"))
+        )
+        url = f"http://localhost:{local_port}/metrics"
+        logger.info(
+            "Port-forwarding %s:%d -> localhost:%d",
+            pod_name,
+            self._container_port,
+            local_port,
+        )
+        return url
+
+    @staticmethod
+    async def _drain_stream(
+        stream: asyncio.StreamReader, pod_name: str, name: str
+    ) -> None:
+        """Continuously read and discard a subprocess pipe so it never fills."""
+        try:
+            while True:
+                line = await stream.readline()
+                if not line:
+                    return
+                # Always surface stderr (kubectl prints errors/diagnostics
+                # there when a port-forward dies). Stdout is per-connection
+                # chatter we don't care about — discarded but drained.
+                if name == "stderr":
+                    text = line.decode(errors="replace").rstrip()
+                    if text:
+                        logger.warning(
+                            "kubectl port-forward[%s] stderr: %s",
+                            pod_name,
+                            text,
+                        )
+        except (asyncio.CancelledError, Exception):
+            return
 
     def check_health(self) -> list[str]:
         """Return names of pods whose port-forward subprocess has died."""
@@ -960,8 +1057,38 @@ class PortForwardManager:
                 dead.append(pod_name)
         return dead
 
+    async def restart(self, pod_name: str) -> str | None:
+        """Restart the port-forward for *pod_name*; return its new metrics URL.
+
+        Removes the dead subprocess from internal tracking and updates
+        ``pod_urls`` / ``metrics_urls`` with the new ephemeral port.
+        Returns ``None`` if the new port-forward could not be established.
+        """
+        # Remove dead proc entry, if any.
+        self._procs = [(n, p) for (n, p) in self._procs if n != pod_name]
+
+        new_url = await self._spawn_one(pod_name)
+        if new_url is None:
+            return None
+
+        # Update pod_urls and metrics_urls in place so external references
+        # to these lists see the new URL.
+        for i, (n, _old) in enumerate(self.pod_urls):
+            if n == pod_name:
+                self.pod_urls[i] = (pod_name, new_url)
+                if i < len(self.metrics_urls):
+                    self.metrics_urls[i] = new_url
+                break
+        else:
+            self.pod_urls.append((pod_name, new_url))
+            self.metrics_urls.append(new_url)
+        return new_url
+
     async def stop(self) -> None:
         """Terminate all ``kubectl port-forward`` processes."""
+        for task in self._drain_tasks:
+            task.cancel()
+        self._drain_tasks.clear()
         for pod_name, proc in self._procs:
             try:
                 proc.terminate()

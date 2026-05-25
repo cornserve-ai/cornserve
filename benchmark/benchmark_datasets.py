@@ -1531,7 +1531,7 @@ if __name__ == "__main__":
     resolution_counts = Counter(
         (r.output_image_height, r.output_image_width) for r in dit_workload
     )
-    print(f"  - Resolution distribution:")
+    print("  - Resolution distribution:")
     for res, count in sorted(resolution_counts.items()):
         print(
             f"    {res[0]}x{res[1]}: {count} ({count / len(dit_workload) * 100:.1f}%)"
