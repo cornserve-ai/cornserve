@@ -95,9 +95,11 @@ class ResetOTelContextMiddleware:
     """
 
     def __init__(self, app):
+        """Wrap the given ASGI app."""
         self.app = app
 
     async def __call__(self, scope, receive, send):
+        """Attach an empty OTel context for the duration of the request."""
         token = otel_context.attach(otel_context.Context())
         try:
             await self.app(scope, receive, send)
