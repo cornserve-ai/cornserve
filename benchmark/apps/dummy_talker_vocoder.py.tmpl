@@ -1,0 +1,28 @@
+"""An app that runs a Dummy Omni Talker Vocoder task."""
+
+from __future__ import annotations
+
+from collections.abc import AsyncIterator
+
+from cornserve.app.base import AppConfig
+from cornserve_tasklib.task.unit.omni import (
+    DummyOmniTalkerVocoderTask,
+    DummyOmniTalkerInput,
+)
+from cornserve_tasklib.task.unit.llm import OpenAIChatCompletionChunk
+
+talker_vocoder = DummyOmniTalkerVocoderTask(
+    model_id="$MODEL_ID",
+    max_num_seqs=$MAX_NUM_SEQS,
+    gpu_memory_utilization=$GPU_MEMORY_UTILIZATION,
+)
+
+class Config(AppConfig):
+    """App configuration model."""
+
+    tasks = {"talker_vocoder": talker_vocoder}
+
+
+async def serve(request: DummyOmniTalkerInput) -> AsyncIterator[OpenAIChatCompletionChunk]:
+    """Main serve function for the app."""
+    return await talker_vocoder(request)

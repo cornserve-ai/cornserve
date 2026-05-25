@@ -1,0 +1,36 @@
+"""An app that runs mixed SP disaggregated Qwen-Image generation."""
+
+from __future__ import annotations
+
+from cornserve.app.base import AppConfig
+from cornserve_tasklib.task.unit.generator import ImageGeneratorTask
+from cornserve_tasklib.task.composite.image_gen import (
+    MixedQwenImageTask,
+    QwenImageInput,
+    QwenImageOutput,
+)
+
+$GENERATOR_ROUTING_TASK_DEFINITIONS
+
+mixed_qwen_image = MixedQwenImageTask(
+    model_id="$MODEL_ID",
+    encoder_model_id="$ENCODER_MODEL_ID",
+    generator_routing_tasks=[$ROUTING_TASK_NAMES],
+    routing_weights=[$ROUTING_WEIGHTS],
+    encoder_tp_size=$ENCODER_TP_SIZE,
+    encoder_max_num_seqs=$ENCODER_MAX_NUM_SEQS,
+    encoder_gpu_memory_utilization=$ENCODER_GPU_MEMORY_UTILIZATION,
+    generator_max_batch_size=$GENERATOR_MAX_BATCH_SIZE,
+    num_prefix_tokens_to_slice=$NUM_PREFIX_TOKENS_TO_SLICE,
+)
+
+
+class Config(AppConfig):
+    """App configuration model."""
+
+    tasks = {"mixed_qwen_image": mixed_qwen_image}
+
+
+async def serve(request: QwenImageInput) -> QwenImageOutput:
+    """Main serve function for the app."""
+    return await mixed_qwen_image(request)

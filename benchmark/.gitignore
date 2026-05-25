@@ -1,8 +1,11 @@
-images
-audios
-videos
+mm_data
+data
 results
+requests
 
 *.wav
 *.json
-data
+.env
+**/*_full.csv
+
+!profiling_fixtures/*.json

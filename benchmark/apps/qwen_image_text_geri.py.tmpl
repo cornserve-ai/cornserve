@@ -1,0 +1,27 @@
+"""An app that runs direct-text Qwen-Image generation in Geri."""
+
+from __future__ import annotations
+
+from cornserve.app.base import AppConfig
+from cornserve_tasklib.task.unit.generator import (
+    ImageGeneratorOutput,
+    QwenImageTextGeneratorInput,
+    QwenImageTextGeneratorTask,
+)
+
+geri = QwenImageTextGeneratorTask(
+    model_id="$MODEL_ID",
+    max_batch_size=$MAX_BATCH_SIZE,
+    sp_size=$SP_SIZE,
+)
+
+
+class Config(AppConfig):
+    """App configuration model."""
+
+    tasks = {"geri": geri}
+
+
+async def serve(request: QwenImageTextGeneratorInput) -> ImageGeneratorOutput:
+    """Main serve function for the app."""
+    return await geri(request)

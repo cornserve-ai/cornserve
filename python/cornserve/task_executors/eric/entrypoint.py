@@ -14,7 +14,7 @@ from cornserve.logging import get_logger
 from cornserve.task_executors.eric.config import EricConfig
 from cornserve.task_executors.eric.engine.client import EngineClient
 from cornserve.task_executors.eric.router.app import create_app
-from cornserve.tracing import configure_otel
+from cornserve.tracing import ResetOTelContextMiddleware, configure_otel
 
 logger = get_logger("cornserve.task_executors.eric.entrypoint")
 
@@ -28,6 +28,7 @@ async def serve(eric_config: EricConfig) -> None:
     app = create_app(eric_config)
 
     FastAPIInstrumentor.instrument_app(app, exclude_spans=["send", "receive"])
+    asgi_app = ResetOTelContextMiddleware(app)
     ThreadingInstrumentor().instrument()
 
     logger.info("Available routes are:")
@@ -44,7 +45,7 @@ async def serve(eric_config: EricConfig) -> None:
             path,
         )
 
-    config = uvicorn.Config(app, host=eric_config.server.host, port=eric_config.server.port)
+    config = uvicorn.Config(asgi_app, host=eric_config.server.host, port=eric_config.server.port)
     server = uvicorn.Server(config)
 
     loop = asyncio.get_running_loop()

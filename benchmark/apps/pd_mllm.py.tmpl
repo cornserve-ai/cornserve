@@ -1,0 +1,34 @@
+"""An app that runs a disaggregated prefill+decode MLLM task (no encoder fission)."""
+
+from __future__ import annotations
+
+from collections.abc import AsyncIterator
+
+from cornserve.app.base import AppConfig
+from cornserve_tasklib.task.composite.llm import DisaggregatedMLLMTask
+from cornserve_tasklib.task.unit.encoder import Modality
+from cornserve_tasklib.task.unit.llm import OpenAIChatCompletionChunk, OpenAIChatCompletionRequest
+
+pd_mllm = DisaggregatedMLLMTask(
+    model_id="$MODEL_ID",
+    modalities=[Modality.IMAGE],
+    encoder_fission=False,
+    eric_max_batch_size=1,
+    prefill_tp_size=$PREFILL_TP_SIZE,
+    prefill_max_num_seqs=$PREFILL_MAX_NUM_SEQS,
+    prefill_gpu_memory_utilization=$PREFILL_GPU_MEMORY_UTILIZATION,
+    decode_tp_size=$DECODE_TP_SIZE,
+    decode_max_num_seqs=$DECODE_MAX_NUM_SEQS,
+    decode_gpu_memory_utilization=$DECODE_GPU_MEMORY_UTILIZATION,
+)
+
+
+class Config(AppConfig):
+    """App configuration model."""
+
+    tasks = {"pd_mllm": pd_mllm}
+
+
+async def serve(request: OpenAIChatCompletionRequest) -> AsyncIterator[OpenAIChatCompletionChunk]:
+    """Main serve function for the app."""
+    return await pd_mllm(request)

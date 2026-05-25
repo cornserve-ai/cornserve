@@ -1,23 +1,24 @@
-"""An app that runs a Multimodal LLM task."""
+"""An app that runs a mixed MLLM task with shared encoders."""
 
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
 
 from cornserve.app.base import AppConfig
+from cornserve_tasklib.task.composite.llm import MixedMLLMTask
 from cornserve_tasklib.task.unit.encoder import Modality
-from cornserve_tasklib.task.composite.llm import $TASK_CLASS
-from cornserve_tasklib.task.unit.llm import OpenAIChatCompletionChunk, OpenAIChatCompletionRequest
+from cornserve_tasklib.task.unit.llm import LLMUnitTask, OpenAIChatCompletionChunk, OpenAIChatCompletionRequest
 
-mllm = $TASK_CLASS(
+$LLM_ROUTING_TASK_DEFINITIONS
+
+mllm = MixedMLLMTask(
     model_id="$MODEL_ID",
     modalities=[Modality.IMAGE],
-    encoder_fission=$ENCODER_FISSION,
     eric_max_batch_size=$ERIC_MAX_BATCH_SIZE,
-    llm_tp_size=$LLM_TP_SIZE,
-    llm_max_num_seqs=$LLM_MAX_NUM_SEQS,
-    llm_gpu_memory_utilization=$LLM_GPU_MEMORY_UTILIZATION,
+    llm_routing_tasks=[$ROUTING_TASK_NAMES],
+    routing_weights=[$ROUTING_WEIGHTS],
 )
+
 
 class Config(AppConfig):
     """App configuration model."""

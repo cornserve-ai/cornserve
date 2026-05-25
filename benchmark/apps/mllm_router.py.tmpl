@@ -1,0 +1,32 @@
+"""An app that routes requests across multiple MLLM tasks."""
+
+from __future__ import annotations
+
+from collections.abc import AsyncIterator
+
+from cornserve.app.base import AppConfig
+from cornserve.task.base import Stream
+from cornserve_tasklib.task.composite.llm import MLLMTask, MixedMLLMTask, TimeSharingMLLMTask
+from cornserve_tasklib.task.composite.router import RouterApp
+from cornserve_tasklib.task.unit.encoder import Modality
+from cornserve_tasklib.task.unit.llm import LLMUnitTask, OpenAIChatCompletionChunk, OpenAIChatCompletionRequest
+
+$ROUTE_DEFINITIONS
+
+mllm_router = RouterApp[
+    OpenAIChatCompletionRequest, Stream[OpenAIChatCompletionChunk]
+](
+    routing_tasks=[$ROUTING_TASK_NAMES],
+    routing_weights=[$ROUTING_WEIGHTS],
+)
+
+
+class Config(AppConfig):
+    """App configuration model."""
+
+    tasks = {"mllm_router": mllm_router}
+
+
+async def serve(request: OpenAIChatCompletionRequest) -> AsyncIterator[OpenAIChatCompletionChunk]:
+    """Main serve function for the app."""
+    return await mllm_router(request)

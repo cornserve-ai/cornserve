@@ -3,7 +3,7 @@
 ```console
 $ cornserve register examples/qwen_image.py
 
-$ cornserve invoke qwen_image --data - <<EOF
+$ cornserve invoke qwen_image --png-key image --data - <<EOF
 prompt: "A beautiful landscape with mountains and a lake at sunset"
 height: 512
 width: 512

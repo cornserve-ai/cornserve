@@ -1,0 +1,91 @@
+"""An app that runs disaggregated Qwen-Image generation."""
+
+from __future__ import annotations
+
+from cornserve.app.base import AppConfig
+from cornserve.task.base import Task, TaskInput, TaskOutput
+from cornserve_tasklib.task.unit.generator import (
+    ImageGeneratorInput,
+    ImageGeneratorTask,
+)
+from cornserve_tasklib.task.unit.llm import (
+    LLMEmbeddingUnitTask,
+    OpenAIChatCompletionRequest,
+)
+
+
+class QwenImageDisaggInput(TaskInput):
+    """Input model for disaggregated Qwen-Image generation task."""
+
+    prompt: str
+    height: int
+    width: int
+    num_inference_steps: int
+
+
+class QwenImageDisaggOutput(TaskOutput):
+    """Output model for disaggregated Qwen-Image generation task."""
+
+    image: str
+
+
+class QwenImageDisaggTask(Task[QwenImageDisaggInput, QwenImageDisaggOutput]):
+    """A task that invokes LLM encoder + image generator for Qwen-Image."""
+
+    def post_init(self) -> None:
+        """Initialize subtasks."""
+        self.text_encoder = LLMEmbeddingUnitTask(
+            model_id="$ENCODER_MODEL_ID",
+            receive_embeddings=False,
+            tp_size=$ENCODER_TP_SIZE,
+            max_num_seqs=$ENCODER_MAX_NUM_SEQS,
+            gpu_memory_utilization=$ENCODER_GPU_MEMORY_UTILIZATION,
+        )
+        self.generator = ImageGeneratorTask(
+            model_id="$MODEL_ID",
+            max_batch_size=$GENERATOR_MAX_BATCH_SIZE,
+            sp_size=$GENERATOR_SP_SIZE,
+        )
+
+        self.system_prompt = (
+            "Describe the image by detailing the color, shape, size, texture, quantity, "
+            "text, spatial relationships of the objects and background:"
+        )
+        self.num_prefix_tokens_to_slice = $NUM_PREFIX_TOKENS_TO_SLICE
+
+    def invoke(self, task_input: QwenImageDisaggInput) -> QwenImageDisaggOutput:
+        """Invoke the task."""
+        encoder_input = OpenAIChatCompletionRequest.model_validate(
+            {
+                "model": "$ENCODER_MODEL_ID",
+                "messages": [
+                    {"role": "system", "content": self.system_prompt},
+                    {"role": "user", "content": task_input.prompt},
+                ],
+                "max_completion_tokens": 1,
+            }
+        )
+        encoder_output = self.text_encoder.invoke(encoder_input)
+        generator_input = ImageGeneratorInput(
+            height=task_input.height,
+            width=task_input.width,
+            num_inference_steps=task_input.num_inference_steps,
+            skip_tokens=self.num_prefix_tokens_to_slice,
+            embeddings=encoder_output.embeddings,
+        )
+        generator_output = self.generator.invoke(generator_input)
+        return QwenImageDisaggOutput(image=generator_output.generated)
+
+
+qwen_image_disagg = QwenImageDisaggTask()
+
+
+class Config(AppConfig):
+    """App configuration model."""
+
+    tasks = {"qwen_image_disagg": qwen_image_disagg}
+
+
+async def serve(request: QwenImageDisaggInput) -> QwenImageDisaggOutput:
+    """Main serve function for the app."""
+    return await qwen_image_disagg(request)

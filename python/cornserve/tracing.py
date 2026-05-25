@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 from collections.abc import Sequence
 
+from opentelemetry import context as otel_context
 from opentelemetry import trace
 from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
 from opentelemetry.sdk.resources import Resource
@@ -69,10 +70,38 @@ def configure_otel(name: str) -> None:
     exporter = _FilteringExporter(exporter, k8s_host)
     processor = BatchSpanProcessor(
         exporter,
-        max_queue_size=8192,
-        schedule_delay_millis=2000,
-        max_export_batch_size=512,
+        max_queue_size=32768,
+        schedule_delay_millis=500,
+        max_export_batch_size=2048,
         export_timeout_millis=10000,
     )
     provider.add_span_processor(processor)
     trace.set_tracer_provider(provider)
+
+
+class ResetOTelContextMiddleware:
+    """Pin a fresh OTel context per request, outside the FastAPI middleware stack.
+
+    Why: ``opentelemetry-instrumentation-asgi``'s ``_start_internal_or_server_span``
+    falls back to ``SpanKind.INTERNAL`` and ignores the inbound ``traceparent``
+    when ``get_current_span()`` is non-INVALID at request entry. Streaming
+    responses + ``asyncio.create_task`` in the request handler can leak a span
+    into the connection task's contextvar between requests, so the next request
+    on the same connection gets (mis-)attached as a child of the previous trace.
+    Anchoring an empty Context here forces the SERVER branch every request.
+
+    Wrap the FastAPI app AFTER ``FastAPIInstrumentor.instrument_app(...)`` and
+    pass the result to ``uvicorn.Config``.
+    """
+
+    def __init__(self, app):
+        """Wrap the given ASGI app."""
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        """Attach an empty OTel context for the duration of the request."""
+        token = otel_context.attach(otel_context.Context())
+        try:
+            await self.app(scope, receive, send)
+        finally:
+            otel_context.detach(token)

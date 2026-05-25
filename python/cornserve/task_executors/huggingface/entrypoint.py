@@ -13,7 +13,7 @@ from cornserve.logging import get_logger
 from cornserve.task_executors.huggingface.config import HuggingFaceConfig
 from cornserve.task_executors.huggingface.engine import HuggingFaceEngine
 from cornserve.task_executors.huggingface.router import create_app
-from cornserve.tracing import configure_otel
+from cornserve.tracing import ResetOTelContextMiddleware, configure_otel
 
 logger = get_logger("cornserve.task_executors.huggingface.entrypoint")
 
@@ -35,6 +35,7 @@ async def serve(config: HuggingFaceConfig) -> None:
 
     # Instrument with OpenTelemetry
     FastAPIInstrumentor.instrument_app(app, exclude_spans=["send", "receive"])
+    asgi_app = ResetOTelContextMiddleware(app)
 
     # Log available routes
     logger.info("Available routes:")
@@ -52,7 +53,7 @@ async def serve(config: HuggingFaceConfig) -> None:
         )
 
     # Configure uvicorn server
-    uvicorn_config = uvicorn.Config(app, host=config.server.host, port=config.server.port, log_level="info")
+    uvicorn_config = uvicorn.Config(asgi_app, host=config.server.host, port=config.server.port, log_level="info")
     server = uvicorn.Server(uvicorn_config)
 
     # Start server

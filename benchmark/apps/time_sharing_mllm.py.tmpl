@@ -1,4 +1,4 @@
-"""An app that runs a Multimodal LLM task."""
+"""An app that runs a time-sharing Multimodal LLM task."""
 
 from __future__ import annotations
 
@@ -6,13 +6,13 @@ from collections.abc import AsyncIterator
 
 from cornserve.app.base import AppConfig
 from cornserve_tasklib.task.unit.encoder import Modality
-from cornserve_tasklib.task.composite.llm import $TASK_CLASS
+from cornserve_tasklib.task.composite.llm import TimeSharingMLLMTask
 from cornserve_tasklib.task.unit.llm import OpenAIChatCompletionChunk, OpenAIChatCompletionRequest
 
-mllm = $TASK_CLASS(
+mllm = TimeSharingMLLMTask(
     model_id="$MODEL_ID",
     modalities=[Modality.IMAGE],
-    encoder_fission=$ENCODER_FISSION,
+    encoder_fission_prob=$ENCODER_FISSION_PROB,
     eric_max_batch_size=$ERIC_MAX_BATCH_SIZE,
     llm_tp_size=$LLM_TP_SIZE,
     llm_max_num_seqs=$LLM_MAX_NUM_SEQS,

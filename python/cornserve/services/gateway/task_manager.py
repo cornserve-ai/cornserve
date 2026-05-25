@@ -805,13 +805,24 @@ class TaskManager:
             # stuck in DEPLOYING with no unit_task_instance_names mapping,
             # which poison invoke_tasks on this replica until pod restart.
 
-            # Teardown any tasks that were sent to the RM (only newly deployed ones)
+            # Release every CR refcount this call took out in Phase 2:
+            #   - tasks_needing_grpc_deploy: CR was just created at
+            #     refcount=1; release drops it to 0 and the CR is deleted.
+            #     The UnitTaskInstance watcher's DELETED handler then drops
+            #     the ghost entry that may have been inserted between CR
+            #     creation and this rollback (the watcher races with Phase 3
+            #     committing unit_task_instance_names).  Without this, the
+            #     ghost survives, an equivalent task in a subsequent
+            #     declare_used matches it and only bumps the refcount, and
+            #     the app is marked READY without a Task Manager pod.
+            #   - tasks_already_deployed_in_cluster: CR pre-existed and
+            #     _get_or_create_task_instance_with_refcount bumped it;
+            #     release brings the refcount back to its prior value
+            #     (>0, so no teardown/delete happens).
             cleanup_coros = [
-                self.resource_manager.TeardownUnitTask(
-                    TeardownUnitTaskRequest(task_instance_name=unit_task_instance_names[tid])
-                )
-                for tid in tasks_needing_grpc_deploy
-                if tid in unit_task_instance_names
+                self._release_task_reference(self.tasks[tid], unit_task_instance_names[tid])
+                for tid in to_deploy
+                if tid in unit_task_instance_names and tid in self.tasks
             ]
             if cleanup_coros:
                 await asyncio.gather(*cleanup_coros, return_exceptions=True)

@@ -15,7 +15,7 @@ from opentelemetry.instrumentation.grpc import GrpcAioInstrumentorClient
 from cornserve.logging import get_logger
 from cornserve.services.gateway.router import create_app
 from cornserve.services.task_registry import TaskRegistry
-from cornserve.tracing import configure_otel
+from cornserve.tracing import ResetOTelContextMiddleware, configure_otel
 from cornserve.utils import set_ulimit
 
 if TYPE_CHECKING:
@@ -59,6 +59,7 @@ async def serve() -> None:
     )
 
     FastAPIInstrumentor.instrument_app(app, exclude_spans=["send", "receive"])
+    asgi_app = ResetOTelContextMiddleware(app)
 
     logger.info("Available routes are:")
     for route in app.routes:
@@ -74,7 +75,7 @@ async def serve() -> None:
             path,
         )
 
-    config = uvicorn.Config(app, host="0.0.0.0", port=8000)
+    config = uvicorn.Config(asgi_app, host="0.0.0.0", port=8000)
     server = uvicorn.Server(config)
     app_manager: AppManager = app.state.app_manager
 

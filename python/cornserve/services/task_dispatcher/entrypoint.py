@@ -15,7 +15,7 @@ from cornserve.logging import get_logger
 from cornserve.services.task_dispatcher.grpc import create_server
 from cornserve.services.task_dispatcher.router import create_app
 from cornserve.services.task_registry import TaskRegistry
-from cornserve.tracing import configure_otel
+from cornserve.tracing import ResetOTelContextMiddleware, configure_otel
 from cornserve.utils import set_ulimit
 
 if TYPE_CHECKING:
@@ -43,6 +43,7 @@ async def serve() -> None:
     app = create_app()
 
     FastAPIInstrumentor.instrument_app(app, exclude_spans=["send", "receive"])
+    asgi_app = ResetOTelContextMiddleware(app)
 
     logger.info("Available HTTP routes are:")
     for route in app.routes:
@@ -58,7 +59,7 @@ async def serve() -> None:
             path,
         )
 
-    config = uvicorn.Config(app, host="0.0.0.0", port=8000)
+    config = uvicorn.Config(asgi_app, host="0.0.0.0", port=8000)
     uvicorn_server = uvicorn.Server(config)
     dispatcher: TaskDispatcher = app.state.dispatcher
 

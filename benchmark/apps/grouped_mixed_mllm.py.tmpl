@@ -1,0 +1,32 @@
+"""An app that routes requests across grouped shared-encoder MLLM tasks."""
+
+from __future__ import annotations
+
+from collections.abc import AsyncIterator
+
+from cornserve.app.base import AppConfig
+from cornserve.task.base import Stream
+from cornserve_tasklib.task.composite.llm import MixedMLLMTask
+from cornserve_tasklib.task.composite.router import RouterApp
+from cornserve_tasklib.task.unit.encoder import Modality
+from cornserve_tasklib.task.unit.llm import LLMUnitTask, OpenAIChatCompletionChunk, OpenAIChatCompletionRequest
+
+$GROUP_DEFINITIONS
+
+grouped_mllm_router = RouterApp[
+    OpenAIChatCompletionRequest, Stream[OpenAIChatCompletionChunk]
+](
+    routing_tasks=[$GROUP_TASK_NAMES],
+    routing_weights=[$GROUP_ROUTING_WEIGHTS],
+)
+
+
+class Config(AppConfig):
+    """App configuration model."""
+
+    tasks = {"grouped_mllm_router": grouped_mllm_router}
+
+
+async def serve(request: OpenAIChatCompletionRequest) -> AsyncIterator[OpenAIChatCompletionChunk]:
+    """Main serve function for the app."""
+    return await grouped_mllm_router(request)

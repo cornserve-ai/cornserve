@@ -1,629 +1,1934 @@
-"""Main benchmark script for Cornserve."""
+"""Unified benchmark runner for Cornserve apps (Eric, MLLM, Geri).
+
+Handles three app types through a single ``benchmark()`` entry point:
+- **Eric** (DummyEricApp): non-streaming encoder profiling
+- **MLLM** (DummyLLMApp / MonolithicLLMApp / router/composite MLLM apps): streaming LLM with TTFT/ITL
+- **Geri** (DummyImageGeriApp / DummyAudioGeriApp): generator profiling
+
+All apps share: Poisson/timestamp dispatching, OTel trace collection,
+queuing-adjusted latency stats, and Experiment-based result persistence.
+"""
+
+from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncGenerator
-import contextlib
-from dataclasses import asdict, dataclass, field, replace
 import json
-import math
+import os
+import resource
 import sys
 import time
 import traceback
-from typing import Any
-import warnings
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any, Awaitable, Callable
 
 import aiohttp
 import numpy as np
 from tqdm import tqdm
-from transformers import AutoTokenizer
-from transformers.tokenization_utils_base import PreTrainedTokenizerBase
 
-from benchmark_dataset import SampleRequest
-from image_utils import create_dummy_image, get_image_data_uris
-from schema import DutyCycleConfig, EricConfig, ExperimentConfig
+from benchmark_datasets import ControlledDiT, OmniRequest, VLMRequest
+from cornserve_utils import GATEWAY_URL, ExecutorLogStreamer
+from prometheus_utils import (
+    PortForwardManager,
+    PrometheusCollector,
+    calculate_steady_state_stats,
+    executor_pod_prefixes,
+    prometheus_pod_prefixes,
+    save_timeline,
+)
+from request_tracker import RequestTracker
+from otel_utils import (
+    DisaggImageOtelProcessor,
+    EPDMLLMOtelProcessor,
+    EricOtelProcessor,
+    GeriOtelProcessor,
+    LLMOtelProcessor,
+    MLLMOtelProcessor,
+    OmniRouterOtelProcessor,
+    OtelProcessor,
+    PDMLLMOtelProcessor,
+    ProcessingMetrics,
+    TalkerOtelProcessor,
+    TalkerVocoderOtelProcessor,
+)
+from schema import (
+    DecodeLLMApp,
+    DummyAudioGeriApp,
+    DummyEricApp,
+    DummyImageGeriApp,
+    DummyLLMApp,
+    DummyTalkerApp,
+    DummyTalkerVocoderApp,
+    EPDMLLMApp,
+    Experiment,
+    GroupedMixedMLLMApp,
+    MixedMLLMApp,
+    MixedMonoQwenImageApp,
+    MixedQwenImageDisaggApp,
+    MLLMRouterApp,
+    MLLMRouterMixedRouteConfig,
+    ModServeApp,
+    MonolithicLLMApp,
+    OmniApp,
+    OmniMLLMApp,
+    OmniFlexApp,
+    OmniRouterApp,
+    QwenImageDisaggApp,
+    QwenImageTextGeriApp,
+    SuperGroupQwenImageApp,
+    PDMLLMApp,
+    PrefillLLMApp,
+    TimeSharingApp,
+)
 
 AIOHTTP_TIMEOUT = aiohttp.ClientTimeout(total=6 * 60 * 60)
-MILLISECONDS_TO_SECONDS_CONVERSION = 1000
+AUDIO_TOKEN_EXPANSION_FACTOR = 4
+
+# Raise the open-file limit to avoid "Too many open files" when hundreds of
+# streaming connections are in flight concurrently.
+try:
+    resource.setrlimit(resource.RLIMIT_NOFILE, (resource.RLIM_INFINITY, resource.RLIM_INFINITY))
+except (ValueError, OSError):
+    # Fall back to hard limit if unlimited is not permitted.
+    _soft, _hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+    if _soft < _hard:
+        resource.setrlimit(resource.RLIMIT_NOFILE, (_hard, _hard))
+
+
+# ---------------------------------------------------------------------------
+# Data classes
+# ---------------------------------------------------------------------------
 
 
 @dataclass
-class RequestInput:
-    """Input for the benchmark request."""
+class EricInput:
+    """Input for a single Eric benchmark request."""
 
     url: str
-    model: str
-    prompt: str | Any
-    prompt_len: int
-    output_len: int
-    multi_modal_data: list[dict[str, Any]]
-    filenames: list[str] = field(default_factory=list)
-    ignore_eos: bool = True
-
-    encoder_fission: bool = False
+    model_id: str
+    data_urls: list[str]
+    timestamp: float | None = None
 
 
 @dataclass
-class RequestOutput:
-    """Output for the benchmark request."""
+class MLLMInput:
+    """Input for a single MLLM benchmark request (OpenAI chat format)."""
 
-    generated_text: str = ""
+    url: str
+    model_id: str
+    content: list[dict[str, Any]]
+    output_len: int
+    prompt_len: int = 0
+    timestamp: float | None = None
+    image_resolutions: list[tuple[int, int]] = field(default_factory=list)
+
+
+@dataclass
+class OmniMLLMInput:
+    """Input for a single Omni MLLM benchmark request (with return_audio)."""
+
+    url: str
+    model_id: str
+    content: list[dict[str, Any]]
+    output_len: int
+    return_audio: bool = False
+    prompt_len: int = 0
+    timestamp: float | None = None
+    image_resolutions: list[tuple[int, int]] = field(default_factory=list)
+    video_metadata: list[dict[str, int]] = field(default_factory=list)
+    audio_durations_s: list[int] = field(default_factory=list)
+
+
+@dataclass
+class GeriInput:
+    """Input for a single Geri benchmark request."""
+
+    url: str
+    request_data: dict[str, Any]
+    timestamp: float | None = None
+
+
+@dataclass
+class TalkerInput:
+    """Input for a single Omni Talker embedding benchmark request."""
+
+    url: str
+    model_id: str
+    prompt: str
+    thinker_hidden_states_len: int
+    thinker_output_len: int
+    max_completion_tokens: int
+    timestamp: float | None = None
+
+
+@dataclass
+class RequestResult:
+    """Result of a single benchmark request.
+
+    Base fields are populated by all app types.  MLLM-specific fields
+    (ttft, itl, output_tokens, etc.) default to zero/empty for non-MLLM apps.
+    """
+
     success: bool = False
     latency: float = 0.0
-    output_tokens: int = 0
-    ttft: float = 0.0  # Time to first token
-    itl: list[float] = field(default_factory=list)  # list of inter-token latencies
-    tpot: float = 0.0  # avg next-token latencies
-    prompt_len: int = 0
     error: str = ""
-    # bookkeeping fields
-    input: RequestInput | None = None
-    usage: dict[str, Any] | None = None
-
-    start_timestamp: float = 0.0  # Timestamp when the request was sent
-    completion_timestamp: float = 0.0  # Timestamp when the completion was generated
-
-
-@dataclass
-class BenchmarkMetrics:
-    """Metrics for the benchmark results."""
-
-    completed: int
-    total_input: int
-    total_output: int
-    request_throughput: float
-    request_goodput: float
-    output_throughput: float
-    total_token_throughput: float
-    mean_ttft_ms: float
-    median_ttft_ms: float
-    std_ttft_ms: float
-    percentiles_ttft_ms: list[tuple[float, float]]
-    mean_tpot_ms: float
-    median_tpot_ms: float
-    std_tpot_ms: float
-    percentiles_tpot_ms: list[tuple[float, float]]
-    mean_itl_ms: float
-    median_itl_ms: float
-    std_itl_ms: float
-    percentiles_itl_ms: list[tuple[float, float]]
-    # E2EL stands for end-to-end latency per request.
-    # It is the time taken on the client side from sending
-    # a request to receiving a complete response.
-    mean_e2el_ms: float
-    median_e2el_ms: float
-    std_e2el_ms: float
-    percentiles_e2el_ms: list[tuple[float, float]]
+    trace_id: str = ""
+    queuing_delay: float = 0.0  # server-side queuing (s), filled from OTel
+    send_time: float = 0.0  # perf_counter offset from benchmark_start
+    # MLLM-specific
+    ttft: float = 0.0
+    itl: list[float] = field(default_factory=list)
+    output_tokens: int = 0
+    prompt_len: int = 0
+    generated_text: str = ""
+    image_resolutions: list[tuple[int, int]] = field(default_factory=list)
+    # Omni-specific: per-request modality info
+    return_audio: bool = False
+    num_images: int = 0
+    num_videos: int = 0
+    num_audios: int = 0
+    video_metadata: list[dict[str, int]] = field(default_factory=list)  # [{frames, height, width}]
+    audio_durations_s: list[int] = field(default_factory=list)  # seconds per audio
 
 
-def calculate_metrics(
-    input_requests: list[RequestInput],
-    outputs: list[RequestOutput],
-    dur_s: float,
-    tokenizer: PreTrainedTokenizerBase,
-    selected_percentiles: list[float] | None = None,
-    goodput_config_dict: dict[str, float] | None = None,
-) -> tuple[BenchmarkMetrics, list[int]]:
-    """Calculate the benchmark metrics based on the outputs."""
-    actual_output_lens: list[int] = []
-    total_input = 0
-    completed = 0
-    good_completed = 0
-    itls: list[float] = []
-    tpots: list[float] = []
-    all_tpots: list[float] = []
-    ttfts: list[float] = []
-    e2els: list[float] = []
-    if selected_percentiles is None:
-        selected_percentiles = [90, 95, 99]
+# ---------------------------------------------------------------------------
+# Input transforms
+# ---------------------------------------------------------------------------
 
-    for i in range(len(outputs)):
-        if outputs[i].success:
-            output_len = outputs[i].output_tokens
 
-            if not output_len:
-                # We use the tokenizer to count the number of output tokens
-                # for some serving backends instead of looking at
-                # len(outputs[i].itl) since multiple output tokens may be
-                # bundled together
-                # Note : this may inflate the output token count slightly
-                output_len = len(tokenizer(outputs[i].generated_text, add_special_tokens=False).input_ids)
-            actual_output_lens.append(output_len)
-            total_input += input_requests[i].prompt_len
-            tpot = 0
-            if output_len > 1:
-                latency_minus_ttft = outputs[i].latency - outputs[i].ttft
-                tpot = latency_minus_ttft / (output_len - 1)
-                tpots.append(tpot)
-            # Note: if output_len <= 1, we regard tpot as 0 for goodput
-            all_tpots.append(tpot)
-            itls += outputs[i].itl
-            ttfts.append(outputs[i].ttft)
-            e2els.append(outputs[i].latency)
-            completed += 1
-        else:
-            actual_output_lens.append(0)
-
-    if goodput_config_dict:
-        valid_metrics = []
-        slo_values = []
-
-        if "ttft" in goodput_config_dict:
-            valid_metrics.append(ttfts)
-            slo_values.append(goodput_config_dict["ttft"] / MILLISECONDS_TO_SECONDS_CONVERSION)
-        if "tpot" in goodput_config_dict:
-            valid_metrics.append(all_tpots)
-            slo_values.append(goodput_config_dict["tpot"] / MILLISECONDS_TO_SECONDS_CONVERSION)
-        if "e2el" in goodput_config_dict:
-            valid_metrics.append(e2els)
-            slo_values.append(goodput_config_dict["e2el"] / MILLISECONDS_TO_SECONDS_CONVERSION)
-
-        for req_metric in zip(*valid_metrics, strict=True):
-            is_good_req = all([s >= r for s, r in zip(slo_values, req_metric, strict=True)])
-            if is_good_req:
-                good_completed += 1
-
-    if completed == 0:
-        warnings.warn(
-            "All requests failed. This is likely due to a misconfiguration on the benchmark arguments.",
-            stacklevel=2,
+def to_eric_inputs(
+    requests: list[VLMRequest] | list[OmniRequest],
+    app_id: str,
+    model_id: str,
+) -> list[EricInput]:
+    """Transform dataset requests into EricInputs for Eric invocation."""
+    url = f"{GATEWAY_URL}/app/invoke/{app_id}"
+    inputs: list[EricInput] = []
+    for req in requests:
+        data_urls: list[str] = []
+        for mm_entry in req.multi_modal_data_list:
+            mm_type = mm_entry["type"].split("_")[0]
+            uri_key = f"{mm_type}_url"
+            if uri_key in mm_entry:
+                data_urls.append(mm_entry[uri_key]["url"])
+        inputs.append(
+            EricInput(
+                url=url, model_id=model_id, data_urls=data_urls, timestamp=req.timestamp
+            )
         )
-    metrics = BenchmarkMetrics(
-        completed=completed,
-        total_input=total_input,
-        total_output=sum(actual_output_lens),
-        request_throughput=completed / dur_s,
-        request_goodput=good_completed / dur_s,
-        output_throughput=sum(actual_output_lens) / dur_s,
-        total_token_throughput=(total_input + sum(actual_output_lens)) / dur_s,
-        mean_ttft_ms=np.mean(ttfts or 0)  # type: ignore
-        * 1000,  # ttfts is empty if streaming is not supported by backend
-        std_ttft_ms=np.std(ttfts or 0) * 1000,  # type: ignore
-        median_ttft_ms=np.median(ttfts or 0) * 1000,  # type: ignore
-        percentiles_ttft_ms=[
-            (p, np.percentile(ttfts or 0, p) * 1000)
-            for p in selected_percentiles  # type: ignore
-        ],
-        mean_tpot_ms=np.mean(tpots or 0) * 1000,  # type: ignore
-        std_tpot_ms=np.std(tpots or 0) * 1000,  # type: ignore
-        median_tpot_ms=np.median(tpots or 0) * 1000,  # type: ignore
-        percentiles_tpot_ms=[
-            (p, np.percentile(tpots or 0, p) * 1000)
-            for p in selected_percentiles  # type: ignore
-        ],
-        mean_itl_ms=np.mean(itls or 0) * 1000,  # type: ignore
-        std_itl_ms=np.std(itls or 0) * 1000,  # type: ignore
-        median_itl_ms=np.median(itls or 0) * 1000,  # type: ignore
-        percentiles_itl_ms=[
-            (p, np.percentile(itls or 0, p) * 1000)
-            for p in selected_percentiles  # type: ignore
-        ],
-        mean_e2el_ms=np.mean(e2els or 0) * 1000,  # type: ignore
-        std_e2el_ms=np.std(e2els or 0) * 1000,  # type: ignore
-        median_e2el_ms=np.median(e2els or 0) * 1000,  # type: ignore
-        percentiles_e2el_ms=[
-            (p, np.percentile(e2els or 0, p) * 1000)
-            for p in selected_percentiles  # type: ignore
-        ],
-    )
-
-    return metrics, actual_output_lens
+    return inputs
 
 
-async def cornserve_invoke_eric(
-    request_input: RequestInput,
-    pbar: tqdm | None,
-) -> RequestOutput:
-    """Invoke an Eric app."""
-    api_url = request_input.url
-    async with aiohttp.ClientSession(trust_env=True, timeout=AIOHTTP_TIMEOUT) as session:
-        # only support images
-        image_urls = get_image_data_uris(request_input.filenames)
-        request_data = {
-            "model_id": request_input.model,
-            "data_urls": image_urls,
-        }
+def _parse_image_resolutions(
+    filenames: list[tuple[str, str]],
+) -> list[tuple[int, int]]:
+    """Extract (width, height) from image filenames like '1080x1920_0.png'."""
+    resolutions = []
+    for modality, fname in filenames:
+        if modality == "image":
+            # fname format: "{min_dim}x{max_dim}_{id}.png"
+            stem = fname.rsplit("_", 1)[0]  # e.g. "1080x1920"
+            parts = stem.split("x")
+            h, w = int(parts[0]), int(parts[1])
+            resolutions.append((w, h))
+    return resolutions
 
-        payload = {"request_data": request_data}
 
-        output = RequestOutput()
-        output.input = replace(request_input, multi_modal_data=[])
-        output.prompt_len = request_input.prompt_len
+def _parse_video_metadata(
+    filenames: list[tuple[str, str]],
+) -> list[dict[str, int]]:
+    """Extract {frames, height, width} from video filenames like '8x1036x1736_0.mp4'."""
+    metadata = []
+    for modality, fname in filenames:
+        if modality == "video":
+            # fname format: "{frames}x{height}x{width}_{id}.mp4"
+            stem = fname.rsplit("_", 1)[0]
+            parts = stem.split("x")
+            metadata.append({"frames": int(parts[0]), "height": int(parts[1]), "width": int(parts[2])})
+    return metadata
 
-        st = time.perf_counter()
-        output.start_timestamp = st
-        try:
-            async with session.post(url=api_url, json=payload) as response:
+
+def _parse_audio_durations(
+    filenames: list[tuple[str, str]],
+) -> list[int]:
+    """Extract duration in seconds from audio filenames like '7s_0.wav'."""
+    durations = []
+    for modality, fname in filenames:
+        if modality == "audio":
+            # fname format: "{seconds}s_{id}.wav"
+            stem = fname.rsplit("_", 1)[0]  # e.g. "7s"
+            durations.append(int(stem.rstrip("s")))
+    return durations
+
+
+def to_mllm_inputs(
+    requests: list[VLMRequest],
+    app_id: str,
+    model_id: str,
+) -> list[MLLMInput]:
+    """Transform VLMRequests into MLLMInputs (OpenAI chat format)."""
+    url = f"{GATEWAY_URL}/app/invoke/{app_id}"
+    inputs: list[MLLMInput] = []
+    for req in requests:
+        content: list[dict[str, Any]] = [{"type": "text", "text": req.prompt}]
+        content.extend(req.multi_modal_data_list)
+        inputs.append(
+            MLLMInput(
+                url=url,
+                model_id=model_id,
+                content=content,
+                output_len=req.output_len,
+                prompt_len=req.prompt_len,
+                timestamp=req.timestamp,
+                image_resolutions=_parse_image_resolutions(req.filenames),
+            )
+        )
+    return inputs
+
+
+def to_omni_inputs(
+    requests: list[OmniRequest],
+    app_id: str,
+    model_id: str,
+) -> list[OmniMLLMInput]:
+    """Transform OmniRequests into OmniMLLMInputs (with return_audio)."""
+    url = f"{GATEWAY_URL}/app/invoke/{app_id}"
+    inputs: list[OmniMLLMInput] = []
+    for req in requests:
+        content: list[dict[str, Any]] = [{"type": "text", "text": req.prompt}]
+        content.extend(req.multi_modal_data_list)
+        inputs.append(
+            OmniMLLMInput(
+                url=url,
+                model_id=model_id,
+                content=content,
+                output_len=req.output_len,
+                return_audio=req.return_audio,
+                prompt_len=req.prompt_len,
+                timestamp=req.timestamp,
+                image_resolutions=_parse_image_resolutions(req.filenames),
+                video_metadata=_parse_video_metadata(req.filenames),
+                audio_durations_s=_parse_audio_durations(req.filenames),
+            )
+        )
+    return inputs
+
+
+def to_geri_audio_inputs(
+    requests: list[OmniRequest],
+    app_id: str,
+) -> list[GeriInput]:
+    """Transform OmniRequests into GeriInputs for audio Geri.
+
+    We expand the dummy sequence length relative to ServeGen output length to
+    match the expected Talker->Vocoder token inflation in audio generation.
+    """
+    url = f"{GATEWAY_URL}/app/invoke/{app_id}"
+    return [
+        GeriInput(
+            url=url,
+            request_data={
+                "dummy_seq_len": req.output_len * AUDIO_TOKEN_EXPANSION_FACTOR
+            },
+            timestamp=req.timestamp,
+        )
+        for req in requests
+    ]
+
+
+def to_talker_inputs(
+    requests: list[OmniRequest],
+    app_id: str,
+    model_id: str,
+) -> list[TalkerInput]:
+    """Transform OmniRequests into TalkerInputs for the Omni Talker embedding task.
+
+    For qwen3 omni profiling:
+    - thinker_hidden_states_len = ServeGen input + output lengths
+    - thinker_output_len = ServeGen output length
+    - max_completion_tokens = 4x ServeGen output length
+    """
+    url = f"{GATEWAY_URL}/app/invoke/{app_id}"
+    return [
+        TalkerInput(
+            url=url,
+            model_id=model_id,
+            prompt=req.prompt if isinstance(req.prompt, str) else "",
+            thinker_hidden_states_len=req.prompt_len + req.output_len,
+            thinker_output_len=req.output_len,
+            max_completion_tokens=req.output_len * AUDIO_TOKEN_EXPANSION_FACTOR,
+            timestamp=req.timestamp,
+        )
+        for req in requests
+    ]
+
+
+# ---------------------------------------------------------------------------
+# Traceparent helper
+# ---------------------------------------------------------------------------
+
+
+def _generate_traceparent() -> tuple[str, str]:
+    """Generate a W3C traceparent header and return (trace_id, header)."""
+    trace_id = os.urandom(16).hex()
+    span_id = os.urandom(8).hex()
+    return trace_id, f"00-{trace_id}-{span_id}-01"
+
+
+# ---------------------------------------------------------------------------
+# Invoke functions
+# ---------------------------------------------------------------------------
+
+
+async def _invoke_app(
+    url: str,
+    payload: dict[str, Any],
+    session: aiohttp.ClientSession | None = None,
+) -> RequestResult:
+    """POST *payload* to *url* with traceparent, read full response.
+
+    Used by Eric and Geri (non-streaming).
+    """
+    trace_id, traceparent = _generate_traceparent()
+    result = RequestResult(trace_id=trace_id)
+    st = time.perf_counter()
+    try:
+        if session is None:
+            async with aiohttp.ClientSession(
+                trust_env=True, timeout=AIOHTTP_TIMEOUT
+            ) as sess:
+                async with sess.post(
+                    url=url,
+                    json=payload,
+                    headers={"traceparent": traceparent},
+                ) as response:
+                    if response.status == 200:
+                        await response.read()
+                        result.success = True
+                    else:
+                        body = await response.text()
+                        result.error = f"HTTP {response.status}: {body[:500]}"
+        else:
+            async with session.post(
+                url=url,
+                json=payload,
+                headers={"traceparent": traceparent},
+            ) as response:
                 if response.status == 200:
-                    # iterate over lines
-                    timestamp = time.perf_counter()
-                    output.latency = timestamp - st
-                    output.completion_timestamp = timestamp
-                    output.success = True
+                    await response.read()
+                    result.success = True
                 else:
-                    output.error = response.reason or ""
-                    output.success = False
-        except Exception:
-            output.success = False
-            exc_info = sys.exc_info()
-            output.error = "".join(traceback.format_exception(*exc_info))
-
-    if pbar:
-        pbar.update(1)
-    return output
+                    body = await response.text()
+                    result.error = f"HTTP {response.status}: {body[:500]}"
+    except Exception:
+        result.error = "".join(traceback.format_exception(*sys.exc_info()))
+    result.latency = time.perf_counter() - st
+    return result
 
 
-async def cornserve_invoke(
-    request_input: RequestInput,
-    pbar: tqdm | None,
-) -> RequestOutput:
-    """Invoke an MLLM app."""
-    api_url = request_input.url
-    async with aiohttp.ClientSession(trust_env=True, timeout=AIOHTTP_TIMEOUT) as session:
-        content = [{"type": "text", "text": request_input.prompt}]
-        for mm_data in request_input.multi_modal_data:
-            content.append(mm_data)
-        request_data = {
-            "model": request_input.model,
+async def invoke_eric(
+    inp: EricInput,
+    session: aiohttp.ClientSession | None = None,
+    tracker: RequestTracker | None = None,  # noqa: ARG001
+) -> RequestResult:
+    """Send a single request to an Eric app."""
+    payload = {"request_data": {"model_id": inp.model_id, "data_urls": inp.data_urls}}
+    return await _invoke_app(inp.url, payload, session)
+
+
+async def invoke_geri(
+    inp: GeriInput,
+    session: aiohttp.ClientSession | None = None,
+    tracker: RequestTracker | None = None,  # noqa: ARG001
+) -> RequestResult:
+    """Send a single request to a Geri app."""
+    payload = {"request_data": inp.request_data}
+    return await _invoke_app(inp.url, payload, session)
+
+
+async def invoke_talker(
+    inp: TalkerInput,
+    session: aiohttp.ClientSession | None = None,
+    tracker: RequestTracker | None = None,  # noqa: ARG001
+) -> RequestResult:
+    """Send a single non-streaming request to an Omni Talker embedding app."""
+    payload = {
+        "request_data": {
+            "model": inp.model_id,
             "messages": [
-                {"role": "user", "content": content},
+                {
+                    "role": "user",
+                    "content": [{"type": "text", "text": inp.prompt or "Hello"}],
+                },
+                {"role": "assistant", "content": "<tts_pad>"},
             ],
-            "temperature": 0.0,
-            "max_completion_tokens": request_input.output_len,
+            "thinker_hidden_states_len": inp.thinker_hidden_states_len,
+            "thinker_output_len": inp.thinker_output_len,
+            "max_completion_tokens": inp.max_completion_tokens,
+            "ignore_eos": True,
+        }
+    }
+    return await _invoke_app(inp.url, payload, session)
+
+
+async def invoke_talker_vocoder(
+    inp: TalkerInput,
+    session: aiohttp.ClientSession | None = None,
+    tracker: RequestTracker | None = None,
+) -> RequestResult:
+    """Send a streaming request to an Omni Talker Vocoder app.
+
+    Streams audio chunks as SSE events. Measures time-to-first-chunk (TTFT)
+    and inter-chunk latency (ITL), matching the invoke_mllm pattern.
+    """
+    payload = {
+        "request_data": {
+            "model": inp.model_id,
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [{"type": "text", "text": inp.prompt or "Hello"}],
+                },
+                {"role": "assistant", "content": "<tts_pad>"},
+            ],
+            "thinker_hidden_states_len": inp.thinker_hidden_states_len,
+            "thinker_output_len": inp.thinker_output_len,
+            "max_completion_tokens": inp.max_completion_tokens,
+            "ignore_eos": True,
             "stream_options": {
                 "include_usage": True,
+                "continuous_usage_stats": True,
             },
-            "encoder_fission": request_input.encoder_fission,
-            "ignore_eos": request_input.ignore_eos,
         }
+    }
 
-        payload = {"request_data": request_data}
+    trace_id, traceparent = _generate_traceparent()
+    result = RequestResult(trace_id=trace_id)
 
-        output = RequestOutput()
-        output.input = replace(request_input, multi_modal_data=[])
-        output.prompt_len = request_input.prompt_len
+    ttft = 0.0
+    current_completion_tokens = 0
+    st = time.perf_counter()
+    most_recent_timestamp = st
 
-        generated_text = ""
-        ttft = 0.0
-        st = time.perf_counter()
-        output.start_timestamp = st
-        most_recent_timestamp = st
-        try:
-            async with session.post(url=api_url, json=payload) as response:
-                if response.status == 200:
-                    # iterate over lines
-                    async for raw_line in response.content:
-                        line = raw_line.decode("utf-8").strip()
+    async def _do_request(sess: aiohttp.ClientSession) -> None:
+        nonlocal ttft, current_completion_tokens, most_recent_timestamp
+        async with sess.post(
+            url=inp.url,
+            json=payload,
+            headers={"traceparent": traceparent},
+        ) as response:
+            if response.status == 200:
+                buffer = b""
+                async for chunk in response.content.iter_any():
+                    buffer += chunk
+                    while b"\n" in buffer:
+                        line_bytes, buffer = buffer.split(b"\n", 1)
+                        line = line_bytes.decode("utf-8").strip()
                         if not line:
-                            # empty lines for keep alive
+                            continue
+                        try:
+                            data = json.loads(line)
+                        except json.JSONDecodeError:
                             continue
                         timestamp = time.perf_counter()
-                        data = json.loads(line)
-                        # here we do the hack to identify the OmniOutputChunk type
-                        if "text_chunk" in data:
-                            data = data["text_chunk"]
-                        if choices := data.get("choices"):
-                            content = choices[0]["delta"].get("content")
-                            # First token
+
+                        usage = data.get("usage")
+                        completion_tokens = (
+                            usage.get("completion_tokens") if usage else None
+                        )
+
+                        if data.get("choices"):
                             if ttft == 0.0:
                                 ttft = timestamp - st
-                                output.ttft = ttft
-                            # Decoding phase
+                                result.ttft = ttft
+                                if tracker is not None:
+                                    tracker.notify_first_token()
                             else:
-                                output.itl.append(timestamp - most_recent_timestamp)
-                            generated_text += content or ""
-                        elif usage := data.get("usage"):
-                            output.output_tokens = usage.get("completion_tokens")
-                            output.usage = usage
+                                result.itl.append(timestamp - most_recent_timestamp)
+
+                            if completion_tokens is not None:
+                                inc = completion_tokens - current_completion_tokens
+                                current_completion_tokens = completion_tokens
+                                if tracker is not None and inc > 0:
+                                    tracker.notify_tokens_generated(inc)
+                            elif tracker is not None:
+                                tracker.notify_tokens_generated(1)
+
+                        elif usage:
+                            result.output_tokens = usage.get("completion_tokens", 0)
+
                         most_recent_timestamp = timestamp
 
-                    output.generated_text = generated_text
-                    output.success = True
-                    output.latency = most_recent_timestamp - st
-                    output.completion_timestamp = most_recent_timestamp
-                else:
-                    output.error = response.reason or ""
-                    output.success = False
-        except Exception:
-            output.success = False
-            exc_info = sys.exc_info()
-            output.error = "".join(traceback.format_exception(*exc_info))
+                result.success = True
+                result.latency = most_recent_timestamp - st
+            else:
+                body = await response.text()
+                result.error = f"HTTP {response.status}: {body[:500]}"
 
-    if pbar:
-        pbar.update(1)
-    return output
-
-async def duty_cycle_get_request(
-    input_requests: list[RequestInput],
-    config: DutyCycleConfig,
-) -> AsyncGenerator[RequestInput, None]:
-    N = len(input_requests)
-    if N == 0:
-        return
-    cycles = config.cycles
-    if cycles < 1:
-        raise ValueError("cycles must be >= 1")
-
-    r = config.request_rate
-    if not (r > 0 and math.isfinite(r)):
-        raise ValueError("request_rate must be a finite, positive number")
-
-    f_on  = config.on_request_factor
-    f_off = config.off_request_factor
-
-    # ON time fraction p so p*f_on + (1-p)*f_off = 1
-    if math.isclose(f_on, f_off, rel_tol=1e-12, abs_tol=1e-12):
-        if not math.isclose(f_on, 1.0, rel_tol=1e-12):
-            raise ValueError("on/off factors equal but not 1.0 → cannot keep the base average")
-        p = 0.5
-    else:
-        p = (1.0 - f_off) / (f_on - f_off)
-        if not (0.0 <= p <= 1.0):
-            raise ValueError("factors produce invalid ON fraction (outside [0,1])")
-
-    # Total duration and cycle/window lengths
-    T = N / r
-    cycle = T / cycles
-    on_dur, off_dur = p * cycle, (1.0 - p) * cycle
-
-    # Requests per cycle (exactly N total)
-    per_cycle = [N // cycles + (1 if i < (N % cycles) else 0) for i in range(cycles)]
-    # Share within a cycle: ON gets fraction f_on * p; OFF gets f_off * (1-p)
-    frac_on = f_on * p
-
-    # Build relative send times (seconds since start)
-    send_times = []
-    base = 0.0
-    for total in per_cycle:
-        n_on = max(0, min(total, round(total * frac_on)))
-        n_off = total - n_on
-
-        if n_on > 0 and on_dur > 0.0:
-            step = on_dur / n_on
-            send_times.extend(base + (j + 0.5) * step for j in range(n_on))
-        if n_off > 0 and off_dur > 0.0:
-            step = off_dur / n_off
-            send_times.extend(base + on_dur + (j + 0.5) * step for j in range(n_off))
-
-        base += cycle
-
-    # Convert absolute-relative times to inter-arrival delays
-    prev = 0.0
-    for when, req in zip(send_times, input_requests):
-        delay = max(0.0, when - prev)
-        if delay > 0:
-            await asyncio.sleep(delay)
-        yield req
-        prev = when
-
-
-async def get_request(
-    input_requests: list[RequestInput],
-    request_rate: float,
-    burstiness: float = 1.0,
-) -> AsyncGenerator[RequestInput, None]:
-    """Asynchronously generates requests at a specified rate with OPTIONAL burstiness.
-
-    Args:
-        input_requests:
-            A list of input requests, each represented as a SampleRequest.
-        request_rate:
-            The rate at which requests are generated (requests/s).
-        burstiness (optional):
-            The burstiness factor of the request generation.
-            Only takes effect when request_rate is not inf.
-            Default value is 1, which follows a Poisson process.
-            Otherwise, the request intervals follow a gamma distribution.
-            A lower burstiness value (0 < burstiness < 1) results
-            in more bursty requests, while a higher burstiness value
-            (burstiness > 1) results in a more uniform arrival of requests.
-    """
-    # Calculate scale parameter theta to maintain the desired request_rate.
-    assert burstiness > 0, f"A positive burstiness factor is expected, but given {burstiness}."
-    theta = 1.0 / (request_rate * burstiness)
-
-    for request in input_requests:
-        yield request
-
-        if request_rate == float("inf"):
-            # If the request rate is infinity, then we don't need to wait.
-            continue
-
-        # Sample the request interval from the gamma distribution.
-        # If burstiness is 1, it follows exponential distribution.
-        interval = np.random.gamma(shape=burstiness, scale=theta)
-        # The next request will be sent after the interval.
-        await asyncio.sleep(interval)
-
-
-def transform_sampled_requests(
-    config: ExperimentConfig,
-    sampled_requests: list[SampleRequest],
-) -> list[RequestInput]:
-    """Transforms the sampled requests from the dataset to RequestInput."""
-    # synthesize image_choices images
-    image_filenames = [
-        create_dummy_image(
-            width=config.image_width,
-            height=config.image_height,
-            id=i,
-        )
-        for i in range(config.image_choices)
-    ]
-    np.random.seed(config.seed)
-    # first synthesize image_data
-    if config.use_synthesized_data:
-        print(f"Synthesizing image data with probability {config.image_probability}.")
-        for request in sampled_requests:
-            if np.random.rand() < config.image_probability:
-                # Synthesize image choices
-                chosen_image_filenames = list(
-                    np.random.choice(
-                        image_filenames,
-                        size=config.image_count,
-                        replace=False,
-                    )
-                )
-                request.filenames = chosen_image_filenames
-                request.image_urls = get_image_data_uris(chosen_image_filenames)
-            if np.random.rand() < config.encoder_fission_probability:
-                # encoder fission
-                request.encoder_fission = True
-        # print(f"Total fissioned requests: {sum(request.encoder_fission for request in sampled_requests)}")
-
-    request_inputs = []
-    app_id = config.app_id
-    for request in sampled_requests:
-        mm_data_list = []
-        if config.use_synthesized_data:
-            for image_uri in request.image_urls:
-                mm_data_list.append({"type": "image_url", "image_url": {"url": image_uri}})
+    try:
+        if session is not None:
+            await _do_request(session)
         else:
-            mm_data_list = [request.multi_modal_data]
-        request_input = RequestInput(
-            url=f"http://127.0.0.1:30080/app/invoke/{app_id}",
-            model=config.model_id,
-            prompt=request.prompt,
-            prompt_len=request.prompt_len,
-            output_len=config.output_len,
-            multi_modal_data=mm_data_list,
-            filenames=request.filenames,
-            encoder_fission=request.encoder_fission,
+            connector = aiohttp.TCPConnector(limit=0)
+            async with aiohttp.ClientSession(
+                trust_env=True, timeout=AIOHTTP_TIMEOUT, connector=connector
+            ) as fallback_session:
+                await _do_request(fallback_session)
+    except Exception:
+        result.error = "".join(traceback.format_exception(*sys.exc_info()))
+        result.latency = time.perf_counter() - st
+    finally:
+        if tracker is not None:
+            tracker.notify_request_finished(result.success)
+
+    return result
+
+
+async def invoke_mllm(
+    inp: MLLMInput,
+    session: aiohttp.ClientSession | None = None,
+    tracker: RequestTracker | None = None,
+) -> RequestResult:
+    """Send a streaming request to an MLLM app.
+
+    Parses SSE events, measures TTFT and per-token ITL.  When a single
+    SSE chunk carries multiple tokens (via continuous_usage_stats),
+    one real ITL is recorded followed by (N-1) zeros.
+
+    If *tracker* is provided, it is notified on first-token, token
+    generation, and request completion for steady-state detection.
+    """
+    payload = {
+        "request_data": {
+            "model": inp.model_id,
+            "messages": [{"role": "user", "content": inp.content}],
+            "max_completion_tokens": inp.output_len,
+            "ignore_eos": True,
+            "stream_options": {
+                "include_usage": True,
+                "continuous_usage_stats": True,
+            },
+        }
+    }
+
+    trace_id, traceparent = _generate_traceparent()
+    result = RequestResult(
+        trace_id=trace_id,
+        prompt_len=inp.prompt_len,
+        image_resolutions=inp.image_resolutions,
+    )
+
+    generated_text = ""
+    ttft = 0.0
+    current_completion_tokens = 0
+    st = time.perf_counter()
+    most_recent_timestamp = st
+
+    async def _do_request(sess: aiohttp.ClientSession) -> None:
+        nonlocal generated_text, ttft, current_completion_tokens, most_recent_timestamp
+        async with sess.post(
+            url=inp.url,
+            json=payload,
+            headers={"traceparent": traceparent},
+        ) as response:
+            if response.status == 200:
+                buffer = b""
+                done = False
+                async for chunk in response.content.iter_any():
+                    if done:
+                        break
+                    buffer += chunk
+                    while b"\n" in buffer:
+                        line_bytes, buffer = buffer.split(b"\n", 1)
+                        line = line_bytes.decode("utf-8").strip()
+                        if not line:
+                            continue
+                        if line.startswith("data: "):
+                            line = line[6:]
+                        if not line:
+                            continue
+                        if line == "[DONE]":
+                            done = True
+                            break
+
+                        data = json.loads(line)
+                        timestamp = time.perf_counter()
+
+                        usage = data.get("usage")
+                        completion_tokens = (
+                            usage.get("completion_tokens") if usage else None
+                        )
+
+                        if choices := data.get("choices"):
+                            content_text = choices[0].get("delta", {}).get("content")
+                            if ttft == 0.0:
+                                ttft = timestamp - st
+                                result.ttft = ttft
+                                if tracker is not None:
+                                    tracker.notify_first_token()
+                            else:
+                                result.itl.append(timestamp - most_recent_timestamp)
+
+                            if completion_tokens is not None:
+                                inc = completion_tokens - current_completion_tokens
+                                current_completion_tokens = completion_tokens
+                                if tracker is not None and inc > 0:
+                                    tracker.notify_tokens_generated(inc)
+                                for _ in range(inc - 1):
+                                    result.itl.append(0.0)
+                            elif tracker is not None:
+                                # No continuous_usage_stats — count 1 token per chunk
+                                tracker.notify_tokens_generated(1)
+
+                            generated_text += content_text or ""
+
+                        elif usage:
+                            result.output_tokens = usage.get("completion_tokens", 0)
+
+                        most_recent_timestamp = timestamp
+
+                result.generated_text = generated_text
+                result.success = True
+                result.latency = most_recent_timestamp - st
+            else:
+                body = await response.text()
+                result.error = f"HTTP {response.status}: {body[:500]}"
+
+    try:
+        if session is not None:
+            await _do_request(session)
+        else:
+            connector = aiohttp.TCPConnector(limit=0)
+            async with aiohttp.ClientSession(
+                trust_env=True, timeout=AIOHTTP_TIMEOUT, connector=connector
+            ) as fallback_session:
+                await _do_request(fallback_session)
+    except Exception:
+        result.error = "".join(traceback.format_exception(*sys.exc_info()))
+        result.latency = time.perf_counter() - st
+    finally:
+        if tracker is not None:
+            tracker.notify_request_finished(result.success)
+
+    return result
+
+
+async def invoke_omni(
+    inp: OmniMLLMInput,
+    session: aiohttp.ClientSession | None = None,
+    tracker: RequestTracker | None = None,
+) -> RequestResult:
+    """Send a streaming request to an Omni MLLM app (with return_audio).
+
+    Same as invoke_mllm but adds return_audio to the request payload.
+    """
+    payload = {
+        "request_data": {
+            "model": inp.model_id,
+            "messages": [{"role": "user", "content": inp.content}],
+            "max_completion_tokens": inp.output_len,
+            "ignore_eos": True,
+            "return_audio": inp.return_audio,
+            "stream_options": {
+                "include_usage": True,
+                "continuous_usage_stats": True,
+            },
+        }
+    }
+
+    # Count modalities from content
+    num_images = sum(1 for c in inp.content if c.get("type") == "image_url")
+    num_videos = sum(1 for c in inp.content if c.get("type") == "video_url")
+    num_audios = sum(1 for c in inp.content if c.get("type") == "audio_url")
+
+    trace_id, traceparent = _generate_traceparent()
+    result = RequestResult(
+        trace_id=trace_id,
+        prompt_len=inp.prompt_len,
+        image_resolutions=inp.image_resolutions,
+        return_audio=inp.return_audio,
+        num_images=num_images,
+        num_videos=num_videos,
+        num_audios=num_audios,
+        video_metadata=inp.video_metadata,
+        audio_durations_s=inp.audio_durations_s,
+    )
+
+    generated_text = ""
+    ttft = 0.0
+    current_completion_tokens = 0
+    st = time.perf_counter()
+    most_recent_timestamp = st
+
+    async def _do_request(sess: aiohttp.ClientSession) -> None:
+        nonlocal generated_text, ttft, current_completion_tokens, most_recent_timestamp
+        async with sess.post(
+            url=inp.url,
+            json=payload,
+            headers={"traceparent": traceparent},
+        ) as response:
+            if response.status == 200:
+                buffer = b""
+                done = False
+                async for chunk in response.content.iter_any():
+                    if done:
+                        break
+                    buffer += chunk
+                    while b"\n" in buffer:
+                        line_bytes, buffer = buffer.split(b"\n", 1)
+                        line = line_bytes.decode("utf-8").strip()
+                        if not line:
+                            continue
+                        if line.startswith("data: "):
+                            line = line[6:]
+                        if not line:
+                            continue
+                        if line == "[DONE]":
+                            done = True
+                            break
+
+                        data = json.loads(line)
+                        timestamp = time.perf_counter()
+
+                        usage = data.get("usage")
+                        completion_tokens = (
+                            usage.get("completion_tokens") if usage else None
+                        )
+
+                        if choices := data.get("choices"):
+                            content_text = choices[0].get("delta", {}).get("content")
+                            if ttft == 0.0:
+                                ttft = timestamp - st
+                                result.ttft = ttft
+                                if tracker is not None:
+                                    tracker.notify_first_token()
+                            else:
+                                result.itl.append(timestamp - most_recent_timestamp)
+
+                            if completion_tokens is not None:
+                                inc = completion_tokens - current_completion_tokens
+                                current_completion_tokens = completion_tokens
+                                if tracker is not None and inc > 0:
+                                    tracker.notify_tokens_generated(inc)
+                                for _ in range(inc - 1):
+                                    result.itl.append(0.0)
+                            elif tracker is not None:
+                                tracker.notify_tokens_generated(1)
+
+                            generated_text += content_text or ""
+
+                        elif usage:
+                            result.output_tokens = usage.get("completion_tokens", 0)
+
+                        most_recent_timestamp = timestamp
+
+                result.generated_text = generated_text
+                result.success = True
+                result.latency = most_recent_timestamp - st
+            else:
+                body = await response.text()
+                result.error = f"HTTP {response.status}: {body[:500]}"
+
+    try:
+        if session is not None:
+            await _do_request(session)
+        else:
+            connector = aiohttp.TCPConnector(limit=0)
+            async with aiohttp.ClientSession(
+                trust_env=True, timeout=AIOHTTP_TIMEOUT, connector=connector
+            ) as fallback_session:
+                await _do_request(fallback_session)
+    except Exception:
+        result.error = "".join(traceback.format_exception(*sys.exc_info()))
+        result.latency = time.perf_counter() - st
+    finally:
+        if tracker is not None:
+            tracker.notify_request_finished(result.success)
+
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Request dispatching
+# ---------------------------------------------------------------------------
+
+
+async def dispatch_requests(
+    inputs: list[Any],
+    invoke_fn: Callable[..., Awaitable[RequestResult]],
+    request_rate: float = float("inf"),
+    max_concurrency: int | None = None,
+    rng: np.random.Generator | None = None,
+    tracker: RequestTracker | None = None,
+    benchmark_start: float | None = None,
+    cancel_event: asyncio.Event | None = None,
+) -> list[RequestResult]:
+    """Dispatch *inputs* through *invoke_fn* with controlled arrival timing.
+
+    - If requests carry ``timestamp`` values, each request sleeps until its
+      timestamp (relative to the start of dispatching) before being sent.
+    - Otherwise, inter-arrival times follow a Poisson process at
+      *request_rate* req/s.
+    - *max_concurrency*, when set, limits how many requests are in-flight
+      at once via an ``asyncio.Semaphore``.
+    - *rng*, when provided, is a per-experiment ``np.random.Generator``
+      used for Poisson inter-arrival sampling so that concurrent
+      experiments don't race on global numpy state.
+    - *tracker*, when provided, is passed to *invoke_fn* (as keyword arg
+      ``tracker``) for steady-state detection in MLLM benchmarks.
+    - *benchmark_start*, when provided, is the ``perf_counter`` reference
+      for computing ``send_time`` on each result.  If ``None``, captured
+      at the start of this function.
+    - *cancel_event*, when provided and set, aborts the benchmark early:
+      stops dispatching new requests and cancels all in-flight tasks.
+    """
+    if rng is None:
+        rng = np.random.default_rng()
+    use_timestamps = (
+        getattr(inputs[0], "timestamp", None) is not None if inputs else False
+    )
+    semaphore = asyncio.Semaphore(max_concurrency) if max_concurrency else None
+    pbar = tqdm(total=len(inputs), desc="Dispatching requests")
+    t0 = benchmark_start if benchmark_start is not None else time.perf_counter()
+
+    connector = aiohttp.TCPConnector(limit=0)
+    async with aiohttp.ClientSession(
+        trust_env=True, timeout=AIOHTTP_TIMEOUT, connector=connector
+    ) as session:
+
+        async def _guarded(inp: Any, send_time: float) -> RequestResult:
+            if semaphore is not None:
+                async with semaphore:
+                    res = await invoke_fn(inp, session, tracker=tracker)
+            else:
+                res = await invoke_fn(inp, session, tracker=tracker)
+            res.send_time = send_time
+            pbar.update(1)
+            return res
+
+        tasks: list[asyncio.Task[RequestResult]] = []
+        cancelled = False
+
+        if use_timestamps:
+
+            async def _timed(inp: Any) -> RequestResult:
+                await asyncio.sleep(inp.timestamp)
+                return await _guarded(inp, time.perf_counter() - t0)
+
+            for inp in inputs:
+                if cancel_event is not None and cancel_event.is_set():
+                    cancelled = True
+                    break
+                tasks.append(asyncio.create_task(_timed(inp)))
+        else:
+            for inp in inputs:
+                if cancel_event is not None and cancel_event.is_set():
+                    cancelled = True
+                    break
+                send_time = time.perf_counter() - t0
+                tasks.append(asyncio.create_task(_guarded(inp, send_time)))
+                if request_rate != float("inf"):
+                    interval = rng.exponential(1.0 / request_rate)
+                    await asyncio.sleep(interval)
+
+        if cancelled:
+            print(
+                f"\n*** Cancelling {len(tasks)} in-flight requests "
+                f"due to pod failure ***"
+            )
+            for t in tasks:
+                t.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+            pbar.close()
+            raise RuntimeError("Benchmark aborted: executor pod died during dispatch")
+
+        # If a cancel_event is provided, watch for it during gather so we
+        # can abort even after all requests have been dispatched.
+        if cancel_event is not None:
+
+            async def _cancel_watcher() -> None:
+                await cancel_event.wait()
+                print(
+                    f"\n*** Pod failure detected — cancelling "
+                    f"{sum(1 for t in tasks if not t.done())} in-flight requests ***"
+                )
+                for t in tasks:
+                    t.cancel()
+
+            watcher = asyncio.create_task(_cancel_watcher())
+            try:
+                results = await asyncio.gather(*tasks, return_exceptions=True)
+            finally:
+                watcher.cancel()
+                try:
+                    await watcher
+                except asyncio.CancelledError:
+                    pass
+
+            if cancel_event.is_set():
+                pbar.close()
+                raise RuntimeError(
+                    "Benchmark aborted: executor pod died during dispatch"
+                )
+            # Filter out should-not-happen exceptions (safety net).
+            final: list[RequestResult] = []
+            for r in results:
+                if isinstance(r, BaseException):
+                    raise r
+                final.append(r)
+            pbar.close()
+            return final
+
+        results = await asyncio.gather(*tasks)
+    pbar.close()
+    return list(results)
+
+
+# ---------------------------------------------------------------------------
+# OTel collection
+# ---------------------------------------------------------------------------
+
+
+def _make_otel_processor(app: Any, app_id: str) -> OtelProcessor:
+    """Create the appropriate OtelProcessor for *app*."""
+    if isinstance(app, DummyEricApp):
+        return EricOtelProcessor(app_id=app_id, modality=app.modality)
+    elif isinstance(app, (OmniApp, OmniRouterApp, OmniFlexApp)):
+        return OmniRouterOtelProcessor(app_id=app_id)
+    elif isinstance(
+        app,
+        (ModServeApp, TimeSharingApp, MLLMRouterApp, MixedMLLMApp, GroupedMixedMLLMApp),
+    ):
+        return MLLMOtelProcessor(app_id=app_id)
+    elif isinstance(app, EPDMLLMApp):
+        return EPDMLLMOtelProcessor(app_id=app_id)
+    elif isinstance(app, PDMLLMApp):
+        return PDMLLMOtelProcessor(app_id=app_id)
+    elif isinstance(app, (DummyLLMApp, MonolithicLLMApp, OmniMLLMApp, PrefillLLMApp, DecodeLLMApp)):
+        return LLMOtelProcessor(app_id=app_id)
+    elif isinstance(app, DummyImageGeriApp):
+        return GeriOtelProcessor(app_id=app_id, modality="image")
+    elif isinstance(app, (QwenImageDisaggApp, MixedQwenImageDisaggApp,
+                          SuperGroupQwenImageApp)):
+        return DisaggImageOtelProcessor(app_id=app_id)
+    elif isinstance(app, (QwenImageTextGeriApp, MixedMonoQwenImageApp)):
+        return GeriOtelProcessor(app_id=app_id, modality="image")
+    elif isinstance(app, DummyAudioGeriApp):
+        return GeriOtelProcessor(app_id=app_id, modality="audio")
+    elif isinstance(app, DummyTalkerApp):
+        return TalkerOtelProcessor(app_id=app_id)
+    elif isinstance(app, DummyTalkerVocoderApp):
+        return TalkerVocoderOtelProcessor(app_id=app_id)
+    else:
+        raise ValueError(f"No OTel processor for {type(app).__name__}")
+
+
+def _process_traces_sync(
+    otel_processor: OtelProcessor,
+    traces: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Process OTel traces (CPU-bound, run in a thread)."""
+    trace_metrics_by_id: dict[str, Any] = {}
+    for trace in traces:
+        for tm in otel_processor._process_trace(trace):
+            trace_metrics_by_id[tm.trace_id] = tm
+    return trace_metrics_by_id
+
+
+def _save_and_summarize_traces_sync(
+    otel_processor: OtelProcessor,
+    traces: list[dict[str, Any]],
+    otel_output_dir: Path,
+) -> ProcessingMetrics:
+    """Save raw traces and compute summary (IO+CPU-bound, run in a thread)."""
+    otel_output_dir.mkdir(parents=True, exist_ok=True)
+    # Save all raw traces as a single Jaeger-compatible JSON file
+    with open(otel_output_dir / "raw.json", "w") as f:
+        json.dump({"data": traces}, f, indent=2)
+    return otel_processor._summarize_and_save(traces, otel_output_dir)
+
+
+async def _collect_otel(
+    results: list[RequestResult],
+    otel_processor: OtelProcessor,
+    otel_output_dir: Path,
+) -> tuple[ProcessingMetrics | None, dict[str, Any]]:
+    """Wait for OTel traces from Jaeger and return (summary, per-trace metrics)."""
+    num_expected = sum(1 for r in results if r.success)
+    otel_metrics = None
+    trace_metrics_by_id: dict[str, Any] = {}
+    try:
+        # Quick connectivity check — if Jaeger API is unreachable, fail hard
+        # so the entire schedule aborts rather than silently proceeding
+        # without OTel data.
+        try:
+            await otel_processor._get_traces(limit=1, lookback="1m")
+        except (aiohttp.ClientConnectorError, aiohttp.ClientError, OSError) as e:
+            raise RuntimeError(
+                f"Jaeger API is unreachable at {otel_processor.jaeger_url}: {e}"
+            ) from e
+
+        print(
+            f"Waiting for OTel traces to arrive at Jaeger (expecting {num_expected})..."
         )
-        request_inputs.append(request_input)
-    return request_inputs
+        traces: list[dict[str, Any]] = []
+        # Poll up to ~3 minutes; bail early if the trace count stops growing
+        # for two consecutive polls (Jaeger has nothing new for us).
+        max_polls = 36
+        poll_interval = 5
+        stale_polls = 0
+        prev_count = -1
+        for _ in range(max_polls):
+            await asyncio.sleep(poll_interval)
+            traces = await otel_processor._get_traces(
+                limit=num_expected + 100, lookback="1h"
+            )
+            print(f"  {len(traces)}/{num_expected} traces available...")
+            if len(traces) >= num_expected:
+                break
+            if len(traces) == prev_count:
+                stale_polls += 1
+                if stale_polls >= 4:
+                    print(
+                        f"  Jaeger trace count stuck at {len(traces)} for "
+                        f"{stale_polls * poll_interval}s; giving up wait."
+                    )
+                    break
+            else:
+                stale_polls = 0
+                prev_count = len(traces)
+
+        trace_metrics_by_id = await asyncio.to_thread(
+            _process_traces_sync, otel_processor, traces
+        )
+
+        otel_metrics = await asyncio.to_thread(
+            _save_and_summarize_traces_sync, otel_processor, traces, otel_output_dir
+        )
+        print(
+            f"OTel: {otel_metrics.total_requests} requests, "
+            f"avg latency: {otel_metrics.avg_latency_ms:.2f}ms, "
+            f"avg queuing: {otel_metrics.avg_queuing_delay_ms:.2f}ms "
+            f"({otel_metrics.queuing_delay_percentage:.1f}%)"
+        )
+    except RuntimeError:
+        raise  # Jaeger unreachable — abort the entire schedule
+    except Exception as e:
+        print(f"Warning: Failed to collect OTel traces: {e}")
+        print("Benchmark results will be saved without OTel metrics.")
+
+    return otel_metrics, trace_metrics_by_id
+
+
+# ---------------------------------------------------------------------------
+# Metrics and result building
+# ---------------------------------------------------------------------------
+
+
+def _stats(values: list[float]) -> dict[str, float]:
+    """Compute summary statistics for a list of values."""
+    if not values:
+        return {
+            k: 0.0 for k in ["mean", "median", "std", "p90", "p95", "p99", "min", "max"]
+        }
+    return {
+        "mean": float(np.mean(values)),
+        "median": float(np.median(values)),
+        "std": float(np.std(values)),
+        "p90": float(np.percentile(values, 90)),
+        "p95": float(np.percentile(values, 95)),
+        "p99": float(np.percentile(values, 99)),
+        "min": float(np.min(values)),
+        "max": float(np.max(values)),
+    }
+
+
+def _build_data(
+    app: Any,
+    results: list[RequestResult],
+    benchmark_duration: float,
+    trace_metrics_by_id: dict[str, Any],
+    otel_metrics: ProcessingMetrics | None,
+    app_id: str,
+) -> dict[str, Any]:
+    """Map OTel traces to results, compute metrics, build the saved data dict."""
+    # Map OTel queuing delays onto result objects
+    for r in results:
+        if r.trace_id and r.trace_id in trace_metrics_by_id:
+            r.queuing_delay = trace_metrics_by_id[r.trace_id].queuing_delay_ms / 1000.0
+
+    mapped = sum(1 for r in results if r.trace_id and r.trace_id in trace_metrics_by_id)
+    if trace_metrics_by_id:
+        print(f"Mapped {mapped}/{len(results)} results to OTel traces")
+
+    # Build per-request OTel latencies (server-side span timing)
+    otel_e2el_values: list[float] = []
+    otel_e2el_nq_values: list[float] = []
+    otel_by_trace: dict[str, dict[str, float]] = {}
+    for r in results:
+        if r.trace_id and r.trace_id in trace_metrics_by_id:
+            tm = trace_metrics_by_id[r.trace_id]
+            span_duration_ms = tm.e2e_latency_ms + tm.queuing_delay_ms
+            otel_by_trace[r.trace_id] = {
+                "otel_e2el_ms": span_duration_ms,
+                "otel_e2el_no_queue_ms": tm.e2e_latency_ms,
+            }
+            if r.success:
+                otel_e2el_values.append(span_duration_ms)
+                otel_e2el_nq_values.append(tm.e2e_latency_ms)
+
+    successful = [r for r in results if r.success]
+    failed = [r for r in results if not r.success]
+    throughput = len(successful) / benchmark_duration if benchmark_duration > 0 else 0.0
+    is_mllm = isinstance(
+        app,
+        (
+            DummyLLMApp,
+            MonolithicLLMApp,
+            OmniMLLMApp,
+            OmniRouterApp,
+            OmniFlexApp,
+            ModServeApp,
+            TimeSharingApp,
+            MLLMRouterApp,
+            MixedMLLMApp,
+            GroupedMixedMLLMApp,
+            DummyTalkerVocoderApp,
+            PrefillLLMApp,
+            DecodeLLMApp,
+        ),
+    )
+
+    # Base metrics (all app types)
+    data: dict[str, Any] = {
+        "app_id": app_id,
+        "throughput": throughput,
+        "benchmark_duration": benchmark_duration,
+        "num_successful": len(successful),
+        "num_failed": len(failed),
+        "e2el_ms": _stats([r.latency * 1000 for r in successful]),
+        "e2el_no_queue_ms": _stats(
+            [(r.latency - r.queuing_delay) * 1000 for r in successful]
+        ),
+    }
+
+    if is_mllm:
+        ttfts = [r.ttft * 1000 for r in successful if r.ttft > 0]
+        ttfts_nq = [(r.ttft - r.queuing_delay) * 1000 for r in successful if r.ttft > 0]
+        all_itls = [itl * 1000 for r in successful for itl in r.itl]
+        total_output = sum(r.output_tokens for r in successful)
+        total_input = sum(r.prompt_len for r in successful)
+        data.update(
+            {
+                "output_throughput": total_output / benchmark_duration
+                if benchmark_duration > 0
+                else 0.0,
+                "total_input_tokens": total_input,
+                "total_output_tokens": total_output,
+                "ttft_ms": _stats(ttfts),
+                "ttft_no_queue_ms": _stats(ttfts_nq),
+                "itl_ms": _stats(all_itls),
+            }
+        )
+        if isinstance(
+            app,
+            (
+                ModServeApp,
+                TimeSharingApp,
+                MLLMRouterApp,
+                MixedMLLMApp,
+                GroupedMixedMLLMApp,
+            ),
+        ):
+            eric_q = [
+                trace_metrics_by_id[r.trace_id].eric_queuing_delay_ms
+                for r in successful
+                if r.trace_id and r.trace_id in trace_metrics_by_id
+            ]
+            eric_proc = [
+                trace_metrics_by_id[r.trace_id].eric_latency_ms
+                for r in successful
+                if r.trace_id and r.trace_id in trace_metrics_by_id
+            ]
+            llm_q = [
+                trace_metrics_by_id[r.trace_id].llm_queuing_delay_ms
+                for r in successful
+                if r.trace_id and r.trace_id in trace_metrics_by_id
+            ]
+            llm_proc = [
+                trace_metrics_by_id[r.trace_id].llm_latency_ms
+                for r in successful
+                if r.trace_id and r.trace_id in trace_metrics_by_id
+            ]
+            data.update(
+                {
+                    "eric_queuing_ms": _stats(eric_q),
+                    "eric_processing_ms": _stats(eric_proc),
+                    "llm_queuing_ms": _stats(llm_q),
+                    "llm_processing_ms": _stats(llm_proc),
+                }
+            )
+    else:
+        engine_queuing = [
+            trace_metrics_by_id[r.trace_id].queuing_delay_ms
+            for r in results
+            if r.trace_id and r.trace_id in trace_metrics_by_id
+        ]
+        data["engine_queuing_ms"] = _stats(engine_queuing)
+
+    data["otel_metrics"] = otel_metrics.model_dump() if otel_metrics else {}
+    data["otel_e2el_ms"] = _stats(otel_e2el_values)
+    data["otel_e2el_no_queue_ms"] = _stats(otel_e2el_nq_values)
+
+    # Per-result serialization
+    def _result_dict(r: RequestResult) -> dict[str, Any]:
+        otel_data = otel_by_trace.get(r.trace_id) if r.trace_id else None
+        d: dict[str, Any] = {
+            "trace_id": r.trace_id,
+            "success": r.success,
+            "latency": r.latency,
+            "send_time": r.send_time,
+            "queuing_delay": r.queuing_delay,
+            "latency_no_queue": r.latency - r.queuing_delay,
+            "otel_e2el_ms": otel_data["otel_e2el_ms"] if otel_data else None,
+            "otel_e2el_no_queue_ms": otel_data["otel_e2el_no_queue_ms"]
+            if otel_data
+            else None,
+            "error": r.error,
+        }
+        if is_mllm:
+            d.update(
+                {
+                    "ttft": r.ttft,
+                    "ttft_no_queue": r.ttft - r.queuing_delay,
+                    "itl": r.itl,
+                    "output_tokens": r.output_tokens,
+                    "prompt_len": r.prompt_len,
+                }
+            )
+            if r.image_resolutions:
+                d["image_resolutions"] = r.image_resolutions
+            # Omni-specific modality info
+            if r.return_audio or r.num_images or r.num_videos or r.num_audios:
+                d["return_audio"] = r.return_audio
+                d["num_images"] = r.num_images
+                d["num_videos"] = r.num_videos
+                d["num_audios"] = r.num_audios
+                if r.video_metadata:
+                    d["video_metadata"] = r.video_metadata
+                if r.audio_durations_s:
+                    d["audio_durations_s"] = r.audio_durations_s
+            if r.trace_id and r.trace_id in trace_metrics_by_id:
+                tm = trace_metrics_by_id[r.trace_id]
+                if hasattr(tm, "mm_items"):
+                    d["mm_items"] = [item.model_dump() for item in tm.mm_items]
+                if hasattr(tm, "eric_queuing_delay_ms"):
+                    d["eric_queuing_delay_ms"] = tm.eric_queuing_delay_ms
+                    d["eric_latency_ms"] = tm.eric_latency_ms
+                    d["llm_queuing_delay_ms"] = tm.llm_queuing_delay_ms
+                    d["llm_latency_ms"] = tm.llm_latency_ms
+                    d["num_prompt_tokens"] = tm.num_prompt_tokens
+                    d["num_output_tokens"] = tm.num_output_tokens
+                if hasattr(tm, "talker_latency_ms"):
+                    d["talker_queuing_delay_ms"] = tm.talker_queuing_delay_ms
+                    d["talker_latency_ms"] = tm.talker_latency_ms
+                    d["talker_output_tokens"] = tm.talker_output_tokens
+        else:
+            if r.trace_id and r.trace_id in trace_metrics_by_id:
+                tm = trace_metrics_by_id[r.trace_id]
+                for k, v in tm.model_dump().items():
+                    if k not in ("trace_id", "e2e_latency_ms", "queuing_delay_ms"):
+                        d[k] = v
+        return d
+
+    data["results"] = [_result_dict(r) for r in results]
+
+    print(
+        f"Benchmark done: {len(successful)}/{len(results)} successful, {benchmark_duration:.1f}s"
+    )
+    if failed:
+        for r in failed[:3]:
+            print(f"  Error: {r.error[:200]}")
+
+    return data
+
+
+# ---------------------------------------------------------------------------
+# Unified benchmark entry point
+# ---------------------------------------------------------------------------
+
+
+class BenchmarkSession:
+    """Manages the state and phases of a single experiment benchmark.
+
+    Splits the monolithic ``benchmark()`` flow into four discrete phases
+    (``setup``, ``dispatch``, ``collect``, ``teardown``) so that the
+    batch scheduler can synchronize multiple experiments at phase
+    boundaries.
+    """
+
+    def __init__(
+        self,
+        experiment: Experiment,
+        app_id: str,
+        request_rate: float = float("inf"),
+        max_concurrency: int | None = None,
+        inputs: list[Any] | None = None,
+    ):
+        self.experiment = experiment
+        self.app = experiment.app
+        self.app_id = app_id
+        self.request_rate = request_rate
+        self.max_concurrency = max_concurrency
+        self._provided_inputs = inputs
+        self.rng = np.random.default_rng(experiment.seed)
+
+        # Populated during setup
+        self.invoke_fn: Callable[..., Awaitable[RequestResult]] | None = None
+        self.inputs: list[Any] | None = None
+        self.output_dir: Path | None = None
+        self.pod_prefixes: list[str] = []
+        self.log_streamer: ExecutorLogStreamer | None = None
+        self.port_fwd: PortForwardManager | None = None
+
+        # Populated during dispatch
+        self.results: list[RequestResult] | None = None
+        self.benchmark_duration: float = 0.0
+        self.benchmark_start: float = 0.0
+        self.benchmark_start_wall: float = 0.0
+        self.tracker: RequestTracker | None = None
+        self.prom_pod_names: list[str] = []  # pod name per Prometheus collector
+        self.prom_timelines: list[list[dict]] = []
+        self.pod_died: bool = False  # set if a pod death is detected
+        self.dead_pods: list[str] = []  # names of pods that died
+
+        # Populated during collect
+        self.data: dict[str, Any] | None = None
+
+    async def sample_inputs(self) -> None:
+        """Sample and transform benchmark inputs (CPU-bound, no app readiness needed)."""
+        app = self.app
+        app_id = self.app_id
+        inputs = self._provided_inputs
+
+        if isinstance(app, DummyEricApp):
+            self.invoke_fn = invoke_eric
+            if inputs is None:
+                requests = await asyncio.to_thread(
+                    self.experiment.dataset.sample, app.model_id
+                )
+                inputs = to_eric_inputs(requests, app_id, app.model_id)
+                print(f"Sampled and transformed {len(inputs)} Eric inputs")
+        elif isinstance(app, (OmniApp, OmniRouterApp, OmniFlexApp)):
+            if inputs is None:
+                requests = await asyncio.to_thread(
+                    self.experiment.dataset.sample, app.model_id
+                )
+                if requests and isinstance(requests[0], OmniRequest):
+                    self.invoke_fn = invoke_omni
+                    inputs = to_omni_inputs(requests, app_id, app.model_id)
+                    print(f"Sampled and transformed {len(inputs)} Omni inputs")
+                else:
+                    self.invoke_fn = invoke_mllm
+                    inputs = to_mllm_inputs(requests, app_id, app.model_id)
+                    print(f"Sampled and transformed {len(inputs)} MLLM inputs")
+            else:
+                if isinstance(inputs[0], OmniMLLMInput):
+                    self.invoke_fn = invoke_omni
+                else:
+                    self.invoke_fn = invoke_mllm
+        elif isinstance(
+            app,
+            (
+                DummyLLMApp,
+                MonolithicLLMApp,
+                OmniMLLMApp,
+                ModServeApp,
+                TimeSharingApp,
+                MLLMRouterApp,
+                MixedMLLMApp,
+                GroupedMixedMLLMApp,
+                PrefillLLMApp,
+                DecodeLLMApp,
+                PDMLLMApp,
+                EPDMLLMApp,
+            ),
+        ):
+            if inputs is None:
+                requests = await asyncio.to_thread(
+                    self.experiment.dataset.sample, app.model_id
+                )
+                # OmniRequest has video/audio/return_audio metadata.
+                # Use to_omni_inputs + invoke_omni to preserve metadata in
+                # result.json.  The extra "return_audio" field in the payload
+                # is ignored by non-OmniRouter backends (DummyLLM, MonoLLM,
+                # OmniMLLM) since vLLM's OpenAI API ignores unknown fields.
+                if requests and isinstance(requests[0], OmniRequest):
+                    self.invoke_fn = invoke_omni
+                    inputs = to_omni_inputs(requests, app_id, app.model_id)
+                    print(f"Sampled and transformed {len(inputs)} Omni inputs")
+                else:
+                    self.invoke_fn = invoke_mllm
+                    inputs = to_mllm_inputs(requests, app_id, app.model_id)
+                    print(f"Sampled and transformed {len(inputs)} MLLM inputs")
+            else:
+                # inputs already provided — infer invoke_fn from type
+                if isinstance(inputs[0], OmniMLLMInput):
+                    self.invoke_fn = invoke_omni
+                else:
+                    self.invoke_fn = invoke_mllm
+        elif isinstance(app, DummyImageGeriApp):
+            self.invoke_fn = invoke_geri
+            if inputs is None:
+                ds = self.experiment.dataset
+                assert isinstance(ds, ControlledDiT), (
+                    f"Image geri requires ControlledDiT dataset, got {type(ds).__name__}"
+                )
+                url = f"{GATEWAY_URL}/app/invoke/{app_id}"
+                requests = await asyncio.to_thread(ds.sample, app.model_id)
+                inputs = [
+                    GeriInput(
+                        url=url,
+                        request_data={
+                            "dummy_seq_len": req.prompt_len,
+                            "height": req.output_image_height,
+                            "width": req.output_image_width,
+                            "num_inference_steps": req.num_inference_steps,
+                        },
+                    )
+                    for req in requests
+                ]
+                print(f"Built {len(inputs)} Geri image inputs")
+        elif isinstance(app, (QwenImageDisaggApp, MixedQwenImageDisaggApp,
+                               QwenImageTextGeriApp, MixedMonoQwenImageApp,
+                               SuperGroupQwenImageApp)):
+            self.invoke_fn = invoke_geri
+            if inputs is None:
+                ds = self.experiment.dataset
+                assert isinstance(ds, ControlledDiT), (
+                    f"Qwen image requires ControlledDiT dataset, got {type(ds).__name__}"
+                )
+                url = f"{GATEWAY_URL}/app/invoke/{app_id}"
+                requests = await asyncio.to_thread(ds.sample, app.model_id)
+                inputs = [
+                    GeriInput(
+                        url=url,
+                        request_data={
+                            "prompt": req.prompt,
+                            "height": req.output_image_height,
+                            "width": req.output_image_width,
+                            "num_inference_steps": req.num_inference_steps,
+                        },
+                    )
+                    for req in requests
+                ]
+                print(f"Built {len(inputs)} Qwen image inputs")
+        elif isinstance(app, DummyAudioGeriApp):
+            self.invoke_fn = invoke_geri
+            if inputs is None:
+                requests = await asyncio.to_thread(
+                    self.experiment.dataset.sample, app.model_id
+                )
+                inputs = to_geri_audio_inputs(requests, app_id)
+                print(f"Sampled and transformed {len(inputs)} Geri audio inputs")
+        elif isinstance(app, DummyTalkerApp):
+            self.invoke_fn = invoke_talker
+            if inputs is None:
+                requests = await asyncio.to_thread(
+                    self.experiment.dataset.sample, app.model_id
+                )
+                inputs = to_talker_inputs(requests, app_id, app.model_id)
+                print(f"Sampled and transformed {len(inputs)} Talker inputs")
+        elif isinstance(app, DummyTalkerVocoderApp):
+            self.invoke_fn = invoke_talker_vocoder
+            if inputs is None:
+                requests = await asyncio.to_thread(
+                    self.experiment.dataset.sample, app.model_id
+                )
+                inputs = to_talker_inputs(requests, app_id, app.model_id)
+                print(f"Sampled and transformed {len(inputs)} Talker Vocoder inputs")
+        else:
+            raise ValueError(f"Unsupported app type: {type(app).__name__}")
+
+        # Clamp output_len if the experiment requests it (e.g. prefill profiling).
+        if inputs and self.experiment.max_output_len is not None:
+            cap = self.experiment.max_output_len
+            for inp in inputs:
+                if hasattr(inp, "output_len"):
+                    inp.output_len = min(inp.output_len, cap)
+
+        self.inputs = inputs
+
+    async def setup(self) -> None:
+        """Phase 1: Start log streaming, port-forwarding, and test request.
+
+        Requires ``sample_inputs()`` to have been called first.
+        """
+        assert self.inputs is not None and self.invoke_fn is not None, (
+            "sample_inputs() must be called before setup()"
+        )
+        app = self.app
+
+        # Per-experiment output directory
+        self.output_dir = self.experiment.to_dir()
+        self.output_dir.mkdir(parents=True, exist_ok=True)
+
+        # Compute pod prefixes for log and Prometheus filtering
+        self.pod_prefixes = executor_pod_prefixes(app)
+        self.log_streamer = await ExecutorLogStreamer.start(
+            self.output_dir, pod_name_prefixes=self.pod_prefixes
+        )
+
+        # Start port forwarding for LLM executor pods (vLLM Prometheus metrics)
+        prom_prefixes = prometheus_pod_prefixes(app)
+        if prom_prefixes:
+            self.port_fwd = PortForwardManager()
+            await self.port_fwd.start(pod_name_prefixes=prom_prefixes)
+
+        # Test request
+        print("Testing a single request to verify setup...")
+        test_result = await self.invoke_fn(self.inputs[0])
+        if not test_result.success:
+            raise RuntimeError(f"Test request failed: {test_result.error}")
+        print(f"Test request succeeded (latency={test_result.latency * 1000:.1f}ms)")
+
+    async def dispatch(self) -> None:
+        """Phase 2: Dispatch all benchmark requests and collect raw results.
+
+        Starts Prometheus collection, dispatches requests, stops Prometheus.
+        """
+        assert self.inputs is not None and self.invoke_fn is not None, (
+            "setup() must be called first"
+        )
+        app = self.app
+        inputs = self.inputs
+
+        has_timestamps = getattr(inputs[0], "timestamp", None) is not None
+        if has_timestamps:
+            print(f"Dispatching {len(inputs)} requests (timestamp-based)...")
+        else:
+            print(
+                f"Dispatching {len(inputs)} requests at {self.request_rate} req/s (Poisson)..."
+            )
+
+        # Create a RequestTracker for MLLM apps to detect steady state.
+        if isinstance(
+            app,
+            (
+                DummyLLMApp,
+                MonolithicLLMApp,
+                OmniMLLMApp,
+                OmniApp,
+                OmniRouterApp,
+                OmniFlexApp,
+                ModServeApp,
+                TimeSharingApp,
+                MLLMRouterApp,
+                MixedMLLMApp,
+                GroupedMixedMLLMApp,
+                PrefillLLMApp,
+                DecodeLLMApp,
+                PDMLLMApp,
+                EPDMLLMApp,
+            ),
+        ):
+            if isinstance(app, OmniFlexApp):
+                max_num_seqs = sum(
+                    t.llm_num_replicas * t.llm_max_num_seqs
+                    for group in app.groups
+                    for t in group.thinkers
+                )
+            elif isinstance(app, OmniRouterApp):
+                max_num_seqs = sum(
+                    route.llm_num_replicas * route.llm_max_num_seqs
+                    for route in app.routes
+                )
+            elif isinstance(app, OmniApp):
+                max_num_seqs = app.llm_num_replicas * app.llm_max_num_seqs
+            elif isinstance(app, (ModServeApp, TimeSharingApp)):
+                max_num_seqs = app.num_llms * app.llm_max_num_seqs
+            elif isinstance(app, (MLLMRouterApp, MixedMLLMApp)):
+                total = 0
+                for route in app.routes:
+                    if isinstance(route, MLLMRouterMixedRouteConfig):
+                        total += sum(
+                            lc.llm_num_replicas * lc.llm_max_num_seqs
+                            for lc in route.llm_configs
+                        )
+                    else:
+                        total += route.llm_num_replicas * route.llm_max_num_seqs
+                max_num_seqs = total
+            elif isinstance(app, GroupedMixedMLLMApp):
+                max_num_seqs = sum(
+                    route.llm_num_replicas * route.llm_max_num_seqs
+                    for group in app.groups
+                    for route in group.routes
+                )
+            elif isinstance(app, (PDMLLMApp, EPDMLLMApp)):
+                max_num_seqs = (
+                    app.num_decode_replicas * app.decode_max_num_seqs
+                )
+            else:
+                max_num_seqs = app.max_num_seqs  # type: ignore[union-attr]
+            self.tracker = RequestTracker(
+                max_num_seqs=max_num_seqs, num_requests=len(inputs)
+            )
+            print(
+                f"Steady-state tracker: max_num_seqs={max_num_seqs}, num_requests={len(inputs)}"
+            )
+
+        # Start Prometheus collection for pods with vLLM metrics.
+        prom_stop_event: asyncio.Event | None = None
+        prom_collect_tasks: list[asyncio.Task[list[dict]]] = []
+        collectors: list[PrometheusCollector] = []
+        if self.port_fwd is not None:
+            pod_urls = self.port_fwd.pod_urls
+            if pod_urls:
+                prom_stop_event = asyncio.Event()
+                self.prom_pod_names = [pod_name for pod_name, _url in pod_urls]
+                collectors = [
+                    PrometheusCollector(url, interval=1.0)
+                    for _pod_name, url in pod_urls
+                ]
+                prom_collect_tasks = [
+                    asyncio.create_task(c.collect(prom_stop_event)) for c in collectors
+                ]
+                print(
+                    f"Prometheus: collecting from {len(pod_urls)} executor pod(s): {self.prom_pod_names}"
+                )
+
+        self.benchmark_start = time.perf_counter()
+        self.benchmark_start_wall = time.time()
+
+        # Monitor for dead pods in the background while requests are dispatched.
+        pod_cancel_event = asyncio.Event()
+
+        async def _monitor_pod_health() -> None:
+            """Periodically check for dead port-forward procs and collector failures."""
+            while not self.pod_died:
+                await asyncio.sleep(5.0)
+                # Check port-forward subprocess health.
+                if self.port_fwd is not None:
+                    dead_pf = self.port_fwd.check_health()
+                    for pod_name in dead_pf:
+                        if pod_name not in self.dead_pods:
+                            self.dead_pods.append(pod_name)
+                            self.pod_died = True
+                            print(
+                                f"\n*** ERROR: port-forward died for pod {pod_name} "
+                                f"— pod likely crashed ***"
+                            )
+                # Check Prometheus collector dead events.
+                for i, c in enumerate(collectors):
+                    if c.dead_event.is_set():
+                        pod_name = self.prom_pod_names[i] if i < len(self.prom_pod_names) else f"collector-{i}"
+                        if pod_name not in self.dead_pods:
+                            self.dead_pods.append(pod_name)
+                            self.pod_died = True
+                            print(
+                                f"\n*** ERROR: pod {pod_name} appears dead "
+                                f"(consecutive Prometheus failures) ***"
+                            )
+                if self.pod_died:
+                    pod_cancel_event.set()
+
+        monitor_task = asyncio.create_task(_monitor_pod_health())
+
+        try:
+            self.results = await dispatch_requests(
+                inputs,
+                self.invoke_fn,
+                request_rate=self.request_rate,
+                max_concurrency=self.max_concurrency,
+                rng=self.rng,
+                tracker=self.tracker,
+                benchmark_start=self.benchmark_start,
+                cancel_event=pod_cancel_event,
+            )
+        except RuntimeError as e:
+            if self.pod_died:
+                # Pod died mid-dispatch — store empty results so collect()
+                # can still run and save a result.json with pod_failure=True.
+                print(f"\n*** Dispatch aborted: {e} ***")
+                self.results = self.results or []
+            else:
+                raise
+        finally:
+            self.benchmark_duration = time.perf_counter() - self.benchmark_start
+
+            # Stop the health monitor.
+            monitor_task.cancel()
+            try:
+                await monitor_task
+            except asyncio.CancelledError:
+                pass
+
+            # Stop Prometheus collection.
+            if prom_stop_event is not None:
+                prom_stop_event.set()
+            if prom_collect_tasks:
+                self.prom_timelines = list(await asyncio.gather(*prom_collect_tasks))
+
+    async def collect(self) -> dict[str, Any]:
+        """Phase 3: Collect OTel traces, compute metrics, save results.
+
+        Returns the data dict for this experiment.
+        """
+        assert self.results is not None, "dispatch() must be called first"
+        assert self.output_dir is not None
+        app = self.app
+
+        # OTel traces
+        otel_processor = _make_otel_processor(app, self.app_id)
+        otel_output_dir = self.output_dir / "otel"
+        otel_metrics, trace_metrics_by_id = await _collect_otel(
+            self.results, otel_processor, otel_output_dir
+        )
+
+        # Metrics + save
+        data = await asyncio.to_thread(
+            _build_data,
+            app,
+            self.results,
+            self.benchmark_duration,
+            trace_metrics_by_id,
+            otel_metrics,
+            self.app_id,
+        )
+
+        # Attach steady-state metrics for MLLM benchmarks
+        tracker = self.tracker
+        benchmark_start = self.benchmark_start
+        if tracker is not None and tracker.steady_state_duration > 0:
+            data["steady_state"] = {
+                "start": tracker.steady_state_start - benchmark_start,
+                "end": tracker.steady_state_end - benchmark_start,
+                "duration_s": tracker.steady_state_duration,
+                "tokens_generated": tracker.steady_state_tokens,
+                "requests_completed": tracker.steady_state_requests,
+                "token_throughput": tracker.steady_state_tokens
+                / tracker.steady_state_duration,
+                "request_throughput": tracker.steady_state_requests
+                / tracker.steady_state_duration,
+            }
+            print(
+                f"Steady state: {tracker.steady_state_duration:.1f}s, "
+                f"{tracker.steady_state_tokens} tokens, "
+                f"{tracker.steady_state_requests} requests completed, "
+                f"{tracker.steady_state_tokens / tracker.steady_state_duration:.1f} tok/s"
+            )
+
+            # Tag per-request results with steady-state membership.
+            # A request is in SS if it was scheduled (dequeued) after ss_start
+            # and completed before ss_end.
+            ss_start = data["steady_state"]["start"]
+            ss_end = data["steady_state"]["end"]
+            ss_count = 0
+            for r_dict in data["results"]:
+                send_t = r_dict.get("send_time", 0.0)
+                schedule_t = send_t + r_dict.get("queuing_delay", 0.0)
+                end_t = send_t + r_dict.get("latency", 0.0)
+                is_ss = r_dict.get("success", False) and schedule_t >= ss_start and end_t <= ss_end
+                r_dict["steady_state"] = is_ss
+                if is_ss:
+                    ss_count += 1
+            data["steady_state"]["num_steady_state_requests"] = ss_count
+            print(f"Steady-state requests: {ss_count}/{len(data['results'])}")
+
+        # Prometheus server-side metrics for MLLM benchmarks
+        if (
+            self.prom_timelines
+            and tracker is not None
+            and tracker.steady_state_duration > 0
+        ):
+            merged_timeline = sorted(
+                [snap for tl in self.prom_timelines for snap in tl],
+                key=lambda s: s["timestamp"],
+            )
+
+            ss_start_wall = self.benchmark_start_wall + (
+                tracker.steady_state_start - benchmark_start
+            )
+            ss_end_wall = self.benchmark_start_wall + (
+                tracker.steady_state_end - benchmark_start
+            )
+
+            prom_stats = await asyncio.to_thread(
+                calculate_steady_state_stats,
+                merged_timeline,
+                steady_start=ss_start_wall,
+                steady_end=ss_end_wall,
+                agg_gauge_metrics={
+                    "vllm:num_requests_running": "sum",
+                    "vllm:num_requests_waiting": "sum",
+                    "vllm:kv_cache_usage_perc": "avg",
+                },
+                counter_metric_names=[
+                    "vllm:prompt_tokens_total",
+                    "vllm:generation_tokens_total",
+                ],
+                histogram_metric_names=[
+                    "vllm:time_to_first_token_seconds",
+                    "vllm:inter_token_latency_seconds",
+                    "vllm:e2e_request_latency_seconds",
+                ],
+            )
+            data["prometheus_metrics"] = prom_stats
+            print(f"Prometheus: collected {len(prom_stats)} steady-state metrics")
+
+        # Save per-pod prometheus timelines.
+        if self.prom_timelines:
+            for pod_name, tl in zip(self.prom_pod_names, self.prom_timelines):
+                if tl:
+                    await asyncio.to_thread(
+                        save_timeline, tl, self.output_dir, f"timeline-{pod_name}.json"
+                    )
+
+        # Mark pod failure if detected during dispatch.
+        if self.pod_died:
+            data["pod_failure"] = True
+            data["dead_pods"] = self.dead_pods
+            print(
+                f"*** Pod failure detected: {self.dead_pods} — "
+                f"results are unreliable ***"
+            )
+
+        await asyncio.to_thread(self.experiment.save, data)
+        self.data = data
+        return data
+
+    async def teardown(self) -> None:
+        """Phase 4: Stop port-forwarding and log streaming."""
+        if self.port_fwd is not None:
+            await self.port_fwd.stop()
+        if self.log_streamer is not None:
+            saved = await self.log_streamer.stop()
+            if saved:
+                print(f"Saved executor logs: {', '.join(p.name for p in saved)}")
 
 
 async def benchmark(
-    request_inputs: list[RequestInput],
-    config: ExperimentConfig,
+    experiment: Experiment,
+    app_id: str,
+    request_rate: float = float("inf"),
+    max_concurrency: int | None = None,
+    inputs: list[Any] | None = None,
 ) -> dict[str, Any]:
-    """Main benchmark function to run the Cornserve benchmark."""
-    # here we assume the cluster is scaled as needed
-    max_concurrency = config.max_concurrency
-    semaphore = asyncio.Semaphore(max_concurrency) if max_concurrency else contextlib.nullcontext()
+    """Run a benchmark for any Cornserve app.
 
-    async def request_func(request_input: RequestInput, pbar: tqdm) -> RequestOutput:
-        async with semaphore:
-            if isinstance(config.backend_config, EricConfig):
-                return await cornserve_invoke_eric(request_input, pbar)
-            return await cornserve_invoke(request_input, pbar)
-
-    # first test a request
-    print("Testing a single request to verify the setup...")
-    test_pbar = tqdm(total=1, desc="Test")
-    test_output = await request_func(request_inputs[0], test_pbar)
-    test_pbar.close()
-    if not test_output.success:
-        print("Test request failed. Please check the setup.")
-        print(f"Error: {test_output.error}")
-        raise RuntimeError("Test request failed.")
-
-    # do warmup
-    print("Starting warmup phase...")
-    warmup_pbar = tqdm(total=config.num_warmups, desc="Warmup")
-    coros = [request_func(request_input, warmup_pbar) for request_input in request_inputs[: config.num_warmups]]
-    results = await asyncio.gather(*coros)
-    if any(not output.success for output in results):
-        print("Warmup requests failed. Please check the setup.")
-        for output in results:
-            if not output.success:
-                print(f"Error: {output.error}")
-        raise RuntimeError("Warmup requests failed.")
-    warmup_pbar.close()
-
-    print("=" * 50)
-
-    pbar = tqdm(total=len(request_inputs))
-    print(f"Starting benchmark with {len(request_inputs)} requests...")
-    distribution = "Poisson process" if config.burstiness == 1.0 else "Gamma distribution"
-    print(f"Traffic request rate: {config.request_rate}")
-    print(f"Burstiness factor: {config.burstiness} ({distribution})")
-    print(f"Maximum request concurrency: {max_concurrency}")
-
-    # Start time for overall benchmark
-    benchmark_start_time = time.perf_counter()
-    tasks = []
-    # Generate requests and create tasks
-    
-    if config.workload_config is not None and isinstance(config.workload_config, DutyCycleConfig):
-        print("Using duty cycle request pattern.")
-        async for request in duty_cycle_get_request(request_inputs, config.workload_config):
-            task = asyncio.create_task(request_func(request_input=request, pbar=pbar))
-            tasks.append(task)
-    else:
-        print("Using standard request pattern.")
-        async for request in get_request(request_inputs, config.request_rate, config.burstiness):
-            task = asyncio.create_task(request_func(request_input=request, pbar=pbar))
-            tasks.append(task)
-
-    # Wait for all tasks to complete
-    results = await asyncio.gather(*tasks)
-    pbar.close()
-
-    # to rule out Timeout errors, we use the latest completion time
-    benchmark_end_time = max([output.completion_timestamp for output in results if output.success])
-    benchmark_duration = benchmark_end_time - benchmark_start_time
-
-    metrics, actual_output_lens = calculate_metrics(
-        input_requests=request_inputs,
-        outputs=results,
-        dur_s=benchmark_duration,
-        tokenizer=AutoTokenizer.from_pretrained(config.model_id),
+    Convenience wrapper that runs all four ``BenchmarkSession`` phases
+    sequentially.  Determines the invoke function and OTel processor from
+    the app type.  For Eric and MLLM apps, *inputs* are sampled from the
+    experiment dataset.  For Geri apps, *inputs* must be provided.
+    """
+    session = BenchmarkSession(
+        experiment, app_id, request_rate, max_concurrency, inputs
     )
-
-    print("{s:{c}^{n}}".format(s=" Serving Benchmark Result ", n=50, c="="))
-    print("{:<40} {:<10}".format("Successful requests:", metrics.completed))
-    print("{:<40} {:<10.2f}".format("Benchmark duration (s):", benchmark_duration))
-    print("{:<40} {:<10}".format("Total input tokens:", metrics.total_input))
-    print("{:<40} {:<10}".format("Total generated tokens:", metrics.total_output))
-    print("{:<40} {:<10.4f}".format("Request throughput (req/s):", metrics.request_throughput))
-    # if goodput_config_dict:
-    #     print(
-    #         "{:<40} {:<10.2f}".format(
-    #             "Request goodput (req/s):", metrics.request_goodput
-    #         )
-    #     )
-    print("{:<40} {:<10.2f}".format("Output token throughput (tok/s):", metrics.output_throughput))
-    print("{:<40} {:<10.2f}".format("Total Token throughput (tok/s):", metrics.total_token_throughput))
-
-    def process_one_metric(
-        # E.g., "ttft"
-        metric_attribute_name: str,
-        # E.g., "TTFT"
-        metric_name: str,
-        # E.g., "Time to First Token"
-        metric_header: str,
-    ):
-        # This function prints and adds statistics of the specified
-        # metric.
-        print("{s:{c}^{n}}".format(s=metric_header, n=50, c="-"))
-        print(
-            "{:<40} {:<10.2f}".format(
-                f"Mean {metric_name} (ms):",
-                getattr(metrics, f"mean_{metric_attribute_name}_ms"),
-            )
-        )
-        print(
-            "{:<40} {:<10.2f}".format(
-                f"Median {metric_name} (ms):",
-                getattr(metrics, f"median_{metric_attribute_name}_ms"),
-            )
-        )
-        for p, value in getattr(metrics, f"percentiles_{metric_attribute_name}_ms"):
-            p_word = str(int(p)) if int(p) == p else str(p)
-            print("{:<40} {:<10.2f}".format(f"P{p_word} {metric_name} (ms):", value))
-
-    process_one_metric("ttft", "TTFT", "Time to First Token")
-    process_one_metric("tpot", "TPOT", "Time per Output Token (excl. 1st token)")
-    process_one_metric("itl", "ITL", "Inter-token Latency")
-    process_one_metric("e2el", "E2EL", "End-to-end Latency")
-    print("=" * 50)
-
-    output_data = {
-        "results": [asdict(output) for output in results],
-        "metrics": asdict(metrics),
-    }
-
-    config.save(output_data)
-
-    return output_data
+    await session.sample_inputs()
+    await session.setup()
+    try:
+        await session.dispatch()
+        data = await session.collect()
+        return data
+    finally:
+        await session.teardown()

@@ -1,0 +1,29 @@
+"""An app that runs a Dummy Audio Generator task."""
+
+from __future__ import annotations
+
+from collections.abc import AsyncIterator
+
+from cornserve.app.base import AppConfig
+from cornserve_tasklib.task.unit.generator import (
+    DummyAudioGeneratorTask,
+    DummyAudioGeneratorInput,
+    Modality,
+)
+from cornserve_tasklib.task.unit.llm import OpenAIChatCompletionChunk
+
+geri = DummyAudioGeneratorTask(
+    model_id="$MODEL_ID",
+    modality=Modality.AUDIO,
+    max_batch_size=$MAX_BATCH_SIZE,
+)
+
+class Config(AppConfig):
+    """App configuration model."""
+
+    tasks = {"geri": geri}
+
+
+async def serve(request: DummyAudioGeneratorInput) -> AsyncIterator[OpenAIChatCompletionChunk]:
+    """Main serve function for the app."""
+    return await geri(request)
