@@ -21,6 +21,7 @@ omni = Qwen3OmniMacroUnitTask(
     llm_tp_size=1,
     llm_max_num_seqs=32,
     llm_gpu_memory_utilization=0.9,
+    macro_ut_deployment_id="qwen3_omni_macro_unittask",
 )
 
 

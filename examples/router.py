@@ -6,25 +6,19 @@ This app uses a weighted router over two MLLM paths:
 
 Routing weights are [0.3, 0.7] respectively.
 
-With the provided profile files, the app deploys onto 4 GPUs total:
-- 2 GPUs for the tp=2 LLM task
-- 1 GPU for the tp=1 LLM task
-- 1 GPU for the image Eric task
-
-Usage:
-    cornserve deploy_profiles profiles
-    cornserve register examples/qwen25vl_router.py
-    cornserve invoke qwen25vl_router --aggregate-keys choices.0.delta.content --data - <<EOF
-    model: "Qwen/Qwen2.5-VL-7B-Instruct"
-    messages:
-    - role: "user"
-      content:
-      - type: text
-        text: "Describe the image briefly."
-      - type: image_url
-        image_url:
-          url: "https://picsum.photos/id/237/512/512"
-    EOF
+```console
+$ cornserve register examples/router.py
+$ cornserve invoke router --aggregate-keys choices.0.delta.content --data - <<EOF
+model: "Qwen/Qwen2.5-VL-7B-Instruct"
+messages:
+- role: "user"
+  content:
+  - type: text
+    text: "Describe the image briefly."
+  - type: image_url
+    image_url:
+      url: "https://picsum.photos/id/237/512/512"
+EOF
 """
 
 from __future__ import annotations

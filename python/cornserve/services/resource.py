@@ -127,6 +127,7 @@ class Resource:
         owner: str,
         must_colocate: bool = True,
         node_selection_policy: Literal["pack", "spread"] = "spread",
+        require_consecutive: bool = True,
     ) -> list[GPU]:
         """Allocate a number of GPUs to a owner.
 
@@ -149,6 +150,14 @@ class Resource:
             owner: Owner name
             must_colocate: Whether GPU colocation is required
             node_selection_policy: Node selection policy ("pack" or "spread")
+            require_consecutive: If True (the default; only takes effect when
+                `must_colocate` and `num_gpus > 1`), the allocated GPUs must have
+                consecutive local ranks on the node. A task executor with tensor
+                parallelism shares a single contiguous slice of the per-node
+                sidecar shared-memory slab keyed by local rank (see
+                `sidecar.utils.init_shmem`), so its GPUs must be consecutive --
+                not merely colocated. Set to False only for allocations that do
+                not back a single TP group.
 
         Raises:
             CannotColocateError: If `must_colocate` is True and GPUs cannot
@@ -207,8 +216,29 @@ class Resource:
         allocated_gpus: list[GPU] = []
         while num_allocated < num_gpus and node_priority:
             _, _, node = heapq.heappop(node_priority)
-            gpus = self.node_to_gpus[node]
-            gpus = [gpu for gpu in gpus if gpu.is_free][: num_gpus - num_allocated]
+            # `node_to_gpus[node]` is sorted by local rank.
+            free_gpus = [gpu for gpu in self.node_to_gpus[node] if gpu.is_free]
+            if require_consecutive and num_gpus > 1 and must_colocate:
+                # Scan for the first run of `num_gpus` consecutive local ranks.
+                # Unlike taking the lowest-N free GPUs, this avoids straddling
+                # GPUs owned by other task managers (e.g. picking local ranks
+                # 2 and 6 when 3, 4, 5 are busy), which would violate the
+                # consecutive-local-rank invariant of the sidecar shared memory.
+                run: list[GPU] = []
+                for gpu in free_gpus:
+                    if run and gpu.local_rank != run[-1].local_rank + 1:
+                        run = []
+                    run.append(gpu)
+                    if len(run) == num_gpus:
+                        break
+                if len(run) != num_gpus:
+                    raise CannotColocateError(
+                        f"Cannot allocate {num_gpus} GPUs with consecutive local ranks on a "
+                        f"single node. Free GPUs on {node} are too fragmented.",
+                    )
+                gpus = run
+            else:
+                gpus = free_gpus[: num_gpus - num_allocated]
             for gpu in gpus:
                 allocated_gpus.append(gpu.allocate_to(owner))
                 num_allocated += 1

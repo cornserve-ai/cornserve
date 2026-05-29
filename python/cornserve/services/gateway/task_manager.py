@@ -697,10 +697,15 @@ class TaskManager:
                     if existing_task.is_equivalent_to(task):
                         logger.info("Skipping already deployed task: %r", task)
                         task_ids.append(task_id)
-                        # If this replica hasn't claimed this task yet (watch-synced),
-                        # we need to bump the CR refcount in Phase 2.
-                        if self.task_usage_counter[task_id] == 0:
-                            to_bump_refcount.append(task_id)
+                        # Every declare_used reference to an already-deployed task
+                        # must bump the CR refcount, mirroring declare_not_used which
+                        # always releases one. This covers both watch-synced tasks
+                        # (local counter 0) and tasks already used by another app on
+                        # this replica (counter > 0). Without bumping in the latter
+                        # case, a shared task's CR refcount undercounts its real users
+                        # and the first unregister tears it down while other apps are
+                        # still using it.
+                        to_bump_refcount.append(task_id)
                         break
                 else:
                     # If the task is not already deployed, deploy it
@@ -781,16 +786,29 @@ class TaskManager:
                 if errors:
                     raise RuntimeError("Error while deploying tasks")
 
-            # Bump CR refcount for watch-synced tasks being used locally for the first time
+            # Bump the CR refcount for every already-deployed task reference so the
+            # cluster-wide refcount tracks the real number of users (each
+            # declare_not_used always releases one). Covers watch-synced tasks and
+            # additional local apps sharing an already-deployed task.
             for task_id in to_bump_refcount:
+                instance_name = self.unit_task_instance_names.get(task_id)
+                if instance_name is None:
+                    # The matched task is still being deployed by a concurrent
+                    # declare_used and has not committed its instance name yet
+                    # (Phase 3). Skip the bump rather than crash — this is the same
+                    # rare window the rollback path below also tolerates with .get().
+                    logger.warning(
+                        "Skipping CR refcount bump for task %s: instance name not yet committed",
+                        task_id,
+                    )
+                    continue
                 task = self.tasks[task_id]
-                instance_name = self.unit_task_instance_names[task_id]
                 lock_key = self._compute_canonical_task_key(task)
                 async with self._refcount_lock(lock_key):
                     current = await self._get_usage_refcount(instance_name)
                     await self._patch_usage_refcount(instance_name, current + 1)
                     logger.info(
-                        "Bumped CR refcount for watch-synced task %s (%s): %d -> %d",
+                        "Bumped CR refcount for shared task %s (%s): %d -> %d",
                         task_id,
                         instance_name,
                         current,
