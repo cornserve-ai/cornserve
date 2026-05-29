@@ -4,7 +4,7 @@
 $ cornserve register examples/mllm.py
 
 $ cornserve invoke mllm --aggregate-keys choices.0.delta.content --data - <<EOF
-model: "Qwen/Qwen2.5-VL-8B-Instruct"
+model: "Qwen/Qwen2.5-VL-7B-Instruct"
 messages:
 - role: "user"
   content:
